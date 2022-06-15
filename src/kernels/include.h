@@ -1,0 +1,1 @@
+#define gamma = 0.05
