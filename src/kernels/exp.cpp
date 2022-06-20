@@ -13,7 +13,7 @@ void exp_2s(input_window_cint16 * in, output_window_cint16 * out) {
     // compute using: exp(x) = 2^(x/ln2)    
     exponent = x / ln_2;
     result = 2;
-    result << exponent; 
+    result << exponent;  // this only works if exponent is an integer!
     window_writeincr(out, result);
 }
 
@@ -29,6 +29,21 @@ void exp_taylor(input_window_cint16 * in, output_window_cint16 * out) {
     window_writeincr(out, sum);
 }
 */
+
+void exp_fast(input_window_cint16 * in, output_window_cint16 * out) {
+    a = 1.0 + a / 1024.0;
+    a *= a;
+    a *= a;
+    a *= a;
+    a *= a;
+    a *= a;
+    a *= a;
+    a *= a;
+    a *= a;
+    a *= a;
+    a *= a;
+    return a;
+}
 
 // TODO: write out kernels to compute ePlace such as xSUM(e^x)
 // Get them ready to test on AMD computer
