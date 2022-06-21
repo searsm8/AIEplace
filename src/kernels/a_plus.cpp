@@ -18,7 +18,7 @@ void a_plus(input_window_cint16 * in, output_window_cint16 * out)
     int coord;
     for(int i = 1; i < n; i++) {
         window_readincr(in, coord);
-        a = exp((coord - max) / float(gamma));
+        a = exp((coord - max) / float(gamma)); // needs to call custom fast exp
         window_writeincr(out, a);
     }
 }

@@ -63,3 +63,32 @@ def WA_partial(x_i, ai_plus, b_plus, c_plus, ai_minus, b_minus, c_minus, gamma):
     term1 = ((1 + x_i/gamma)*b_plus  - c_plus/gamma )*ai_plus  / (b_plus * b_plus)
     term2 = ((1 - x_i/gamma)*b_minus + c_minus/gamma)*ai_minus / (b_minus * b_minus)
     return term1 - term2
+
+def alpha(u, v, rho):
+    ''' @brief compute a_uv term for density function
+        @param u, v as in DREAMplace 0..M
+        @param rho: density map MxM
+    '''
+    M = len(rho)
+    w = 2*math.pi / M
+    sum = 0
+    for x in range(M):
+        for y in range(M):
+            sum += rho[x][y] * math.cos(w*u*x) * math.cos(w*v*y)
+    sum /= M*M
+    return sum
+
+def phi(u, v, alpha):
+    ''' @brief compute a_uv term for density function
+        @param u, v as in DREAMplace 0..M
+        @param rho: density map MxM
+    '''
+    if u is 0 and v is 0:
+        return 0
+    M = len(alpha)
+    w = 2*math.pi / M
+    sum = 0
+    for x in range(M):
+        for y in range(M):
+            sum += alpha[x][y]/(w*u*w*u + w*v*w*v) * math.cos(w*u*x) * math.cos(w*v*y)
+    return sum
