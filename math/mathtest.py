@@ -3,8 +3,10 @@
 from timeit import *
 from scipy.fftpack import dct, fft
 import customDCT
+from copy import copy
 import computeTerm
 import numpy as np
+import math
 
 def idct_test():
     x = [8, 16, 24, 32, 40, 48, 56, 64] # array input numbers
@@ -83,39 +85,88 @@ def dct_2d_compare():
     print("scipy_idct: ")
     print(scipy_idct)
 
-def alpha_test():
-    rho = np.array([[1,3,5,6],
-                    [2,6,7,6],
-                    [8,4,5,6],
-                    [7,6,4,1]])
+def electro_test():
+    rho = np.array([[0,3,6,9],
+                    [1,4,7,10],
+                    [2,5,8,11],
+                    [3,6,9,12]])
 
+    #rho = np.array([[1,1,1,1],
+    #                [1,1,1,1],
+    #                [1,1,1,1],
+    #                [1,1,1,1]])
     print("rho:")
     print(rho)
+
     my_dct = customDCT.dct_2d(rho)
-    my_idct = customDCT.idct_2d(my_dct)
+    for i in range(len(my_dct)):
+        for j in range(len(my_dct[0])):
+            my_dct[i][j] = round(my_dct[i][j], 2)
     print("my_dct: ")
     print(my_dct )
-    alpha = np.zeros((len(rho), len(rho)))
-    for u in range(len(rho)):
-        for v in range(len(rho)):
-            alpha[u][v] = computeTerm.alpha(u, v, rho)
-            #print(f"a[{u}][{v}] = " + str(a))
-    print("alpha:")
-    print(alpha)
+    for i in range(len(my_dct)):
+        my_dct[i][0] *= 0.5
+    for i in range(len(my_dct[0])):
+        my_dct[0][i] *= 0.5
+    for i in range(len(my_dct)):
+        for j in range(len(my_dct[0])):
+            my_dct[i][j] *= 4.0 / len(my_dct) / len(my_dct[0])
 
-    print("my_idct: ")
-    print(my_idct )
-    phi = np.zeros((len(rho), len(rho)))
-    for u in range(len(rho)):
-        for v in range(len(rho)):
-            phi[u][v] = computeTerm.phi(u, v, alpha)
-    print("phi:")
-    print(phi)
+    print("alpha: ")
+    print(my_dct )
+
+    electroPhi = copy(my_dct)
+    electroForceX = copy(my_dct)
+    electroForceY = copy(my_dct)
+    # w_u and w_v factors
+    for u in range(len(my_dct)):
+        w_u = 2*math.pi*u / len(my_dct)
+        w_u2 = w_u*w_u
+        for v in range(len(my_dct[0])):
+            w_v = 2*math.pi*v / len(my_dct[0])
+            w_v2 = w_v*w_v
+            if u == 0 and v == 0:
+                electroPhi[u][v] = 0
+            else:
+                electroPhi[u][v] /= w_u2 + w_v2
+                electroForceX[u][v] = electroPhi[u][v] * w_u
+                electroForceY[u][v] = electroPhi[u][v] * w_v
+
+
+    #density = np.zeros((len(rho), len(rho)))
+    #for u in range(len(rho)):
+    #    for v in range(len(rho)):
+    #        density[u][v] = computeTerm.density(u, v, rho)
+    #        #print(f"a[{u}][{v}] = " + str(a))
+    #print("density:")
+    #print(density)
+
+    print("electro_phi: ")
+    print(electroPhi)
+    print("electroForceX: ")
+    print(electroForceX)
+    print("electroForceY: ")
+    print(electroForceY)
+
+    electroPhi = customDCT.idct_2d(electroPhi)
+    print("electro_phi: ")
+    print(electroPhi)
+
+    electroForceX = customDCT.idsct_2d(electroForceX)
+    print("electroForceX: ")
+    print(electroForceX)
+
+    #phi = np.zeros((len(rho), len(rho)))
+    #for u in range(len(rho)):
+    #    for v in range(len(rho)):
+    #        phi[u][v] = computeTerm.phi(u, v, density)
+    #print("phi:")
+    #print(phi)
          
 if __name__ == "__main__":
     #dct_2d_compare()
     #dct_2d_test()
     #idct_test()
-    alpha_test()
+    electro_test()
 
     

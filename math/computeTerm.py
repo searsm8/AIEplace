@@ -64,7 +64,7 @@ def WA_partial(x_i, ai_plus, b_plus, c_plus, ai_minus, b_minus, c_minus, gamma):
     term2 = ((1 - x_i/gamma)*b_minus + c_minus/gamma)*ai_minus / (b_minus * b_minus)
     return term1 - term2
 
-def alpha(u, v, rho):
+def density(u, v, rho):
     ''' @brief compute a_uv term for density function
         @param u, v as in DREAMplace 0..M
         @param rho: density map MxM
