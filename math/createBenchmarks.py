@@ -5,7 +5,7 @@ import os
 import random
 import computeTerm
 import numpy as np
-from dct import *
+from customDCT import *
 
 def createRandomInput(filepath, N=100):
     ''' Generates a new directory and random input vectors
@@ -21,14 +21,14 @@ def createRandomInput(filepath, N=100):
             input_vec[i] = random.randint(min_x, min_x + width)
         input_vec.sort()
         input_vec = [str(i) for i in input_vec]
-        with open(filepath+"/input.txt", "a") as f:
+        with open(filepath+"/input_x_coords.txt", "w") as f:
             f.write(','.join(input_vec) + "\n")
     return
 
 def computeAllTerms(filepath):
     ''' Computes a±, b±, c± and writes to file
     '''
-    gamma = 4
+    gamma = 4 # same as in RePlace
     # delete old result files
     try:
         os.remove(filepath+"/a_plus.txt")
@@ -43,7 +43,7 @@ def computeAllTerms(filepath):
         pass
 
     # open "input.txt" at the specified filepath
-    with open(filepath+"/input.txt", "r") as f:
+    with open(filepath+"/input_x_coords.txt", "r") as f:
         for line in f:
             input = line.strip().split(",")
             input = [int(s) for s in input]
@@ -63,21 +63,21 @@ def computeAllTerms(filepath):
                                                     a_minus_results[i],b_minus_result,c_minus_result, gamma)
         
             # write terms to output files
-            with open(filepath+"/a_plus.txt", "a") as f:
+            with open(filepath+"/a_plus.txt", "w") as f:
                 f.write(','.join([str(i) for i in a_plus_results]) + '\n')
-            with open(filepath+"/a_minus.txt", "a") as f:
+            with open(filepath+"/a_minus.txt", "w") as f:
                 f.write(','.join([str(i) for i in a_minus_results]) + '\n')
-            with open(filepath+"/b_plus.txt", "a") as f:
+            with open(filepath+"/b_plus.txt", "w") as f:
                 f.write(str(b_plus_result) + '\n')
-            with open(filepath+"/b_minus.txt", "a") as f:
+            with open(filepath+"/b_minus.txt", "w") as f:
                 f.write(str(b_minus_result) + '\n')
-            with open(filepath+"/c_plus.txt", "a") as f:
+            with open(filepath+"/c_plus.txt", "w") as f:
                 f.write(str(c_plus_result) + '\n')
-            with open(filepath+"/c_minus.txt", "a") as f:
+            with open(filepath+"/c_minus.txt", "w") as f:
                 f.write(str(c_minus_result) + '\n')
-            with open(filepath+"/WA_hpwl.txt", "a") as f:
+            with open(filepath+"/WA_hpwl.txt", "w") as f:
                 f.write(str(WA) + '\n')
-            with open(filepath+"/partials.txt", "a") as f:
+            with open(filepath+"/partials.txt", "w") as f:
                 f.write(','.join([str(i) for i in partials]) + '\n')
     
 def createRandomDensitys(filepath, M=16):
@@ -88,7 +88,7 @@ def createRandomDensitys(filepath, M=16):
     RHO_MIN = 0
     RHO_MAX = 1
     rho = np.random.rand(M, M)
-    with open(filepath+"/density_map.txt", "w") as f:
+    with open(filepath+"/input_density_map.txt", "w") as f:
         for row in range(M):
             for col in range(M):
                 f.write(str(rho[row][col]) + ' ')
@@ -99,17 +99,55 @@ def createRandomDensitys(filepath, M=16):
 def computeAllDCTs(filepath, rho):
     M = len(rho)
     a = dct_2d(rho) # compute 'a' terms
-    with open(filepath+"/a_vals.txt", "w") as f:
+    with open(filepath+"/electro_a_vals.txt", "w") as f:
         for row in range(M):
             for col in range(M):
                 f.write(str(a[row][col]) + ' ')
             f.write('\n')
             
-    psi = idct_2d(a) # compute 'electric potential'
-    with open(filepath+"/psi.txt", "w") as f:
+    # Manipulations
+    for i in range(len(a)):
+        a[i][0] *= 0.5
+    for i in range(len(a[0])):
+        a[0][i] *= 0.5
+    for i in range(len(a)):
+        for j in range(len(a[0])):
+            a[i][j] *= 4.0 / len(a) / len(a[0])
+    electroPhi    = np.zeros((len(a), len(a[0])))
+    electroForceX = np.zeros((len(a), len(a[0])))
+    electroForceY = np.zeros((len(a), len(a[0])))
+    # w_u and w_v factors
+    for u in range(len(a)):
+        for v in range(len(a[0])):
+            w_u = 1*math.pi*u / len(a) # why not 2*pi?
+            w_u2 = w_u*w_u
+            w_v = 1*math.pi*v / len(a[0])
+            w_v2 = w_v*w_v
+            if u == 0 and v == 0:
+                electroPhi[u][v] = 0
+            else:
+                electroPhi[u][v] = a[u][v] / (w_u2 + w_v2)
+                electroForceX[u][v] = electroPhi[u][v] * w_u
+                electroForceY[u][v] = electroPhi[u][v] * w_v
+            
+    electroPhi = idct_2d(electroPhi)
+    electroForceX = idsct_2d(electroForceX)
+    electroForceY = idcst_2d(electroForceY)
+
+    with open(filepath+"/electroPhi.txt", "w") as f:
         for row in range(M):
             for col in range(M):
-                f.write(str(psi[row][col]) + ' ')
+                f.write(str(electroPhi[row][col]) + ' ')
+            f.write('\n')
+    with open(filepath+"/electroForceX.txt", "w") as f:
+        for row in range(M):
+            for col in range(M):
+                f.write(str(electroForceX[row][col]) + ' ')
+            f.write('\n')
+    with open(filepath+"/electroForceY.txt", "w") as f:
+        for row in range(M):
+            for col in range(M):
+                f.write(str(electroForceY[row][col]) + ' ')
             f.write('\n')
     
     return
@@ -117,12 +155,16 @@ def computeAllDCTs(filepath, rho):
 if __name__ == "__main__":
     output_dir = "/home/msears/AIEplace/benchmarks/"
     #Create benchmarks for wirelength
-    #for i in range(1, 10):
-    #    createRandomInput(output_dir+"test"+str(i), 1)
-    #    computeAllTerms(output_dir+"test"+str(i))
+    for i in range(1, 10):
+        createRandomInput(output_dir+"test"+str(i), 1)
+        computeAllTerms(output_dir+"test"+str(i))
 
     #Create benchmarks for density
     for i in range(1, 10):
         rho = createRandomDensitys(output_dir+"test"+str(i), 16)
+        #rho = np.array([[1,1,99,99],
+        #            [1,1,99,99],
+        #            [99,99,99,99],
+        #            [99,99,99,99]])
         computeAllDCTs(output_dir+"test"+str(i), rho)
 

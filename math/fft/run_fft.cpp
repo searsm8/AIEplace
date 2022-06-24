@@ -13,10 +13,15 @@ int main() {
     int M = 4;
     int size = 16;
     replace::FFT* fft = new replace::FFT(M, M, size, size);
-    vector<vector<int>> rho = {{0, 7,14,21},
-                               {3,10,17,24},
-                               {6,13,20,27},
-                               {9,16,23,30}};
+    vector<vector<int>> rho = 
+                              {{1,1,99,99},
+                               {1,1,99,99},
+                               {99,99,99,99},
+                               {99,99,99,99}};
+                            //{{10, 17,114,121},
+                            //   {3,10,17,24},
+                            //   {6,13,20,27},
+                            //   {9,16,23,30}};
 
     for(int x = 0; x < M; x++)
         for(int y = 0; y < M; y++)
@@ -30,8 +35,6 @@ int main() {
         cout << endl;
     }
 
-    fft->doFFT();
-    
     cout << "\nDensity:" << endl;
     for(int x = 0; x < M; x++) {
         for(int y = 0; y < M; y++) {
@@ -40,6 +43,8 @@ int main() {
         cout << endl;
     }
 
+    fft->doFFT();
+    
     cout << "\nelectro phi:" << endl;
     for(int x = 0; x < M; x++) {
         for(int y = 0; y < M; y++) {
@@ -51,6 +56,13 @@ int main() {
     for(int x = 0; x < M; x++) {
         for(int y = 0; y < M; y++) {
             cout << fft->getElectroForce(x, y).first << " ";
+        }
+        cout << endl;
+    }
+    cout << "\nelectro force Y:" << endl;
+    for(int x = 0; x < M; x++) {
+        for(int y = 0; y < M; y++) {
+            cout << fft->getElectroForce(x, y).second<< " ";
         }
         cout << endl;
     }

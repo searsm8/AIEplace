@@ -118,6 +118,14 @@ void
 FFT::doFFT() {
   ddct2d(binCntX_, binCntY_, -1, binDensity_, // -1 means DCT
       NULL, (int*) &workArea_[0], (float*)&csTable_[0]);
+
+    cout << "\nAfter 2d DCT:" << endl;
+    for(int x = 0; x < binCntX_; x++) {
+        for(int y = 0; y < binCntY_; y++) {
+            cout << binDensity_[x][y] << " ";
+        }
+        cout << endl;
+    }
   
   for(int i = 0; i < binCntX_; i++) {
     binDensity_[i][0] *= 0.5;
@@ -132,6 +140,13 @@ FFT::doFFT() {
       binDensity_[i][j] *= 4.0 / binCntX_ / binCntY_;
     }
   }
+    cout << "\nAlpha:" << endl;
+    for(int x = 0; x < binCntX_; x++) {
+        for(int y = 0; y < binCntY_; y++) {
+            cout << binDensity_[x][y] << " ";
+        }
+        cout << endl;
+    }
 
   for(int i = 0; i < binCntX_; i++) {
     float wx = wx_[i];
@@ -170,10 +185,17 @@ FFT::doFFT() {
     }
   }
 
-    cout << "\nelectro phi:" << endl;
+    cout << "\nAfter manipulation:" << endl;
     for(int x = 0; x < binCntX_; x++) {
         for(int y = 0; y < binCntY_; y++) {
             cout << electroPhi_[x][y] << " ";
+        }
+        cout << endl;
+    }
+    cout << "\nelectroForceY (pre idsct):" << endl;
+    for(int x = 0; x < binCntX_; x++) {
+        for(int y = 0; y < binCntY_; y++) {
+            cout << electroForceY_[x][y] << " ";
         }
         cout << endl;
     }

@@ -20,8 +20,9 @@ def dct(input_X):
         Lambda = 1
         for n in range(N):
             dct_result[k] += Lambda * input_X[n] * math.cos(math.pi*k*(n+0.5)/N)
-        #dct_result[k] *= math.sqrt(1 / N) if k == 0 else math.sqrt(2 / N)
-        dct_result[k] *= (1 / N) if k == 0 else (2 / N)
+        #dct_result[k] *= math.sqrt(1 / N) if k == 0 else math.sqrt(2 / N) # to match scipy
+        #dct_result[k] *= 1 if k == 0 else 2 # to match scipy
+        dct_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
     #dct_result[0] /= math.sqrt(2)
     #dct_result[-1] /= math.sqrt(2)
     return np.array(dct_result)
@@ -34,12 +35,15 @@ def idct(input_X):
     idct_result = [0]*N
 
     for k in range(N):
-        idct_result[k] += input_X[0]/2#/math.sqrt(2)
+        #idct_result[k] += input_X[0]/math.sqrt(N) # to match scipy
+        idct_result[k] += input_X[0] # to match fft.cpp 
         for n in range(1, N):
             idct_result[k] += input_X[n] * math.cos(math.pi*n*(k+0.5)/N)
+        #idct_result[k] *= math.sqrt(2) if k == 0 else 2 # to match scipy
+        idct_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
         #idct_result[k] *= 1.5*N #math.sqrt(N*8)
         #idct_result[k] *= math.sqrt(2 / N)
-        idct_result[k] *= N*N / 2
+        #idct_result[k] *= 2/N
         #idct_result[k] *= (1 / N) if k == 0 else (2 / N)
     
     return np.array(idct_result)
@@ -49,14 +53,15 @@ def idst(input_X):
     idst_result = [0]*N
 
     for k in range(N):
-        idst_result[k] += input_X[0]/2#/math.sqrt(2)
+        idst_result[k] += input_X[0]#/math.sqrt(2)
         for n in range(1, N):
             #print(f"sin: {math.sin(math.pi*n*(k+0.5)/N)}")
             idst_result[k] += input_X[n] * math.sin(math.pi*n*(k+0.5)/N)
-
+        #idst_result[k] *= math.sqrt(2) if k == 0 else 2 # to match scipy
+        idst_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
         #idst_result[k] *= 1.5*N #math.sqrt(N*8)
         #idst_result[k] *= math.sqrt(2 / N)
-        idst_result[k] *= N*N / 2
+        #idst_result[k] *= N*N / 2
         #idst_result[k] *= (1 / N) if k == 0 else (2 / N)
     
     return np.array(idst_result)
@@ -93,7 +98,7 @@ def idct_2d(input_MxM):
 
     return np.array(mat)
 
-def idsct_2d(input_MxM):
+def idcst_2d(input_MxM):
     ''' Compute the 2D IDCT. Perform 1D IDCT on rows, then again on columns.'''
     M = len(input_MxM)
     mat = np.zeros((M, M))
@@ -105,6 +110,22 @@ def idsct_2d(input_MxM):
     mat = list(zip(*mat)) # transpose
     for row in range(M):
         mat[row] = idct(mat[row])
+    mat = list(zip(*mat)) # transpose
+
+    return np.array(mat)
+
+def idsct_2d(input_MxM):
+    ''' Compute the 2D IDCT. Perform 1D IDCT on rows, then again on columns.'''
+    M = len(input_MxM)
+    mat = np.zeros((M, M))
+    # Compute DCT on rows
+    for row in range(M):
+        mat[row] = idct(input_MxM[row])
+
+    # Compute DCT on cols
+    mat = list(zip(*mat)) # transpose
+    for row in range(M):
+        mat[row] = idst(mat[row])
     mat = list(zip(*mat)) # transpose
 
     return np.array(mat)

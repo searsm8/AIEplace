@@ -1,1 +1,4 @@
-benchmarks/
+benchmarks
+*.o
+*.out
+*/__pycache__
