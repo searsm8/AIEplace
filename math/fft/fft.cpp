@@ -169,6 +169,14 @@ FFT::doFFT() {
       electroForceY_[i][j] = electroY;
     }
   }
+
+    cout << "\nelectro phi:" << endl;
+    for(int x = 0; x < binCntX_; x++) {
+        for(int y = 0; y < binCntY_; y++) {
+            cout << electroPhi_[x][y] << " ";
+        }
+        cout << endl;
+    }
   // Inverse DCT
   ddct2d(binCntX_, binCntY_, 1, //+1 means IDCT
       electroPhi_, NULL, 

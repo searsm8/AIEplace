@@ -86,10 +86,15 @@ def dct_2d_compare():
     print(scipy_idct)
 
 def electro_test():
-    rho = np.array([[0,3,6,9],
-                    [1,4,7,10],
-                    [2,5,8,11],
-                    [3,6,9,12]])
+    rho = np.array([[0, 7,14,21],
+                    [3,10,17,24],
+                    [6,13,20,27],
+                    [9,16,23,30]])
+
+    #rho = np.array([[0, 7,14,21],
+    #                [3,10,17,424],
+    #                [6,213,20,27],
+    #                [9,16,123,30]])
 
     #rho = np.array([[1,1,1,1],
     #                [1,1,1,1],
@@ -120,11 +125,14 @@ def electro_test():
     electroForceY = copy(my_dct)
     # w_u and w_v factors
     for u in range(len(my_dct)):
-        w_u = 2*math.pi*u / len(my_dct)
+        w_u = 1*math.pi*u / len(my_dct)
         w_u2 = w_u*w_u
+    for v in range(len(my_dct[0])):
+        w_v = 1*math.pi*v / len(my_dct[0])
+        w_v2 = w_v*w_v
+    
+    for u in range(len(my_dct)):
         for v in range(len(my_dct[0])):
-            w_v = 2*math.pi*v / len(my_dct[0])
-            w_v2 = w_v*w_v
             if u == 0 and v == 0:
                 electroPhi[u][v] = 0
             else:
@@ -141,20 +149,15 @@ def electro_test():
     #print("density:")
     #print(density)
 
-    print("electro_phi: ")
-    print(electroPhi)
-    print("electroForceX: ")
-    print(electroForceX)
-    print("electroForceY: ")
-    print(electroForceY)
+    print("electro_phi: "); print(electroPhi)
+    #print("electroForceX: "); print(electroForceX)
+    #print("electroForceY: "); print(electroForceY)
 
     electroPhi = customDCT.idct_2d(electroPhi)
-    print("electro_phi: ")
-    print(electroPhi)
+    print("electro_phi: "); print(electroPhi)
 
-    electroForceX = customDCT.idsct_2d(electroForceX)
-    print("electroForceX: ")
-    print(electroForceX)
+    #electroForceX = customDCT.idsct_2d(electroForceX)
+    #print("electroForceX: "); print(electroForceX)
 
     #phi = np.zeros((len(rho), len(rho)))
     #for u in range(len(rho)):

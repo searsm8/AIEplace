@@ -1,6 +1,7 @@
 #include <cmath>
 #include <iostream>
 #include "fft.h"
+#include <vector>
 
 using namespace std;
 using namespace replace;
@@ -12,10 +13,15 @@ int main() {
     int M = 4;
     int size = 16;
     replace::FFT* fft = new replace::FFT(M, M, size, size);
+    vector<vector<int>> rho = {{0, 7,14,21},
+                               {3,10,17,24},
+                               {6,13,20,27},
+                               {9,16,23,30}};
 
     for(int x = 0; x < M; x++)
         for(int y = 0; y < M; y++)
-            fft->updateDensity(x, y, 1*x+3*y);
+            //fft->updateDensity(x, y,3*x+7*y);
+            fft->updateDensity(x, y, rho[x][y]);
     
     for(int x = 0; x < M; x++) {
         for(int y = 0; y < M; y++) {
