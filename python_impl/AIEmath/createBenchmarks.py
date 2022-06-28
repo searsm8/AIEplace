@@ -7,7 +7,7 @@ import computeTerm
 import numpy as np
 from customDCT import *
 
-def createRandomInput(filepath, N=100):
+def createRandomInput(filepath, N=1):
     ''' Generates a new directory and random input vectors
     '''
     if(not os.path.exists(filepath)):

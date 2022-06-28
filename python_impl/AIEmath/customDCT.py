@@ -66,61 +66,65 @@ def idst(input_X):
     
     return np.array(idst_result)
 
-def dct_2d(input_MxM):
+def dct_2d(input_mat):
     ''' Compute the 2D DCT. Perform 1D DCT on rows, then again on columns.'''
-    M = len(input_MxM)
-    mat = np.zeros((M, M))
+    M = len(input_mat)
+    N = len(input_mat[0])
+    mat = np.zeros((M, N))
     # Compute DCT on rows
     for row in range(M):
-        mat[row] = dct(input_MxM[row])
+        mat[row] = dct(input_mat[row])
 
     # Compute DCT on cols
     mat = list(zip(*mat)) # transpose
-    for row in range(M):
+    for row in range(N):
         mat[row] = dct(mat[row])
     mat = list(zip(*mat)) # transpose
 
     return np.array(mat)
 
-def idct_2d(input_MxM):
+def idct_2d(input_mat):
     ''' Compute the 2D IDCT. Perform 1D IDCT on rows, then again on columns.'''
-    M = len(input_MxM)
-    mat = np.zeros((M, M))
+    M = len(input_mat)
+    N = len(input_mat)
+    mat = np.zeros((M, N))
     # Compute DCT on rows
     for row in range(M):
-        mat[row] = idct(input_MxM[row])
+        mat[row] = idct(input_mat[row])
 
     # Compute DCT on cols
     mat = list(zip(*mat)) # transpose
-    for row in range(M):
+    for row in range(N):
         mat[row] = idct(mat[row])
     mat = list(zip(*mat)) # transpose
 
     return np.array(mat)
 
-def idcst_2d(input_MxM):
+def idcst_2d(input_mat):
     ''' Compute the 2D IDCT. Perform 1D IDCT on rows, then again on columns.'''
-    M = len(input_MxM)
-    mat = np.zeros((M, M))
+    M = len(input_mat)
+    N = len(input_mat[0])
+    mat = np.zeros((M, N))
     # Compute DCT on rows
     for row in range(M):
-        mat[row] = idst(input_MxM[row])
+        mat[row] = idst(input_mat[row])
 
     # Compute DCT on cols
     mat = list(zip(*mat)) # transpose
-    for row in range(M):
+    for row in range(N):
         mat[row] = idct(mat[row])
     mat = list(zip(*mat)) # transpose
 
     return np.array(mat)
 
-def idsct_2d(input_MxM):
+def idsct_2d(input_mat):
     ''' Compute the 2D IDCT. Perform 1D IDCT on rows, then again on columns.'''
-    M = len(input_MxM)
-    mat = np.zeros((M, M))
+    M = len(input_mat)
+    N = len(input_mat[0])
+    mat = np.zeros((M, N))
     # Compute DCT on rows
     for row in range(M):
-        mat[row] = idct(input_MxM[row])
+        mat[row] = idct(input_mat[row])
 
     # Compute DCT on cols
     mat = list(zip(*mat)) # transpose
