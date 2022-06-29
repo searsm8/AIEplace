@@ -32,32 +32,28 @@ def makeRandomNet(node_count):
         net.append(new_index)
     return net
 
+def initializeCoords(grid, node_count):
+    #random initial position
+    coords = []
+    for i in range(node_count):
+        coords.append( Coord( random.choice(range(round(grid.num_rows))), random.choice(range(round(grid.num_cols))) ) )
+    return coords
 
 if __name__ == "__main__":
     logging.root.name = 'AIEplace'
     logging.basicConfig(level=logging.INFO,
                         format='[%(levelname)-7s] %(name)s - %(message)s',
                         stream=sys.stdout)
-    grid = Grid(50, 8)
-    x_coords = [
-                24,24,24,24,24,24,24,24,
-                24,24,24,24,24,24,24,24,
-                25,25,25,25,25,25,25,25,
-                25,25,25,25,25,25,25,25
-                ]
-    y_coords = [
-                4,4,4,4,4,4,4,4,
-                3,3,3,3,3,3,3,3,
-                3,3,3,3,3,3,3,3,
-                4,4,4,4,4,4,4,4
-                ]
+    grid = Grid(8, 16)
+    node_count = 48
+    coords = initializeCoords(grid, node_count)
     node_names = []
-    for i in range(len(x_coords)):
+    for i in range(len(coords)):
         node_names.append("k"+str(i))
     nets = []
-    for i in range(len(x_coords)):
-        nets.append(makeRandomNet(len(x_coords)))
-    design = Design(grid, x_coords, y_coords, node_names, nets)
+    for i in range(int(2+random.random()) * len(coords)):
+        nets.append(makeRandomNet(len(coords)))
+    design = Design(grid, coords, node_names, nets)
 
     placer = AIEplacer(grid, design) 
     placer.run(2)

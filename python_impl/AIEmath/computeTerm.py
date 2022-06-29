@@ -92,3 +92,6 @@ def phi(u, v, alpha):
         for y in range(M):
             sum += alpha[x][y]/(w*u*w*u + w*v*w*v) * math.cos(w*u*x) * math.cos(w*v*y)
     return sum
+
+    
+    
