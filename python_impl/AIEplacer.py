@@ -53,7 +53,7 @@ class AIEplacer:
                     max_x = coord.x
                 if coord.y > max_y:
                     max_y = coord.y
-            hpwls.append( (max_x - min_x, max_y - min_y) )
+            hpwls.append( Coord(max_x - min_x, max_y - min_y) )
         return hpwls
     
     def computeBinDensities(self):
@@ -64,7 +64,11 @@ class AIEplacer:
         for i in range(len(self.design.coords)):
             row = self.design.coords[i].x
             col = self.design.coords[i].y
-            self.bin_grid.vals[int(row/self.bin_height)][int(col/self.bin_width)] += \
+            #print(f"({row}, {col})")
+            #print(f"({int(row/self.bin_height)}, {int(col/self.bin_width)})")
+            #print(f"bin_grid.vals[{self.bin_grid.num_rows}][{self.bin_grid.num_cols}]")
+            self.bin_grid.vals[min(self.bin_grid.num_rows-1, int(row/self.bin_height))] \
+                                    [min(self.bin_grid.num_cols-1,int(col/self.bin_width))] += \
                                     1 / (self.bin_width*self.bin_height)
 
     def run(self, iterations):
@@ -113,20 +117,26 @@ class AIEplacer:
                     #hpwl_gradient[i].append( Coord( AIEmath.computeTerm.WA_partial(self.design.coords[i].x, a_plus[node_index].x, b_plus[i].x, c_plus[i].x, a_minus[node_index].x, b_minus[i].x, c_minus[i].x, gamma), \
                     #          AIEmath.computeTerm.WA_partial(self.design.coords[i].y, a_plus[node_index].y, b_plus[i].y, c_plus[i].y, a_minus[node_index].y, b_minus[i].y, c_minus[i].y, gamma) ) )
             for i in range(len(self.design.nets)):
+                continue
                 print(f"net {i}: {self.design.nets[i]}")
                 for j in range(len(self.design.nets[i])):
                     print(f"({self.design.coords[self.design.nets[i][j]].x}, {self.design.coords[self.design.nets[i][j]].y})", end=", ")
                 print()
                 print()
             
+            total_hpwl = 0
             for i in range(len(self.design.nets)):
+                total_hpwl += hpwl_actual[i].x + hpwl_actual[i].y
+                continue
                 print(f"NET[{i}]")
                 print(f"HPWL estimate: ({hpwl_WA[i].x}, {hpwl_WA[i].y})")
                 print(f"HPWL actual: {hpwl_actual[i]}")
                 print()
+            print(f"HPWL actual: {total_hpwl}")
 
             for i in range(len(self.design.coords)):
-                logging.info(f"HPWL gradient[{i}] ({self.design.coords[i].x}, {self.design.coords[i].y}): ({hpwl_gradient[i].x}, {hpwl_gradient[i].y})")
+                #logging.info(f"HPWL gradient[{i}] ({self.design.coords[i].x}, {self.design.coords[i].y}): ({hpwl_gradient[i].x}, {hpwl_gradient[i].y})")
+                pass
             
             # Density Gradients
             self.computeBinDensities()
@@ -160,9 +170,9 @@ class AIEplacer:
                         electroForceX[u][v] = electroPhi[u][v] * w_u
                         electroForceY[u][v] = electroPhi[u][v] * w_v
 
-            print(f"electroForceX:")
-            for i in range(len(electroForceX)):
-                print(electroForceX[-i-1])
+           # print(f"electroForceX:")
+           # for i in range(len(electroForceX)):
+           #     print(electroForceX[-i-1])
 
             # Update node locations
             print(f"Update coords:")
