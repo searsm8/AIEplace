@@ -36,7 +36,8 @@ def initializeCoords(grid, node_count):
     #random initial position
     coords = []
     for i in range(node_count):
-        coords.append( Coord( random.choice(range(round(grid.num_rows))), random.choice(range(round(grid.num_cols))) ) )
+        coords.append( Coord( random.choice(range(round(grid.num_rows*.4), round(grid.num_rows*.6))), 
+                              random.choice(range(round(grid.num_cols*.4), round(grid.num_cols*.6)) ) ) )
     return coords
 
 if __name__ == "__main__":
@@ -44,8 +45,8 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO,
                         format='[%(levelname)-7s] %(name)s - %(message)s',
                         stream=sys.stdout)
-    grid = Grid(8, 16)
-    node_count = 48
+    grid = Grid(8, 8)
+    node_count = 4 * 4 
     coords = initializeCoords(grid, node_count)
     node_names = []
     for i in range(len(coords)):
@@ -56,6 +57,6 @@ if __name__ == "__main__":
     design = Design(grid, coords, node_names, nets)
 
     placer = AIEplacer(grid, design) 
-    placer.run(2)
+    placer.run(100)
     #placer.legalize()
 

@@ -86,7 +86,7 @@ def dct_2d(input_mat):
 def idct_2d(input_mat):
     ''' Compute the 2D IDCT. Perform 1D IDCT on rows, then again on columns.'''
     M = len(input_mat)
-    N = len(input_mat)
+    N = len(input_mat[0])
     mat = np.zeros((M, N))
     # Compute DCT on rows
     for row in range(M):
