@@ -2,4 +2,5 @@ benchmarks
 *.o
 *.out
 */__pycache__
+AIEmath/__pycache__
 python_impl/results

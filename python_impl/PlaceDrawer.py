@@ -40,7 +40,9 @@ class PlaceDrawer(object):
                 bin_force_x=[],
                 bin_force_y=[],
                 density_penalty=0,
-                iteration=None):
+                iteration=None,
+                hpwl=None,
+                overflow=None):
         """
         @brief python implementation of placement drawer.  
         @param pos locations of cells 
@@ -307,11 +309,19 @@ class PlaceDrawer(object):
                 ctx.set_line_width(line_width * 10)
                 ctx.select_font_face("monospace", cairo.FONT_SLANT_NORMAL,
                                      cairo.FONT_WEIGHT_NORMAL)
-                ctx.set_font_size(32)
-                #ctx.move_to(normalize_x((xl + xh) / 2),
-                #            normalize_y((yl + yh) / 2))
-                ctx.move_to(normalize_x(xl)+1, normalize_y(yl)+1)
-                ctx.show_text('{:4}'.format(iteration))
+                ctx.set_font_size(16)
+                ctx.move_to((xl), (yl+16))
+                ctx.show_text('iter: {:4}'.format(iteration))
+            
+            # show HPWL
+            if hpwl:
+                ctx.move_to((xl), (yl+32))
+                ctx.show_text('hpwl: {:.1f}'.format(hpwl))
+                
+            # show overlap
+            if overflow:
+                ctx.move_to((xl), (yl+48))
+                ctx.show_text('overflow: {:.1f}'.format(overflow))
 
             surface.write_to_png(filename)  # Output to PNG
             print("[I] plotting to %s takes %.3f seconds" %

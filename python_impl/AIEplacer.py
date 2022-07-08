@@ -286,7 +286,9 @@ class AIEplacer:
                         bin_force_x=electroForceX,
                         bin_force_y=electroForceY,
                         density_penalty=density_penalty,
-                        iteration=iter
+                        iteration=iter,
+                        hpwl=total_hpwl,
+                        overflow=overflow
                         )
 
             # Update node locations
