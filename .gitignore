@@ -2,4 +2,4 @@ benchmarks
 *.o
 *.out
 */__pycache__
-python_impl/images
+python_impl/results

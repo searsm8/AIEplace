@@ -16,6 +16,7 @@ def net(net, design):
     print()
 
 def nets(design):
+    print()
     for i in range(len(design.nets)):
         print(f'Net {i}: {design.nets[i]}:', end='')
         net(design.nets[i], design)

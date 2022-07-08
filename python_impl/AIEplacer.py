@@ -27,9 +27,10 @@ class Grid:
 
 class Design:
     # primary lists which hold design information
-    def __init__(self, grid, coords, node_names, nets) -> None:
+    def __init__(self, grid, coords, node_names, node_sizes, nets) -> None:
         self.coords = coords
         self.node_names = node_names
+        self.node_sizes = node_sizes
         self.nets = nets # each net is a list of node indices
                     # e.g. [4,7,9] means nodes 4, 7, and 9 are connect by a net
         
@@ -88,44 +89,32 @@ class AIEplacer:
                                     1 / (self.bin_width*self.bin_height)
         return net_bins
 
+    def computeOverlap(self, node_index, u, v):
+        node = self.design.coords[node_index]
+        node_size = self.design.node_sizes[node_index]
+        low_row = max(u*self.bin_height, node.row)
+        low_col = max(v*self.bin_width, node.col)
+        high_row= min((u+1)*self.bin_height, node.row + node_size.row) 
+        high_col= min((v+1)*self.bin_height, node.col + node_size.col) 
+        if low_row >= high_row or low_col >= high_col:
+            return 0 
+        else:
+            return (high_row - low_row) * (high_col - low_col)
 
     def run(self, iterations):
         ''' Runs the ePlace algorithm'''
         logging.info("Begin AIEplace")
-        os.system("mkdir images"); os.system("cd images")
+        os.system("mkdir results")
         design_run = 0
-        while(os.path.exists(f"images/run_{design_run}")):
+        while(os.path.exists(f"results/run_{design_run}")):
             design_run += 1
-        os.system(f"mkdir images/run_{design_run}"); os.system(f"cd images/run_{design_run}")
+        os.system(f"mkdir results/run_{design_run}")
         
         for iter in range(iterations):
             logging.root.name = 'ITER ' + str(iter)
             logging.info(f"***Begin Iteration {iter}***")
 
-            #use PlaceDrawer to export an image
-            if(iter%10 == 0):
-                filename=f"{time.strftime('%y%m%d_%H%M')}_iter_{iter}.png"
-                filename = os.path.join("images", f"run_{design_run}", filename)
-                pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  + \
-                    [self.design.coords[i].row for i in range(len(self.design.coords))] 
-                print(pos)
-
-                ret = PlaceDrawer.PlaceDrawer.forward(
-                        pos= [10*self.design.coords[i].col for i in range(len(self.design.coords))]  + 
-                             [10*self.design.coords[i].row for i in range(len(self.design.coords))], 
-                        node_size_x=[8 for i in range(len(self.design.coords))], 
-                        node_size_y=[8 for i in range(len(self.design.coords))], 
-                        pin_offset_x=[0 for i in range(len(self.design.coords))],
-                        pin_offset_y=[0 for i in range(len(self.design.coords))],
-                        pin2node_map={}, 
-                        xl=0, yl=0, xh=80, yh=80, 
-                        site_width=1, row_height=1,
-                        bin_size_x=20, bin_size_y=20, 
-                        num_movable_nodes=0, num_filler_nodes=0, 
-                        filename=filename
-                        )
-
-            
+                
             # Compute gradients
             # TODO: include the min/m.row terms to reduce computational burden
             # compute a+/- terms
@@ -141,7 +130,7 @@ class AIEplacer:
             b_plus  = []
             b_minus = []
             for net_index in range(len(self.design.nets)):
-                net = self.design.nets[i]
+                net = self.design.nets[net_index]
                 b_plus.append( Coord(sum([a_plus[i].row for i in net]), sum([a_plus[i].col for i in net]) ) ) #had row instead of col for b_plus.col
                 b_minus.append( Coord(sum([a_minus[i].row for i in net]), sum([a_minus[i].col for i in net]) ) )#had col instead of row for b_minus.row
 
@@ -149,7 +138,7 @@ class AIEplacer:
             c_plus  = []
             c_minus = []
             for net_index in range(len(self.design.nets)):
-                net = self.design.nets[i]
+                net = self.design.nets[net_index]
                 c_plus.append ( Coord(sum([self.design.coords[i].row*a_plus[i].row for i in net]), sum([self.design.coords[i].col*a_plus[i].col for i in net]) ) )
                 c_minus.append( Coord(sum([self.design.coords[i].row*a_minus[i].row for i in net]), sum([self.design.coords[i].col*a_minus[i].col for i in net]) ) )
 
@@ -244,9 +233,8 @@ class AIEplacer:
             electroForceX = AIEmath.customDCT.idsct_2d(electroForceX)
             electroForceY = AIEmath.customDCT.idcst_2d(electroForceY)
 
-            step_len = 0.05
-            density_penalty = 0# 0.1 + (iter)*.01 #round(iter/10) * 10
-            density_penalty = 1 + (iter)*.05 #round(iter/10) * 10
+            step_len = 0.09
+            density_penalty = min(50, 0.05*(iter))
             print(f"density_penalty: {density_penalty}")
             overflow = 0
 
@@ -258,36 +246,83 @@ class AIEplacer:
 
 
             my_node = 0
-            print(f"node {my_node}: ({self.design.coords[my_node].row:.2f}, {self.design.coords[my_node].col:.2f})")
-            print(f"hpwl_grad[0]: ({hpwl_gradient[0].row:.2f}, {hpwl_gradient[0].col:.2f}) ")
-            print(f"density_grad[0] X: {density_penalty*electroForceX[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)]:.2f}")
-            print(f"density_grad[0] Y: {density_penalty*electroForceY[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)]:.2f}")
-            print(f"step[0].row: {step_len * (hpwl_gradient[0].row + density_penalty*electroForceX[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)] ):.2f}")
-            print(f"step[0].col: {step_len * (hpwl_gradient[0].col + density_penalty*electroForceY[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)] ):.2f}")
+            #print(f"node {my_node}: ({self.design.coords[my_node].row:.2f}, {self.design.coords[my_node].col:.2f})")
+            #print(f"hpwl_grad[0]: ({hpwl_gradient[0].row:.2f}, {hpwl_gradient[0].col:.2f}) ")
+            #print(f"density_grad[0] X: {density_penalty*electroForceX[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)]:.2f}")
+            #print(f"density_grad[0] Y: {density_penalty*electroForceY[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)]:.2f}")
+            #print(f"step[0].row: {step_len * (hpwl_gradient[0].row + density_penalty*electroForceX[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)] ):.2f}")
+            #print(f"step[0].col: {step_len * (hpwl_gradient[0].col + density_penalty*electroForceY[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)] ):.2f}")
+
+            #use PlaceDrawer to export an image
+            if(iter%10 == 0):
+                filename=f"{time.strftime('%y%m%d_%H%M')}_iter_{iter}.png"
+                filename = os.path.join("results", f"run_{design_run}", filename)
+                #pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  + \
+                #    [self.design.coords[i].row for i in range(len(self.design.coords))] 
+                #print(pos)
+                #overlap = []
+                #for bin_row in range((self.bin_grid.num_rows)):
+                #    overlap.append([0]*(self.bin_grid.num_cols))
+                #    for bin_col in range((self.bin_grid.num_cols)):
+                #        overlap[bin_row][bin_col] = self.computeOverlap(0, bin_row, bin_col)
+                #print("Overlap:")
+                #prettyPrint.matrix(overlap)
+                        
+                ret = PlaceDrawer.PlaceDrawer.forward(
+                        pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  + 
+                             [self.design.coords[i].row for i in range(len(self.design.coords))], 
+                        node_size_x=[self.design.node_sizes[i].col for i in range(len(self.design.coords))], 
+                        node_size_y=[self.design.node_sizes[i].row for i in range(len(self.design.coords))], 
+                        pin_offset_x=[0 for i in range(len(self.design.coords))],
+                        pin_offset_y=[0 for i in range(len(self.design.coords))],
+                        pin2node_map={}, 
+                        xl=0, yl=0, xh=self.grid.num_cols, yh=self.grid.num_rows, 
+                        site_width=1, row_height=1,
+                        bin_size_x=self.bin_width, bin_size_y=self.bin_height, 
+                        num_movable_nodes=0, num_filler_nodes=0, 
+                        filename=filename,
+                        nets=[],#self.design.nets[:],
+                        hwpl_force=[],
+                        bin_force_x=electroForceX,
+                        bin_force_y=electroForceY,
+                        density_penalty=density_penalty,
+                        iteration=iter
+                        )
 
             # Update node locations
             print(f"Update coords:")
             prettyPrint.coord(self.design.coords[my_node]); print(f" --> ", end="")
             for i in range(len(self.design.coords)):
-                #print(f"({self.design.coords[i].col}, {self.design.coords[i].col})")
-                #delta_x = 
-                self.design.coords[i].row -= step_len * (hpwl_gradient[i].row 
-                                            - density_penalty*electroForceX[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
+                # Compute the electro force for each node, accounting for bin overlaps
+                force = Coord(0, 0)
+                for bin_row in range((self.bin_grid.num_rows)):
+                    for bin_col in range((self.bin_grid.num_cols)):
+                        overlap = self.computeOverlap(i, bin_row, bin_col)
+                        if overlap > 0:
+                            force.row += overlap * electroForceX[bin_row][bin_col]
+                            force.col += overlap * electroForceY[bin_row][bin_col]
+
+                self.design.coords[i].row -= step_len * (hpwl_gradient[i].row - density_penalty * force.row)
+                #self.design.coords[i].row -= step_len * (0 - density_penalty * force.row)
+                                            #- density_penalty*electroForceX[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
                                             # WHY IS THIS MINUS SIGN NEEDED????
                 if self.design.coords[i].row < 0: self.design.coords[i].row = 0 # this shouldn't be needed b/c of boundary condition?
-                if self.design.coords[i].row >= self.grid.num_rows : self.design.coords[i].row = self.grid.num_rows-1
+                if self.design.coords[i].row + self.design.node_sizes[i].row >= self.grid.num_rows : self.design.coords[i].row = self.grid.num_rows-1
 
-                self.design.coords[i].col -= step_len * (hpwl_gradient[i].col
-                                            - density_penalty*electroForceY[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
+                self.design.coords[i].col -= step_len * (hpwl_gradient[i].col - density_penalty * force.col)
+                #self.design.coords[i].col -= step_len * (0 - density_penalty * force.col)
+                                            #- density_penalty*electroForceY[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
                 if self.design.coords[i].col < 0: self.design.coords[i].col = 0
-                if self.design.coords[i].col >= self.grid.num_cols : self.design.coords[i].col = self.grid.num_cols-1
+                if self.design.coords[i].col + self.design.node_sizes[i].col  >= self.grid.num_cols : self.design.coords[i].col = self.grid.num_cols-1
 
-            prettyPrint.coord(self.design.coords[my_node])
-            prettyPrint.matrix(self.bin_grid.vals, title="Densities:", tabs="\t"*8)
-            prettyPrint.matrix(electroPhi, title="electroPhi:", tabs="\t"*8)
-            prettyPrint.matrix(electroForceY, title="electroForceY(cols):", tabs="\t"*8)
-            prettyPrint.matrix(electroForceX, title="electroForceX(rows):", tabs="\t"*8)
+            #prettyPrint.coord(self.design.coords[my_node])
+            #prettyPrint.matrix(self.bin_grid.vals, title="Densities:", tabs="\t"*8)
+            #prettyPrint.matrix(electroPhi, title="electroPhi:", tabs="\t"*8)
+            #prettyPrint.matrix(electroForceY, title="electroForceY(cols):", tabs="\t"*8)
+            #prettyPrint.matrix(electroForceX, title="electroForceX(rows):", tabs="\t"*8)
+            #os.system("clear")
 
+            #end iteration loop
 
         net_bins = []
         for net_index in range(len(self.design.nets)):
@@ -308,11 +343,11 @@ class AIEplacer:
                 print(f"{net_bins[my_net][-i-1]}")
 
         prettyPrint.nets(self.design)
+        #for node in self.design.coords:
+        #    print(f"({node.row}, {node.col})")
 
         logging.root.name = 'AIEplace'
         logging.info("End AIEplace")
-        #for node in self.design.coords:
-        #    print(f"({node.row}, {node.col})")
     
     def legalize(self):
         ''' After running placement, legalize the design'''

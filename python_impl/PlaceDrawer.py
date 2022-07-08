@@ -35,6 +35,11 @@ class PlaceDrawer(object):
                 num_movable_nodes,
                 num_filler_nodes,
                 filename,
+                nets=[],
+                hwpl_force=[],
+                bin_force_x=[],
+                bin_force_y=[],
+                density_penalty=0,
                 iteration=None):
         """
         @brief python implementation of placement drawer.  
@@ -148,6 +153,21 @@ class PlaceDrawer(object):
                 ctx.close_path()
                 ctx.stroke()
 
+            def draw_arrow(x1, y1, arrow_length, arrow_angle):
+                arrowhead_angle = math.pi/6
+                arrowhead_length = arrow_length/3
+
+                ctx.move_to(x1, y1) # move to start
+                #ctx.show_text('({:.2f}, {:.2f})'.format(dx, dy))
+                ctx.move_to(x1, y1) # move to start
+                ctx.rel_line_to(arrow_length * math.cos(arrow_angle), arrow_length * math.sin(arrow_angle))
+                ctx.rel_move_to(-arrowhead_length * math.cos(arrow_angle - arrowhead_angle), -arrowhead_length * math.sin(arrow_angle - arrowhead_angle))
+                ctx.rel_line_to(arrowhead_length * math.cos(arrow_angle - arrowhead_angle), arrowhead_length * math.sin(arrow_angle - arrowhead_angle))
+                ctx.rel_line_to(-arrowhead_length * math.cos(arrow_angle + arrowhead_angle), -arrowhead_length * math.sin(arrow_angle + arrowhead_angle))
+                ctx.set_source_rgb(0,0,0)
+                ctx.set_line_width(0.05*arrow_length)
+                ctx.stroke()
+
             # draw layout region
             ctx.set_source_rgb(1, 1, 1)
             draw_layout_xl = normalize_x(layout_xl - padding * bin_size_x)
@@ -166,13 +186,8 @@ class PlaceDrawer(object):
             ctx.close_path()
             ctx.stroke()
             ## draw bins
-            ctx.set_source_rgba(0, 0, 0, alpha=1.0)  # Solid color
             ctx.set_source_rgba(1, 0, 0, alpha=0.5)
-            print("Drawing bins...")
-            print(f"num_bins_x: {num_bins_x}")
-            print(f"num_bins_y: {num_bins_y}")
             for i in range(1, num_bins_x):
-                print(f"Line: ({bin_xl(i)}, {normalize_y(yl)}) to ({bin_xl(i)}, {normalize_y(yh)})")
                 ctx.move_to(normalize_x(bin_xl(i)), normalize_y(yl))
                 ctx.line_to(normalize_x(bin_xl(i)), normalize_y(yh))
                 ctx.close_path()
@@ -183,21 +198,63 @@ class PlaceDrawer(object):
                 ctx.close_path()
                 ctx.stroke()
 
+            # draw selected nets
+            ctx.set_line_width(line_width)
+            ctx.set_source_rgba(0, 0, 0, alpha=0.5)
+            for net in nets:
+                maxx, maxy = 0, 0
+                minx, miny = layout_xh, layout_yh
+                for node_index in net:
+                    if x[node_index] < minx: minx = x[node_index]
+                    if x[node_index]+node_size_x[node_index] > maxx: maxx = x[node_index]+node_size_x[node_index]
+                    if y[node_index] < miny: miny = y[node_index]
+                    if y[node_index]+node_size_y[node_index] > maxy: maxy = y[node_index]+node_size_y[node_index]
+                # Draw bounding box
+                draw_rect(normalize_x(minx), normalize_x(miny), normalize_y(maxx), normalize_y(maxy))
+                centerx = minx + (maxx - minx)/2
+                centery = miny + (maxy - miny)/2
+                
+                # Draw connections
+                for node_index in net:
+                    ctx.move_to(normalize_x(x[node_index] + node_size_x[node_index]/2), normalize_y(y[node_index] + node_size_y[node_index]/2))
+                    ctx.line_to(normalize_x(centerx), normalize_y(centery))
+                    ctx.close_path()
+                    ctx.stroke()
+
+            # draw force arrows
+            ctx.set_source_rgb(0, 0, 0)
+            ctx.set_line_width(line_width * 10)
+            ctx.select_font_face("monospace", cairo.FONT_SLANT_NORMAL,
+                                    cairo.FONT_WEIGHT_NORMAL)
+            ctx.set_font_size(6)
+            for i in range(num_bins_y):
+                for j in range(num_bins_x):
+                    dx = 0.1*density_penalty*bin_force_y[i][j]
+                    dy = 0.1*density_penalty*bin_force_x[i][j]
+                    arrow_length = math.sqrt(dx**2 + dy**2)
+                    arrow_angle = math.atan(dy/dx)
+                    if dx < 0: # mirror across y axis
+                        arrow_angle = math.pi - arrow_angle
+                    draw_arrow(normalize_x(bin_xl(j) + bin_size_x/2), 
+                               normalize_y(bin_yl(i) + bin_size_y/2),
+                               normalize_x(arrow_length), arrow_angle)
+
+
             # draw cells
             ctx.set_font_size(16)
             ctx.select_font_face("monospace", cairo.FONT_SLANT_NORMAL,
                                  cairo.FONT_WEIGHT_NORMAL)
             node_xl = x
-            node_yl = layout_yl + layout_yh - (y + node_size_y[0:len(y)]
-                                               )  # flip y
+            node_yl = layout_yl + y # layout_yh - (y + node_size_y[0:len(y)]
             node_xh = node_xl + node_size_x[0:len(x)]
-            node_yh = layout_yl + layout_yh - y  # flip y
+            node_yh = layout_yl + y + node_size_y[0:len(y)] # flip y
             node_xl = normalize_x(node_xl)
             node_yl = normalize_y(node_yl)
             node_xh = normalize_x(node_xh)
             node_yh = normalize_y(node_yh)
             ctx.set_line_width(line_width)
-            #print("plot layout")
+
+
             # draw fixed macros
             ctx.set_source_rgba(1, 0, 0, alpha=0.5)
             for i in range(num_movable_nodes, num_physical_nodes):
@@ -238,9 +295,11 @@ class PlaceDrawer(object):
             for i in range(num_movable_nodes):
                 draw_rect(node_xl[i], node_yl[i], node_xh[i], node_yh[i])
             ## draw cell indices
-            for i in range(num_nodes):
-                ctx.move_to((node_xl[i]+node_xh[i])/2, (node_yl[i]+node_yh[i])/2)
-                ctx.show_text("%d" % (i))
+            # but only for small grids
+            if xh < 10 and yh < 10:
+                for i in range(num_nodes):
+                    ctx.move_to((node_xl[i]+node_xh[i])/2, (node_yl[i]+node_yh[i])/2)
+                    ctx.show_text("%d" % (i))
 
             # show iteration
             if iteration:
@@ -249,9 +308,10 @@ class PlaceDrawer(object):
                 ctx.select_font_face("monospace", cairo.FONT_SLANT_NORMAL,
                                      cairo.FONT_WEIGHT_NORMAL)
                 ctx.set_font_size(32)
-                ctx.move_to(normalize_x((xl + xh) / 2),
-                            normalize_y((yl + yh) / 2))
-                ctx.show_text('{:04}'.format(iteration))
+                #ctx.move_to(normalize_x((xl + xh) / 2),
+                #            normalize_y((yl + yh) / 2))
+                ctx.move_to(normalize_x(xl)+1, normalize_y(yl)+1)
+                ctx.show_text('{:4}'.format(iteration))
 
             surface.write_to_png(filename)  # Output to PNG
             print("[I] plotting to %s takes %.3f seconds" %

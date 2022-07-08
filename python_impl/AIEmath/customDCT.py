@@ -128,7 +128,7 @@ def idsct_2d(input_mat):
 
     # Compute DCT on cols
     mat = list(zip(*mat)) # transpose
-    for row in range(M):
+    for row in range(N):
         mat[row] = idst(mat[row])
     mat = list(zip(*mat)) # transpose
 
