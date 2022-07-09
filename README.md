@@ -1,8 +1,6 @@
 # AIEplace
 Implementation of the ePlace algorithm on the AMD Versal architecture, utilizing AIE, PL, and PS regions of the chip.
 
-![Python implementation of AIEplace 8x48](images/AIEplace_8x48.gif)
-
 # TODO
 * Python: Implement legalization step
 * Python: Add convergence detection (e.g. < 10% change)
