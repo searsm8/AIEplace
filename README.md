@@ -9,11 +9,7 @@ Implementation of the ePlace algorithm on the AMD Versal architecture, utilizing
 * Collect data on hyperparameters
 * Collect data on program execution
 
-<<<<<<< HEAD
-![Python implementation of AIEplace 8x48][images/AIEplace_8x48.gif]
-![Python implementation of AIEplace 8x8][images/AIEplace_8x8.gif]
-![Python implementation of AIEplace 16x16][images/AIEplace_16x16.gif]
-![Python implementation of AIEplace 24x24][images/AIEplace_24x24.gif]
-=======
+![Python implementation of AIEplace 8x48](images/AIEplace_8x48.gif)
 ![Python implementation of AIEplace 8x8](images/AIEplace_8x8.gif)
->>>>>>> 07ddf977c6bbd1c9855a4e13e5da270ad316829d
+![Python implementation of AIEplace 16x16](images/AIEplace_16x16.gif)
+![Python implementation of AIEplace 24x24](images/AIEplace_24x24.gif)
