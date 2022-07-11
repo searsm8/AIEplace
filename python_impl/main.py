@@ -50,7 +50,7 @@ if __name__ == "__main__":
     
     # Create a design environment and run AIEplacer
     num_rows = 8*3
-    num_cols = 8*3
+    num_cols = 8*5
     grid = Grid(num_rows, num_cols)
     node_count = int(num_rows * num_cols * 0.5)
     coords = initializeCoords(grid, node_count)

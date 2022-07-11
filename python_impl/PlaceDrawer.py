@@ -235,8 +235,12 @@ class PlaceDrawer(object):
                     dy = 0.1*density_penalty*bin_force_x[i][j]
                     arrow_length = math.sqrt(dx**2 + dy**2)
                     arrow_angle = math.atan(dy/dx)
+                    print(f"(dx, dy): ({dx:.4f}, {dy:.4f})")
+                    print(f"arrow_angle: {math.degrees(arrow_angle):.2f} ")
                     if dx < 0: # mirror across y axis
-                        arrow_angle = math.pi - arrow_angle
+                        arrow_angle = math.pi + arrow_angle
+                    print(f"final arrow_angle: {math.degrees(arrow_angle):.2f} ")
+                    print()
                     draw_arrow(normalize_x(bin_xl(j) + bin_size_x/2), 
                                normalize_y(bin_yl(i) + bin_size_y/2),
                                normalize_x(arrow_length), arrow_angle)
