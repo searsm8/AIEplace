@@ -83,7 +83,7 @@ def phi(u, v, alpha):
         @param u, v as in DREAMplace 0..M
         @param rho: density map MxM
     '''
-    if u is 0 and v is 0:
+    if u == 0 and v == 0:
         return 0
     M = len(alpha)
     w = 2*math.pi / M

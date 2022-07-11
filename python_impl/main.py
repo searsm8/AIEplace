@@ -50,7 +50,7 @@ if __name__ == "__main__":
     
     # Create a design environment and run AIEplacer
     num_rows = 8*3
-    num_cols = 8*5
+    num_cols = 8*3
     grid = Grid(num_rows, num_cols)
     node_count = int(num_rows * num_cols * 0.5)
     coords = initializeCoords(grid, node_count)
@@ -58,14 +58,13 @@ if __name__ == "__main__":
     node_sizes = []
     for i in range(len(coords)):
         node_names.append("k"+str(i))
-        node_sizes.append(Coord(1, 1))
+        node_sizes.append(Coord(.8, .8))
     nets = []
     for i in range(int((2+random.random()) * len(coords))):
     #for i in range(2):
         nets.append(makeRandomNet(len(coords)))
-    design = Design(grid, coords, node_names, node_sizes, nets)
+    design = Design(coords, node_names, node_sizes, nets)
 
     placer = AIEplacer(grid, design) 
     placer.run(1000)
-    #placer.legalize()
 

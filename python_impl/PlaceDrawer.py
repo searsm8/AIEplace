@@ -42,7 +42,7 @@ class PlaceDrawer(object):
                 density_penalty=0,
                 iteration=None,
                 hpwl=None,
-                overflow=None):
+                overflow=-1):
         """
         @brief python implementation of placement drawer.  
         @param pos locations of cells 
@@ -200,51 +200,6 @@ class PlaceDrawer(object):
                 ctx.close_path()
                 ctx.stroke()
 
-            # draw selected nets
-            ctx.set_line_width(line_width)
-            ctx.set_source_rgba(0, 0, 0, alpha=0.5)
-            for net in nets:
-                maxx, maxy = 0, 0
-                minx, miny = layout_xh, layout_yh
-                for node_index in net:
-                    if x[node_index] < minx: minx = x[node_index]
-                    if x[node_index]+node_size_x[node_index] > maxx: maxx = x[node_index]+node_size_x[node_index]
-                    if y[node_index] < miny: miny = y[node_index]
-                    if y[node_index]+node_size_y[node_index] > maxy: maxy = y[node_index]+node_size_y[node_index]
-                # Draw bounding box
-                draw_rect(normalize_x(minx), normalize_x(miny), normalize_y(maxx), normalize_y(maxy))
-                centerx = minx + (maxx - minx)/2
-                centery = miny + (maxy - miny)/2
-                
-                # Draw connections
-                for node_index in net:
-                    ctx.move_to(normalize_x(x[node_index] + node_size_x[node_index]/2), normalize_y(y[node_index] + node_size_y[node_index]/2))
-                    ctx.line_to(normalize_x(centerx), normalize_y(centery))
-                    ctx.close_path()
-                    ctx.stroke()
-
-            # draw force arrows
-            ctx.set_source_rgb(0, 0, 0)
-            ctx.set_line_width(line_width * 10)
-            ctx.select_font_face("monospace", cairo.FONT_SLANT_NORMAL,
-                                    cairo.FONT_WEIGHT_NORMAL)
-            ctx.set_font_size(6)
-            for i in range(num_bins_y):
-                for j in range(num_bins_x):
-                    dx = 0.1*density_penalty*bin_force_y[i][j]
-                    dy = 0.1*density_penalty*bin_force_x[i][j]
-                    arrow_length = math.sqrt(dx**2 + dy**2)
-                    arrow_angle = math.atan(dy/dx)
-                    print(f"(dx, dy): ({dx:.4f}, {dy:.4f})")
-                    print(f"arrow_angle: {math.degrees(arrow_angle):.2f} ")
-                    if dx < 0: # mirror across y axis
-                        arrow_angle = math.pi + arrow_angle
-                    print(f"final arrow_angle: {math.degrees(arrow_angle):.2f} ")
-                    print()
-                    draw_arrow(normalize_x(bin_xl(j) + bin_size_x/2), 
-                               normalize_y(bin_yl(i) + bin_size_y/2),
-                               normalize_x(arrow_length), arrow_angle)
-
 
             # draw cells
             ctx.set_font_size(16)
@@ -307,6 +262,50 @@ class PlaceDrawer(object):
                     ctx.move_to((node_xl[i]+node_xh[i])/2, (node_yl[i]+node_yh[i])/2)
                     ctx.show_text("%d" % (i))
 
+            # draw selected nets
+            for net in nets:
+                maxx, maxy = 0, 0
+                minx, miny = layout_xh, layout_yh
+                for node_index in net:
+                    if x[node_index] < minx: minx = x[node_index]
+                    if x[node_index]+node_size_x[node_index] > maxx: maxx = x[node_index]+node_size_x[node_index]
+                    if y[node_index] < miny: miny = y[node_index]
+                    if y[node_index]+node_size_y[node_index] > maxy: maxy = y[node_index]+node_size_y[node_index]
+                # Draw bounding box
+                ctx.set_line_width(4*line_width)
+                ctx.set_source_rgba(0, 0, 0, alpha=1)
+                draw_rect(normalize_x(minx), normalize_x(miny), normalize_y(maxx), normalize_y(maxy))
+                centerx = minx + (maxx - minx)/2
+                centery = miny + (maxy - miny)/2
+                
+                ctx.set_line_width(line_width)
+                ctx.set_source_rgba(0, 0, 0, alpha=0.5)
+                # Draw connections
+                for node_index in net:
+                    ctx.move_to(normalize_x(x[node_index] + node_size_x[node_index]/2), normalize_y(y[node_index] + node_size_y[node_index]/2))
+                    ctx.line_to(normalize_x(centerx), normalize_y(centery))
+                    ctx.close_path()
+                    ctx.stroke()
+
+            # draw force arrows
+            ctx.set_source_rgb(0, 0, 0)
+            ctx.set_line_width(line_width * 10)
+            ctx.select_font_face("monospace", cairo.FONT_SLANT_NORMAL,
+                                    cairo.FONT_WEIGHT_NORMAL)
+            ctx.set_font_size(6)
+            for i in range(num_bins_y):
+                for j in range(num_bins_x):
+                    dx = 0.1*density_penalty*bin_force_y[i][j]
+                    dy = 0.1*density_penalty*bin_force_x[i][j]
+                    arrow_length = math.sqrt(dx**2 + dy**2)
+                    arrow_angle = math.atan(dy/dx)
+                    if dx < 0: # mirror across y axis
+                        arrow_angle = math.pi + arrow_angle
+                    draw_arrow(normalize_x(bin_xl(j) + bin_size_x/2), 
+                               normalize_y(bin_yl(i) + bin_size_y/2),
+                               normalize_x(arrow_length), arrow_angle)
+
+
             # show iteration
             if iteration:
                 ctx.set_source_rgb(0, 0, 0)
@@ -323,9 +322,8 @@ class PlaceDrawer(object):
                 ctx.show_text('hpwl: {:.1f}'.format(hpwl))
                 
             # show overlap
-            if overflow:
-                ctx.move_to((xl), (yl+48))
-                ctx.show_text('overflow: {:.1f}'.format(overflow))
+            ctx.move_to((xl), (yl+48))
+            ctx.show_text('overflow: {:.1f}'.format(overflow))
 
             surface.write_to_png(filename)  # Output to PNG
             print("[I] plotting to %s takes %.3f seconds" %

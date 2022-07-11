@@ -17,6 +17,12 @@ class Coord:
         self.row = row
         self.col = col
 
+    def __add__(self, oc):
+        return Coord(self.row + oc.row, self.col + oc.col)
+    
+    def __str__(self):
+        return f"({self.row}, {self.col})"
+
 class Grid:
     def __init__(self, num_rows: int, num_cols: int) -> None:
         self.num_rows = num_rows
@@ -27,7 +33,7 @@ class Grid:
 
 class Design:
     # primary lists which hold design information
-    def __init__(self, grid, coords, node_names, node_sizes, nets) -> None:
+    def __init__(self, coords, node_names, node_sizes, nets) -> None:
         self.coords = coords
         self.node_names = node_names
         self.node_sizes = node_sizes
@@ -41,6 +47,10 @@ class AIEplacer:
         self.bin_width = 1 # arbitrary
         self.bin_height= 1 # arbitrary
         self.bin_grid = Grid(int(grid.num_rows/self.bin_height), int(grid.num_cols/self.bin_width))
+        self.design_run = 0
+        while(os.path.exists(f"results/run_{self.design_run}")):
+            self.design_run += 1
+        os.system(f"mkdir results/run_{self.design_run}")
     
     def computeActualHPWL(self):
         hpwls = []
@@ -105,10 +115,6 @@ class AIEplacer:
         ''' Runs the ePlace algorithm'''
         logging.info("Begin AIEplace")
         os.system("mkdir results")
-        design_run = 0
-        while(os.path.exists(f"results/run_{design_run}")):
-            design_run += 1
-        os.system(f"mkdir results/run_{design_run}")
         
         for iter in range(iterations):
             logging.root.name = 'ITER ' + str(iter)
@@ -144,17 +150,16 @@ class AIEplacer:
 
             # HPWL WA gradient
             hpwl_WA = []
-            hpwl_actual = self.computeActualHPWL() 
             hpwl_gradient = []
             for i in range(len(self.design.coords)):
                 hpwl_gradient.append(Coord(0,0))
 
             #print a, b, c terms for debugging
-            net_index = 0
-            print(f"Net {net_index}: ", end=""); prettyPrint.net(self.design.nets[0], self.design)
-            for node_index in self.design.nets[net_index]:
-                prettyPrint.coord(self.design.coords[node_index])
-            print()
+            #net_index = 0
+            #print(f"Net {net_index}: ", end=""); prettyPrint.net(self.design.nets[0], self.design)
+            #for node_index in self.design.nets[net_index]:
+            #    prettyPrint.coord(self.design.coords[node_index])
+            #print()
             #    print("\ta+ ", end=''); prettyPrint.coord(a_plus[node_index]);
             #    print("\ta- ", end=''); prettyPrint.coord(a_minus[node_index]); print()
             #print("b+ ", end=''); prettyPrint.coord(b_plus[net_index]);
@@ -162,6 +167,7 @@ class AIEplacer:
             #print("c+ ", end=''); prettyPrint.coord(c_plus[net_index]);
             #print("c- ", end=''); prettyPrint.coord(c_minus[net_index]); print()
 
+            # Compute HPWL gradients
             for i in range(len(self.design.nets)):
                 hpwl_WA.append( Coord( AIEmath.computeTerm.WA_hpwl(b_plus[i].row, c_plus[i].row, b_minus[i].row, c_minus[i].row), \
                                        AIEmath.computeTerm.WA_hpwl(b_plus[i].col, c_plus[i].col, b_minus[i].col, c_minus[i].col) ) )
@@ -183,16 +189,6 @@ class AIEplacer:
                 print()
                 print()
             
-            total_hpwl = 0
-            for i in range(len(self.design.nets)):
-                total_hpwl += hpwl_actual[i].row + hpwl_actual[i].col
-                continue
-                print(f"NET[{i}]")
-                print(f"HPWL estimate: ({hpwl_WA[i].row}, {hpwl_WA[i].col})")
-                print(f"HPWL actual: {hpwl_actual[i]}")
-                print()
-            print(f"Total HPWL actual: {total_hpwl}")
-
             # Density Gradients
             self.computeBinDensities()
             total_density = 0
@@ -236,13 +232,6 @@ class AIEplacer:
             step_len = 0.09
             density_penalty = min(50, 0.05*(iter))
             print(f"density_penalty: {density_penalty}")
-            overflow = 0
-
-            for i in range(len(self.bin_grid.vals)):
-                for j in range(len(self.bin_grid.vals[i])):
-                    if self.bin_grid.vals[-i-1][j] > 1:
-                        overflow += self.bin_grid.vals[-i-1][j] - 1
-            print(f"overflow: {overflow}")
 
 
             my_node = 0
@@ -253,10 +242,68 @@ class AIEplacer:
             #print(f"step[0].row: {step_len * (hpwl_gradient[0].row + density_penalty*electroForceX[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)] ):.2f}")
             #print(f"step[0].col: {step_len * (hpwl_gradient[0].col + density_penalty*electroForceY[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)] ):.2f}")
 
+
+            # Update node locations
+            print(f"Update coords:")
+            prettyPrint.coord(self.design.coords[my_node]); print(f" --> ", end="")
+            for i in range(len(self.design.coords)):
+                # Compute the electro force for each node, accounting for bin overlaps
+                force = Coord(0, 0)
+                for bin_row in range((self.bin_grid.num_rows)):
+                    for bin_col in range((self.bin_grid.num_cols)):
+                        overlap = self.computeOverlap(i, bin_row, bin_col)
+                        if overlap > 0:
+                            force.row += overlap * electroForceX[bin_row][bin_col]
+                            force.col += overlap * electroForceY[bin_row][bin_col]
+
+                self.design.coords[i].row -= step_len * (hpwl_gradient[i].row - density_penalty * force.row)
+                #self.design.coords[i].row -= step_len * (0 - density_penalty * force.row)
+                                            #- density_penalty*electroForceX[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
+                                            # WHY IS THIS MINUS SIGN NEEDED????
+                #if self.design.coords[i].row < 0: self.design.coords[i].row = 0 # this shouldn't be needed b/c of boundary condition?
+                #if self.design.coords[i].row + self.design.node_sizes[i].row >= self.grid.num_rows : self.design.coords[i].row = self.grid.num_rows-1
+
+                self.design.coords[i].col -= step_len * (hpwl_gradient[i].col - density_penalty * force.col)
+                #self.design.coords[i].col -= step_len * (0 - density_penalty * force.col)
+                                            #- density_penalty*electroForceY[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
+                #if self.design.coords[i].col < 0: self.design.coords[i].col = 0
+                #if self.design.coords[i].col + self.design.node_sizes[i].col  >= self.grid.num_cols : self.design.coords[i].col = self.grid.num_cols-1
+
+            #prettyPrint.coord(self.design.coords[my_node])
+            #prettyPrint.matrix(self.bin_grid.vals, title="Densities:", tabs="\t"*8)
+            #prettyPrint.matrix(electroPhi, title="electroPhi:", tabs="\t"*8)
+            #prettyPrint.matrix(electroForceY, title="electroForceY(cols):", tabs="\t"*8)
+            #prettyPrint.matrix(electroForceX, title="electroForceX(rows):", tabs="\t"*8)
+            #os.system("clear")
+
+            nets_to_draw = []
+            if iter == iterations-1:
+                self.legalize()
+                nets_to_draw = self.design.nets[:5]
+
+            # after the update, compute new metrics
+            self.computeBinDensities()
+            net_bins = []
+            for net_index in range(len(self.design.nets)):
+                net_bins.append(self.getNetBinDensities(net_index))
+        
+            hpwl_actual = self.computeActualHPWL() 
+            total_hpwl = 0
+            for i in range(len(self.design.nets)):
+                total_hpwl += hpwl_actual[i].row + hpwl_actual[i].col
+            print(f"Total HPWL actual: {total_hpwl}")
+
+            overflow = 0
+            for i in range(len(self.bin_grid.vals)):
+                for j in range(len(self.bin_grid.vals[i])):
+                    if self.bin_grid.vals[-i-1][j] > 1:
+                        overflow += self.bin_grid.vals[-i-1][j] - 1
+            print(f"overflow: {overflow}")
+                
             #use PlaceDrawer to export an image
-            if(iter%10 == 0):
+            if(iter%10 == 0) or (iter == iterations-1):
                 filename=f"{time.strftime('%y%m%d_%H%M')}_iter_{iter}.png"
-                filename = os.path.join("results", f"run_{design_run}", filename)
+                filename = os.path.join("results", f"run_{self.design_run}", filename)
                 #pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  + \
                 #    [self.design.coords[i].row for i in range(len(self.design.coords))] 
                 #print(pos)
@@ -281,7 +328,7 @@ class AIEplacer:
                         bin_size_x=self.bin_width, bin_size_y=self.bin_height, 
                         num_movable_nodes=0, num_filler_nodes=0, 
                         filename=filename,
-                        nets=[],#self.design.nets[:],
+                        nets=nets_to_draw,
                         hwpl_force=[],
                         bin_force_x=electroForceX,
                         bin_force_y=electroForceY,
@@ -290,47 +337,9 @@ class AIEplacer:
                         hpwl=total_hpwl,
                         overflow=overflow
                         )
-
-            # Update node locations
-            print(f"Update coords:")
-            prettyPrint.coord(self.design.coords[my_node]); print(f" --> ", end="")
-            for i in range(len(self.design.coords)):
-                # Compute the electro force for each node, accounting for bin overlaps
-                force = Coord(0, 0)
-                for bin_row in range((self.bin_grid.num_rows)):
-                    for bin_col in range((self.bin_grid.num_cols)):
-                        overlap = self.computeOverlap(i, bin_row, bin_col)
-                        if overlap > 0:
-                            force.row += overlap * electroForceX[bin_row][bin_col]
-                            force.col += overlap * electroForceY[bin_row][bin_col]
-
-                self.design.coords[i].row -= step_len * (hpwl_gradient[i].row - density_penalty * force.row)
-                #self.design.coords[i].row -= step_len * (0 - density_penalty * force.row)
-                                            #- density_penalty*electroForceX[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
-                                            # WHY IS THIS MINUS SIGN NEEDED????
-                if self.design.coords[i].row < 0: self.design.coords[i].row = 0 # this shouldn't be needed b/c of boundary condition?
-                if self.design.coords[i].row + self.design.node_sizes[i].row >= self.grid.num_rows : self.design.coords[i].row = self.grid.num_rows-1
-
-                self.design.coords[i].col -= step_len * (hpwl_gradient[i].col - density_penalty * force.col)
-                #self.design.coords[i].col -= step_len * (0 - density_penalty * force.col)
-                                            #- density_penalty*electroForceY[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
-                if self.design.coords[i].col < 0: self.design.coords[i].col = 0
-                if self.design.coords[i].col + self.design.node_sizes[i].col  >= self.grid.num_cols : self.design.coords[i].col = self.grid.num_cols-1
-
-            #prettyPrint.coord(self.design.coords[my_node])
-            #prettyPrint.matrix(self.bin_grid.vals, title="Densities:", tabs="\t"*8)
-            #prettyPrint.matrix(electroPhi, title="electroPhi:", tabs="\t"*8)
-            #prettyPrint.matrix(electroForceY, title="electroForceY(cols):", tabs="\t"*8)
-            #prettyPrint.matrix(electroForceX, title="electroForceX(rows):", tabs="\t"*8)
-            #os.system("clear")
-
             #end iteration loop
 
-        net_bins = []
-        for net_index in range(len(self.design.nets)):
-            net_bins.append(self.getNetBinDensities(net_index))
-        
-        hpwl_actual = self.computeActualHPWL() 
+        # print debugging info
         for my_net in range(len(self.design.nets)):
             continue
             if len(self.design.nets[my_net]) == 2:
@@ -344,15 +353,58 @@ class AIEplacer:
             for i in range(len(net_bins[my_net])):
                 print(f"{net_bins[my_net][-i-1]}")
 
-        prettyPrint.nets(self.design)
+        #prettyPrint.nets(self.design)
         #for node in self.design.coords:
         #    print(f"({node.row}, {node.col})")
 
         logging.root.name = 'AIEplace'
         logging.info("End AIEplace")
+
     
     def legalize(self):
         ''' After running placement, legalize the design'''
         logging.info("Begin legalization")
+        lg = Grid (self.grid.num_rows, self.grid.num_cols) # legalization grid
+        for coord in self.design.coords:
+            legalized = False
+            coord.row = round(coord.row)
+            coord.col = round(coord.col)
+            if coord.row < 0: coord.row = 0
+            if coord.col < 0: coord.col = 0
+            if coord.row >= self.grid.num_rows: coord.row = self.grid.num_rows-1
+            if coord.col >= self.grid.num_cols: coord.col = self.grid.num_cols-1
+            if lg.vals[coord.row][coord.col] == 0:
+                lg.vals[coord.row][coord.col] = 1
+                continue
+            dist = 1
+            while not legalized:
+                spiral_coords = []
+                spiral_coords.append(Coord(coord.row, coord.col+dist))
+                spiral_coords.append(Coord(coord.row+dist, coord.col))
+                spiral_coords.append(Coord(coord.row, coord.col-dist))
+                spiral_coords.append(Coord(coord.row-dist, coord.col))
+                for i in range(-dist+1,dist+1):
+                    if i == 0: continue
+                    spiral_coords.append(Coord(coord.row+i, coord.col+dist))
+                    spiral_coords.append(Coord(coord.row+dist, coord.col-i))
+                    spiral_coords.append(Coord(coord.row-i, coord.col-dist))
+                    spiral_coords.append(Coord(coord.row-dist, coord.col+i))
+
+                new_coord_tested = False
+                for i in range(len(spiral_coords)):
+                    if spiral_coords[i].row < 0 or spiral_coords[i].row >= self.grid.num_rows: continue
+                    if spiral_coords[i].col < 0 or spiral_coords[i].col >= self.grid.num_cols: continue
+                    new_coord_tested = True
+                    if lg.vals[spiral_coords[i].row][spiral_coords[i].col] == 0:
+                        lg.vals[spiral_coords[i].row][spiral_coords[i].col] = 1
+                        coord.row = spiral_coords[i].row
+                        coord.col = spiral_coords[i].col
+                        legalized = True
+                        break
+                if new_coord_tested:
+                    dist += 1
+                else: 
+                    logging.info(f"Legalization FAILED: no legal placement found for node at {coord}.")
+                    return
+
         logging.info("End legalization")
-        pass
