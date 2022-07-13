@@ -1,6 +1,7 @@
 # main.py
 # Driver code for AIEplacer
 from AIEplacer import *
+import cProfile
 import sys
 import logging
 import random
@@ -42,15 +43,15 @@ def initializeCoords(grid, node_count):
                               random.choice(range(round(grid.num_cols*.4), round(grid.num_cols*.6))) + random.random() ) )
     return coords
 
-if __name__ == "__main__":
+def runAIEPlacer():
     logging.root.name = 'AIEplace'
     logging.basicConfig(level=logging.INFO,
                         format='[%(levelname)-7s] %(name)s - %(message)s',
                         stream=sys.stdout)
     
     # Create a design environment and run AIEplacer
-    num_rows = 8*3
-    num_cols = 8*3
+    num_rows = 8*1
+    num_cols = 8*5
     grid = Grid(num_rows, num_cols)
     node_count = int(num_rows * num_cols * 0.5)
     coords = initializeCoords(grid, node_count)
@@ -68,3 +69,5 @@ if __name__ == "__main__":
     placer = AIEplacer(grid, design) 
     placer.run(1000)
 
+if __name__ == "__main__":
+    cProfile.run('runAIEPlacer()')

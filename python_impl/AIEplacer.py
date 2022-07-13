@@ -6,6 +6,7 @@ import AIEmath.computeTerm
 import AIEmath.customDCT
 import sys, os
 import prettyPrint
+import random
 import math
 import time
 import numpy as np
@@ -111,8 +112,25 @@ class AIEplacer:
         else:
             return (high_row - low_row) * (high_col - low_col)
 
+    def get0(self, a):
+        return a[0]
+
+    def getSortedRows(self, net):
+        rows = [self.design.coords[i].row for i in net]
+        rows = list(zip(rows, net))
+        rows.sort(key=self.get0)
+        return rows
+
+    def getSortedCols(self, net):
+        cols = [self.design.coords[i].col for i in net]
+        cols = list(zip(cols, net))
+        cols.sort(key=self.get0)
+        return cols
+
     def run(self, iterations):
         ''' Runs the ePlace algorithm'''
+        export_images = False
+
         logging.info("Begin AIEplace")
         os.system("mkdir results")
         
@@ -125,77 +143,50 @@ class AIEplacer:
             # TODO: include the min/m.row terms to reduce computational burden
             # compute a+/- terms
             gamma = 4.
-            a_plus  = []
-            a_minus = []
-            for i in range(len(self.design.coords)):
-                coord = self.design.coords[i]
-                a_plus.append( Coord(math.exp(coord.row/gamma), math.exp(coord.col/gamma)) )
-                a_minus.append( Coord(math.exp(-coord.row/gamma), math.exp(-coord.col/gamma)) )
-
-            # compute b+/- terms
-            b_plus  = []
-            b_minus = []
-            for net_index in range(len(self.design.nets)):
-                net = self.design.nets[net_index]
-                b_plus.append( Coord(sum([a_plus[i].row for i in net]), sum([a_plus[i].col for i in net]) ) ) #had row instead of col for b_plus.col
-                b_minus.append( Coord(sum([a_minus[i].row for i in net]), sum([a_minus[i].col for i in net]) ) )#had col instead of row for b_minus.row
-
-            # compute c+/- terms
-            c_plus  = []
-            c_minus = []
-            for net_index in range(len(self.design.nets)):
-                net = self.design.nets[net_index]
-                c_plus.append ( Coord(sum([self.design.coords[i].row*a_plus[i].row for i in net]), sum([self.design.coords[i].col*a_plus[i].col for i in net]) ) )
-                c_minus.append( Coord(sum([self.design.coords[i].row*a_minus[i].row for i in net]), sum([self.design.coords[i].col*a_minus[i].col for i in net]) ) )
-
+            a_plus  = []; a_minus = []
+            b_plus  = []; b_minus = []
+            c_plus  = []; c_minus = []
             # HPWL WA gradient
             hpwl_WA = []
             hpwl_gradient = []
             for i in range(len(self.design.coords)):
                 hpwl_gradient.append(Coord(0,0))
 
-            #print a, b, c terms for debugging
-            #net_index = 0
-            #print(f"Net {net_index}: ", end=""); prettyPrint.net(self.design.nets[0], self.design)
-            #for node_index in self.design.nets[net_index]:
-            #    prettyPrint.coord(self.design.coords[node_index])
-            #print()
-            #    print("\ta+ ", end=''); prettyPrint.coord(a_plus[node_index]);
-            #    print("\ta- ", end=''); prettyPrint.coord(a_minus[node_index]); print()
-            #print("b+ ", end=''); prettyPrint.coord(b_plus[net_index]);
-            #print("b- ", end=''); prettyPrint.coord(b_minus[net_index]); print()
-            #print("c+ ", end=''); prettyPrint.coord(c_plus[net_index]);
-            #print("c- ", end=''); prettyPrint.coord(c_minus[net_index]); print()
-
-            # Compute HPWL gradients
             for i in range(len(self.design.nets)):
+                net = self.design.nets[i]
+                zipped_y_coords = self.getSortedRows(net)
+                zipped_x_coords = self.getSortedCols(net)
+                y_coords = [zipped_y_coords[i][0] for i in range(len(zipped_y_coords))]
+                x_coords = [zipped_x_coords[i][0] for i in range(len(zipped_x_coords))]
+                a_plus.append( Coord( AIEmath.computeTerm.a_plus(y_coords, gamma), AIEmath.computeTerm.a_plus(x_coords, gamma) ) )
+                a_minus.append( Coord( AIEmath.computeTerm.a_minus(y_coords, gamma), AIEmath.computeTerm.a_minus(x_coords, gamma) ) )
+            #for i in range(len(self.design.coords)):
+            #    coord = self.design.coords[i]
+            #    a_plus.append( Coord(math.exp(coord.row/gamma), math.exp(coord.col/gamma)) )
+            #    a_minus.append( Coord(math.exp(-coord.row/gamma), math.exp(-coord.col/gamma)) )
+
+                # compute b+/- terms
+                b_plus.append( Coord(AIEmath.computeTerm.b_term(a_plus[i].row), AIEmath.computeTerm.b_term(a_plus[i].col) ) )
+                b_minus.append( Coord(AIEmath.computeTerm.b_term(a_minus[i].row), AIEmath.computeTerm.b_term(a_minus[i].col) ) )
+
+                # compute c+/- terms
+                c_plus.append( Coord(AIEmath.computeTerm.c_term(y_coords, a_plus[i].row), AIEmath.computeTerm.c_term(x_coords, a_plus[i].col) ) )
+                c_minus.append( Coord(AIEmath.computeTerm.c_term(y_coords, a_minus[i].row), AIEmath.computeTerm.c_term(x_coords, a_minus[i].col) ) )
+                #c_plus.append ( Coord(sum([self.design.coords[i].row*a_plus[i].row for i in net]), sum([self.design.coords[i].col*a_plus[i].col for i in net]) ) )
+                #c_minus.append( Coord(sum([self.design.coords[i].row*a_minus[i].row for i in net]), sum([self.design.coords[i].col*a_minus[i].col for i in net]) ) )
+
+                # Compute HPWL gradients
                 hpwl_WA.append( Coord( AIEmath.computeTerm.WA_hpwl(b_plus[i].row, c_plus[i].row, b_minus[i].row, c_minus[i].row), \
                                        AIEmath.computeTerm.WA_hpwl(b_plus[i].col, c_plus[i].col, b_minus[i].col, c_minus[i].col) ) )
-                for j in range(len(self.design.nets[i])):
-                    node_index = self.design.nets[i][j]
-                    hpwl_gradient[node_index].row += AIEmath.computeTerm.WA_partial(self.design.coords[node_index].row, a_plus[node_index].row, b_plus[i].row, c_plus[i].row, a_minus[node_index].row, b_minus[i].row, c_minus[i].row, gamma) 
-                    hpwl_gradient[node_index].col += AIEmath.computeTerm.WA_partial(self.design.coords[node_index].col, a_plus[node_index].col, b_plus[i].col, c_plus[i].col, a_minus[node_index].col, b_minus[i].col, c_minus[i].col, gamma) 
-                    #if node_index == 0:
-                    #    coord0 = self.design.coords[node_index]
-                    #    print(f"ADDING TO hpwl_grad[0]: ({hpwl_gradient[0].row:.2f}, {hpwl_gradient[0].col:.2f}) updated for net {i}", end='')
-                    #    prettyPrint.net(self.design.nets[i], self.design)
-                    #hpwl_gradient[i].append( Coord( AIEmath.computeTerm.WA_partial(self.design.coords[i].row, a_plus[node_ind.row].row, b_plus[i].row, c_plus[i].row, a_minus[node_ind.row].row, b_minus[i].row, c_minus[i].row, gamma), \
-                    #          AIEmath.computeTerm.WA_partial(self.design.coords[i].col, a_plus[node_ind.row].col, b_plus[i].col, c_plus[i].col, a_minus[node_ind.row].col, b_minus[i].col, c_minus[i].col, gamma) ) )
-            for i in range(len(self.design.nets)):
-                continue
-                print(f"net {i}: {self.design.nets[i]}")
-                for j in range(len(self.design.nets[i])):
-                    print(f"({self.design.coords[self.design.nets[i][j]].row}, {self.design.coords[self.design.nets[i][j]].col})", end=", ")
-                print()
-                print()
-            
+                for j in range(len(zipped_y_coords)):
+                    node_index = zipped_y_coords[j][1]
+                    hpwl_gradient[node_index].row += AIEmath.computeTerm.WA_partial(self.design.coords[node_index].row, a_plus[i].row[j], b_plus[i].row, c_plus[i].row, a_minus[i].row[j], b_minus[i].row, c_minus[i].row, gamma) 
+                    node_index = zipped_x_coords[j][1]
+                    hpwl_gradient[node_index].col += AIEmath.computeTerm.WA_partial(self.design.coords[node_index].col, a_plus[i].row[j], b_plus[i].col, c_plus[i].col, a_minus[i].row[j], b_minus[i].col, c_minus[i].col, gamma) 
+
+
             # Density Gradients
             self.computeBinDensities()
-            total_density = 0
-            for i in range(len(self.bin_grid.vals)):
-                for j in range(len(self.bin_grid.vals[i])):
-                    total_density += self.bin_grid.vals[i][j]
-            print(f"total_density: {total_density} ")
 
             my_dct = AIEmath.customDCT.dct_2d(self.bin_grid.vals)
             # adjustment
@@ -244,13 +235,14 @@ class AIEplacer:
 
 
             # Update node locations
-            print(f"Update coords:")
-            prettyPrint.coord(self.design.coords[my_node]); print(f" --> ", end="")
+            #print(f"Update coords:")
+            #prettyPrint.coord(self.design.coords[my_node]); print(f" --> ", end="")
             for i in range(len(self.design.coords)):
                 # Compute the electro force for each node, accounting for bin overlaps
                 force = Coord(0, 0)
-                for bin_row in range((self.bin_grid.num_rows)):
-                    for bin_col in range((self.bin_grid.num_cols)):
+                node = self.design.coords[i]
+                for bin_row in range(math.floor(node.row)-1, math.floor(node.row)+2):
+                    for bin_col in range(math.floor(node.col)-1, math.floor(node.col +2)):
                         overlap = self.computeOverlap(i, bin_row, bin_col)
                         if overlap > 0:
                             force.row += overlap * electroForceX[bin_row][bin_col]
@@ -279,83 +271,62 @@ class AIEplacer:
             nets_to_draw = []
             if iter == iterations-1:
                 self.legalize()
-                nets_to_draw = self.design.nets[:5]
+                # choose a random node and draw all nets for that node
+                for i in range(1):
+                    target_node=random.randint(0, len(self.design.coords)-1)
+                    for net in self.design.nets:
+                        if net.count(target_node):
+                            nets_to_draw.append(net)
+                #nets_to_draw = self.design.nets[:5]
 
             # after the update, compute new metrics
-            self.computeBinDensities()
-            net_bins = []
-            for net_index in range(len(self.design.nets)):
-                net_bins.append(self.getNetBinDensities(net_index))
-        
-            hpwl_actual = self.computeActualHPWL() 
-            total_hpwl = 0
-            for i in range(len(self.design.nets)):
-                total_hpwl += hpwl_actual[i].row + hpwl_actual[i].col
-            print(f"Total HPWL actual: {total_hpwl}")
+            if export_images:
+                self.computeBinDensities()
+                net_bins = []
+                for net_index in range(len(self.design.nets)):
+                    net_bins.append(self.getNetBinDensities(net_index))
+            
+                hpwl_actual = self.computeActualHPWL() 
+                total_hpwl = 0
+                for i in range(len(self.design.nets)):
+                    total_hpwl += hpwl_actual[i].row + hpwl_actual[i].col
+                print(f"Total HPWL actual: {total_hpwl}")
 
-            overflow = 0
-            for i in range(len(self.bin_grid.vals)):
-                for j in range(len(self.bin_grid.vals[i])):
-                    if self.bin_grid.vals[-i-1][j] > 1:
-                        overflow += self.bin_grid.vals[-i-1][j] - 1
-            print(f"overflow: {overflow}")
-                
-            #use PlaceDrawer to export an image
-            if(iter%10 == 0) or (iter == iterations-1):
-                filename=f"{time.strftime('%y%m%d_%H%M')}_iter_{iter}.png"
-                filename = os.path.join("results", f"run_{self.design_run}", filename)
-                #pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  + \
-                #    [self.design.coords[i].row for i in range(len(self.design.coords))] 
-                #print(pos)
-                #overlap = []
-                #for bin_row in range((self.bin_grid.num_rows)):
-                #    overlap.append([0]*(self.bin_grid.num_cols))
-                #    for bin_col in range((self.bin_grid.num_cols)):
-                #        overlap[bin_row][bin_col] = self.computeOverlap(0, bin_row, bin_col)
-                #print("Overlap:")
-                #prettyPrint.matrix(overlap)
-                        
-                ret = PlaceDrawer.PlaceDrawer.forward(
-                        pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  + 
-                             [self.design.coords[i].row for i in range(len(self.design.coords))], 
-                        node_size_x=[self.design.node_sizes[i].col for i in range(len(self.design.coords))], 
-                        node_size_y=[self.design.node_sizes[i].row for i in range(len(self.design.coords))], 
-                        pin_offset_x=[0 for i in range(len(self.design.coords))],
-                        pin_offset_y=[0 for i in range(len(self.design.coords))],
-                        pin2node_map={}, 
-                        xl=0, yl=0, xh=self.grid.num_cols, yh=self.grid.num_rows, 
-                        site_width=1, row_height=1,
-                        bin_size_x=self.bin_width, bin_size_y=self.bin_height, 
-                        num_movable_nodes=0, num_filler_nodes=0, 
-                        filename=filename,
-                        nets=nets_to_draw,
-                        hwpl_force=[],
-                        bin_force_x=electroForceX,
-                        bin_force_y=electroForceY,
-                        density_penalty=density_penalty,
-                        iteration=iter,
-                        hpwl=total_hpwl,
-                        overflow=overflow
-                        )
+                overflow = 0
+                for i in range(len(self.bin_grid.vals)):
+                    for j in range(len(self.bin_grid.vals[i])):
+                        if self.bin_grid.vals[-i-1][j] > 1:
+                            overflow += self.bin_grid.vals[-i-1][j] - 1
+                print(f"overflow: {overflow}")
+                    
+                #use PlaceDrawer to export an image
+                if(iter%10 == 0) or (iter == iterations-1):
+                    filename=f"{time.strftime('%y%m%d_%H%M')}_iter_{iter}.png"
+                    filename = os.path.join("results", f"run_{self.design_run}", filename)
+                            
+                    ret = PlaceDrawer.PlaceDrawer.forward(
+                            pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  + 
+                                [self.design.coords[i].row for i in range(len(self.design.coords))], 
+                            node_size_x=[self.design.node_sizes[i].col for i in range(len(self.design.coords))], 
+                            node_size_y=[self.design.node_sizes[i].row for i in range(len(self.design.coords))], 
+                            pin_offset_x=[0 for i in range(len(self.design.coords))],
+                            pin_offset_y=[0 for i in range(len(self.design.coords))],
+                            pin2node_map={}, 
+                            xl=0, yl=0, xh=self.grid.num_cols, yh=self.grid.num_rows, 
+                            site_width=1, row_height=1,
+                            bin_size_x=self.bin_width, bin_size_y=self.bin_height, 
+                            num_movable_nodes=0, num_filler_nodes=0, 
+                            filename=filename,
+                            nets=nets_to_draw,
+                            hwpl_force=[],
+                            bin_force_x=electroForceX,
+                            bin_force_y=electroForceY,
+                            density_penalty=density_penalty,
+                            iteration=iter,
+                            hpwl=total_hpwl,
+                            overflow=overflow
+                            )
             #end iteration loop
-
-        # print debugging info
-        for my_net in range(len(self.design.nets)):
-            continue
-            if len(self.design.nets[my_net]) == 2:
-                continue
-            print(f"\nnets[{my_net}]: {self.design.nets[my_net]}")
-            print(f"\tCoords: ", end="")
-            for node in self.design.nets[my_net]:
-                print(f"({self.design.coords[node].row}, {self.design.coords[node].col})", end=", ")
-            print(f"\tHPWL: ({hpwl_actual[my_net].row}, {hpwl_actual[my_net].col})")
-            print(f"net_bins[{my_net}]: ")
-            for i in range(len(net_bins[my_net])):
-                print(f"{net_bins[my_net][-i-1]}")
-
-        #prettyPrint.nets(self.design)
-        #for node in self.design.coords:
-        #    print(f"({node.row}, {node.col})")
 
         logging.root.name = 'AIEplace'
         logging.info("End AIEplace")
