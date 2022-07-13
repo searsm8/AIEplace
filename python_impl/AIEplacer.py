@@ -12,6 +12,7 @@ import time
 import numpy as np
 import logging
 import PlaceDrawer
+from scipy.sparse import csr_matrix
 
 class Coord:
     def __init__(self, row, col):
@@ -133,6 +134,24 @@ class AIEplacer:
 
         logging.info("Begin AIEplace")
         os.system("mkdir results")
+
+        # for sparse matrices, construct the base matrix which encodes the netlist
+        # since the netlist never changes, this never will either
+        V = [] # values of sparse matrix
+        C = [] # column index
+        R = [] # row index for CSR format
+        r = 0 
+        R.append(r)
+        for i in range(len(self.design.nets)):
+            net = self.design.nets[i]
+            for node_index in net:
+                C.append(node_index)
+            r += len(net)
+            R.append(r)
+        # INSERT BANDWIDTH REDUCING ALGORITHM HERE
+        print(f"nets: {self.design.nets}")
+        print(f"C: {C}")
+        print(f"R: {R}")
         
         for iter in range(iterations):
             logging.root.name = 'ITER ' + str(iter)
@@ -152,37 +171,88 @@ class AIEplacer:
             for i in range(len(self.design.coords)):
                 hpwl_gradient.append(Coord(0,0))
 
+            all_zipped_rows = []
+            all_zipped_cols = []
             for i in range(len(self.design.nets)):
                 net = self.design.nets[i]
                 zipped_y_coords = self.getSortedRows(net)
                 zipped_x_coords = self.getSortedCols(net)
+                all_zipped_rows.append(zipped_y_coords)
+                all_zipped_cols.append(zipped_x_coords)
                 y_coords = [zipped_y_coords[i][0] for i in range(len(zipped_y_coords))]
                 x_coords = [zipped_x_coords[i][0] for i in range(len(zipped_x_coords))]
                 a_plus.append( Coord( AIEmath.computeTerm.a_plus(y_coords, gamma), AIEmath.computeTerm.a_plus(x_coords, gamma) ) )
                 a_minus.append( Coord( AIEmath.computeTerm.a_minus(y_coords, gamma), AIEmath.computeTerm.a_minus(x_coords, gamma) ) )
-            #for i in range(len(self.design.coords)):
-            #    coord = self.design.coords[i]
-            #    a_plus.append( Coord(math.exp(coord.row/gamma), math.exp(coord.col/gamma)) )
-            #    a_minus.append( Coord(math.exp(-coord.row/gamma), math.exp(-coord.col/gamma)) )
 
-                # compute b+/- terms
+                ## compute b+/- terms
                 b_plus.append( Coord(AIEmath.computeTerm.b_term(a_plus[i].row), AIEmath.computeTerm.b_term(a_plus[i].col) ) )
-                b_minus.append( Coord(AIEmath.computeTerm.b_term(a_minus[i].row), AIEmath.computeTerm.b_term(a_minus[i].col) ) )
+                #b_minus.append( Coord(AIEmath.computeTerm.b_term(a_minus[i].row), AIEmath.computeTerm.b_term(a_minus[i].col) ) )
 
-                # compute c+/- terms
+                ## compute c+/- terms
                 c_plus.append( Coord(AIEmath.computeTerm.c_term(y_coords, a_plus[i].row), AIEmath.computeTerm.c_term(x_coords, a_plus[i].col) ) )
-                c_minus.append( Coord(AIEmath.computeTerm.c_term(y_coords, a_minus[i].row), AIEmath.computeTerm.c_term(x_coords, a_minus[i].col) ) )
-                #c_plus.append ( Coord(sum([self.design.coords[i].row*a_plus[i].row for i in net]), sum([self.design.coords[i].col*a_plus[i].col for i in net]) ) )
-                #c_minus.append( Coord(sum([self.design.coords[i].row*a_minus[i].row for i in net]), sum([self.design.coords[i].col*a_minus[i].col for i in net]) ) )
+                #c_minus.append( Coord(AIEmath.computeTerm.c_term(y_coords, a_minus[i].row), AIEmath.computeTerm.c_term(x_coords, a_minus[i].col) ) )
+                ##c_plus.append ( Coord(sum([self.design.coords[i].row*a_plus[i].row for i in net]), sum([self.design.coords[i].col*a_plus[i].col for i in net]) ) )
+                ##c_minus.append( Coord(sum([self.design.coords[i].row*a_minus[i].row for i in net]), sum([self.design.coords[i].col*a_minus[i].col for i in net]) ) )
 
-                # Compute HPWL gradients
-                hpwl_WA.append( Coord( AIEmath.computeTerm.WA_hpwl(b_plus[i].row, c_plus[i].row, b_minus[i].row, c_minus[i].row), \
-                                       AIEmath.computeTerm.WA_hpwl(b_plus[i].col, c_plus[i].col, b_minus[i].col, c_minus[i].col) ) )
-                for j in range(len(zipped_y_coords)):
-                    node_index = zipped_y_coords[j][1]
-                    hpwl_gradient[node_index].row += AIEmath.computeTerm.WA_partial(self.design.coords[node_index].row, a_plus[i].row[j], b_plus[i].row, c_plus[i].row, a_minus[i].row[j], b_minus[i].row, c_minus[i].row, gamma) 
-                    node_index = zipped_x_coords[j][1]
-                    hpwl_gradient[node_index].col += AIEmath.computeTerm.WA_partial(self.design.coords[node_index].col, a_plus[i].row[j], b_plus[i].col, c_plus[i].col, a_minus[i].row[j], b_minus[i].col, c_minus[i].col, gamma) 
+                ## Compute HPWL gradients
+                #hpwl_WA.append( Coord( AIEmath.computeTerm.WA_hpwl(b_plus[i].row, c_plus[i].row, b_minus[i].row, c_minus[i].row), \
+                #                       AIEmath.computeTerm.WA_hpwl(b_plus[i].col, c_plus[i].col, b_minus[i].col, c_minus[i].col) ) )
+                #for j in range(len(zipped_y_coords)):
+                #    node_index = zipped_y_coords[j][1]
+                #    hpwl_gradient[node_index].row += AIEmath.computeTerm.WA_partial(self.design.coords[node_index].row, a_plus[i].row[j], b_plus[i].row, c_plus[i].row, a_minus[i].row[j], b_minus[i].row, c_minus[i].row, gamma) 
+                #    node_index = zipped_x_coords[j][1]
+                #    hpwl_gradient[node_index].col += AIEmath.computeTerm.WA_partial(self.design.coords[node_index].col, a_plus[i].row[j], b_plus[i].col, c_plus[i].col, a_minus[i].row[j], b_minus[i].col, c_minus[i].col, gamma) 
+            
+            a_plus_rows = ([[f"{a_plus[i].row[j]:.2f}" for j in range(len(self.design.nets[i]))] for i in range(len(a_plus))])
+            rows = ([f"{self.design.coords[i].row:.2f}" for i in range(len(self.design.coords))])
+            
+            print("row vals:")
+            print(rows)
+            print("a_plus:")
+            print(a_plus_rows)
+            ordered_rows = [[all_zipped_rows[i][j][1] for j in range(len(all_zipped_rows[i]))] for i in range(len(all_zipped_rows))]
+            ordered_cols = [[all_zipped_cols[i][j][1] for j in range(len(all_zipped_cols[i]))] for i in range(len(all_zipped_cols))]
+            print(ordered_rows)
+
+            V = [] # values of sparse matrix
+
+            #Warning: dumb implementation!
+            for i in range(len(ordered_rows)):
+                for j in range(len(ordered_rows[i])):
+                    for k in range(len(ordered_rows[i])):
+                        if ordered_rows[i][k] == self.design.nets[i][j]:
+                            V.append(a_plus_rows[i][k])
+                            break
+            print(f"\nV: {len(V)}")
+            print(V)
+            print(f"\nC: {len(C)}")
+            print(C)
+            print(f"\nR: {len(R)}")
+            print(R)
+
+            CSR_aplus = csr_matrix((V, C, R), dtype=np.float64) # Compressed Sparse Row representation of a+ terms
+            #unity_vec = csr_matrix(np.atleast_2d([1.0]*CSR_aplus.shape[1]).transpose())
+            unity_vec = [[1] for i in range(len(self.design.coords))]
+            row_vec = [[self.design.coords[i].row] for i in range(len(self.design.coords))]
+            CSR_bplus = CSR_aplus.dot(unity_vec)
+            CSR_cplus = CSR_aplus.dot(row_vec)
+            print("\nCSR a+:")
+            print(CSR_aplus.shape)
+            print(CSR_aplus)
+            print("\nunity:")
+            print(unity_vec)
+            print("\nCSR b+:")
+            print(CSR_bplus)
+            for i in range(len(b_plus)):
+                print(f"{b_plus[i].row:.2f}")
+            print("\nrows:")
+            print(row_vec)
+            print("\nCSR c+:")
+            print(CSR_cplus)
+            for i in range(len(c_plus)):
+                print(f"{c_plus[i].row:.2f}")
+            return
+
 
 
             # Density Gradients

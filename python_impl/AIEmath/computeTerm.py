@@ -26,9 +26,10 @@ def a_plus(sorted_list, gamma):
         The entire sorted list is needed to take advantage of max x
     '''
     a_plus_results = [0] * len(sorted_list)
-    for i in range(len(sorted_list)):
+    for i in range(len(sorted_list)-1):
         exp = (sorted_list[i] - sorted_list[-1]) / gamma
         a_plus_results[i] = fast_exp(exp)
+    a_plus_results[-1] = 1 # last term is always e^0 = 1
     return a_plus_results
 
 def a_minus(sorted_list, gamma):
