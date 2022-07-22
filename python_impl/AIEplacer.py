@@ -130,7 +130,7 @@ class AIEplacer:
 
     def run(self, iterations):
         ''' Runs the ePlace algorithm'''
-        export_images = False
+        export_images = True # if True, exports images every 10 iterations
 
         logging.info("Begin AIEplace")
         os.system("mkdir results")
@@ -145,13 +145,11 @@ class AIEplacer:
         for i in range(len(self.design.nets)):
             net = self.design.nets[i]
             for node_index in net:
+                V.append(1)
                 C.append(node_index)
             r += len(net)
             R.append(r)
         # INSERT BANDWIDTH REDUCING ALGORITHM HERE
-        print(f"nets: {self.design.nets}")
-        print(f"C: {C}")
-        print(f"R: {R}")
         
         for iter in range(iterations):
             logging.root.name = 'ITER ' + str(iter)
@@ -186,72 +184,81 @@ class AIEplacer:
 
                 ## compute b+/- terms
                 b_plus.append( Coord(AIEmath.computeTerm.b_term(a_plus[i].row), AIEmath.computeTerm.b_term(a_plus[i].col) ) )
-                #b_minus.append( Coord(AIEmath.computeTerm.b_term(a_minus[i].row), AIEmath.computeTerm.b_term(a_minus[i].col) ) )
+                b_minus.append( Coord(AIEmath.computeTerm.b_term(a_minus[i].row), AIEmath.computeTerm.b_term(a_minus[i].col) ) )
 
                 ## compute c+/- terms
                 c_plus.append( Coord(AIEmath.computeTerm.c_term(y_coords, a_plus[i].row), AIEmath.computeTerm.c_term(x_coords, a_plus[i].col) ) )
-                #c_minus.append( Coord(AIEmath.computeTerm.c_term(y_coords, a_minus[i].row), AIEmath.computeTerm.c_term(x_coords, a_minus[i].col) ) )
-                ##c_plus.append ( Coord(sum([self.design.coords[i].row*a_plus[i].row for i in net]), sum([self.design.coords[i].col*a_plus[i].col for i in net]) ) )
-                ##c_minus.append( Coord(sum([self.design.coords[i].row*a_minus[i].row for i in net]), sum([self.design.coords[i].col*a_minus[i].col for i in net]) ) )
+                c_minus.append( Coord(AIEmath.computeTerm.c_term(y_coords, a_minus[i].row), AIEmath.computeTerm.c_term(x_coords, a_minus[i].col) ) )
 
                 ## Compute HPWL gradients
-                #hpwl_WA.append( Coord( AIEmath.computeTerm.WA_hpwl(b_plus[i].row, c_plus[i].row, b_minus[i].row, c_minus[i].row), \
-                #                       AIEmath.computeTerm.WA_hpwl(b_plus[i].col, c_plus[i].col, b_minus[i].col, c_minus[i].col) ) )
-                #for j in range(len(zipped_y_coords)):
-                #    node_index = zipped_y_coords[j][1]
-                #    hpwl_gradient[node_index].row += AIEmath.computeTerm.WA_partial(self.design.coords[node_index].row, a_plus[i].row[j], b_plus[i].row, c_plus[i].row, a_minus[i].row[j], b_minus[i].row, c_minus[i].row, gamma) 
-                #    node_index = zipped_x_coords[j][1]
-                #    hpwl_gradient[node_index].col += AIEmath.computeTerm.WA_partial(self.design.coords[node_index].col, a_plus[i].row[j], b_plus[i].col, c_plus[i].col, a_minus[i].row[j], b_minus[i].col, c_minus[i].col, gamma) 
+                hpwl_WA.append( Coord( AIEmath.computeTerm.WA_hpwl(b_plus[i].row, c_plus[i].row, b_minus[i].row, c_minus[i].row), \
+                                       AIEmath.computeTerm.WA_hpwl(b_plus[i].col, c_plus[i].col, b_minus[i].col, c_minus[i].col) ) )
+                for j in range(len(zipped_y_coords)):
+                    node_index = zipped_y_coords[j][1]
+                    hpwl_gradient[node_index].row += AIEmath.computeTerm.WA_partial(self.design.coords[node_index].row, a_plus[i].row[j], b_plus[i].row, c_plus[i].row, a_minus[i].row[j], b_minus[i].row, c_minus[i].row, gamma) 
+                    node_index = zipped_x_coords[j][1]
+                    hpwl_gradient[node_index].col += AIEmath.computeTerm.WA_partial(self.design.coords[node_index].col, a_plus[i].row[j], b_plus[i].col, c_plus[i].col, a_minus[i].row[j], b_minus[i].col, c_minus[i].col, gamma) 
             
-            a_plus_rows = ([[f"{a_plus[i].row[j]:.2f}" for j in range(len(self.design.nets[i]))] for i in range(len(a_plus))])
-            rows = ([f"{self.design.coords[i].row:.2f}" for i in range(len(self.design.coords))])
+            a_plus_rows = ([[f"{a_plus[i].row[j]}" for j in range(len(self.design.nets[i]))] for i in range(len(a_plus))])
+            rows = ([f"{self.design.coords[i].row}" for i in range(len(self.design.coords))])
             
-            print("row vals:")
-            print(rows)
-            print("a_plus:")
-            print(a_plus_rows)
             ordered_rows = [[all_zipped_rows[i][j][1] for j in range(len(all_zipped_rows[i]))] for i in range(len(all_zipped_rows))]
             ordered_cols = [[all_zipped_cols[i][j][1] for j in range(len(all_zipped_cols[i]))] for i in range(len(all_zipped_cols))]
-            print(ordered_rows)
-
-            V = [] # values of sparse matrix
 
             #Warning: dumb implementation!
+            aV = [] # values of sparse matrix
             for i in range(len(ordered_rows)):
                 for j in range(len(ordered_rows[i])):
                     for k in range(len(ordered_rows[i])):
                         if ordered_rows[i][k] == self.design.nets[i][j]:
-                            V.append(a_plus_rows[i][k])
+                            aV.append(float(a_plus_rows[i][k]))
                             break
-            print(f"\nV: {len(V)}")
-            print(V)
-            print(f"\nC: {len(C)}")
-            print(C)
-            print(f"\nR: {len(R)}")
-            print(R)
 
-            CSR_aplus = csr_matrix((V, C, R), dtype=np.float64) # Compressed Sparse Row representation of a+ terms
-            #unity_vec = csr_matrix(np.atleast_2d([1.0]*CSR_aplus.shape[1]).transpose())
+            all_x_coords = [self.design.coords[i].row for i in range(len(self.design.coords))]
+
+            # perform the computations for a+ but using Sparse Matrices
+            N_mat = csr_matrix((V, C, R), dtype=np.float64) # matrix encoding of netlist
+            x_star = csr_matrix((all_x_coords, range(len(all_x_coords)), range(len(all_x_coords)+1)), dtype=np.float64)
+
+            N_mat = N_mat.dot(x_star)
+
+            # create net max x-coord vector
+            x_max = N_mat.max(axis=1).tocsr()
+
+            # subtract max x from each element
+            for row_ind in range(len(N_mat.indptr)-1):
+                for i in range(N_mat.indptr[row_ind], N_mat.indptr[row_ind+1]):
+                    N_mat.data[i] = math.exp( (N_mat.data[i] - x_max.data[row_ind])/gamma )
+
+            # Compute a+, b+, c+ using sparse matrices
+            CSR_aplus = csr_matrix((aV, C, R), dtype=np.float64) # Compressed Sparse Row representation of a+ terms
+            # PAY ATTENTION TO dtype or dot operations won't work!!!
             unity_vec = [[1] for i in range(len(self.design.coords))]
             row_vec = [[self.design.coords[i].row] for i in range(len(self.design.coords))]
             CSR_bplus = CSR_aplus.dot(unity_vec)
             CSR_cplus = CSR_aplus.dot(row_vec)
-            print("\nCSR a+:")
-            print(CSR_aplus.shape)
-            print(CSR_aplus)
-            print("\nunity:")
-            print(unity_vec)
-            print("\nCSR b+:")
-            print(CSR_bplus)
-            for i in range(len(b_plus)):
-                print(f"{b_plus[i].row:.2f}")
-            print("\nrows:")
-            print(row_vec)
-            print("\nCSR c+:")
-            print(CSR_cplus)
-            for i in range(len(c_plus)):
-                print(f"{c_plus[i].row:.2f}")
-            return
+            #CSR_bplus = N_mat.dot(unity_vec)
+            #CSR_cplus = N_mat.dot(row_vec)
+            #print("\nCSR a+:")
+            #print(CSR_aplus.shape)
+            #print(CSR_aplus)
+
+            #diff = N_mat.todense() - CSR_aplus.todense()
+            #print(f"diff: {diff.shape}")
+            #print(diff)
+
+            #print("\nunity:")
+            #print(unity_vec)
+            #print("\nCSR b+:")
+            #print(CSR_bplus)
+            #for i in range(len(b_plus)):
+            #    print(f"{b_plus[i].row:.2f}")
+            #print("\nrows:")
+            #print(row_vec)
+            #print("\nCSR c+:")
+            #print(CSR_cplus)
+            #for i in range(len(c_plus)):
+            #    print(f"{c_plus[i].row:.2f}")
 
 
 
@@ -291,7 +298,7 @@ class AIEplacer:
             electroForceY = AIEmath.customDCT.idcst_2d(electroForceY)
 
             step_len = 0.09
-            density_penalty = min(50, 0.05*(iter))
+            density_penalty = min(15, 0.01*(iter) + 0.05*max(0, iter-50))
             print(f"density_penalty: {density_penalty}")
 
 
@@ -312,7 +319,9 @@ class AIEplacer:
                 force = Coord(0, 0)
                 node = self.design.coords[i]
                 for bin_row in range(math.floor(node.row)-1, math.floor(node.row)+2):
+                    if bin_row >= len(electroForceX): continue
                     for bin_col in range(math.floor(node.col)-1, math.floor(node.col +2)):
+                        if bin_col >= len(electroForceX[bin_row]): continue
                         overlap = self.computeOverlap(i, bin_row, bin_col)
                         if overlap > 0:
                             force.row += overlap * electroForceX[bin_row][bin_col]
@@ -342,7 +351,7 @@ class AIEplacer:
             if iter == iterations-1:
                 self.legalize()
                 # choose a random node and draw all nets for that node
-                for i in range(1):
+                for i in range(2):
                     target_node=random.randint(0, len(self.design.coords)-1)
                     for net in self.design.nets:
                         if net.count(target_node):

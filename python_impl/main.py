@@ -39,8 +39,8 @@ def initializeCoords(grid, node_count):
     #random initial position
     coords = []
     for i in range(node_count):
-        coords.append( Coord( random.choice(range(round(grid.num_rows*.4), round(grid.num_rows*.6)+1)) + random.random(), 
-                              random.choice(range(round(grid.num_cols*.4), round(grid.num_cols*.6)+1)) + random.random() ) )
+        coords.append( Coord( random.choice(range(round(grid.num_rows*.3), round(grid.num_rows*.7)+1)) + random.random(), 
+                              random.choice(range(round(grid.num_cols*.3), round(grid.num_cols*.7)+1)) + random.random() ) )
     return coords
 
 def runAIEPlacer():
@@ -50,8 +50,8 @@ def runAIEPlacer():
                         stream=sys.stdout)
     
     # Create a design environment and run AIEplacer
-    num_rows = 3*1
-    num_cols = 3*2
+    num_rows = 8*1
+    num_cols = 8*5
     grid = Grid(num_rows, num_cols)
     node_count = int(num_rows * num_cols * 0.5)
     coords = initializeCoords(grid, node_count)
@@ -59,7 +59,7 @@ def runAIEPlacer():
     node_sizes = []
     for i in range(len(coords)):
         node_names.append("k"+str(i))
-        node_sizes.append(Coord(.8, .8))
+        node_sizes.append(Coord(.9, .9))
     nets = []
     for i in range(int((1+random.random()) * len(coords))):
     #for i in range(2):
@@ -67,8 +67,8 @@ def runAIEPlacer():
     design = Design(coords, node_names, node_sizes, nets)
 
     placer = AIEplacer(grid, design) 
-    placer.run(10)
+    placer.run(1000)
 
 if __name__ == "__main__":
     runAIEPlacer()
-    #cProfile.run('runAIEPlacer()')
+    #cProfile.run('runAIEPlacer()') # run with profiling enabled
