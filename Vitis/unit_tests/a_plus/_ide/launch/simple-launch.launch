@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<launchConfiguration type="com.xilinx.sdx.aie.tcf.debug.SDXAIESimLaunchConfigurationType">
+    <stringAttribute key="org.eclipse.cdt.launch.PROJECT_ATTR" value="simple"/>
+    <listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_PATHS">
+        <listEntry value="/simple"/>
+    </listAttribute>
+    <listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_TYPES">
+        <listEntry value="4"/>
+    </listAttribute>
+    <stringAttribute key="org.eclipse.tcf.debug.ProgramArguments" value="--pkg-dir=./Work --i=.."/>
+    <stringAttribute key="org.eclipse.tcf.debug.gminitfile" value=""/>
+    <stringAttribute key="org.eclipse.tcf.debug.input-dir" value=".."/>
+    <intAttribute key="org.eclipse.tcf.debug.maxcycles" value="0"/>
+    <stringAttribute key="org.eclipse.tcf.debug.output-dir" value=""/>
+    <stringAttribute key="org.eclipse.tcf.debug.pkg-dir" value="./Work"/>
+</launchConfiguration>

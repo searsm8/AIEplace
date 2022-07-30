@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<launchConfiguration type="com.xilinx.sdx.aie.tcf.debug.SDXAIESimLaunchConfigurationType">
+    <stringAttribute key="org.eclipse.cdt.launch.PROJECT_ATTR" value="simple"/>
+    <stringAttribute key="org.eclipse.cdt.launch.PROJECT_BUILD_CONFIG_ID_ATTR" value="com.xilinx.ide.aie.config.hw_emu.1640824485"/>
+    <stringAttribute key="org.eclipse.tcf.debug.ProgramArguments" value="--pkg-dir=./Work --i=.."/>
+</launchConfiguration>
