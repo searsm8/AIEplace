@@ -1,24 +1,15 @@
 # termGenerator.py
-# computes a±, b±, c± and writes to file
+# computes a, b, c and writes to file
 # this generates a golden output for use in testing later.
 import math
 
-def fast_exp(a):
+def fast_exp(a, prec=16):
     ''' Fast function to compute e^a
         Trades accuracy for speed, result will be inaccurate
     '''
-    return math.exp(a)
-    a = 1.0 + a / 1024.0;
-    a *= a;
-    a *= a;
-    a *= a;
-    a *= a;
-    a *= a;
-    a *= a;
-    a *= a;
-    a *= a;
-    a *= a;
-    a *= a;
+    a = 1.0 + a / 2**prec;
+    for i in range(prec):
+        a *= a;
     return a;
 
 def a_plus(sorted_list, gamma):
@@ -36,7 +27,7 @@ def a_minus(sorted_list, gamma):
         The entire sorted list is needed to take advantage of min x
     '''
     a_minus_results = [0] * len(sorted_list)
-    a_minus_results[0] = 1 # first term is always e^0 = 1
+    a_minus_results[0] = 1.0 # first term is always e^0 = 1
     for i in range(1, len(sorted_list)):
         exp = (sorted_list[0] - sorted_list[i]) / gamma
         a_minus_results[i] = fast_exp(exp)
