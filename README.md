@@ -1,5 +1,5 @@
 # AIEplace
-Implementation of the [RePlace](https://github.com/The-OpenROAD-Project/RePlAce) algorithm on the AMD Versal architecture, utilizing AIE, PL, and PS regions of the chip.
+Implementation of the [RePlace](https://github.com/The-OpenROAD-Project/RePlAce)<sup>[2]</sup> algorithm on the AMD Versal architecture, utilizing AIE, PL, and PS regions of the chip.
 
 # TODO
 * Python: Add convergence detection (e.g. < 10% change)
