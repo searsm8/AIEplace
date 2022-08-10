@@ -4,47 +4,53 @@
 
 using namespace adf;
 #define netsize 3
+//#define DEBUG_OUTPUT // output files for a+, a-, b+, b-, c+, c-
 
 class simpleGraph : public adf::graph {
 private:
-	kernel ka0, ka1;
-	kernel kb0, kb1;
-	kernel kc0, kc1;
+	kernel ka;  //kernel for a+ and a-
+	kernel kbc; // kernel for b+, b-, c+ and c-
+	kernel kHPWL;
+	kernel kpartials;
 public:
-  input_plio  in_a_plus, in_a_minus;
+  input_plio  in_data;
+  output_plio out_HPWL, out_partials;
+
+#ifdef DEBUG_OUTPUT
   output_plio out_a_plus, out_a_minus;
   output_plio out_b_plus, out_b_minus;
   output_plio out_c_plus, out_c_minus;
+#endif
+
 
   simpleGraph(){
     
 	// Create IO files
-	in_a_plus   = input_plio::create(plio_32_bits, "data/input_a_plus.txt");
-	in_a_minus  = input_plio::create(plio_32_bits, "data/input_a_minus.txt");
-	out_a_plus  = output_plio::create(plio_32_bits, "data/output_a_plus.txt");
-    out_a_minus = output_plio::create(plio_32_bits, "data/output_a_minus.txt");
-    out_b_plus  = output_plio::create(plio_32_bits, "data/output_b_plus.txt");
-    out_b_minus = output_plio::create(plio_32_bits, "data/output_b_minus.txt");
-    out_c_plus  = output_plio::create(plio_32_bits, "data/output_c_plus.txt");
-    out_c_minus = output_plio::create(plio_32_bits, "data/output_c_minus.txt");
+	in_data   = input_plio::create(plio_32_bits, "data/input.dat");
+    out_HPWL    = output_plio::create(plio_32_bits, "data/HPWL.dat");
+    out_partials    = output_plio::create(plio_32_bits, "data/partials.dat");
+
+#ifdef DEBUG_OUTPUT
+	out_a_plus  = output_plio::create(plio_32_bits, "data/a_plus.dat");
+    out_a_minus = output_plio::create(plio_32_bits, "data/a_minus.dat");
+    out_b_plus  = output_plio::create(plio_32_bits, "data/b_plus.dat");
+    out_b_minus = output_plio::create(plio_32_bits, "data/b_minus.dat");
+    out_c_plus  = output_plio::create(plio_32_bits, "data/c_plus.dat");
+    out_c_minus = output_plio::create(plio_32_bits, "data/c_minus.dat");
+#endif
 
     // Create Kernels
-    ka0 = kernel::create(compute_a<netsize>);
-    ka1 = kernel::create(compute_a<netsize>);
-    kb0 = kernel::create(compute_b<netsize>);
-    kb1 = kernel::create(compute_b<netsize>);
-    kc0 = kernel::create(compute_c<netsize>);
-    kc1 = kernel::create(compute_c<netsize>);
+    ka = kernel::create(compute_a<netsize>);
+    kbc = kernel::create(compute_bc<netsize>);
+    kHPWL = kernel::create(compute_HPWL);
+    kpartials = kernel::create(compute_partials<netsize>);
+
 
     // Connect windows between kernels
-    connect< window<32*netsize> > net_ka0 (in_a_plus.out[0], ka0.in[0]); // a window of 32B contains eight 4B floats
-    connect< window<32*netsize> > net_kb0 (ka0.out[0], kb0.in[0]);
-    connect< window<32*netsize> > net_ka1 (in_a_minus.out[0], ka1.in[0]);
-    connect< window<32*netsize> > net_kb1 (ka1.out[0], kb1.in[0]);
-    connect< window<32*netsize> > net_kc0_x (in_a_plus.out[0], kc0.in[0]);
-    connect< window<32*netsize> > net_kc0_a (ka0.out[0], kc0.in[1]);
-    connect< window<32*netsize> > net_kc1_x (in_a_minus.out[0], kc1.in[0]);
-    connect< window<32*netsize> > net_kc1_a (ka1.out[0], kc1.in[1]);
+    connect< window<32*netsize> > net_ka_in (in_data.out[0], ka.in[0]); // a window of 32B contains eight 4B floats
+    connect< window<32*netsize> > net_kbc_in_a_plus  (ka.out[0], kbc.in[0]);
+    connect< window<32*netsize> > net_kbc_in_a_minus (ka.out[1], kbc.in[1]);
+    connect< window<32*netsize> > net_kbc_inx (in_data.out[0], kbc.in[2]);
 
     /*
      * Using parameters and stream inputs might be able to create a kernel that can process any netsize!
@@ -56,28 +62,44 @@ public:
     connect< parameter > (curr_netsize, kc1.in[2]);
 	*/
 
-    connect< window<32*netsize> > net_a_plus_out  (ka0.out[0], out_a_plus.in[0]);
-    connect< window<32*netsize> > net_a_minus_out (ka1.out[0], out_a_minus.in[0]);
-    connect< window<32*1> >       net_b_plus_out  (kb0.out[0], out_b_plus.in[0]);
-    connect< window<32*1> >       net_b_minus_out (kb1.out[0], out_b_minus.in[0]);
-    connect< window<32*1> >       net_c_plus_out  (kc0.out[0], out_c_plus.in[0]);
-    connect< window<32*1> >       net_c_minus_out  (kc1.out[0], out_c_minus.in[0]);
+    // connect HPWL kernel
+    connect< window<32*1> >       net_hpwl_b_plus (kbc.out[0], kHPWL.in[0]);
+    connect< window<32*1> >       net_hpwl_b_minus(kbc.out[1], kHPWL.in[1]);
+    connect< window<32*1> >       net_hpwl_c_plus (kbc.out[2], kHPWL.in[2]);
+    connect< window<32*1> >       net_hpwl_c_minus(kbc.out[3], kHPWL.in[3]);
+
+    // connect partials kernel
+    connect< window<32*netsize> >   net_partials_a_plus (ka.out[0],  kpartials.in[0]);
+    connect< window<32*netsize> >   net_partials_a_minus(ka.out[1],  kpartials.in[1]);
+    connect< window<32*1> > 		net_partials_b_plus (kbc.out[0], kpartials.in[2]);
+    connect< window<32*1> >       	net_partials_b_minus(kbc.out[1], kpartials.in[3]);
+    connect< window<32*1> >     	net_partials_c_plnus(kbc.out[2], kpartials.in[4]);
+    connect< window<32*1> > 		net_partials_c_minus(kbc.out[3], kpartials.in[5]);
+    connect< window<32*netsize> >	net_partials_x 	  (in_data.out[0], kpartials.in[6]);
+
+
+    // connect outputs to out files
+    connect< window<32*1> >       net_hpwl_out    (kHPWL.out[0], out_HPWL.in[0]);
+    connect< window<32*netsize> > net_partials_out(kpartials.out[0], out_partials.in[0]);
+#ifdef DEBUG_OUTPUT
+    connect< window<32*netsize> > net_a_plus_out  (ka.out[0], out_a_plus.in[0]);
+    connect< window<32*netsize> > net_a_minus_out (ka.out[1], out_a_minus.in[0]);
+    connect< window<32*1> >       net_b_plus_out  (kbc.out[0], out_b_plus.in[0]);
+    connect< window<32*1> >       net_b_minus_out (kbc.out[1], out_b_minus.in[0]);
+    connect< window<32*1> >       net_c_plus_out  (kbc.out[2], out_c_plus.in[0]);
+    connect< window<32*1> >       net_c_minus_out (kbc.out[3], out_c_minus.in[0]);
+#endif
 
     // Source kernels
-    source(ka0) = "kernels/compute_a.cpp";
-    source(ka1) = "kernels/compute_a.cpp";
-    source(kb0) = "kernels/compute_b.cpp";
-    source(kb1) = "kernels/compute_b.cpp";
-    source(kc0) = "kernels/compute_c.cpp";
-    source(kc1) = "kernels/compute_c.cpp";
+    source(ka) = "kernels/compute_a.cpp";
+    source(kbc) = "kernels/compute_bc.cpp";
+    source(kHPWL) = "kernels/compute_HPWL.cpp";
+    source(kpartials) = "kernels/compute_partials.cpp";
 
     // Set runtime ratios
-    runtime<ratio>(ka0) = 1;
-    runtime<ratio>(ka1) = 1;
-    runtime<ratio>(kb0) = 1;
-    runtime<ratio>(kb1) = 1;
-    runtime<ratio>(kc0) = 1;
-    runtime<ratio>(kc1) = 1;
-
+    runtime<ratio>(ka) = 1;
+    runtime<ratio>(kbc) = 1;
+    runtime<ratio>(kHPWL) = 1;
+    runtime<ratio>(kpartials) = 1;
   }
 };

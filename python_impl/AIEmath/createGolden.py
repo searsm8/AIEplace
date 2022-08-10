@@ -1,6 +1,6 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-# createTest.py
+# createGolden.py
 #
 # Driver code which takes an input list and writes terms to a test file
 import os
@@ -18,13 +18,12 @@ def createGolden(filepath, N=1):
     if(not os.path.exists(filepath)):
         os.makedirs(filepath)
     # delete old files
-    filenames = ["input_max", "input_min", "a_plus", "a_minus", "b_plus", "b_minus", "c_plus", "c_minus", "WA_hpwl", "partials"]
+    filenames = ["input", "a_plus", "a_minus", "b_plus", "b_minus", "c_plus", "c_minus", "HPWL", "partials"]
     for filename in filenames:
-        try: os.remove(filepath+f"/{filename}.txt")
+        try: os.remove(filepath+f"/{filename}.dat")
         except: pass
     try:
-        os.remove(AIE_input_dir+f"/input_max.txt")
-        os.remove(AIE_input_dir+f"/input_min.txt")
+        os.remove(AIE_input_dir+f"/input.dat")
     except: pass
 
     gamma = 4 # same as in RePlace
@@ -46,7 +45,6 @@ def createGolden(filepath, N=1):
         for i in range(netsize):
             input_vec[i] = random.randint(min_x, min_x + width)
         input_vec.sort()
-        #input_vec = [str(i) for i in input_vec]
         input_vectors.append(input_vec)
 
         #Compute a, b, c terms and write to file
@@ -59,46 +57,44 @@ def createGolden(filepath, N=1):
         c_minus_vec.append(computeTerm.c_term(input_vec, a_minus_vec[-1]))
 
         WA_vec.append(computeTerm.WA_hpwl(b_plus_vec[-1],c_plus_vec[-1],b_minus_vec[-1],c_minus_vec[-1]))
-        partials = [0] * len(a_plus_vec[-1])
-        for i in range(len(a_plus_vec[-1])):
+        partials = [0] * netsize
+        for i in range(netsize):
             partials[i] = computeTerm.WA_partial(input_vec[i], a_plus_vec[-1][i], b_plus_vec[-1],c_plus_vec[-1],
                                                 a_minus_vec[-1][i],b_minus_vec[-1],c_minus_vec[-1], gamma)
         partials_vec.append(partials)
         
     # write terms to files
-    for i in range(netsize):
+    for i in range(netsize-1, -1, -1):
         for n in range(N):
             # write input files to golden
-            with open(filepath+"/input_min.txt", "a") as f:
-                f.write(f"{input_vectors[n][i]}\n")            
-            with open(filepath+"/input_max.txt", "a") as f:
-                f.write(f"{input_vectors[n][-i-1]}\n")
+            with open(filepath+"/input.dat", "a") as f:
+                f.write(f"{input_vectors[n][i]}\n")
 
             # write input files to Vitis AIE workspace
-            with open(AIE_input_dir+"/input_max.txt", "a") as f:
-                f.write(f"{input_vectors[n][-i-1]}\n")
-            with open(AIE_input_dir+"/input_min.txt", "a") as f:
+            with open(AIE_input_dir+"/input.dat", "a") as f:
                 f.write(f"{input_vectors[n][i]}\n")
 
             # write golden outputs for all HPWL terms
-            with open(filepath+"/a_plus.txt", "a") as f:
-                f.write(f"{a_plus_vec[n][-i-1]}\n")            
-            with open(filepath+"/a_minus.txt", "a") as f:
+            with open(filepath+"/a_plus.dat", "a") as f:
+                f.write(f"{a_plus_vec[n][i]}\n")            
+            with open(filepath+"/a_minus.dat", "a") as f:
                 f.write(f"{a_minus_vec[n][i]}\n")            
 
+            # write golden outputs for all HPWL partials
+            with open(filepath+"/partials.dat", "a") as f:
+                f.write(f"{partials_vec[n][i]}\n")            
+
     for n in range(N):
-        with open(filepath+"/b_plus.txt", "a") as f:
+        with open(filepath+"/b_plus.dat", "a") as f:
             f.write(f"{b_plus_vec[n]}\n")            
-        with open(filepath+"/b_minus.txt", "a") as f:
+        with open(filepath+"/b_minus.dat", "a") as f:
             f.write(f"{b_minus_vec[n]}\n")            
-        with open(filepath+"/c_plus.txt", "a") as f:
+        with open(filepath+"/c_plus.dat", "a") as f:
             f.write(f"{c_plus_vec[n]}\n")            
-        with open(filepath+"/c_minus.txt", "a") as f:
+        with open(filepath+"/c_minus.dat", "a") as f:
             f.write(f"{c_minus_vec[n]}\n")            
-        with open(filepath+"/WA_hpwl.txt", "a") as f:
+        with open(filepath+"/HPWL.dat", "a") as f:
             f.write(f"{WA_vec[n]}\n")            
-        #with open(filepath+"/partials.txt", "a") as f:
-        #    f.write(','.join([str(i) for i in partials]) + '\n')
     
 def createRandomDensitys(filepath, M=16):
     ''' Generates a random MxM density map
@@ -108,7 +104,7 @@ def createRandomDensitys(filepath, M=16):
     RHO_MIN = 0
     RHO_MAX = 1
     rho = np.random.rand(M, M)
-    with open(filepath+"/electro_input_density_map.txt", "w") as f:
+    with open(filepath+"/electro_input_density_map.dat", "w") as f:
         for row in range(M):
             for col in range(M):
                 f.write(str(rho[row][col]) + ' ')
@@ -119,7 +115,7 @@ def createRandomDensitys(filepath, M=16):
 def computeAllDCTs(filepath, rho):
     M = len(rho)
     a = dct_2d(rho) # compute 'a' terms
-    with open(filepath+"/electro_a_vals.txt", "w") as f:
+    with open(filepath+"/electro_a_vals.dat", "w") as f:
         for row in range(M):
             for col in range(M):
                 f.write(str(a[row][col]) + ' ')
@@ -154,17 +150,17 @@ def computeAllDCTs(filepath, rho):
     electroForceX = idsct_2d(electroForceX)
     electroForceY = idcst_2d(electroForceY)
 
-    with open(filepath+"/electroPhi.txt", "w") as f:
+    with open(filepath+"/electroPhi.dat", "w") as f:
         for row in range(M):
             for col in range(M):
                 f.write(str(electroPhi[row][col]) + ' ')
             f.write('\n')
-    with open(filepath+"/electroForceX.txt", "w") as f:
+    with open(filepath+"/electroForceX.dat", "w") as f:
         for row in range(M):
             for col in range(M):
                 f.write(str(electroForceX[row][col]) + ' ')
             f.write('\n')
-    with open(filepath+"/electroForceY.txt", "w") as f:
+    with open(filepath+"/electroForceY.dat", "w") as f:
         for row in range(M):
             for col in range(M):
                 f.write(str(electroForceY[row][col]) + ' ')
