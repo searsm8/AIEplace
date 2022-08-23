@@ -1,7 +1,5 @@
 # dct.py
 # functions to compute the Discrete Cosine Transform (DCT) of a signal or dataset
-from ast import Lambda
-from copy import copy
 import math
 import numpy as np
 
@@ -20,12 +18,10 @@ def dct(input_X):
         Lambda = 1
         for n in range(N):
             dct_result[k] += Lambda * input_X[n] * math.cos(math.pi*k*(n+0.5)/N)
-        #dct_result[k] *= math.sqrt(1 / N) if k == 0 else math.sqrt(2 / N) # to match scipy
-        #dct_result[k] *= 1 if k == 0 else 2 # to match scipy
         dct_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
-    #dct_result[0] /= math.sqrt(2)
-    #dct_result[-1] /= math.sqrt(2)
-    return np.array(dct_result)
+    #dct_result = np.array(dct_result)
+
+    return dct_result 
 
 def idct(input_X):
     ''' Perform the Inverse Discrete Cosine Transform on input set x
@@ -36,15 +32,11 @@ def idct(input_X):
 
     for k in range(N):
         #idct_result[k] += input_X[0]/math.sqrt(N) # to match scipy
-        idct_result[k] += input_X[0] # to match fft.cpp 
+        idct_result[k] += input_X[0]/2 # to match fft.cpp 
         for n in range(1, N):
             idct_result[k] += input_X[n] * math.cos(math.pi*n*(k+0.5)/N)
-        #idct_result[k] *= math.sqrt(2) if k == 0 else 2 # to match scipy
         idct_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
-        #idct_result[k] *= 1.5*N #math.sqrt(N*8)
-        #idct_result[k] *= math.sqrt(2 / N)
         #idct_result[k] *= 2/N
-        #idct_result[k] *= (1 / N) if k == 0 else (2 / N)
     
     return np.array(idct_result)
 
@@ -57,12 +49,7 @@ def idst(input_X):
         for n in range(1, N):
             #print(f"sin: {math.sin(math.pi*n*(k+0.5)/N)}")
             idst_result[k] += input_X[n] * math.sin(math.pi*n*(k+0.5)/N)
-        #idst_result[k] *= math.sqrt(2) if k == 0 else 2 # to match scipy
         idst_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
-        #idst_result[k] *= 1.5*N #math.sqrt(N*8)
-        #idst_result[k] *= math.sqrt(2 / N)
-        #idst_result[k] *= N*N / 2
-        #idst_result[k] *= (1 / N) if k == 0 else (2 / N)
     
     return np.array(idst_result)
 
@@ -74,13 +61,22 @@ def dct_2d(input_mat):
     # Compute DCT on rows
     for row in range(M):
         mat[row] = dct(input_mat[row])
+    
+    for row in range(M):
+        for col in range(N):
+            mat[row][col] = float(round(mat[row][col], 3))
+            if math.isclose(mat[row][col], 0,  rel_tol=0.01):
+                mat[row][col] = 0
+    print("1D DCT:"); print(mat)
 
     # Compute DCT on cols
-    mat = list(zip(*mat)) # transpose
+    mat = np.transpose(mat)
+    #breakpoint()
     for row in range(N):
         mat[row] = dct(mat[row])
-    mat = list(zip(*mat)) # transpose
-
+    mat = np.transpose(mat)
+    print("2D DCT:"); print(mat)
+    
     return np.array(mat)
 
 def idct_2d(input_mat):
@@ -88,16 +84,21 @@ def idct_2d(input_mat):
     M = len(input_mat)
     N = len(input_mat[0])
     mat = np.zeros((M, N))
+    print("idct input")
+    print(input_mat)
     # Compute DCT on rows
     for row in range(M):
         mat[row] = idct(input_mat[row])
+    
+    print("1D IDCT:"); print(mat)
 
     # Compute DCT on cols
-    mat = list(zip(*mat)) # transpose
+    mat = np.transpose(mat)
     for row in range(N):
         mat[row] = idct(mat[row])
-    mat = list(zip(*mat)) # transpose
+    mat = np.transpose(mat)
 
+    print("2D IDCT:"); print(mat)
     return np.array(mat)
 
 def idcst_2d(input_mat):

@@ -7,6 +7,7 @@ from copy import copy
 import computeTerm
 import numpy as np
 import math
+import cmath
 
 def idct_test():
     x = [8, 16, 24, 32, 40, 48, 56, 64] # array input numbers
@@ -85,21 +86,8 @@ def dct_2d_compare():
     print("scipy_idct: ")
     print(scipy_idct)
 
-def electro_test():
-    rho = np.array([[10, 17,114,121],
-                    [3,10,17,24],
-                    [6,13,20,27],
-                    [9,16,23,30]])
+def electro_test(rho):
 
-    #rho = np.array([[0, 7,14,21],
-    #                [3,10,17,424],
-    #                [6,213,20,27],
-    #                [9,16,123,30]])
-
-    rho = np.array([[1,1,99,99],
-                    [1,1,99,99],
-                    [99,99,99,99],
-                    [99,99,99,99]])
     print("rho:")
     print(rho)
 
@@ -110,7 +98,7 @@ def electro_test():
     print("my_dct: ")
     print(my_dct )
     for i in range(len(my_dct)):
-        my_dct[i][0] *= 0.5
+        my_dct[i][0] *= 0.5 # why cut in half? boundary conditions?
     for i in range(len(my_dct[0])):
         my_dct[0][i] *= 0.5
     for i in range(len(my_dct)):
@@ -153,6 +141,7 @@ def electro_test():
     electroPhi = customDCT.idct_2d(electroPhi)
     print("electro_phi: "); print(electroPhi)
 
+    return
     electroForceX = customDCT.idsct_2d(electroForceX)
     print("electroForceX: "); print(electroForceX)
 
@@ -165,11 +154,67 @@ def electro_test():
     #print("phi:")
     #print(phi)
          
+
+def DCT_IDCT_test(rho):
+    print("rho"); print(rho)
+    dct_result = customDCT.dct(rho)
+    print("dct"); print(dct_result)
+    idct_result = customDCT.idct(dct_result)
+    print("idct"); print(idct_result)
+
+
+# DCT type II, unscaled
+def transform(vector):
+	temp = vector[ : : 2] + vector[-1 - len(vector) % 2 : : -2]
+	temp = np.fft.fft(temp)
+	factor = -1j * cmath.pi / (len(vector) * 2)
+	return [(val * cmath.exp(i * factor)).real for (i, val) in enumerate(temp)]
+
+
+def inverse_transform(vector):
+	n = len(vector)
+	factor = -1j * cmath.pi / (len(vector) * 2)
+	temp = [(val if i > 0 else val / 2) * cmath.exp(i * factor)
+		for (i, val) in enumerate(vector)]
+	temp = np.fft.fft(temp)
+	
+	temp = [val.real for val in temp]
+	result = [None] * n
+	result[ : : 2] = temp[ : (n + 1) // 2]
+	result[-1 - len(vector) % 2 : : -2] = temp[(n + 1) // 2 : ]
+	return result
+
 if __name__ == "__main__":
     #dct_1d_compare()
     #dct_2d_compare()
     #dct_2d_test()
     #idct_test()
-    electro_test()
+
+    #rho = np.array([[10, 17,114,121],
+    #                [3,10,17,24],
+    #                [6,13,20,27],
+    #                [9,16,23,30]])
+    #rho = np.array([[0, 7,14,21],
+    #                [3,10,17,424],
+    #                [6,213,20,27],
+    #                [9,16,123,30]])
+    #rho = np.array([[1,1,99,99],
+    #                [1,1,99,99],
+    #                [99,99,99,99],
+    #                [99,99,99,99]])
+        
+    #electro_test(rho)
+    #DCT_IDCT_test(rho)
+    input = [[9,9,9,9],
+             [9,9,99,9],
+             [99,9,9,9],
+             [79,9,99,9] ]
+    for i in range(4):
+        ref = customDCT.idct(input[i])
+        test = inverse_transform(input[i])
+        print("ref:", ref)
+        print("test: ", test)
+        print()
+    pass
 
     

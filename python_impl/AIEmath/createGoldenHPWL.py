@@ -10,15 +10,16 @@ import numpy as np
 from customDCT import *
 
 MAX_COORD = 10000
+golden_dir    = "/home/msears/AIEplace/golden/hpwl/"
 AIE_input_dir = "/home/msears/AIEplace/Vitis/workspace/hpwl/data/"
 
-def createGolden(filepath, N=1):
+def createGoldenHPWL(filepath, N=1):
     ''' Generates a new directory and random input vectors
     '''
     if(not os.path.exists(filepath)):
         os.makedirs(filepath)
     # delete old files
-    filenames = ["input", "a_plus", "a_minus", "b_plus", "b_minus", "c_plus", "c_minus", "HPWL", "partials"]
+    filenames = ["input", "a_plus", "a_minus", "b_plus", "b_minus", "c_plus", "c_minus", "hpwl", "partials"]
     for filename in filenames:
         try: os.remove(filepath+f"/{filename}.dat")
         except: pass
@@ -93,7 +94,7 @@ def createGolden(filepath, N=1):
             f.write(f"{c_plus_vec[n]}\n")            
         with open(filepath+"/c_minus.dat", "a") as f:
             f.write(f"{c_minus_vec[n]}\n")            
-        with open(filepath+"/HPWL.dat", "a") as f:
+        with open(filepath+"/hpwl.dat", "a") as f:
             f.write(f"{WA_vec[n]}\n")            
     
 def createRandomDensitys(filepath, M=16):
@@ -169,14 +170,13 @@ def computeAllDCTs(filepath, rho):
     return
 
 if __name__ == "__main__":
-    output_dir = "/home/msears/AIEplace/golden/"
-    bencmark_count = 1
-    #Create benchmarks for wirelength
-    for i in range(bencmark_count):
-        createGolden(output_dir+"test"+str(i), 8)
+    benchmark_count = 1
+    #Create benchhmarks for wirelength
+    for i in range(benchmark_count):
+        createGoldenHPWL(golden_dir+"test"+str(i), 8)
 
-    #Create benchmarks for density
-    for i in range(bencmark_count):
-        rho = createRandomDensitys(output_dir+"test"+str(i), 16)
-        computeAllDCTs(output_dir+"test"+str(i), rho)
+    #Create benchhmarks for density
+    for i in range(benchmark_count):
+        rho = createRandomDensitys(golden_dir+"test"+str(i), 16)
+        computeAllDCTs(golden_dir+"test"+str(i), rho)
 
