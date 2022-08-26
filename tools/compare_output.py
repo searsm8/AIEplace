@@ -41,7 +41,7 @@ def compare_output(filename, output_dir, golden_dir, rel_tol=0.01):
                     golden_line = golden_file.readline()
                     line_count += 1
                     if not math.isclose(float(line), float(golden_line), rel_tol=rel_tol):
-                        print(f"(line #{line_count})\t***DIFF DETECTED: AIE: {float(line.strip()):.5f}\tgolden: {float(golden_line.strip()):.5f}***")
+                        print(f"(line #{line_count})\t***DIFF DETECTED: AIE: {float(line.strip()):.2f}\tgolden: {float(golden_line.strip()):.2f}***")
                         diff_found = True
         if not diff_found:
             print("\tALL OUTPUTS MATCH")

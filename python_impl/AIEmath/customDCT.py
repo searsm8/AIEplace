@@ -18,7 +18,8 @@ def dct(input_X):
         Lambda = 1
         for n in range(N):
             dct_result[k] += Lambda * input_X[n] * math.cos(math.pi*k*(n+0.5)/N)
-        dct_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
+        # This scaling factor of 2/sqrt(N) is applied all in one step later
+        #dct_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
     #dct_result = np.array(dct_result)
 
     return dct_result 
@@ -35,7 +36,7 @@ def idct(input_X):
         idct_result[k] += input_X[0]/2 # to match fft.cpp 
         for n in range(1, N):
             idct_result[k] += input_X[n] * math.cos(math.pi*n*(k+0.5)/N)
-        idct_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
+        #idct_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
         #idct_result[k] *= 2/N
     
     return np.array(idct_result)

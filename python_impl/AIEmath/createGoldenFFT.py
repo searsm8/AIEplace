@@ -12,7 +12,7 @@ import customDCT
 golden_dir    = "/home/msears/AIEplace/golden/density/"
 AIE_input_dir = "/home/msears/AIEplace/Vitis/workspace/fft_basic/data/"
 fft_filepath = golden_dir + "fft/"
-fft_size = 4
+fft_size = 16
 alpha = -1*cmath.pi/2/fft_size # constant term used in fast DCT computation
 
 def shuffle_input(input, axis=1):
@@ -20,17 +20,17 @@ def shuffle_input(input, axis=1):
     if axis == 1:
         for row in range(fft_size):
             for col in range(fft_size):
-                k = 2*col if col < fft_size/2 else 2*col - fft_size - 1 
+                k = 2*col if col < fft_size/2 else 2*(fft_size-col) - 1 
                 shuffled[row][col] = input[row][k]
     else: # axis == 0
         for row in range(fft_size):
             if row < fft_size/2:
                 shuffled[row] = input[2*row]
-            else: shuffled[row] = input[2*row - fft_size - 1]
+            else: shuffled[row] = input[2*(fft_size-row) - 1]
     return shuffled
 
 
-def unshuffle(input, axis=1):
+def unshuffle_input(input, axis=1):
     unshuffled = np.ndarray((fft_size, fft_size), dtype=complex)
     if axis==1:
         for row in range(fft_size):
@@ -38,13 +38,13 @@ def unshuffle(input, axis=1):
                 if col < fft_size / 2:
                     unshuffled[row][2*col] = input[row][col]
                 else:
-                    unshuffled[row][2*col - fft_size -1] = input[row][col]
+                    unshuffled[row][2*(fft_size-col) - 1] = input[row][col]
     else: # axis==0
         for row in range(fft_size):
             if row < fft_size / 2:
                 unshuffled[2*row] = input[row]
             else:
-                unshuffled[2*row - fft_size - 1] = input[row]
+                unshuffled[2*(fft_size-row) - 1] = input[row]
     return unshuffled
 
 def fft_to_dct(fft_output, alpha, axis=1):
@@ -68,7 +68,6 @@ def fft_to_dct(fft_output, alpha, axis=1):
 def fast_dct(input, axis=1):
     # compute the fft (shuffled) along all rows
     fft_input = shuffle_input(input, axis=axis)
-    print("shuffled input", fft_input.real)
     fft_output = np.fft.fft(fft_input, axis=axis)
     
     # modify FFT outputs to get DCT as result
@@ -97,7 +96,7 @@ def idct_preprocess(input, axis=1):
 def fast_idct(input, axis=1):
     ifft_input = idct_preprocess(input, axis=axis) 
     ifft_output = np.fft.fft(ifft_input, n=1*fft_size, axis=axis)
-    idct_output = unshuffle(ifft_output, axis=axis)
+    idct_output = unshuffle_input(ifft_output, axis=axis)
     return idct_output.real
 
 def createGoldenFFT(filepath, size):
@@ -107,15 +106,21 @@ def createGoldenFFT(filepath, size):
         os.makedirs(AIE_input_dir)
     
     print(f"Generating random input for a 2D-FFT to {fft_filepath}")
-    fft_input = np.array([  [11,12,13,24],
-                            [35,26,27,28],
-                            [19,210,111,312],
-                            [213,314,15,216]])
-    #fft_input = np.array([[10, 17,114,121],
-    #                [3,10,17,24],
-    #                [6,13,20,27],
-    #                [9,16,23,30]])
-    #fft_input = np.random.rand(size, size) * 100
+    fft_input = np.array([[0, 1, 2,3,4, 5, 6, 7],
+                        [0,1, 2,3,4, 5, 6, 7],
+                        [0,1, 2,3,4, 5, 6, 7],
+                        [0,1, 2,3,4, 5, 6, 7],
+                        [0,1, 2,3,4, 5, 6, 7],
+                        [0,1, 2,3,4, 5, 6, 7],
+                        [0,1, 2,3,4, 5, 6, 7],
+                        [0,1, 2,3,4, 5, 6, 7] ])
+    #fft_input = np.array([  [11,12,13,24],
+    #                        [35,26,27,28],
+    #                        [19,210,111,312],
+    #                        [213,314,15,216]])
+    #fft_input = np.array([  [11,12],[13,24] ])
+    fft_input = np.random.rand(size, size) * 100
+
     mathtest.electro_test(fft_input)
     print("#"*50)
     print()
@@ -127,7 +132,9 @@ def createGoldenFFT(filepath, size):
                 file.write(f"{fft_input[row][col].real}\n{fft_input[row][col].imag}\n")
                 AIE_file.write(f"{fft_input[row][col].real}\n{fft_input[row][col].imag}\n")
 
-    print("Input:", fft_input)
+    fft_output = np.fft.fft(fft_input)
+    ifft_output = np.fft.ifft(fft_output)
+
     # Compute the DCT along rows
     dct_output = fast_dct(fft_input, axis=1)
     print("After 1D-DCT"); print(dct_output.real)
@@ -196,12 +203,17 @@ def createGoldenFFT(filepath, size):
 
     # perform 2D-IDCST to obtain electroY
 
+
+   
     # write golden output
     with open(filepath+"fft_output.dat", "w") as file:
-        for i in range(size):
+        for i in range(len(fft_output)):
             for j in range(size):
-                #file.write(f"{fft_output[i][j].real:.2f}\n{fft_output[i][j].imag:.2f}\n")
-                pass
+                file.write(f"{fft_output[i][j].real:.2f}\n{fft_output[i][j].imag:.2f}\n")
+    with open(filepath+"ifft_output.dat", "w") as file:
+        for i in range(len(ifft_output)):
+            for j in range(size):
+                file.write(f"{ifft_output[i][j].real:.2f}\n{ifft_output[i][j].imag:.2f}\n")
     with open(filepath+"dct_output.dat", "w") as file:
         for i in range(size):
             for j in range(size):

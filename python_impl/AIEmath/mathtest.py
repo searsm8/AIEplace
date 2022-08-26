@@ -205,16 +205,100 @@ if __name__ == "__main__":
         
     #electro_test(rho)
     #DCT_IDCT_test(rho)
-    input = [[9,9,9,9],
-             [9,9,99,9],
-             [99,9,9,9],
-             [79,9,99,9] ]
-    for i in range(4):
-        ref = customDCT.idct(input[i])
-        test = inverse_transform(input[i])
-        print("ref:", ref)
-        print("test: ", test)
-        print()
+    input = [
+complex(335.0, -365.0),
+complex(-262.0, 68.0),
+complex(-572.0, 202.0),
+complex(-380.0, 129.0),
+complex(177.0, 909.0),
+complex(-585.0, 195.0),
+complex(-982.0, 512.0),
+complex(797.0, -516.0),
+complex(-22.0, -337.0),
+complex(-929.0, 316.0),
+complex(-496.0, -318.0),
+complex(671.0, -830.0),
+complex(-774.0, 574.0),
+complex(434.0, -997.0),
+complex(892.0, 555.0),
+complex(844.0, 171.0)
+    ]
+
+#    input = [
+#335.0,
+#-262.0,
+#-572.0,
+#-380.0,
+#177.0,
+#-585.0,
+#-982.0,
+#797.0,
+#-22.0,
+#-929.0,
+#-496.0,
+#671.0,
+#-774.0,
+#434.0,
+#892.0,
+#844.0
+#    ]
+    input = [
+335.0,
+-365.0,
+-262.0,
+68.0,
+-572.0,
+202.0,
+-380.0,
+129.0,
+177.0,
+909.0,
+-585.0,
+195.0,
+-982.0,
+512.0,
+797.0,
+-516.0
+    ]
+
+    input = [
+-22.0,
+-337.0,
+-929.0,
+316.0,
+-496.0,
+-318.0,
+671.0,
+-830.0,
+-774.0,
+574.0,
+434.0,
+-997.0,
+892.0,
+555.0,
+844.0,
+171.0
+    ]
+    input_shuffled = []
+    for i in range(0, len(input)-1, 2):
+        input_shuffled.append(input[i])
+    for i in range(len(input)-1, 0, -2):
+        input_shuffled.append(input[i])
+    print("shuffled:", input_shuffled)
+
+    fft = np.fft.fft(input_shuffled)
+    print("fft", fft)
+
+    alpha = -1*cmath.pi/2/len(fft) # constant term used in fast DCT computation
+    dct_output = np.ndarray((len(fft)))
+    for row in range(len(fft)):
+        dct_output[row] = fft[row].real * cmath.cos(alpha*row) - \
+            fft[row].imag * cmath.sin(alpha*row) 
+    print("dct: ", dct_output)
+
+
+    gold_dct = customDCT.dct(input)
+    print("golden:", gold_dct)
     pass
 
     
