@@ -11,4 +11,4 @@
 #define TP_DYN_PT_SIZE 0
 #define TP_WINDOW_VSIZE POINT_SIZE
 
-#define NUM_ITER 2
+#define NUM_ITER POINT_SIZE

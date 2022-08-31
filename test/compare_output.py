@@ -3,7 +3,7 @@
 # Since AIE kernels produce estimates of values, the comparison must have an acceptable error % from the golden
 import math
 
-AIE_workspace_dir = "/home/msears/AIEplace/Vitis/workspace/"
+AIE_workspace_dir = "/home/msears/AIEplace/Vitis/"
 golden_dir = "/home/msears/AIEplace/golden/"
 rel_tol = 0.01
 
@@ -18,9 +18,9 @@ def compare_hpwl_outputs():
             all_match = False
     return all_match
 
-def compare_fft_outputs():
-    filenames = ["fft_output", "ifft_output"]
-    AIE_output_dir = AIE_workspace_dir + "fft_basic/Emulation-AIE/aiesimulator_output/data/"
+def compare_dct_outputs():
+    filenames = ["dct_output", "idct_output"]
+    AIE_output_dir = AIE_workspace_dir + "dct/build/aiesimulator_output/data/"
     golden_fft_dir = golden_dir + "density/fft/"
     all_match = True
     for filename in filenames:
@@ -53,7 +53,7 @@ def compare_output(filename, output_dir, golden_dir, rel_tol=0.01):
 
 if __name__ == "__main__":
     hpwl_match = compare_hpwl_outputs()      
-    fft_match = compare_fft_outputs()
+    fft_match = compare_dct_outputs()
     if hpwl_match and fft_match:
         print(f"\nAll values match to within an error of {rel_tol*100}%")
     else: print(f"\n***FAIL: MISMATCH DETECTED OR FILE NOT FOUND***")

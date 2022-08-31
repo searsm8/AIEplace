@@ -279,6 +279,8 @@ complex(844.0, 171.0)
 844.0,
 171.0
     ]
+    size = 16
+    input = np.random.rand(size) * 100
     input_shuffled = []
     for i in range(0, len(input)-1, 2):
         input_shuffled.append(input[i])

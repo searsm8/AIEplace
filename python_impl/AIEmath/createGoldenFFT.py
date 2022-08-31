@@ -10,7 +10,7 @@ import customDCT
 
 # Directory names
 golden_dir    = "/home/msears/AIEplace/golden/density/"
-AIE_input_dir = "/home/msears/AIEplace/Vitis/workspace/fft_basic/data/"
+AIE_input_dir = "/home/msears/AIEplace/Vitis/dct/data/"
 fft_filepath = golden_dir + "fft/"
 fft_size = 16
 alpha = -1*cmath.pi/2/fft_size # constant term used in fast DCT computation
@@ -94,9 +94,17 @@ def idct_preprocess(input, axis=1):
     return output
 
 def fast_idct(input, axis=1):
+    print("fast_idct input:", input[0])
+    print()
     ifft_input = idct_preprocess(input, axis=axis) 
+    print("idct_preprocess: ", ifft_input[0] )
+    print()
     ifft_output = np.fft.fft(ifft_input, n=1*fft_size, axis=axis)
+    print("ifft_output: ", ifft_output[0] )
+    print()
     idct_output = unshuffle_input(ifft_output, axis=axis)
+    print("idct_output: ", idct_output[0].real )
+    print()
     return idct_output.real
 
 def createGoldenFFT(filepath, size):
@@ -121,27 +129,64 @@ def createGoldenFFT(filepath, size):
     #fft_input = np.array([  [11,12],[13,24] ])
     fft_input = np.random.rand(size, size) * 100
 
-    mathtest.electro_test(fft_input)
+    #mathtest.electro_test(fft_input)
     print("#"*50)
     print()
     # write random inputs to file (with padding)
-    with open(filepath+"fft_input.dat", "w") as file, \
-            open(AIE_input_dir+"fft_input.dat", "w") as AIE_file:
+    with open(filepath+"input.dat", "w") as file, \
+            open(AIE_input_dir+"input.dat", "w") as AIE_file:
         for row in range(len(fft_input)):
             for col in range(len(fft_input[row])):
                 file.write(f"{fft_input[row][col].real}\n{fft_input[row][col].imag}\n")
                 AIE_file.write(f"{fft_input[row][col].real}\n{fft_input[row][col].imag}\n")
 
-    fft_output = np.fft.fft(fft_input)
-    ifft_output = np.fft.ifft(fft_output)
+    #fft_output = np.fft.fft(shuffle_input(np.copy(fft_input)))
+    #ifft_output = np.fft.ifft(fft_output)
 
     # Compute the DCT along rows
-    dct_output = fast_dct(fft_input, axis=1)
-    print("After 1D-DCT"); print(dct_output.real)
+    dct_output = fast_dct(np.copy(fft_input), axis=1)
+    #print("After 1D-DCT"); print(dct_output.real)
+    with open(filepath+"dct_output.dat", "w") as file:
+        for i in range(size):
+            for j in range(size):
+                file.write(f"{dct_output[i][j].real:.2f}\n{dct_output[i][j].imag:.2f}\n")
+
+    idct_output = fast_idct(dct_output, axis=1)
+    with open(filepath+"idct_output.dat", "w") as file:
+        for i in range(size):
+            for j in range(size):
+                file.write(f"{idct_output[i][j].real:.2f}\n{idct_output[i][j].imag:.2f}\n")
+
+    print("input:", fft_input[0])
+    print()
+    print("\n***gold_dct_output:")
+    gold_dct_output = []
+    for i in range(16):
+        gold_dct_output.append( customDCT.dct(np.copy(fft_input[i])) )
+        print("\n[ ", end="")
+        for j in range(16):
+            print(f"{gold_dct_output[i][j]:.2f}", end=", ")
+        print("]")
+
+    print("\n***gold_idct_output:")
+    gold_idct_output = []
+    for i in range(16):
+        gold_idct_output.append( customDCT.idct(np.copy(gold_dct_output[i])) )
+        print("\n[ ", end="")
+        for j in range(16):
+            print(f"{gold_idct_output[i][j]:.2f}", end=", ")
+        print("]")
+    print()
+    return
 
     # Compute the DCT along cols
     dct_output = fast_dct(dct_output, axis=0)
-    print("After 2D-DCT: "); print(dct_output.real)
+    #print("After 2D-DCT: "); print(dct_output.real)
+
+    with open(filepath+"2d_dct_output.dat", "w") as file:
+        for i in range(size):
+            for j in range(size):
+                file.write(f"{dct_output[i][j].real:.2f}\n")
 
     # adjustment
     # perform all scaling factors in one step instead of after each DCT or IDCT
@@ -179,18 +224,18 @@ def createGoldenFFT(filepath, size):
 
     # Ref golden output
     idct_golden = np.zeros((size, size), dtype=complex)
-    print("new idct input"); print(idct_input)
+    #print("new idct input"); print(idct_input)
     for i in range(size):
         idct_golden[i] = customDCT.idct(idct_input[i])
-    print("idct_golden "); print(idct_golden.real)
+    #print("idct_golden "); print(idct_golden.real)
 
     # Compute the DCT along rows
     idct_output = fast_idct(idct_input, axis=1)
-    print("After 1D-IDCT"); print(idct_output)
+    #print("After 1D-IDCT"); print(idct_output)
 
     # Compute the DCT along cols
     idct_output = fast_idct(idct_output, axis=0)
-    print("After 2D-IDCT"); print(idct_output)
+    #print("After 2D-IDCT"); print(idct_output)
 
     # modify IFFT outputs to get IDCT as result
     # DCT = Re[e^{-i pi k / 2N} * FFT*]
@@ -214,10 +259,6 @@ def createGoldenFFT(filepath, size):
         for i in range(len(ifft_output)):
             for j in range(size):
                 file.write(f"{ifft_output[i][j].real:.2f}\n{ifft_output[i][j].imag:.2f}\n")
-    with open(filepath+"dct_output.dat", "w") as file:
-        for i in range(size):
-            for j in range(size):
-                file.write(f"{dct_output[i][j].real:.2f}\n")
     with open(filepath+"electroPhi.dat", "w") as file:
         for i in range(size):
             for j in range(size):
