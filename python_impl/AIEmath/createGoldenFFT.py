@@ -94,17 +94,9 @@ def idct_preprocess(input, axis=1):
     return output
 
 def fast_idct(input, axis=1):
-    print("fast_idct input:", input[0])
-    print()
     ifft_input = idct_preprocess(input, axis=axis) 
-    print("idct_preprocess: ", ifft_input[0] )
-    print()
     ifft_output = np.fft.fft(ifft_input, n=1*fft_size, axis=axis)
-    print("ifft_output: ", ifft_output[0] )
-    print()
     idct_output = unshuffle_input(ifft_output, axis=axis)
-    print("idct_output: ", idct_output[0].real )
-    print()
     return idct_output.real
 
 def createGoldenFFT(filepath, size):
@@ -157,26 +149,39 @@ def createGoldenFFT(filepath, size):
             for j in range(size):
                 file.write(f"{idct_output[i][j].real:.2f}\n{idct_output[i][j].imag:.2f}\n")
 
-    print("input:", fft_input[0])
-    print()
-    print("\n***gold_dct_output:")
-    gold_dct_output = []
+
+    #print("\n***gold_dct_output:")
+    #gold_dct_output = []
+    #for i in range(16):
+    #    gold_dct_output.append( customDCT.dct(np.copy(fft_input[i])) )
+    #    print("\n[ ", end="")
+    #    for j in range(16):
+    #        print(f"{gold_dct_output[i][j]:.2f}", end=", ")
+    #    print("]")
+
+    #print("\n***gold_idct_output:")
+    #gold_idct_output = []
+    #for i in range(16):
+    #    gold_idct_output.append( customDCT.idct(np.copy(gold_dct_output[i])) )
+    #    print("\n[ ", end="")
+    #    for j in range(16):
+    #        print(f"{gold_idct_output[i][j]:.2f}", end=", ")
+    #    print("]")
+    #print()
+
+    print("\n***gold_idxst_output:")
+    gold_idxst_output = []
     for i in range(16):
-        gold_dct_output.append( customDCT.dct(np.copy(fft_input[i])) )
-        print("\n[ ", end="")
+        gold_idxst_output.append( customDCT.idxst(np.copy(fft_input[i])) )
+        print(f"\n[{i}] [ ", end="")
         for j in range(16):
-            print(f"{gold_dct_output[i][j]:.2f}", end=", ")
+            print(f" {gold_idxst_output[i][j]:.2f}", end=", ")
         print("]")
 
-    print("\n***gold_idct_output:")
-    gold_idct_output = []
-    for i in range(16):
-        gold_idct_output.append( customDCT.idct(np.copy(gold_dct_output[i])) )
-        print("\n[ ", end="")
-        for j in range(16):
-            print(f"{gold_idct_output[i][j]:.2f}", end=", ")
-        print("]")
-    print()
+    with open(filepath+"idxst_output.dat", "w") as file:
+        for i in range(size):
+            for j in range(size):
+                file.write(f"{gold_idxst_output[i][j].real:.2f}\n{gold_idxst_output[i][j].imag:.2f}\n")
     return
 
     # Compute the DCT along cols

@@ -184,123 +184,46 @@ def inverse_transform(vector):
 	result[-1 - len(vector) % 2 : : -2] = temp[(n + 1) // 2 : ]
 	return result
 
+def idxst_test(rho):
+    for i in range(4):
+        print()
+        print(rho[i])
+        mat = customDCT.idxst(rho[i])
+        print("After IDXST:")
+        print(mat)
+
+        golden = customDCT.idst(rho[i])
+        print("golden:")
+        print(golden)
+
+def idct_idxst_test(rho):
+    N = len(rho)
+    mat = np.zeros((N, N))
+    mat2 = np.zeros((N, N))
+    for row in range(len(mat)):
+        mat[row] = customDCT.idxst(rho[row]) 
+        print(mat[row])
+    mat_t = np.transpose(mat)
+    for row in range(len(mat)):
+        mat2[row] = customDCT.idct(mat_t[row]) 
+    res = np.transpose(mat2)
+
+    print("result:")
+    print(res)
+
+    golden = customDCT.idcst_2d(rho)
+    print("golden:")
+    print(golden)
+
+    
+
 if __name__ == "__main__":
     #dct_1d_compare()
     #dct_2d_compare()
     #dct_2d_test()
     #idct_test()
-
-    #rho = np.array([[10, 17,114,121],
-    #                [3,10,17,24],
-    #                [6,13,20,27],
-    #                [9,16,23,30]])
-    #rho = np.array([[0, 7,14,21],
-    #                [3,10,17,424],
-    #                [6,213,20,27],
-    #                [9,16,123,30]])
-    #rho = np.array([[1,1,99,99],
-    #                [1,1,99,99],
-    #                [99,99,99,99],
-    #                [99,99,99,99]])
-        
-    #electro_test(rho)
-    #DCT_IDCT_test(rho)
-    input = [
-complex(335.0, -365.0),
-complex(-262.0, 68.0),
-complex(-572.0, 202.0),
-complex(-380.0, 129.0),
-complex(177.0, 909.0),
-complex(-585.0, 195.0),
-complex(-982.0, 512.0),
-complex(797.0, -516.0),
-complex(-22.0, -337.0),
-complex(-929.0, 316.0),
-complex(-496.0, -318.0),
-complex(671.0, -830.0),
-complex(-774.0, 574.0),
-complex(434.0, -997.0),
-complex(892.0, 555.0),
-complex(844.0, 171.0)
-    ]
-
-#    input = [
-#335.0,
-#-262.0,
-#-572.0,
-#-380.0,
-#177.0,
-#-585.0,
-#-982.0,
-#797.0,
-#-22.0,
-#-929.0,
-#-496.0,
-#671.0,
-#-774.0,
-#434.0,
-#892.0,
-#844.0
-#    ]
-    input = [
-335.0,
--365.0,
--262.0,
-68.0,
--572.0,
-202.0,
--380.0,
-129.0,
-177.0,
-909.0,
--585.0,
-195.0,
--982.0,
-512.0,
-797.0,
--516.0
-    ]
-
-    input = [
--22.0,
--337.0,
--929.0,
-316.0,
--496.0,
--318.0,
-671.0,
--830.0,
--774.0,
-574.0,
-434.0,
--997.0,
-892.0,
-555.0,
-844.0,
-171.0
-    ]
-    size = 16
-    input = np.random.rand(size) * 100
-    input_shuffled = []
-    for i in range(0, len(input)-1, 2):
-        input_shuffled.append(input[i])
-    for i in range(len(input)-1, 0, -2):
-        input_shuffled.append(input[i])
-    print("shuffled:", input_shuffled)
-
-    fft = np.fft.fft(input_shuffled)
-    print("fft", fft)
-
-    alpha = -1*cmath.pi/2/len(fft) # constant term used in fast DCT computation
-    dct_output = np.ndarray((len(fft)))
-    for row in range(len(fft)):
-        dct_output[row] = fft[row].real * cmath.cos(alpha*row) - \
-            fft[row].imag * cmath.sin(alpha*row) 
-    print("dct: ", dct_output)
-
-
-    gold_dct = customDCT.dct(input)
-    print("golden:", gold_dct)
-    pass
-
+    size = 4
+    rho = np.random.rand(size, size) * 100
     
+    #idxst_test(rho)
+    idct_idxst_test(rho)

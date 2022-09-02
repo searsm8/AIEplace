@@ -4,7 +4,8 @@ PLATFORM_REPO_PATHS := $(XILNX_TOOLS_LOCATION)/base_platforms
 PLATFORM := ${PLATFORM_REPO_PATHS}/xilinx_vck190_base_202210_1/xilinx_vck190_base_202210_1.xpfm
 AIE_SRC_DIR := $(PWD)/src
 BUILD_TARGET_DIR := $(PWD)/build
-TOP_SRC_CPP := $(AIE_SRC_DIR)/dct_graph.cpp
+TOP := AIEplaceGraph
+TOP_SRC_CPP := $(AIE_SRC_DIR)/$(TOP).cpp
 
 AIE_FLAGS := -include=$(AIE_SRC_DIR)
 AIE_FLAGS += -include=$(AIE_SRC_DIR)/kernels
@@ -40,11 +41,11 @@ AIE_SIM_FLAGS += -i=$(PWD)
 
 sim: graph
 	cd $(BUILD_TARGET_DIR); \
-	aiesimulator $(AIE_SIM_FLAGS) 2>&1 | tee -a aiesim.log
+	aiesimulator $(AIE_SIM_FLAGS) --profile 2>&1 | tee -a aiesim.log
 	@echo ""
-	@echo "AIE Simulation, Without Profiling, Complete..."
+	@echo "AIE Simulation, With Profiling, Complete..."
 	@echo "####################################"
 	@echo ""
 
 analyze:
-	vitis_analyzer Work/fft_graph.aiecompile_summary
+	vitis_analyzer ./build/Work/$(TOP).aiecompile_summary

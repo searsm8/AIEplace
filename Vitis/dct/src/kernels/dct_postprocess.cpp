@@ -12,7 +12,7 @@ void dct_postprocess(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TY
 	aie::vector<FFT_DATA_TYPE, 8> data;
 
 	float k_init[8]={0,1,2,3,4,5,6,7};
-	aie::vector<float,8> k = aie::load_v<8>(k_init); 
+	aie::vector<float, 8> k = aie::load_v<8>(k_init); 
 	aie::vector<float, 8> eights = aie::broadcast<float, 8>( 8.0 );
 	aie::vector<float, 8> alpha;
 	aie::vector<float, 8> alpha_base = aie::broadcast<float, 8>( -PI/2/POINT_SIZE);
@@ -28,7 +28,7 @@ void dct_postprocess(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TY
 
 		// Take only the real part
 		real_data = data.cast_to<float>();
-		//result = aie::filter_even(real_data);
+		//result = aie::filter_even(real_data); // take every even entry
 		for(int i = 0; i < 8; i++)
 			real_data[2*i+1] = 0; // Set imaginary part to zero
 		data = real_data.cast_to<cfloat>();

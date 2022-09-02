@@ -46,13 +46,34 @@ def idst(input_X):
     idst_result = [0]*N
 
     for k in range(N):
-        idst_result[k] += input_X[0]#/math.sqrt(2)
+        #idst_result[k] += input_X[0]#/math.sqrt(2)
         for n in range(1, N):
             #print(f"sin: {math.sin(math.pi*n*(k+0.5)/N)}")
             idst_result[k] += input_X[n] * math.sin(math.pi*n*(k+0.5)/N)
-        idst_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
+        #idst_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
     
     return np.array(idst_result)
+
+def idxst(input_):
+    N = len(input_)
+    input = [0]*N
+    input[0] = input_[0]
+    input[1:] = input_[-1:0:-1]
+    idxst_result = [0]*N
+
+    for k in range(N):
+        idxst_result[k] += input[0]/2 # to match fft.cpp 
+        for n in range(1, N):
+            idxst_result[k] += input[n] * math.cos(math.pi*n*(k+0.5)/N)
+        #idxst_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
+        #idxst_result[k] *= 2/N
+
+    for k in range(N):
+        idxst_result[k] -= input[0]/2 # to match fft.cpp 
+    
+    for k in range(N):
+        idxst_result[k] *= (-1)**k
+    return np.array(idxst_result)
 
 def dct_2d(input_mat):
     ''' Compute the 2D DCT. Perform 1D DCT on rows, then again on columns.'''
@@ -103,7 +124,7 @@ def idct_2d(input_mat):
     return np.array(mat)
 
 def idcst_2d(input_mat):
-    ''' Compute the 2D IDCT. Perform 1D IDCT on rows, then again on columns.'''
+    ''' Compute the 2D IDCST. Perform 1D IDST on rows, then IDCT on columns.'''
     M = len(input_mat)
     N = len(input_mat[0])
     mat = np.zeros((M, N))
@@ -120,7 +141,7 @@ def idcst_2d(input_mat):
     return np.array(mat)
 
 def idsct_2d(input_mat):
-    ''' Compute the 2D IDCT. Perform 1D IDCT on rows, then again on columns.'''
+    ''' Compute the 2D IDSCT. Perform 1D IDCT on rows, then IDST on columns.'''
     M = len(input_mat)
     N = len(input_mat[0])
     mat = np.zeros((M, N))
