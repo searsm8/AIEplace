@@ -16,7 +16,7 @@ void idxst_shuffle(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE
 	data = window_read(in);
 	window_writeincr(out, data);
 	window_incr(in, POINT_SIZE-1);
-    for(int i = POINT_SIZE; i > 1;) {
+    for(int i = 1; i < POINT_SIZE; i++) {
         data = window_read(in);
         window_decr(in, 1);
         window_writeincr(out, data);
