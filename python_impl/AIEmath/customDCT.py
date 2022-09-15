@@ -68,8 +68,9 @@ def idxst(input_):
         #idxst_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
         #idxst_result[k] *= 2/N
 
-    for k in range(N):
-        idxst_result[k] -= input[0]/2 # to match fft.cpp 
+    # SHOULD THIS BE PART OF THE AIE KERNEL???
+    #for k in range(N):
+        #idxst_result[k] -= input[0]/2 # to match fft.cpp 
     
     for k in range(N):
         idxst_result[k] *= (-1)**k

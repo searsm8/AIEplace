@@ -11,7 +11,7 @@ from customDCT import *
 
 MAX_COORD = 10000
 golden_dir    = "/home/msears/AIEplace/golden/hpwl/"
-AIE_input_dir = "/home/msears/AIEplace/Vitis/workspace/hpwl/data/"
+AIE_input_dir = "/home/msears/AIEplace/Vitis/AIEplace/data/"
 
 def createGoldenHPWL(filepath, N=1):
     ''' Generates a new directory and random input vectors

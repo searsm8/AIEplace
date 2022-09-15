@@ -6,9 +6,8 @@ namespace transform = xf::dsp::aie::fft;
 
 class idxst_subgraph : public adf::graph {
 private:
-  idct_subgraph IDCT_subgraph;
-
   kernel IDXST_shuffle_kernel;
+  idct_subgraph IDCT_subgraph;
   kernel IDXST_signs_kernel;
   
 public:
@@ -26,12 +25,13 @@ public:
     connect< window<4*2*POINT_SIZE> > net_idct    (IDXST_shuffle_kernel.out[0], IDCT_subgraph.in);
     connect< window<4*2*POINT_SIZE> > net_signs   (IDCT_subgraph.out, IDXST_signs_kernel.in[0]);
     connect< window<4*2*POINT_SIZE> > net_out     (IDXST_signs_kernel.out[0], out);
+    //connect< window<4*2*POINT_SIZE> > net_out     (IDCT_subgraph.out, out);
 
     // Associate kernels with Source files and set runtime ratio
     source(IDXST_shuffle_kernel)  = "kernels/idxst_shuffle.cpp";
-    source(IDXST_signs_kernel)  = "kernels/idxst_signs.cpp";
-
     runtime<ratio>(IDXST_shuffle_kernel)   = 0.5;
+
+    source(IDXST_signs_kernel)  = "kernels/idxst_signs.cpp";
     runtime<ratio>(IDXST_signs_kernel)   = 0.5;
   }
 };
