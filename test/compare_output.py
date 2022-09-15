@@ -19,8 +19,8 @@ def compare_hpwl_outputs():
     return all_match
 
 def compare_dct_outputs():
-    filenames = ["dct_output", "idct_output"]
-    AIE_output_dir = AIE_workspace_dir + "dct/build/aiesimulator_output/data/"
+    filenames = ["dct_output", "idct_output", "idxst_output"]
+    AIE_output_dir = AIE_workspace_dir + "AIEplace/build/aiesimulator_output/data/"
     golden_fft_dir = golden_dir + "density/fft/"
     all_match = True
     for filename in filenames:
@@ -36,12 +36,13 @@ def compare_output(filename, output_dir, golden_dir, rel_tol=0.01):
     line_count = 0
     try:
         with open(output_filename) as AIE_file, open(golden_filename) as golden_file:
-            for line in AIE_file:
-                if 'T' not in line: # if this line is a timestamp, skip it
-                    golden_line = golden_file.readline()
+            for golden_line in golden_file:
+                    AIE_line = AIE_file.readline()
+                    while 'T' in AIE_line: # if this line is a timestamp, skip it
+                        AIE_line = AIE_file.readline()
                     line_count += 1
-                    if not math.isclose(float(line), float(golden_line), rel_tol=rel_tol):
-                        print(f"(line #{line_count})\t***DIFF DETECTED: AIE: {float(line.strip()):.2f}\tgolden: {float(golden_line.strip()):.2f}***")
+                    if not math.isclose(float(AIE_line), float(golden_line), rel_tol=rel_tol):
+                        print(f"(line #{line_count})\t***DIFF DETECTED: AIE: {float(AIE_line.strip()):.2f}\tgolden: {float(golden_line.strip()):.2f}***")
                         diff_found = True
         if not diff_found:
             print("\tALL OUTPUTS MATCH")
@@ -52,7 +53,7 @@ def compare_output(filename, output_dir, golden_dir, rel_tol=0.01):
 
 
 if __name__ == "__main__":
-    hpwl_match = compare_hpwl_outputs()      
+    hpwl_match = True#compare_hpwl_outputs()      
     fft_match = compare_dct_outputs()
     if hpwl_match and fft_match:
         print(f"\nAll values match to within an error of {rel_tol*100}%")
