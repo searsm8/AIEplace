@@ -11,7 +11,7 @@ from customDCT import *
 
 MAX_COORD = 10000
 golden_dir    = "/home/msears/AIEplace/golden/hpwl/"
-AIE_input_dir = "/home/msears/AIEplace/Vitis/AIEplace/data/"
+AIE_input_dir = "/home/msears/AIEplace/Vitis/hpwl/data/"
 
 def createGoldenHPWL(filepath, N=1):
     ''' Generates a new directory and random input vectors
@@ -65,37 +65,38 @@ def createGoldenHPWL(filepath, N=1):
         partials_vec.append(partials)
         
     # write terms to files
-    for i in range(netsize-1, -1, -1):
+    with open(filepath+"/hpwl.dat", "a") as f:
         for n in range(N):
-            # write input files to golden
-            with open(filepath+"/input.dat", "a") as f:
-                f.write(f"{input_vectors[n][i]}\n")
-
-            # write input files to Vitis AIE workspace
-            with open(AIE_input_dir+"/input.dat", "a") as f:
-                f.write(f"{input_vectors[n][i]}\n")
-
-            # write golden outputs for all HPWL terms
-            with open(filepath+"/a_plus.dat", "a") as f:
-                f.write(f"{a_plus_vec[n][i]}\n")            
-            with open(filepath+"/a_minus.dat", "a") as f:
-                f.write(f"{a_minus_vec[n][i]}\n")            
-
-            # write golden outputs for all HPWL partials
-            with open(filepath+"/partials.dat", "a") as f:
-                f.write(f"{partials_vec[n][i]}\n")            
-
-    for n in range(N):
-        with open(filepath+"/b_plus.dat", "a") as f:
-            f.write(f"{b_plus_vec[n]}\n")            
-        with open(filepath+"/b_minus.dat", "a") as f:
-            f.write(f"{b_minus_vec[n]}\n")            
-        with open(filepath+"/c_plus.dat", "a") as f:
-            f.write(f"{c_plus_vec[n]}\n")            
-        with open(filepath+"/c_minus.dat", "a") as f:
-            f.write(f"{c_minus_vec[n]}\n")            
-        with open(filepath+"/hpwl.dat", "a") as f:
             f.write(f"{WA_vec[n]}\n")            
+        #with open(filepath+"/b_plus.dat", "a") as f:
+        #    f.write(f"{b_plus_vec[n]}\n")            
+        #with open(filepath+"/b_minus.dat", "a") as f:
+        #    f.write(f"{b_minus_vec[n]}\n")            
+        #with open(filepath+"/c_plus.dat", "a") as f:
+        #    f.write(f"{c_plus_vec[n]}\n")            
+        #with open(filepath+"/c_minus.dat", "a") as f:
+        #    f.write(f"{c_minus_vec[n]}\n")            
+
+    with    open(filepath+"/input.dat", "a") as golden_input_file, \
+            open(AIE_input_dir+"/input.dat", "a") as AIE_input_file, \
+            open(filepath+"/partials.dat", "a") as partials_file:
+        for iter in range(int(N/8)):
+            for i in range(netsize-1, -1, -1):
+                for lane in range(8):
+                    n = 8*iter + lane
+                    # write input files to golden
+                    golden_input_file.write(f"{input_vectors[n][i]}\n")
+                    # write input files to Vitis AIE workspace
+                    AIE_input_file.write(f"{input_vectors[n][i]}\n")
+                    # write golden outputs for all HPWL partials
+                    partials_file.write(f"{partials_vec[n][i]}\n")            
+
+                    # write golden outputs for all HPWL terms
+                    #with open(filepath+"/a_plus.dat", "a") as f:
+                    #    f.write(f"{a_plus_vec[n][i]}\n")            
+                    #with open(filepath+"/a_minus.dat", "a") as f:
+                    #    f.write(f"{a_minus_vec[n][i]}\n")            
+
     
 def createRandomDensitys(filepath, M=16):
     ''' Generates a random MxM density map
@@ -173,10 +174,10 @@ if __name__ == "__main__":
     benchmark_count = 1
     #Create benchhmarks for wirelength
     for i in range(benchmark_count):
-        createGoldenHPWL(golden_dir+"test"+str(i), 8)
+        createGoldenHPWL(golden_dir, N=8*1000*1000)
 
     #Create benchhmarks for density
-    for i in range(benchmark_count):
-        rho = createRandomDensitys(golden_dir+"test"+str(i), 16)
-        computeAllDCTs(golden_dir+"test"+str(i), rho)
+    #for i in range(benchmark_count):
+    #    rho = createRandomDensitys(golden_dir+"test"+str(i), 16)
+    #    computeAllDCTs(golden_dir+"test"+str(i), rho)
 

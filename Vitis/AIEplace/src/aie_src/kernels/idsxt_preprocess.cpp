@@ -3,7 +3,7 @@
 #include <aie_api/utils.hpp>
 //#include "system_settings.h"
 
-void dct_postprocess(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out) {
+void idxst_preprocess(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out) {
   /* EXPECTED INPUT
    * 
    */
@@ -16,27 +16,42 @@ void dct_postprocess(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TY
 	aie::vector<float, 8> eights = aie::broadcast<float, 8>( 8.0 );
 	aie::vector<float, 8> alpha;
 	aie::vector<float, 8> alpha_base = aie::broadcast<float, 8>( -PI/2/POINT_SIZE);
-	float real_init[16] = {1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0};
-	aie::vector<float, 16> real_only = aie::load_v<16>(real_init);
 
 	aie::vector<cfloat, 8> adjust_factor;
-	aie::vector<float, 16> real_data;
 
-	// compute e ^ -pi*k / 2N
+	/* perform IDXST shuffle
+	*  Flip order, but preserve first element
+	*  Input: a b c d e f g h
+	* Output: a h g f e d c b
+	*/
+
+	// could be optimized using aie::reverse???
+	data[0] = window_read(in)/2; // first element should be divided by 2. why?
+	window_incr(in, POINT_SIZE-1);
+	for(int i = 1; i < 8; i++) {
+		data[i] = window_read(in);
+		window_decr(in, 1);
+	}
+
 	for(int n = 0; n < POINT_SIZE/8; n++) {
+
+		// perform IDXST preprocess
+		// multiply each element by e ^ -pi*k / 2N
 		alpha = aie::mul(alpha_base, k);
 		adjust_factor = aie::sincos_complex(alpha); // Equivalent to e^(i*alpha)
 		data = aie::mul(window_readincr_v<8>(in), adjust_factor);
 
-		// Take only the real part
-		real_data = data.cast_to<float>();
+        // Divide the first output by 2
+        //if(n == 0)
+        //    data[0] = data[0] * 0.5;
 
-		//vectorized imag only DOES THIS REDUCE KERNEL TIME???
-		//for(int i = 0; i < 8; i++)
-			//real_data[2*i+1] = 0; // Set imaginary part to zero
-		real_data = aie::mul(real_data, real_only);
-		data = real_data.cast_to<cfloat>();
 		window_writeincr(out, data);
 		k = aie::add(k, eights);
+
+		// read in next 8 cints to data
+	for(int i = 1; i < 8; i++) {
+		data[i] = window_read(in);
+		window_decr(in, 1);
+	}
 	}
 }

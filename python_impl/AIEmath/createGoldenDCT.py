@@ -12,7 +12,7 @@ import customDCT
 golden_dir    = "/home/msears/AIEplace/golden/density/"
 AIE_input_dir = "/home/msears/AIEplace/Vitis/AIEplace/data/"
 fft_filepath = golden_dir + "fft/"
-fft_size = 16
+fft_size = 1024
 alpha = -1*cmath.pi/2/fft_size # constant term used in fast DCT computation
 
 def shuffle_input(input, axis=1):
@@ -127,8 +127,9 @@ def createGoldenFFT(filepath, size):
     # write random inputs to file (with padding)
     with open(filepath+"input.dat", "w") as file, \
             open(AIE_input_dir+"input.dat", "w") as AIE_file:
-        for row in range(len(fft_input)):
-            for col in range(len(fft_input[row])):
+        #for row in range(len(fft_input)):
+        for row in range(size):
+            for col in range(size):
                 file.write(f"{fft_input[row][col].real}\n{fft_input[row][col].imag}\n")
                 AIE_file.write(f"{fft_input[row][col].real}\n{fft_input[row][col].imag}\n")
 
@@ -171,12 +172,13 @@ def createGoldenFFT(filepath, size):
 
     print("\n***gold_idxst_output:")
     gold_idxst_output = []
-    for i in range(16):
+    for i in range(size):
         gold_idxst_output.append( customDCT.idxst(np.copy(fft_input[i])) )
-        print(f"\n[{i}] [ ", end="")
-        for j in range(16):
-            print(f" {gold_idxst_output[i][j]:.2f}", end=", ")
-        print("]")
+        print(f"[{i}]")
+        #print(f"\n[{i}] [ ", end="")
+        #for j in range(size):
+        #    print(f" {gold_idxst_output[i][j]:.2f}", end=", ")
+        #print("]")
 
     with open(filepath+"idxst_output.dat", "w") as file:
         for i in range(size):
