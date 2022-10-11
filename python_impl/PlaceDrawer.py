@@ -297,7 +297,7 @@ class PlaceDrawer(object):
                 for j in range(num_bins_x):
                     dx = 0.1*density_penalty*bin_force_y[i][j]
                     dy = 0.1*density_penalty*bin_force_x[i][j]
-                    arrow_length = math.sqrt(dx**2 + dy**2)
+                    arrow_length = min(math.sqrt(dx**2 + dy**2), 0.5)
                     arrow_angle = math.atan(dy/dx)
                     if dx < 0: # mirror across y axis
                         arrow_angle = math.pi + arrow_angle

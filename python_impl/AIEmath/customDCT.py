@@ -90,7 +90,7 @@ def dct_2d(input_mat):
             mat[row][col] = float(round(mat[row][col], 3))
             if math.isclose(mat[row][col], 0,  rel_tol=0.01):
                 mat[row][col] = 0
-    print("1D DCT:"); print(mat)
+    #print("1D DCT:"); print(mat)
 
     # Compute DCT on cols
     mat = np.transpose(mat)
@@ -98,7 +98,7 @@ def dct_2d(input_mat):
     for row in range(N):
         mat[row] = dct(mat[row])
     mat = np.transpose(mat)
-    print("2D DCT:"); print(mat)
+    #print("2D DCT:"); print(mat)
     
     return np.array(mat)
 
@@ -107,13 +107,13 @@ def idct_2d(input_mat):
     M = len(input_mat)
     N = len(input_mat[0])
     mat = np.zeros((M, N))
-    print("idct input")
-    print(input_mat)
+    #print("idct input")
+    #print(input_mat)
     # Compute DCT on rows
     for row in range(M):
         mat[row] = idct(input_mat[row])
     
-    print("1D IDCT:"); print(mat)
+    #print("1D IDCT:"); print(mat)
 
     # Compute DCT on cols
     mat = np.transpose(mat)
@@ -121,7 +121,7 @@ def idct_2d(input_mat):
         mat[row] = idct(mat[row])
     mat = np.transpose(mat)
 
-    print("2D IDCT:"); print(mat)
+    #print("2D IDCT:"); print(mat)
     return np.array(mat)
 
 def idcst_2d(input_mat):

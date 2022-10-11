@@ -51,7 +51,7 @@ def runAIEPlacer():
     
     # Create a design environment and run AIEplacer
     num_rows = 8*1
-    num_cols = 8*5
+    num_cols = 4*5
     grid = Grid(num_rows, num_cols)
     node_count = int(num_rows * num_cols * 0.5)
     coords = initializeCoords(grid, node_count)
@@ -67,7 +67,8 @@ def runAIEPlacer():
     design = Design(coords, node_names, node_sizes, nets)
 
     placer = AIEplacer(grid, design) 
-    placer.run(1000)
+    placer.run(200)
 
 if __name__ == "__main__":
-    cProfile.run('runAIEPlacer()')
+    #cProfile.run('runAIEPlacer()')
+    runAIEPlacer()

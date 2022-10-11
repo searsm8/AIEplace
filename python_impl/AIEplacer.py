@@ -129,7 +129,7 @@ class AIEplacer:
 
     def run(self, iterations):
         ''' Runs the ePlace algorithm'''
-        export_images = False
+        export_images = True
 
         logging.info("Begin AIEplace")
         os.system("mkdir results")
@@ -241,8 +241,8 @@ class AIEplacer:
                 # Compute the electro force for each node, accounting for bin overlaps
                 force = Coord(0, 0)
                 node = self.design.coords[i]
-                for bin_row in range(math.floor(node.row)-1, math.floor(node.row)+2):
-                    for bin_col in range(math.floor(node.col)-1, math.floor(node.col +2)):
+                for bin_row in range(max(0, math.floor(node.row)-1), min(math.floor(node.row)+2, self.grid.num_rows-1)):
+                    for bin_col in range(max(0, math.floor(node.col)-1), min(math.floor(node.col+2), self.grid.num_cols-1)):
                         overlap = self.computeOverlap(i, bin_row, bin_col)
                         if overlap > 0:
                             force.row += overlap * electroForceX[bin_row][bin_col]
