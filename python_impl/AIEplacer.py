@@ -34,10 +34,11 @@ class Grid:
 
 class Design:
     # primary lists which hold design information
-    def __init__(self, coords, node_names, node_sizes, nets) -> None:
+    def __init__(self, coords, node_names, node_sizes, dependencies, nets) -> None:
         self.coords = coords
         self.node_names = node_names
         self.node_sizes = node_sizes
+        self.dependencies = dependencies
         self.nets = nets # each net is a list of node indices
                     # e.g. [4,7,9] means nodes 4, 7, and 9 are connect by a net
         
@@ -133,6 +134,9 @@ class AIEplacer:
 
         logging.info("Begin AIEplace")
         os.system("mkdir results")
+
+        stagnant_iterations = 0 # number of iterations without seeing any improvement
+        converged = False 
         
         for iter in range(iterations):
             logging.root.name = 'ITER ' + str(iter)
@@ -221,22 +225,11 @@ class AIEplacer:
             electroForceY = AIEmath.customDCT.idcst_2d(electroForceY)
 
             step_len = 0.09
-            density_penalty = min(50, 0.05*(iter))
+            density_penalty = 0.02*(iter) if iter < 50 else 0.05*iter
             print(f"density_penalty: {density_penalty}")
 
-
-            my_node = 0
-            #print(f"node {my_node}: ({self.design.coords[my_node].row:.2f}, {self.design.coords[my_node].col:.2f})")
-            #print(f"hpwl_grad[0]: ({hpwl_gradient[0].row:.2f}, {hpwl_gradient[0].col:.2f}) ")
-            #print(f"density_grad[0] X: {density_penalty*electroForceX[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)]:.2f}")
-            #print(f"density_grad[0] Y: {density_penalty*electroForceY[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)]:.2f}")
-            #print(f"step[0].row: {step_len * (hpwl_gradient[0].row + density_penalty*electroForceX[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)] ):.2f}")
-            #print(f"step[0].col: {step_len * (hpwl_gradient[0].col + density_penalty*electroForceY[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)] ):.2f}")
-
-
             # Update node locations
-            #print(f"Update coords:")
-            #prettyPrint.coord(self.design.coords[my_node]); print(f" --> ", end="")
+            depend_weight = 5 if iter < 50 else 3#max(0.5, 0.02*(100-iter))
             for i in range(len(self.design.coords)):
                 # Compute the electro force for each node, accounting for bin overlaps
                 force = Coord(0, 0)
@@ -248,14 +241,16 @@ class AIEplacer:
                             force.row += overlap * electroForceX[bin_row][bin_col]
                             force.col += overlap * electroForceY[bin_row][bin_col]
 
-                self.design.coords[i].row -= step_len * (hpwl_gradient[i].row - density_penalty * force.row)
+                dependency_force = depend_weight*(self.design.dependencies[i]-0.5)*(self.grid.num_cols-self.design.coords[i].col)/self.grid.num_cols
+                # Subtract the electro force because we want to model REPULSIVE force
+                self.design.coords[i].row -= step_len * (hpwl_gradient[i].row  - density_penalty * force.row)
                 #self.design.coords[i].row -= step_len * (0 - density_penalty * force.row)
                                             #- density_penalty*electroForceX[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
                                             # WHY IS THIS MINUS SIGN NEEDED????
                 #if self.design.coords[i].row < 0: self.design.coords[i].row = 0 # this shouldn't be needed b/c of boundary condition?
                 #if self.design.coords[i].row + self.design.node_sizes[i].row >= self.grid.num_rows : self.design.coords[i].row = self.grid.num_rows-1
 
-                self.design.coords[i].col -= step_len * (hpwl_gradient[i].col - density_penalty * force.col)
+                self.design.coords[i].col -= step_len * (hpwl_gradient[i].col - dependency_force - density_penalty * force.col)
                 #self.design.coords[i].col -= step_len * (0 - density_penalty * force.col)
                                             #- density_penalty*electroForceY[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
                 #if self.design.coords[i].col < 0: self.design.coords[i].col = 0
@@ -268,18 +263,44 @@ class AIEplacer:
             #prettyPrint.matrix(electroForceX, title="electroForceX(rows):", tabs="\t"*8)
             #os.system("clear")
 
-            nets_to_draw = []
+
+            # after the update, compute new metrics
+            overflow = 0
+            for i in range(len(self.bin_grid.vals)):
+                for j in range(len(self.bin_grid.vals[i])):
+                    if self.bin_grid.vals[-i-1][j] > 1:
+                        overflow += self.bin_grid.vals[-i-1][j] - 1
+
+            if iter == 0:
+                min_overflow = overflow
+            if overflow >= min_overflow:
+                stagnant_iterations += 1
+            else: stagnant_iterations = 0
+            if overflow < min_overflow:
+                min_overflow = overflow
+
+            logging.info(f"\t\t{stagnant_iterations} stagnant_iterations\t{overflow} overflow\t {min_overflow} min_overflow")
+            convergence_iterations = 20
+            if iter > 50 and stagnant_iterations >= convergence_iterations:
+                logging.info(f"No improvement in overflow for {convergence_iterations} iterations...Stopping.")
+                converged = True
+
             if iter == iterations-1:
+                converged = True
+
+            nets_to_draw = []
+            if converged:
                 self.legalize()
                 # choose a random node and draw all nets for that node
                 for i in range(1):
-                    target_node=random.randint(0, len(self.design.coords)-1)
+                    while True:
+                        target_node=random.randint(0, len(self.design.coords)-1)
+                        if self.design.dependencies[target_node] >= 1:
+                            break
                     for net in self.design.nets:
                         if net.count(target_node):
                             nets_to_draw.append(net)
-                #nets_to_draw = self.design.nets[:5]
 
-            # after the update, compute new metrics
             if export_images:
                 self.computeBinDensities()
                 net_bins = []
@@ -291,16 +312,10 @@ class AIEplacer:
                 for i in range(len(self.design.nets)):
                     total_hpwl += hpwl_actual[i].row + hpwl_actual[i].col
                 print(f"Total HPWL actual: {total_hpwl}")
-
-                overflow = 0
-                for i in range(len(self.bin_grid.vals)):
-                    for j in range(len(self.bin_grid.vals[i])):
-                        if self.bin_grid.vals[-i-1][j] > 1:
-                            overflow += self.bin_grid.vals[-i-1][j] - 1
                 print(f"overflow: {overflow}")
                     
                 #use PlaceDrawer to export an image
-                if(iter%10 == 0) or (iter == iterations-1):
+                if(iter%5 == 0) or converged:
                     filename=f"{time.strftime('%y%m%d_%H%M')}_iter_{iter}.png"
                     filename = os.path.join("results", f"run_{self.design_run}", filename)
                             
@@ -323,9 +338,12 @@ class AIEplacer:
                             bin_force_y=electroForceY,
                             density_penalty=density_penalty,
                             iteration=iter,
+                            dependencies=self.design.dependencies,
                             hpwl=total_hpwl,
                             overflow=overflow
                             )
+            if converged:
+                break
             #end iteration loop
 
         logging.root.name = 'AIEplace'
