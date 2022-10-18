@@ -12,6 +12,33 @@ import time
 import numpy as np
 import logging
 import PlaceDrawer
+import jsbeautifier
+
+class Herd:
+    def __init__(self, row_loc, col_loc, row_size, col_size, number):
+        self.row_loc = row_loc
+        self.col_loc = col_loc
+        self.row_size = row_size
+        self.col_size = col_size
+        self.number = number
+    
+    def convert_to_list(self):
+        """Converts the herd locations and number to a format that will be 
+           displayed correctly in the AIR partition grid
+
+        Returns:
+            list: [<number>, <name>, [<row #>, <col #>], ...]
+        """
+        locations = [self.number]
+        for i in range(self.row_size):
+            for j in range(self.col_size):
+                # Right and down
+                row_coord = self.row_loc - i
+                col_coord = self.col_loc + j
+                locations.append([row_coord, col_coord])
+        return locations
+
+
 
 class Coord:
     def __init__(self, row, col):
@@ -31,6 +58,9 @@ class Grid:
         self.vals = []
         for i in range(num_rows):
             self.vals.append([0]*num_cols)
+    def print_grid(self):
+        temp_grid = np.asarray(self.vals)
+        print(temp_grid)
 
 class Design:
     # primary lists which hold design information
@@ -349,51 +379,135 @@ class AIEplacer:
         logging.root.name = 'AIEplace'
         logging.info("End AIEplace")
 
-    
+    def is_legal_placement(self, grid_coords, herd, lg):
+                """Checks if a herd fits in the grid at the specified grid tile. 
+                    Assumes the first tile in the grid will be the upper left hand
+                    tile of the herd.
+                Args:
+                    coords (list): [row, col] to place herd
+                    herd (Herd): herd to be checked
+                """
+                for row in range(grid_coords[0], grid_coords[0] + herd.row):
+                    for col in range(grid_coords[1], grid_coords[1] + herd.col):
+                        if (row < 0 or col < 0):
+                            return False
+                        if (row >= self.grid.num_rows or col >= self.grid.num_cols):
+                            return False
+                        if (lg.vals[row][col] != 0):
+                            return False
+                return True
+                
     def legalize(self):
         ''' After running placement, legalize the design'''
         logging.info("Begin legalization")
         lg = Grid (self.grid.num_rows, self.grid.num_cols) # legalization grid
-        for coord in self.design.coords:
+        herdList = []
+        number = 0
+        for i, coord in enumerate(self.design.coords):
+        # for coord in self.design.coords:
             legalized = False
             coord.row = round(coord.row)
             coord.col = round(coord.col)
+            size = self.design.node_sizes[i]
+            # don't know how to place things smaller than tiles, so just rounding up
+            size.row = int(math.ceil(size.row))
+            size.col = int(math.ceil(size.col))
             if coord.row < 0: coord.row = 0
             if coord.col < 0: coord.col = 0
             if coord.row >= self.grid.num_rows: coord.row = self.grid.num_rows-1
             if coord.col >= self.grid.num_cols: coord.col = self.grid.num_cols-1
-            if lg.vals[coord.row][coord.col] == 0:
-                lg.vals[coord.row][coord.col] = 1
-                continue
-            dist = 1
-            while not legalized:
-                spiral_coords = []
-                spiral_coords.append(Coord(coord.row, coord.col+dist))
-                spiral_coords.append(Coord(coord.row+dist, coord.col))
-                spiral_coords.append(Coord(coord.row, coord.col-dist))
-                spiral_coords.append(Coord(coord.row-dist, coord.col))
-                for i in range(-dist+1,dist+1):
-                    if i == 0: continue
-                    spiral_coords.append(Coord(coord.row+i, coord.col+dist))
-                    spiral_coords.append(Coord(coord.row+dist, coord.col-i))
-                    spiral_coords.append(Coord(coord.row-i, coord.col-dist))
-                    spiral_coords.append(Coord(coord.row-dist, coord.col+i))
 
-                new_coord_tested = False
-                for i in range(len(spiral_coords)):
-                    if spiral_coords[i].row < 0 or spiral_coords[i].row >= self.grid.num_rows: continue
-                    if spiral_coords[i].col < 0 or spiral_coords[i].col >= self.grid.num_cols: continue
-                    new_coord_tested = True
-                    if lg.vals[spiral_coords[i].row][spiral_coords[i].col] == 0:
-                        lg.vals[spiral_coords[i].row][spiral_coords[i].col] = 1
-                        coord.row = spiral_coords[i].row
-                        coord.col = spiral_coords[i].col
-                        legalized = True
+            # if the top left corner is filled on the grid or if it's empty
+            if lg.vals[coord.row][coord.col] == 0:
+                # Do not go out of the top or the left of the grid
+            
+                # Because we're looking @ the top left corner, move the herd upwards until all
+                # rows have been checked.
+                for row in range(coord.row, coord.row - size.row, -1):
+                    # Start at "placed" location, Move the herd to the left, closer to t=0
+                    for col in range(coord.col, coord.col - size.col, -1):
+                        if (self.is_legal_placement([row, col], size, lg)):
+                            curr_row = row
+                            curr_col = col
+                            legalized = True
+                            break
+                    if legalized:
                         break
-                if new_coord_tested:
-                    dist += 1
-                else: 
+            dist = 0
+
+            while not legalized:
+                attempted_placement = False
+                curr_row = min(max(coord.row - dist, 0), self.grid.num_rows)
+                curr_col = min(max(coord.col + dist, 0), self.grid.num_cols)
+
+                # starting right of the target tile, moving down
+                while (not legalized and curr_row < coord.row + size.row + dist):
+                    attempted_placement = True
+                    if (self.is_legal_placement([curr_row, curr_col], size, lg)):
+                        legalized = 1
+                        break
+                    elif (curr_row == self.grid.num_rows - 1):
+                        break
+                    else:
+                        curr_row += 1
+
+                # moving left, beneath the target tile, until the herd
+                # is clear of the target tile (column wise), and won't 
+                # overlap with the target tile until it wants to move up
+                while (not legalized and coord.col - curr_col - dist - size.col <= -1):
+                    attempted_placement = True
+                    if (self.is_legal_placement([curr_row, curr_col], size, lg)):
+                        legalized = 1
+                        break
+                    elif (curr_col == 0):
+                        break
+                    else:
+                        curr_col -= 1
+
+                # moving up, to the left of the target tile, until the 
+                # bottom of the current herd clears the top of the target
+                # tile.
+                while (not legalized and coord.row - curr_row - dist - size.row <= -1):
+                    attempted_placement = True
+                    if (self.is_legal_placement([curr_row, curr_col], size, lg)):
+                        legalized = 1
+                        break
+                    elif (curr_row == 0):
+                        break
+                    else:
+                        curr_row -= 1
+
+                # moving right, until the herd is clear of the right hand 
+                # side of the target tile.
+                while (not legalized and curr_col < coord.col + dist + size.col):
+                    attempted_placement = True
+                    if (self.is_legal_placement([curr_row, curr_col], size, lg)):
+                        legalized = 1
+                        break
+                    elif (curr_col == self.grid.num_cols - 1):
+                        break
+                    else:
+                        curr_col += 1
+                if (not attempted_placement):
+                    print("failed")
                     logging.info(f"Legalization FAILED: no legal placement found for node at {coord}.")
                     return
+                elif (dist > max(self.grid.num_rows, self.grid.num_cols)):
+                    logging.info(f"Legalization FAILED: no legal placement found for node at {coord}.")
+                    return
+                else: 
+                    dist += 1
+            if (legalized):
+                coord.row = curr_row
+                coord.col = curr_col
+                herdList.append(Herd(self.grid.num_rows - curr_row - 1, curr_col, size.row, size.col, number))
+                number += 1
+                for row in range(coord.row, coord.row + size.row):
+                    for col in range(coord.col, coord.col + size.col):
+                        lg.vals[row][col] = 1
+                continue
+        print(lg.print_grid())
+        print("===============")
+        print("Total tiles placed: " + str(np.sum(np.asarray(lg.vals))))
 
         logging.info("End legalization")

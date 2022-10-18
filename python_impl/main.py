@@ -5,6 +5,7 @@ import cProfile
 import sys
 import logging
 import random
+from naivePlacer import *
 
 def makeRandomNet(node_count):
     netsize = 2
@@ -79,23 +80,36 @@ def runAIEPlacer():
     num_rows = 8*1
     num_cols = 8*4
     grid = Grid(num_rows, num_cols)
-    node_count = int(num_rows * num_cols * 0.5)
+    node_count = int(num_rows * num_cols * 0.2)
     coords = initializeCoords(grid, node_count)
     dependencies = initializeDependencies(node_count)
     node_names = []
     node_sizes = []
+    total_size = 0
     for i in range(len(coords)):
         node_names.append("k"+str(i))
-        node_sizes.append(Coord(.8, .8))
+        # node_sizes.append(Coord(.8, .8))
+        num1 = random.random()
+        num2 = random.random()
+        row_size = 1
+        col_size = 1
+        if (num1 > .8):
+            row_size = 2
+        if (num2 > .8):
+            col_size = 2
+        node_sizes.append(Coord(row_size, col_size))
+        total_size += col_size * row_size
     nets = []
     for i in range(int((2+random.random()) * len(coords))):
     #for i in range(2):
         nets.append(makeRandomNet(len(coords)))
     design = Design(coords, node_names, node_sizes, dependencies, nets)
-
-    placer = AIEplacer(grid, design) 
+    print(nets)
+    placer = AIEplacer(grid, design)
     placer.run(999)
+    print("Number of tiles to be placed: " + str(total_size))
 
 if __name__ == "__main__":
+    random.seed(1)
     #cProfile.run('runAIEPlacer()')
     runAIEPlacer()
