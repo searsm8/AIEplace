@@ -12,6 +12,33 @@ import time
 import numpy as np
 import logging
 import PlaceDrawer
+import jsbeautifier
+
+class Herd:
+    def __init__(self, row_loc, col_loc, row_size, col_size, number):
+        self.row_loc = row_loc
+        self.col_loc = col_loc
+        self.row_size = row_size
+        self.col_size = col_size
+        self.number = number
+    
+    def convert_to_list(self):
+        """Converts the herd locations and number to a format that will be 
+           displayed correctly in the AIR partition grid
+
+        Returns:
+            list: [<number>, <name>, [<row #>, <col #>], ...]
+        """
+        locations = [self.number]
+        for i in range(self.row_size):
+            for j in range(self.col_size):
+                # Right and down
+                row_coord = self.row_loc - i
+                col_coord = self.col_loc + j
+                locations.append([row_coord, col_coord])
+        return locations
+
+
 
 class Coord:
     def __init__(self, row, col):
@@ -31,13 +58,17 @@ class Grid:
         self.vals = []
         for i in range(num_rows):
             self.vals.append([0]*num_cols)
+    def print_grid(self):
+        temp_grid = np.asarray(self.vals)
+        print(temp_grid)
 
 class Design:
     # primary lists which hold design information
-    def __init__(self, coords, node_names, node_sizes, nets) -> None:
+    def __init__(self, coords, node_names, node_sizes, dependencies, nets) -> None:
         self.coords = coords
         self.node_names = node_names
         self.node_sizes = node_sizes
+        self.dependencies = dependencies
         self.nets = nets # each net is a list of node indices
                     # e.g. [4,7,9] means nodes 4, 7, and 9 are connect by a net
         
@@ -129,10 +160,13 @@ class AIEplacer:
 
     def run(self, iterations):
         ''' Runs the ePlace algorithm'''
-        export_images = False
+        export_images = True
 
         logging.info("Begin AIEplace")
         os.system("mkdir results")
+
+        stagnant_iterations = 0 # number of iterations without seeing any improvement
+        converged = False 
         
         for iter in range(iterations):
             logging.root.name = 'ITER ' + str(iter)
@@ -221,41 +255,32 @@ class AIEplacer:
             electroForceY = AIEmath.customDCT.idcst_2d(electroForceY)
 
             step_len = 0.09
-            density_penalty = min(50, 0.05*(iter))
+            density_penalty = 0.02*(iter) if iter < 50 else 0.05*iter
             print(f"density_penalty: {density_penalty}")
 
-
-            my_node = 0
-            #print(f"node {my_node}: ({self.design.coords[my_node].row:.2f}, {self.design.coords[my_node].col:.2f})")
-            #print(f"hpwl_grad[0]: ({hpwl_gradient[0].row:.2f}, {hpwl_gradient[0].col:.2f}) ")
-            #print(f"density_grad[0] X: {density_penalty*electroForceX[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)]:.2f}")
-            #print(f"density_grad[0] Y: {density_penalty*electroForceY[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)]:.2f}")
-            #print(f"step[0].row: {step_len * (hpwl_gradient[0].row + density_penalty*electroForceX[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)] ):.2f}")
-            #print(f"step[0].col: {step_len * (hpwl_gradient[0].col + density_penalty*electroForceY[int(self.design.coords[0].row/self.bin_height)][int(self.design.coords[0].col/self.bin_width)] ):.2f}")
-
-
             # Update node locations
-            #print(f"Update coords:")
-            #prettyPrint.coord(self.design.coords[my_node]); print(f" --> ", end="")
+            depend_weight = 5 if iter < 50 else 3#max(0.5, 0.02*(100-iter))
             for i in range(len(self.design.coords)):
                 # Compute the electro force for each node, accounting for bin overlaps
                 force = Coord(0, 0)
                 node = self.design.coords[i]
-                for bin_row in range(math.floor(node.row)-1, math.floor(node.row)+2):
-                    for bin_col in range(math.floor(node.col)-1, math.floor(node.col +2)):
+                for bin_row in range(max(0, math.floor(node.row)-1), min(math.floor(node.row)+2, self.grid.num_rows-1)):
+                    for bin_col in range(max(0, math.floor(node.col)-1), min(math.floor(node.col+2), self.grid.num_cols-1)):
                         overlap = self.computeOverlap(i, bin_row, bin_col)
                         if overlap > 0:
                             force.row += overlap * electroForceX[bin_row][bin_col]
                             force.col += overlap * electroForceY[bin_row][bin_col]
 
-                self.design.coords[i].row -= step_len * (hpwl_gradient[i].row - density_penalty * force.row)
+                dependency_force = depend_weight*(self.design.dependencies[i]-0.5)*(self.grid.num_cols-self.design.coords[i].col)/self.grid.num_cols
+                # Subtract the electro force because we want to model REPULSIVE force
+                self.design.coords[i].row -= step_len * (hpwl_gradient[i].row  - density_penalty * force.row)
                 #self.design.coords[i].row -= step_len * (0 - density_penalty * force.row)
                                             #- density_penalty*electroForceX[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
                                             # WHY IS THIS MINUS SIGN NEEDED????
                 #if self.design.coords[i].row < 0: self.design.coords[i].row = 0 # this shouldn't be needed b/c of boundary condition?
                 #if self.design.coords[i].row + self.design.node_sizes[i].row >= self.grid.num_rows : self.design.coords[i].row = self.grid.num_rows-1
 
-                self.design.coords[i].col -= step_len * (hpwl_gradient[i].col - density_penalty * force.col)
+                self.design.coords[i].col -= step_len * (hpwl_gradient[i].col - dependency_force - density_penalty * force.col)
                 #self.design.coords[i].col -= step_len * (0 - density_penalty * force.col)
                                             #- density_penalty*electroForceY[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
                 #if self.design.coords[i].col < 0: self.design.coords[i].col = 0
@@ -268,18 +293,44 @@ class AIEplacer:
             #prettyPrint.matrix(electroForceX, title="electroForceX(rows):", tabs="\t"*8)
             #os.system("clear")
 
-            nets_to_draw = []
+
+            # after the update, compute new metrics
+            overflow = 0
+            for i in range(len(self.bin_grid.vals)):
+                for j in range(len(self.bin_grid.vals[i])):
+                    if self.bin_grid.vals[-i-1][j] > 1:
+                        overflow += self.bin_grid.vals[-i-1][j] - 1
+
+            if iter == 0:
+                min_overflow = overflow
+            if overflow >= min_overflow:
+                stagnant_iterations += 1
+            else: stagnant_iterations = 0
+            if overflow < min_overflow:
+                min_overflow = overflow
+
+            logging.info(f"\t\t{stagnant_iterations} stagnant_iterations\t{overflow} overflow\t {min_overflow} min_overflow")
+            convergence_iterations = 20
+            if iter > 50 and stagnant_iterations >= convergence_iterations:
+                logging.info(f"No improvement in overflow for {convergence_iterations} iterations...Stopping.")
+                converged = True
+
             if iter == iterations-1:
+                converged = True
+
+            nets_to_draw = []
+            if converged:
                 self.legalize()
                 # choose a random node and draw all nets for that node
                 for i in range(1):
-                    target_node=random.randint(0, len(self.design.coords)-1)
+                    while True:
+                        target_node=random.randint(0, len(self.design.coords)-1)
+                        if self.design.dependencies[target_node] >= 1:
+                            break
                     for net in self.design.nets:
                         if net.count(target_node):
                             nets_to_draw.append(net)
-                #nets_to_draw = self.design.nets[:5]
 
-            # after the update, compute new metrics
             if export_images:
                 self.computeBinDensities()
                 net_bins = []
@@ -291,16 +342,10 @@ class AIEplacer:
                 for i in range(len(self.design.nets)):
                     total_hpwl += hpwl_actual[i].row + hpwl_actual[i].col
                 print(f"Total HPWL actual: {total_hpwl}")
-
-                overflow = 0
-                for i in range(len(self.bin_grid.vals)):
-                    for j in range(len(self.bin_grid.vals[i])):
-                        if self.bin_grid.vals[-i-1][j] > 1:
-                            overflow += self.bin_grid.vals[-i-1][j] - 1
                 print(f"overflow: {overflow}")
                     
                 #use PlaceDrawer to export an image
-                if(iter%10 == 0) or (iter == iterations-1):
+                if(iter%5 == 0) or converged:
                     filename=f"{time.strftime('%y%m%d_%H%M')}_iter_{iter}.png"
                     filename = os.path.join("results", f"run_{self.design_run}", filename)
                             
@@ -323,59 +368,146 @@ class AIEplacer:
                             bin_force_y=electroForceY,
                             density_penalty=density_penalty,
                             iteration=iter,
+                            dependencies=self.design.dependencies,
                             hpwl=total_hpwl,
                             overflow=overflow
                             )
+            if converged:
+                break
             #end iteration loop
 
         logging.root.name = 'AIEplace'
         logging.info("End AIEplace")
 
-    
+    def is_legal_placement(self, grid_coords, herd, lg):
+                """Checks if a herd fits in the grid at the specified grid tile. 
+                    Assumes the first tile in the grid will be the upper left hand
+                    tile of the herd.
+                Args:
+                    coords (list): [row, col] to place herd
+                    herd (Herd): herd to be checked
+                """
+                for row in range(grid_coords[0], grid_coords[0] + herd.row):
+                    for col in range(grid_coords[1], grid_coords[1] + herd.col):
+                        if (row < 0 or col < 0):
+                            return False
+                        if (row >= self.grid.num_rows or col >= self.grid.num_cols):
+                            return False
+                        if (lg.vals[row][col] != 0):
+                            return False
+                return True
+                
     def legalize(self):
         ''' After running placement, legalize the design'''
         logging.info("Begin legalization")
         lg = Grid (self.grid.num_rows, self.grid.num_cols) # legalization grid
-        for coord in self.design.coords:
+        herdList = []
+        number = 0
+        for i, coord in enumerate(self.design.coords):
+        # for coord in self.design.coords:
             legalized = False
             coord.row = round(coord.row)
             coord.col = round(coord.col)
+            size = self.design.node_sizes[i]
+            # don't know how to place things smaller than tiles, so just rounding up
+            size.row = int(math.ceil(size.row))
+            size.col = int(math.ceil(size.col))
             if coord.row < 0: coord.row = 0
             if coord.col < 0: coord.col = 0
             if coord.row >= self.grid.num_rows: coord.row = self.grid.num_rows-1
             if coord.col >= self.grid.num_cols: coord.col = self.grid.num_cols-1
-            if lg.vals[coord.row][coord.col] == 0:
-                lg.vals[coord.row][coord.col] = 1
-                continue
-            dist = 1
-            while not legalized:
-                spiral_coords = []
-                spiral_coords.append(Coord(coord.row, coord.col+dist))
-                spiral_coords.append(Coord(coord.row+dist, coord.col))
-                spiral_coords.append(Coord(coord.row, coord.col-dist))
-                spiral_coords.append(Coord(coord.row-dist, coord.col))
-                for i in range(-dist+1,dist+1):
-                    if i == 0: continue
-                    spiral_coords.append(Coord(coord.row+i, coord.col+dist))
-                    spiral_coords.append(Coord(coord.row+dist, coord.col-i))
-                    spiral_coords.append(Coord(coord.row-i, coord.col-dist))
-                    spiral_coords.append(Coord(coord.row-dist, coord.col+i))
 
-                new_coord_tested = False
-                for i in range(len(spiral_coords)):
-                    if spiral_coords[i].row < 0 or spiral_coords[i].row >= self.grid.num_rows: continue
-                    if spiral_coords[i].col < 0 or spiral_coords[i].col >= self.grid.num_cols: continue
-                    new_coord_tested = True
-                    if lg.vals[spiral_coords[i].row][spiral_coords[i].col] == 0:
-                        lg.vals[spiral_coords[i].row][spiral_coords[i].col] = 1
-                        coord.row = spiral_coords[i].row
-                        coord.col = spiral_coords[i].col
-                        legalized = True
+            # if the top left corner is filled on the grid or if it's empty
+            if lg.vals[coord.row][coord.col] == 0:
+                # Do not go out of the top or the left of the grid
+            
+                # Because we're looking @ the top left corner, move the herd upwards until all
+                # rows have been checked.
+                for row in range(coord.row, coord.row - size.row, -1):
+                    # Start at "placed" location, Move the herd to the left, closer to t=0
+                    for col in range(coord.col, coord.col - size.col, -1):
+                        if (self.is_legal_placement([row, col], size, lg)):
+                            curr_row = row
+                            curr_col = col
+                            legalized = True
+                            break
+                    if legalized:
                         break
-                if new_coord_tested:
-                    dist += 1
-                else: 
+            dist = 0
+
+            while not legalized:
+                attempted_placement = False
+                curr_row = min(max(coord.row - dist, 0), self.grid.num_rows)
+                curr_col = min(max(coord.col + dist, 0), self.grid.num_cols)
+
+                # starting right of the target tile, moving down
+                while (not legalized and curr_row < coord.row + size.row + dist):
+                    attempted_placement = True
+                    if (self.is_legal_placement([curr_row, curr_col], size, lg)):
+                        legalized = 1
+                        break
+                    elif (curr_row == self.grid.num_rows - 1):
+                        break
+                    else:
+                        curr_row += 1
+
+                # moving left, beneath the target tile, until the herd
+                # is clear of the target tile (column wise), and won't 
+                # overlap with the target tile until it wants to move up
+                while (not legalized and coord.col - curr_col - dist - size.col <= -1):
+                    attempted_placement = True
+                    if (self.is_legal_placement([curr_row, curr_col], size, lg)):
+                        legalized = 1
+                        break
+                    elif (curr_col == 0):
+                        break
+                    else:
+                        curr_col -= 1
+
+                # moving up, to the left of the target tile, until the 
+                # bottom of the current herd clears the top of the target
+                # tile.
+                while (not legalized and coord.row - curr_row - dist - size.row <= -1):
+                    attempted_placement = True
+                    if (self.is_legal_placement([curr_row, curr_col], size, lg)):
+                        legalized = 1
+                        break
+                    elif (curr_row == 0):
+                        break
+                    else:
+                        curr_row -= 1
+
+                # moving right, until the herd is clear of the right hand 
+                # side of the target tile.
+                while (not legalized and curr_col < coord.col + dist + size.col):
+                    attempted_placement = True
+                    if (self.is_legal_placement([curr_row, curr_col], size, lg)):
+                        legalized = 1
+                        break
+                    elif (curr_col == self.grid.num_cols - 1):
+                        break
+                    else:
+                        curr_col += 1
+                if (not attempted_placement):
+                    print("failed")
                     logging.info(f"Legalization FAILED: no legal placement found for node at {coord}.")
                     return
+                elif (dist > max(self.grid.num_rows, self.grid.num_cols)):
+                    logging.info(f"Legalization FAILED: no legal placement found for node at {coord}.")
+                    return
+                else: 
+                    dist += 1
+            if (legalized):
+                coord.row = curr_row
+                coord.col = curr_col
+                herdList.append(Herd(self.grid.num_rows - curr_row - 1, curr_col, size.row, size.col, number))
+                number += 1
+                for row in range(coord.row, coord.row + size.row):
+                    for col in range(coord.col, coord.col + size.col):
+                        lg.vals[row][col] = 1
+                continue
+        print(lg.print_grid())
+        print("===============")
+        print("Total tiles placed: " + str(np.sum(np.asarray(lg.vals))))
 
         logging.info("End legalization")

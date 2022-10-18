@@ -41,6 +41,7 @@ class PlaceDrawer(object):
                 bin_force_y=[],
                 density_penalty=0,
                 iteration=None,
+                dependencies=[],
                 hpwl=None,
                 overflow=-1):
         """
@@ -219,6 +220,13 @@ class PlaceDrawer(object):
             # draw fixed macros
             ctx.set_source_rgba(1, 0, 0, alpha=0.5)
             for i in range(num_movable_nodes, num_physical_nodes):
+                if len(dependencies) > 0:
+                    if dependencies[i] == 0:    
+                        ctx.set_source_rgba(1, 0, 0, alpha=0.5)
+                    elif dependencies[i] == 1:    
+                        ctx.set_source_rgba(0, 1, 0, alpha=0.5)
+                    else:
+                        ctx.set_source_rgba(0, 0, 1, alpha=0.5)
                 ctx.rectangle(node_xl[i], node_yl[i], node_xh[i] - node_xl[i],
                               node_yh[i] -
                               node_yl[i])  # Rectangle(xl, yl, w, h)
@@ -297,13 +305,13 @@ class PlaceDrawer(object):
                 for j in range(num_bins_x):
                     dx = 0.1*density_penalty*bin_force_y[i][j]
                     dy = 0.1*density_penalty*bin_force_x[i][j]
-                    arrow_length = math.sqrt(dx**2 + dy**2)
+                    arrow_length = min(math.sqrt(dx**2 + dy**2), .5)
                     arrow_angle = math.atan(dy/dx)
                     if dx < 0: # mirror across y axis
                         arrow_angle = math.pi + arrow_angle
-                    draw_arrow(normalize_x(bin_xl(j) + bin_size_x/2), 
-                               normalize_y(bin_yl(i) + bin_size_y/2),
-                               normalize_x(arrow_length), arrow_angle)
+                    #draw_arrow(normalize_x(bin_xl(j) + bin_size_x/2), 
+                    #           normalize_y(bin_yl(i) + bin_size_y/2),
+                    #           normalize_x(arrow_length), arrow_angle)
 
 
             # show iteration
