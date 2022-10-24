@@ -10,6 +10,13 @@
 * input = { x0, x1, x2, x3, x4, x5, x6, x7}
 * output ={ x0, x2, x4, x6, x7, x5, x3, x1}
 */
+//vectorized implementation
+void shuffle_vectorized(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out) {
+    FFT_DATA_TYPE data;
+
+}
+
+//NOT vectorized implementation
 void shuffle(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out) {
     FFT_DATA_TYPE data;
     

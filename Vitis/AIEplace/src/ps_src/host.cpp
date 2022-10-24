@@ -42,8 +42,9 @@ load_xclbin(xrtDeviceHandle device, const std::string& fnm)
 	return header;
 }
 
-
-#define SAMPLES 32
+#define FFT_SIZE 32
+#define COLS FFT_SIZE
+#define ROWS FFT_SIZE
 
 int main(int argc, char ** argv)
 {
@@ -57,35 +58,36 @@ int main(int argc, char ** argv)
     auto top = reinterpret_cast<const axlf*>(xclbin.data());
     adf::registerXRT(dhdl, top->m_header.uuid);
 
-	int sizeIn = SAMPLES;
-	int sizeOut = SAMPLES;
 	
 	//////////////////////////////////////////
 	// input memory
-	// Allocating the input size of sizeIn to MM2S
+	// Allocating the input size of COLS to MM2S
 	// This is using low-level XRT call xclAllocBO to allocate the memory
 	//////////////////////////////////////////	
     
-	xrtBufferHandle in_bohdl = xrtBOAlloc(dhdl, sizeIn * sizeof(float) * 2, 0, 0);
+	xrtBufferHandle in_bohdl = xrtBOAlloc(dhdl, COLS * sizeof(float) * 2 * ROWS, 0, 0);
 	auto in_bomapped = reinterpret_cast<uint32_t*>(xrtBOMap(in_bohdl));
-	memcpy(in_bomapped, cfloat_input, sizeIn * sizeof(float) * 2);
+	memcpy(in_bomapped, cfloat_input, COLS * sizeof(float) * 2 * ROWS);
 	printf("Input memory virtual addr 0x%px\n", in_bomapped);
 
 	#if defined(__SYNCBO_ENABLE__) 
-		xrtBOSync(in_bohdl, XCL_BO_SYNC_BO_TO_DEVICE, sizeIn * sizeof(int16_t) * 2 , 0);
+		xrtBOSync(in_bohdl, XCL_BO_SYNC_BO_TO_DEVICE, COLS * sizeof(int16_t) * 2 , 0);
 	#endif
 	
 
 	//////////////////////////////////////////
 	// output memory
-	// Allocating the output size of sizeOut to S2MM
+	// Allocating the output size of COLS to S2MM
 	// This is using low-level XRT call xclAllocBO to allocate the memory
 	//////////////////////////////////////////
-	
-	xrtBufferHandle out_bohdl = xrtBOAlloc(dhdl, sizeOut * sizeof(float) * 2, 0, 0);
-	auto out_bomapped = reinterpret_cast<float*>(xrtBOMap(out_bohdl));
-	memset(out_bomapped, 0xABCDEF00, sizeOut * sizeof(float) * 2);
-	printf("Output memory virtual addr 0x%px\n", out_bomapped);
+	xrtBufferHandle out_bohdl[3]; 
+	float* out_bomapped[3];
+	for(int i = 0; i < 3; i++){
+		out_bohdl[i] = xrtBOAlloc(dhdl, COLS * sizeof(float) * 2 * ROWS, 0, 0);
+		out_bomapped[i] = reinterpret_cast<float*>(xrtBOMap(out_bohdl[i]));
+		memset(out_bomapped[i], 0xABCDEF00, COLS * sizeof(float) * 2 * ROWS);
+		printf("Output memory virtual addr 0x%px\n", out_bomapped[i]);
+	}
 	
 	//////////////////////////////////////////
 	// mm2s ip
@@ -93,37 +95,39 @@ int main(int argc, char ** argv)
 	// that is outside of the AI Engine graph
 	//////////////////////////////////////////
 	
-	xrtKernelHandle mm2s_khdl = xrtPLKernelOpen(dhdl, top->m_header.uuid, "mm2s");
+	xrtKernelHandle mm2s_khdl = xrtPLKernelOpen(dhdl, top->m_header.uuid, "mm2s:{mm2s_1}");
 	// Need to provide the kernel handle, and the argument order of the kernel arguments
 	// Here the in_bohdl is the input buffer, the nullptr is the streaming interface and must be null,
 	// lastly, the size of the data. This info can be found in the kernel definition. 
-	xrtRunHandle mm2s_rhdl = xrtKernelRun(mm2s_khdl, in_bohdl, nullptr, sizeIn*2);
-	printf("AIEplace run mm2s (size: %d bytes)\n", sizeIn*2);
+	xrtRunHandle mm2s_rhdl = xrtKernelRun(mm2s_khdl, in_bohdl, nullptr, COLS*2*ROWS);
+	printf("AIEplace run mm2s_1 (size: %d bytes)\n", COLS*2*ROWS);
 	
 	//////////////////////////////////////////
 	// s2mm ip
 	// Using the xrtPLKernelOpen function to manually control the PL Kernel
 	// that is outside of the AI Engine graph
 	//////////////////////////////////////////
-	
-	xrtKernelHandle s2mm_khdl = xrtPLKernelOpen(dhdl, top->m_header.uuid, "s2mm");
+	xrtKernelHandle s2mm_khdl[3]; 
+	xrtRunHandle s2mm_rhdl[3];
+	for(int i = 0; i < 3; i++){
+		s2mm_khdl[i] = xrtPLKernelOpen(dhdl, top->m_header.uuid, ("s2mm_tm:{s2mm_tm_"+std::to_string(i+1)+"}").c_str());
 	// Need to provide the kernel handle, and the argument order of the kernel arguments
 	// Here the out_bohdl is the output buffer, the nullptr is the streaming interface and must be null,
 	// lastly, the size of the data. This info can be found in the kernel definition. 
-	xrtRunHandle s2mm_rhdl = xrtKernelRun(s2mm_khdl, out_bohdl, nullptr, sizeOut*2);
-	printf("AIEplace run s2mm (size: %d bytes)\n", sizeOut*2);
+		s2mm_rhdl[i] = xrtKernelRun(s2mm_khdl[i], out_bohdl[i], nullptr, COLS, ROWS);
+		printf("AIEplace run s2mm_%d (size: %d floats)\n", i+1, COLS*2*ROWS);
+	}
 
 	//////////////////////////////////////////
 	// graph execution for AIE
 	//////////////////////////////////////////	
-
     AIEplaceGraph graph;
 	
 	printf("AIEplace graph init. This does nothing because CDO in boot PDI already configures AIE.\n");
 	graph.init();
 	
-	printf("AIEplace graph running...\n");
-	graph.run(1);
+	printf("AIEplace graph running for %d iterations...\n", ROWS);
+	graph.run(ROWS);
 	
 	graph.end();
 	printf("AIEplace graph end!\n");
@@ -141,13 +145,15 @@ int main(int argc, char ** argv)
 	// wait for s2mm done
 	//////////////////////////////////////////	
 	
-	state = xrtRunWait(s2mm_rhdl);
-	std::cout << "s2mm completed with status(" << state << ")\n";
-	xrtRunClose(s2mm_rhdl);
-	xrtKernelClose(s2mm_khdl);
+	for(int i = 0; i < 3; i++){
+		state = xrtRunWait(s2mm_rhdl[i]);
+		std::cout << "s2mm completed with status(" << state << ")\n";
+		xrtRunClose(s2mm_rhdl[i]);
+		xrtKernelClose(s2mm_khdl[i]);
+	}
 
 	#if defined(__SYNCBO_ENABLE__) 
-		xrtBOSync(out_bohdl, XCL_BO_SYNC_BO_FROM_DEVICE, sizeOut * sizeof(int) , 0);
+		xrtBOSync(out_bohdl, XCL_BO_SYNC_BO_FROM_DEVICE, COLS * sizeof(int) , 0);
 	#endif
 	
 	//////////////////////////////////////////
@@ -155,21 +161,34 @@ int main(int argc, char ** argv)
 	//////////////////////////////////////////	
 	
 	int errorCount = 0;
-	{
-		for (int i = 0; i < sizeOut; i++)
-		{
-				if ((signed)out_bomapped[i] != golden[i])
-				{
-					printf("Error found @ %d, %f != %f\n", i, out_bomapped[i], golden[i]);
-					errorCount++;
-				}
-		}
-
-		if (errorCount)
-			printf("DCT Test failed with %d errors\n", errorCount);
-		else
-			printf("DCT TEST PASSED\n");
+	int successCount = 0;
+	printf("\n\n###DCT CHECK###\n");
+	for (int i = 0; i < COLS*2*ROWS; i++) {
+			if (abs(out_bomapped[0][i] - golden_dct[i]) > abs(golden_dct[i]/100)) {
+				printf("Error found @ %d, %.2f != %.2f\n", i, out_bomapped[0][i], golden_dct[i]); errorCount++; }
+			else { successCount++; printf("Correct output @ %d, %.2f == %.2f\n", i, out_bomapped[0][i], golden_dct[i]); }
 	}
+
+	printf("\n\n###IDCT CHECK###\n");
+	for (int i = 0; i < COLS*2*ROWS; i++) {
+			if (abs(out_bomapped[1][i] - golden_idct[i]) > abs(golden_idct[i]/100)) {
+				printf("Error found @ %d, %.2f != %.2f\n", i, out_bomapped[1][i], golden_idct[i]); errorCount++; }
+			else { successCount++; printf("Correct output @ %d, %.2f == %.2f\n", i, out_bomapped[1][i], golden_idct[i]); }
+	}
+
+	printf("\n\n###IDXST CHECK###\n");
+	for (int i = 0; i < COLS*2*ROWS; i++) {
+			if (abs(out_bomapped[2][i] - golden_idxst[i]) > abs(golden_idxst[i]/100)) {
+				printf("Error found @ %d, %.2f != %.2f\n", i, out_bomapped[2][i], golden_idxst[i]); errorCount++; }
+			else { successCount++; printf("Correct output @ %d, %.2f == %.2f\n", i, out_bomapped[2][i], golden_idxst[i]); }
+	}
+
+	printf("%d correct results and %d errors\n", successCount, errorCount);
+	if (errorCount)
+		printf("DCT TEST FAILED\n");
+	else
+		printf("DCT TEST PASSED\n");
+
 	//TODO: Print runtime??
 	
 	//////////////////////////////////////////
@@ -180,7 +199,9 @@ int main(int argc, char ** argv)
 	//xrtBOUnmap(dhdl, in_bohdl, in_bomapped);
 	//xrtBOUnmap(dhdl, out_bohdl, out_bomapped);
 	xrtBOFree(in_bohdl);
-	xrtBOFree(out_bohdl);
+	for(int i = 0; i < 3; i++){
+		xrtBOFree(out_bohdl[i]);
+	}
 	xrtDeviceClose(dhdl);
 	
 	return errorCount;

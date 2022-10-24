@@ -1,5 +1,6 @@
 
 TARGET := hw_emu #sw_emu, hw_emu, or hw
+TIME := time # leave blank to not time commands
 
 ROOTFS ?= /home/msears/tools/xilinx-versal-common-v2022.1/rootfs.ext4
 IMAGE ?=  /home/msears/tools/xilinx-versal-common-v2022.1/Image
@@ -17,7 +18,7 @@ BUILD_DIR := $(PWD)/build
 
 TOP := AIEplaceGraph
 AIE_TOP_CPP := $(AIE_SRC_DIR)/$(TOP).cpp
-XILINX_OBJECTS := mm2s.xo s2mm.xo #transpose.xo
+XILINX_OBJECTS := mm2s.xo s2mm_tm.xo
 CONFIG_FILE := $(PWD)/system.cfg
 
 AIE_INCLUDES := -include=$(AIE_SRC_DIR)
@@ -45,76 +46,85 @@ endif
 ################################################################
 # MAKE RULES
 ################################################################
-all: aie pl ps xsa package
+.PHONY: aie aiengine_graph pl pl_kernels sim xsa ps application pkg package
 
-PL_FLAGS := -t $(TARGET)
-PL_FLAGS += --platform $(PLATFORM)
-PL_FLAGS += --save-temps -g
+all: aie pl sim xsa ps package
 
 # =========================================================
-# Step 1. Kernel XO File Generation
-# ========================================================
-# This step compiles the HLS C PL kernels.
-# make pl
-pl: $(XILINX_OBJECTS)
-
-%.xo: $(PL_SRC_DIR)/%.cpp
-	cd $(BUILD_DIR); \
-	v++ --compile -k $(basename $(notdir $@)) $(PL_FLAGS) $< -o $@
-
-
-# =========================================================
-# Step 2. AI Engine SDF Graph File and $(WORK_DIR)/ Directory
+# Step 1. AI Engine SDF Graph File and $(WORK_DIR)/ Directory
 #         (containing the Graph Executable) Generation
 # ========================================================
 # Compiles the aie kernels and graphs
 # Output: .build/libadf.a
 # make aie
-aie: ./build/libadf.a
 
-./build/libadf.a: $(AIE_SRC_DIR)/* $(AIE_SRC_DIR)/kernels/*
-	mkdir -p $(BUILD_DIR); \
-	cd $(BUILD_DIR); \
-	aiecompiler $(AIE_INCLUDES) $(AIE_FLAGS) $(AIE_TOP_CPP) 2>&1 | tee -a aiecompiler.log
-	@echo ""
-	@echo "AIE Compilation Complete..."
+aie: aiengine_graph 
+
+aiengine_graph: ./libadf.a
+
+./libadf.a: $(AIE_SRC_DIR)/* $(AIE_SRC_DIR)/kernels/*
+	@echo "####################################"
+	@echo "BEGIN: make aie"
+	@echo "####################################"
+	@mkdir -p $(BUILD_DIR);
+	@mkdir -p $(BUILD_DIR)/out; 
+	$(TIME) aiecompiler $(AIE_INCLUDES) $(AIE_FLAGS) $(AIE_TOP_CPP) --output-archive="./libadf.a" 2>&1 | tee -a aiecompiler.log
+	@echo "####################################"
+	@echo "END: make aie"
 	@echo "####################################"
 	@echo ""
 
+# =========================================================
+# Step 2. Kernel XO File Generation
+# ========================================================
+# This step compiles the HLS C PL kernels.
+# make pl
+
+PL_FLAGS := -t $(TARGET)
+PL_FLAGS += --platform $(PLATFORM)
+PL_FLAGS += --save-temps -g
+
+pl: pl_kernels # alias
+
+pl_kernels: $(XILINX_OBJECTS)
+
+%.xo: $(PL_SRC_DIR)/%.cpp
+	@echo "v++ --compile --kernel $(basename $(notdir $@)) ..."
+	$(TIME) v++ --compile --kernel $(basename $(notdir $@)) $(PL_FLAGS) $< -o $@
 
 SIM_FLAGS := --pkg-dir=Work/
 SIM_FLAGS += -i=$(PWD)
-SIM_FLAGS += --profile
+# is profile option needed if you plan to run hw emulation later?
+SIM_FLAGS += --profile 
 #SIM_FLAGS += --dump-vcd=$(TOP) # BEWARE: creating a VCD can eat a TON of disk space for large sims!
 
 # Run the AIE simulator, reading ./data/input.dat files.
 # Output to ./build/aiesimulator_output/data
-sim: aie
+sim: simulate # alias
+
+simulate: aie
+	@echo ""
+	@echo "####################################"
+	@echo "BEGIN: AIE Simulation"
+	@echo "####################################"
 	@echo TARGET=$(TARGET)
 ifeq ($(TARGET),sw_emu)
-	cd $(BUILD_DIR); \
-	time x86simulator $(SIM_FLAGS)  2>&1 | tee -a x86sim.log
+	$(TIME) x86simulator $(SIM_FLAGS)  2>&1 | tee -a x86sim.log
 else
-	cd $(BUILD_DIR); \
-	time aiesimulator $(SIM_FLAGS)  2>&1 | tee -a aiesim.log
+	$(TIME) aiesimulator $(SIM_FLAGS) > aiesim.log
 endif 
+	@echo "####################################"
+	@echo "END: AIE Simulation"
+	@echo "####################################"
 	@echo ""
-	@echo "####################################"
-	@echo "AIE Simulation Complete."
-	@echo "####################################"
 
-aiesim: aie
-	cd $(BUILD_DIR); \
-	time aiesimulator $(SIM_FLAGS)  2>&1 | tee -a aiesim.log
-	@echo ""
-	@echo "####################################"
-	@echo "AIE Simulation, With Profiling, Complete..."
-	@echo "####################################"
 
-emu:
-	./launch_hw_emu.sh -aie-sim-options $(BUILD_DIR)/aiesimulator_output/aiesim_options.txt -add-env AIE_COMPILER_WORKDIR=$(BUILD_DIR)/Work 
+emu: emulate # alias
 
-analyze: analyze_aie
+emulate:
+	./launch_hw_emu.sh -aie-sim-options ./aiesimulator_output/aiesim_options.txt -add-env AIE_COMPILER_WORKDIR=./Work 
+
+analyze: analyze_aie # alias
 
 # after running aie sim, waveform can be generated using vcd
 vcd:
@@ -135,10 +145,16 @@ VPP_LINK_FLAGS := --target $(TARGET) --platform $(PLATFORM) libadf.a $(XILINX_OB
 
 # Link Xilinx Object Files (.xo) into a .xsa file
 # Link the platform, PL kernels, and AIE graph
-xsa:
-	cd $(BUILD_DIR); \
+xsa: $(CONFIG_FILE)
+	@echo "####################################"
+	@echo "BEGIN: make xsa"
+	@echo "####################################"
+	@echo v++ --link ...
 	v++ --link $(VPP_LINK_FLAGS)
+	@echo "####################################"
 	@echo "END: make xsa"
+	@echo "####################################"
+	@echo ""
 
 APP_ELF := fft_2d_aie_xrt.elf
 CXX := /tools/batonroot/rodin/devkits/lnx64/gcc-8.3.0/bin/g++
@@ -190,21 +206,27 @@ CXX := aarch64-xilinx-linux-g++  -mcpu=cortex-a72.cortex-a53 -march=armv8-a+crc 
 GCC_LIB := -lxaiengine -ladf_api_xrt -lxrt_core -lxrt_coreutil -L$(SDKTARGETSYSROOT)/usr/lib -L${XILINX_VITIS}/aietools/lib/aarch64.o --sysroot=${SDKTARGETSYSROOT}
 
 # Compile the host program to run on the PS
-ps:
-	cd ./src/ps_src/; \
-	$(CXX) $(GCC_FLAGS) $(GCC_INCLUDES) -o aie_control_xrt.o ../../build/Work/ps/c_rts/aie_control_xrt.cpp; \
+ps: application # alias
+
+application: $(PS_SRC_DIR)/host.cpp
+	@echo "Begin PS host app compilation..."
+	@cd $(PS_SRC_DIR); \
+	$(CXX) $(GCC_FLAGS) $(GCC_INCLUDES) -o aie_control_xrt.o ../../Work/ps/c_rts/aie_control_xrt.cpp; \
 	$(CXX) $(GCC_FLAGS) $(GCC_INCLUDES) -o host.o host.cpp; \
-	$(CXX) *.o $(GCC_LIB) -std=c++14 -o $(BUILD_DIR)/host.exe 
+	$(CXX) *.o $(GCC_LIB) -std=c++14 -o $(PWD)/host.exe 
 	@echo "####################################"
 	@echo "END: make ps"
 	@echo "####################################"
 
 ##################################################################################################
 # Depending on the TARGET, it'll either generate the PDI for sw_emu,hw_emu or hw.
+pkg: package # alias
 #--package.sd_file embedded_exec.sh 
 package: #guard-PLATFORM_REPO_PATHS guard-IMAGE guard-ROOTFS
-	cd $(BUILD_DIR); \
-	v++ --package \
+	@echo "\n####################################"
+	@echo v++ --package ...
+	$(TIME) v++ \
+		--package \
 		--target ${TARGET} \
 		--platform ${PLATFORM} \
 		--package.rootfs=${ROOTFS} \
@@ -212,11 +234,15 @@ package: #guard-PLATFORM_REPO_PATHS guard-IMAGE guard-ROOTFS
 		--package.boot_mode=sd \
 		--package.kernel_image=${IMAGE} \
 		--package.defer_aie_run \
-		--package.sd_file $(BUILD_DIR)/host.exe $(BUILD_DIR)/AIEplace.xsa $(BUILD_DIR)/libadf.a
-	@echo "END: make package"
+		--package.sd_file host.exe AIEplace.xsa libadf.a 
+	@echo "####################################"
+	@echo "END: make package."
+	@echo "####################################"
+	@echo ""
 	
 
 ###################################################################################################
 
 clean:
-	rm -rf $(BUILD_DIR) _x .Xil emu_qemu_scripts sim
+	rm -rf $(BUILD_DIR) _x .Xil emu_qemu_scripts sd_card sim aiesimulator_output
+	rm -rf *.xo* *.xsa* *.a *.exe *.o *.bin *.BIN *xclbin *.bif *.log *summary *img qemu* *.wcfg *.wdb *.txt
