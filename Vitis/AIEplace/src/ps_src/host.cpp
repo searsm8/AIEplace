@@ -45,6 +45,7 @@ load_xclbin(xrtDeviceHandle device, const std::string& fnm)
 #define FFT_SIZE 32
 #define COLS FFT_SIZE
 #define ROWS FFT_SIZE
+#define BO_SIZE ROWS*COLS*2
 
 int main(int argc, char ** argv)
 {
@@ -65,29 +66,36 @@ int main(int argc, char ** argv)
 	// This is using low-level XRT call xclAllocBO to allocate the memory
 	//////////////////////////////////////////	
     
-	xrtBufferHandle in_bohdl = xrtBOAlloc(dhdl, COLS * sizeof(float) * 2 * ROWS, 0, 0);
+	xrtBufferHandle in_bohdl = xrtBOAlloc(dhdl, BO_SIZE*sizeof(float), 0, 0);
 	auto in_bomapped = reinterpret_cast<uint32_t*>(xrtBOMap(in_bohdl));
-	memcpy(in_bomapped, cfloat_input, COLS * sizeof(float) * 2 * ROWS);
+	memcpy(in_bomapped, cfloat_input, BO_SIZE*sizeof(float));
 	printf("Input memory virtual addr 0x%px\n", in_bomapped);
 
 	#if defined(__SYNCBO_ENABLE__) 
 		xrtBOSync(in_bohdl, XCL_BO_SYNC_BO_TO_DEVICE, COLS * sizeof(int16_t) * 2 , 0);
 	#endif
 	
+	//////////////////////////////////////////
+	// transpose buffers
+	xrtBufferHandle transpose_bohdl = xrtBOAlloc(dhdl, BO_SIZE*sizeof(float), 0, 0);
+	float* transpose_bomapped = reinterpret_cast<float*>(xrtBOMap(transpose_bohdl));
+	memset(transpose_bomapped, 0xABCDEF00, BO_SIZE*sizeof(float));
+	printf("Output memory virtual addr 0x%px\n", transpose_bomapped);
+
+	//xrtBufferHandle transpose_out_bohdl = xrtBOAlloc(dhdl, BO_SIZE*sizeof(float), 0, 0);
+	//float* transpose_out_bomapped = reinterpret_cast<float*>(xrtBOMap(transpose_out_bohdl));
+	//memset(transpose_out_bomapped, 0xABCDEF00, BO_SIZE*sizeof(float));
+	//printf("Output memory virtual addr 0x%px\n", transpose_out_bomapped);
 
 	//////////////////////////////////////////
 	// output memory
 	// Allocating the output size of COLS to S2MM
 	// This is using low-level XRT call xclAllocBO to allocate the memory
 	//////////////////////////////////////////
-	xrtBufferHandle out_bohdl[3]; 
-	float* out_bomapped[3];
-	for(int i = 0; i < 3; i++){
-		out_bohdl[i] = xrtBOAlloc(dhdl, COLS * sizeof(float) * 2 * ROWS, 0, 0);
-		out_bomapped[i] = reinterpret_cast<float*>(xrtBOMap(out_bohdl[i]));
-		memset(out_bomapped[i], 0xABCDEF00, COLS * sizeof(float) * 2 * ROWS);
-		printf("Output memory virtual addr 0x%px\n", out_bomapped[i]);
-	}
+	xrtBufferHandle out_bohdl = xrtBOAlloc(dhdl, BO_SIZE*sizeof(float), 0, 0);
+	float* out_bomapped = reinterpret_cast<float*>(xrtBOMap(out_bohdl));
+	memset(out_bomapped, 0xABCDEF00, BO_SIZE*sizeof(float));
+	printf("Output memory virtual addr 0x%px\n", out_bomapped);
 	
 	//////////////////////////////////////////
 	// mm2s ip
@@ -99,24 +107,25 @@ int main(int argc, char ** argv)
 	// Need to provide the kernel handle, and the argument order of the kernel arguments
 	// Here the in_bohdl is the input buffer, the nullptr is the streaming interface and must be null,
 	// lastly, the size of the data. This info can be found in the kernel definition. 
-	xrtRunHandle mm2s_rhdl = xrtKernelRun(mm2s_khdl, in_bohdl, nullptr, COLS*2*ROWS);
-	printf("AIEplace run mm2s_1 (size: %d bytes)\n", COLS*2*ROWS);
+	xrtRunHandle mm2s_rhdl = xrtKernelRun(mm2s_khdl, in_bohdl, nullptr, BO_SIZE);
+	printf("AIEplace run mm2s_1 (size: %d bytes)\n", BO_SIZE);
+
+	//transpose ip
+	xrtKernelHandle transpose_khdl = xrtPLKernelOpen(dhdl, top->m_header.uuid, "transpose:{transpose_1}");
+	xrtRunHandle transpose_rhdl = xrtKernelRun(transpose_khdl, transpose_bohdl, nullptr, nullptr, COLS, ROWS);
+	printf("AIEplace run transpose_1 (size: %d bytes)\n", BO_SIZE);
 	
 	//////////////////////////////////////////
 	// s2mm ip
 	// Using the xrtPLKernelOpen function to manually control the PL Kernel
 	// that is outside of the AI Engine graph
 	//////////////////////////////////////////
-	xrtKernelHandle s2mm_khdl[3]; 
-	xrtRunHandle s2mm_rhdl[3];
-	for(int i = 0; i < 3; i++){
-		s2mm_khdl[i] = xrtPLKernelOpen(dhdl, top->m_header.uuid, ("s2mm_tm:{s2mm_tm_"+std::to_string(i+1)+"}").c_str());
+	xrtKernelHandle s2mm_khdl = xrtPLKernelOpen(dhdl, top->m_header.uuid, "s2mm_tm:{s2mm_tm_1}");
 	// Need to provide the kernel handle, and the argument order of the kernel arguments
 	// Here the out_bohdl is the output buffer, the nullptr is the streaming interface and must be null,
 	// lastly, the size of the data. This info can be found in the kernel definition. 
-		s2mm_rhdl[i] = xrtKernelRun(s2mm_khdl[i], out_bohdl[i], nullptr, COLS, ROWS);
-		printf("AIEplace run s2mm_%d (size: %d floats)\n", i+1, COLS*2*ROWS);
-	}
+	xrtRunHandle s2mm_rhdl = xrtKernelRun(s2mm_khdl, out_bohdl, nullptr, COLS, ROWS);
+	printf("AIEplace run s2mm_%d (size: %d floats)\n", 1, BO_SIZE);
 
 	//////////////////////////////////////////
 	// graph execution for AIE
@@ -135,22 +144,27 @@ int main(int argc, char ** argv)
 	//////////////////////////////////////////
 	// wait for mm2s done
 	//////////////////////////////////////////	
-	
 	auto state = xrtRunWait(mm2s_rhdl);
 	std::cout << "mm2s completed with status(" << state << ")\n";
 	xrtRunClose(mm2s_rhdl);
 	xrtKernelClose(mm2s_khdl);
+	
+	//////////////////////////////////////////
+	// wait for transpose done
+	//////////////////////////////////////////	
+	
+	state = xrtRunWait(transpose_rhdl);
+	std::cout << "transpose completed with status(" << state << ")\n";
+	xrtRunClose(transpose_rhdl);
+	xrtKernelClose(transpose_khdl);
 
 	//////////////////////////////////////////
 	// wait for s2mm done
 	//////////////////////////////////////////	
-	
-	for(int i = 0; i < 3; i++){
-		state = xrtRunWait(s2mm_rhdl[i]);
-		std::cout << "s2mm completed with status(" << state << ")\n";
-		xrtRunClose(s2mm_rhdl[i]);
-		xrtKernelClose(s2mm_khdl[i]);
-	}
+	state = xrtRunWait(s2mm_rhdl);
+	std::cout << "s2mm completed with status(" << state << ")\n";
+	xrtRunClose(s2mm_rhdl);
+	xrtKernelClose(s2mm_khdl);
 
 	#if defined(__SYNCBO_ENABLE__) 
 		xrtBOSync(out_bohdl, XCL_BO_SYNC_BO_FROM_DEVICE, COLS * sizeof(int) , 0);
@@ -164,24 +178,24 @@ int main(int argc, char ** argv)
 	int successCount = 0;
 	printf("\n\n###DCT CHECK###\n");
 	for (int i = 0; i < COLS*2*ROWS; i++) {
-			if (abs(out_bomapped[0][i] - golden_dct[i]) > abs(golden_dct[i]/100)) {
-				printf("Error found @ %d, %.2f != %.2f\n", i, out_bomapped[0][i], golden_dct[i]); errorCount++; }
-			else { successCount++; printf("Correct output @ %d, %.2f == %.2f\n", i, out_bomapped[0][i], golden_dct[i]); }
+			if (abs(out_bomapped[i] - golden_2d_dct[i]) > abs(golden_dct[i]/100)) {
+				printf("Error found @ %d, %.2f != %.2f\n", i, out_bomapped[i], golden_2d_dct[i]); errorCount++; }
+			else { successCount++; printf("Correct output @ %d, %.2f == %.2f\n", i, out_bomapped[i], golden_2d_dct[i]); }
 	}
 
-	printf("\n\n###IDCT CHECK###\n");
-	for (int i = 0; i < COLS*2*ROWS; i++) {
-			if (abs(out_bomapped[1][i] - golden_idct[i]) > abs(golden_idct[i]/100)) {
-				printf("Error found @ %d, %.2f != %.2f\n", i, out_bomapped[1][i], golden_idct[i]); errorCount++; }
-			else { successCount++; printf("Correct output @ %d, %.2f == %.2f\n", i, out_bomapped[1][i], golden_idct[i]); }
-	}
+	//printf("\n\n###IDCT CHECK###\n");
+	//for (int i = 0; i < COLS*2*ROWS; i++) {
+	//		if (abs(out_bomapped[1][i] - golden_idct[i]) > abs(golden_idct[i]/100)) {
+	//			printf("Error found @ %d, %.2f != %.2f\n", i, out_bomapped[1][i], golden_idct[i]); errorCount++; }
+	//		else { successCount++; printf("Correct output @ %d, %.2f == %.2f\n", i, out_bomapped[1][i], golden_idct[i]); }
+	//}
 
-	printf("\n\n###IDXST CHECK###\n");
-	for (int i = 0; i < COLS*2*ROWS; i++) {
-			if (abs(out_bomapped[2][i] - golden_idxst[i]) > abs(golden_idxst[i]/100)) {
-				printf("Error found @ %d, %.2f != %.2f\n", i, out_bomapped[2][i], golden_idxst[i]); errorCount++; }
-			else { successCount++; printf("Correct output @ %d, %.2f == %.2f\n", i, out_bomapped[2][i], golden_idxst[i]); }
-	}
+	//printf("\n\n###IDXST CHECK###\n");
+	//for (int i = 0; i < COLS*2*ROWS; i++) {
+	//		if (abs(out_bomapped[2][i] - golden_idxst[i]) > abs(golden_idxst[i]/100)) {
+	//			printf("Error found @ %d, %.2f != %.2f\n", i, out_bomapped[2][i], golden_idxst[i]); errorCount++; }
+	//		else { successCount++; printf("Correct output @ %d, %.2f == %.2f\n", i, out_bomapped[2][i], golden_idxst[i]); }
+	//}
 
 	printf("%d correct results and %d errors\n", successCount, errorCount);
 	if (errorCount)
@@ -199,9 +213,8 @@ int main(int argc, char ** argv)
 	//xrtBOUnmap(dhdl, in_bohdl, in_bomapped);
 	//xrtBOUnmap(dhdl, out_bohdl, out_bomapped);
 	xrtBOFree(in_bohdl);
-	for(int i = 0; i < 3; i++){
-		xrtBOFree(out_bohdl[i]);
-	}
+	xrtBOFree(transpose_bohdl);
+	xrtBOFree(out_bohdl);
 	xrtDeviceClose(dhdl);
 	
 	return errorCount;

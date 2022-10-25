@@ -18,7 +18,7 @@ BUILD_DIR := $(PWD)/build
 
 TOP := AIEplaceGraph
 AIE_TOP_CPP := $(AIE_SRC_DIR)/$(TOP).cpp
-XILINX_OBJECTS := mm2s.xo s2mm_tm.xo
+XILINX_OBJECTS := mm2s.xo transpose.xo s2mm_transpose.xo
 CONFIG_FILE := $(PWD)/system.cfg
 
 AIE_INCLUDES := -include=$(AIE_SRC_DIR)
