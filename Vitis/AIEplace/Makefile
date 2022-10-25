@@ -11,15 +11,15 @@ PLATFORM_REPO_PATHS := $(XILNX_TOOLS_LOCATION)/base_platforms
 #DSPLIB_ROOT :=
 PLATFORM := ${PLATFORM_REPO_PATHS}/xilinx_vck190_base_202210_1/xilinx_vck190_base_202210_1.xpfm
 SRC_DIR := $(PWD)/src
-AIE_SRC_DIR := $(SRC_DIR)/aie_src
-PL_SRC_DIR  := $(SRC_DIR)/pl_src
-PS_SRC_DIR  := $(SRC_DIR)/ps_src
+AIE_SRC_DIR := $(SRC_DIR)/aie
+PL_SRC_DIR  := $(SRC_DIR)/pl
+PS_SRC_DIR  := $(SRC_DIR)/ps
 BUILD_DIR := $(PWD)/build
 
 TOP := AIEplaceGraph
 AIE_TOP_CPP := $(AIE_SRC_DIR)/$(TOP).cpp
 XILINX_OBJECTS := mm2s.xo transpose.xo s2mm_transpose.xo
-CONFIG_FILE := $(PWD)/system.cfg
+CONFIG_FILE := $(PWD)/src/system.cfg
 
 AIE_INCLUDES := -include=$(AIE_SRC_DIR)
 AIE_INCLUDES += -include=$(AIE_SRC_DIR)/kernels
@@ -66,8 +66,6 @@ aiengine_graph: ./libadf.a
 	@echo "####################################"
 	@echo "BEGIN: make aie"
 	@echo "####################################"
-	@mkdir -p $(BUILD_DIR);
-	@mkdir -p $(BUILD_DIR)/out; 
 	$(TIME) aiecompiler $(AIE_INCLUDES) $(AIE_FLAGS) $(AIE_TOP_CPP) --output-archive="./libadf.a" 2>&1 | tee -a aiecompiler.log
 	@echo "####################################"
 	@echo "END: make aie"
@@ -132,7 +130,7 @@ vcd:
 # -wdb
 
 analyze_aie:
-	vitis_analyzer ./build/Work/$(TOP).aiecompile_summary
+	vitis_analyzer ./Work/$(TOP).aiecompile_summary
 
 analyze_link:
 	vitis_analyzer AIEplace.xsa.link_summary
@@ -194,7 +192,7 @@ REG_GCC_FLAGS += -DITER_CNT=$(ITER_CNT)
 XRT_PATH := /proj/xbuilds/XRT/2022.1/202210.2.13.466/packages/x86_64/xrt-2.13.466_centos_7.8/opt/xilinx/xrt/include/
 SDKTARGETSYSROOT := /home/msears/tools/SDK/sysroots/cortexa72-cortexa53-xilinx-linux
 GCC_INCLUDES := -I$(XILINX_VITIS)/aietools/include
-GCC_INCLUDES += -I$(PWD)/src/aie_src
+GCC_INCLUDES += -I$(AIE_SRC_DIR)
 GCC_INCLUDES += -I$(SDKTARGETSYSROOT)/usr/include/xrt
 GCC_INCLUDES += -I$(DSPLIB_ROOT)/L1/include/aie
 GCC_INCLUDES += -I$(DSPLIB_ROOT)/L1/src/aie
@@ -211,7 +209,7 @@ ps: application # alias
 application: $(PS_SRC_DIR)/host.cpp
 	@echo "Begin PS host app compilation..."
 	@cd $(PS_SRC_DIR); \
-	$(CXX) $(GCC_FLAGS) $(GCC_INCLUDES) -o aie_control_xrt.o ../../Work/ps/c_rts/aie_control_xrt.cpp; \
+	$(CXX) $(GCC_FLAGS) $(GCC_INCLUDES) -o aie_control_xrt.o $(PWD)/Work/ps/c_rts/aie_control_xrt.cpp; \
 	$(CXX) $(GCC_FLAGS) $(GCC_INCLUDES) -o host.o host.cpp; \
 	$(CXX) *.o $(GCC_LIB) -std=c++14 -o $(PWD)/host.exe 
 	@echo "####################################"
