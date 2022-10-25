@@ -19,7 +19,7 @@ BUILD_DIR := $(PWD)/build
 TOP := AIEplaceGraph
 AIE_TOP_CPP := $(AIE_SRC_DIR)/$(TOP).cpp
 XILINX_OBJECTS := mm2s.xo transpose.xo s2mm_transpose.xo
-CONFIG_FILE := $(PWD)/system.cfg
+CONFIG_FILE := $(PWD)/src/system.cfg
 
 AIE_INCLUDES := -include=$(AIE_SRC_DIR)
 AIE_INCLUDES += -include=$(AIE_SRC_DIR)/kernels
@@ -66,8 +66,6 @@ aiengine_graph: ./libadf.a
 	@echo "####################################"
 	@echo "BEGIN: make aie"
 	@echo "####################################"
-	@mkdir -p $(BUILD_DIR);
-	@mkdir -p $(BUILD_DIR)/out; 
 	$(TIME) aiecompiler $(AIE_INCLUDES) $(AIE_FLAGS) $(AIE_TOP_CPP) --output-archive="./libadf.a" 2>&1 | tee -a aiecompiler.log
 	@echo "####################################"
 	@echo "END: make aie"
