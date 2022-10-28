@@ -7,6 +7,25 @@ import logging
 import random
 from naivePlacer import *
 
+ExampleDict = {
+    "k0": [],
+    "k1": [],
+    "k2": [],
+    "k3": ["k0", "k1"],
+    "k4": ["k1", "k2"],
+    "k5": [],
+    "k6": ["k3"],
+    "k7": ["k4"],
+    "k8": ["k4", "k5"],
+    "k9": ["k6", "k7"],
+    "k10": ["k8"],
+    "k11": [],
+    "k12": ["k11"],
+    "k13": ["k12", "k10"],
+    "k14": [],
+    "k15": ["k14"]
+}
+
 def makeRandomNet(node_count):
     netsize = 2
     num = random.random()
@@ -77,10 +96,10 @@ def runAIEPlacer():
                         stream=sys.stdout)
     
     # Create a design environment and run AIEplacer
-    num_rows = 8*1
-    num_cols = 8*4
+    num_rows = 4
+    num_cols = 5
     grid = Grid(num_rows, num_cols)
-    node_count = int(num_rows * num_cols * 0.2)
+    node_count = 16
     coords = initializeCoords(grid, node_count)
     dependencies = initializeDependencies(node_count)
     node_names = []
@@ -104,12 +123,13 @@ def runAIEPlacer():
     #for i in range(2):
         nets.append(makeRandomNet(len(coords)))
     design = Design(coords, node_names, node_sizes, dependencies, nets)
-    print(nets)
-    placer = AIEplacer(grid, design)
-    placer.run(999)
+    run_brandon_placement(num_rows, num_cols, node_sizes, node_names, ExampleDict)
+    # placer = AIEplacer(grid, design)
+    # placer.run(999)
     print("Number of tiles to be placed: " + str(total_size))
 
 if __name__ == "__main__":
     random.seed(1)
     #cProfile.run('runAIEPlacer()')
     runAIEPlacer()
+
