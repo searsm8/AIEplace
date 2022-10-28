@@ -27,7 +27,7 @@ public:
     connect< window<4*2*POINT_SIZE> > net_dct_out (DCTpost_kernel.out[0], out);
 
     // Associate kernels with Source files and set runtime ratio
-    source(shuffle_kernel)     = "kernels/shuffle.cpp";
+    source(shuffle_kernel) = "kernels/shuffle.cpp";
     source(DCTpost_kernel) = "kernels/dct_postprocess.cpp";
 
     runtime<ratio>(shuffle_kernel) = 0.5;

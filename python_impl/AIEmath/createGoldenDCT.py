@@ -12,7 +12,7 @@ import customDCT
 golden_dir    = "/home/msears/AIEplace/golden/density/"
 AIE_input_dir = "/home/msears/AIEplace/Vitis/AIEplace/data/"
 fft_filepath = golden_dir + "fft/"
-fft_size = 1024
+fft_size = 32 
 alpha = -1*cmath.pi/2/fft_size # constant term used in fast DCT computation
 
 def shuffle_input(input, axis=1):
@@ -138,14 +138,38 @@ def createGoldenFFT(filepath, size):
 
     # Compute the DCT along rows
     dct_output = fast_dct(np.copy(fft_input), axis=1)
-    #print("After 1D-DCT"); print(dct_output.real)
     with open(filepath+"dct_output.dat", "w") as file:
         for i in range(size):
             for j in range(size):
                 file.write(f"{dct_output[i][j].real:.2f}\n{dct_output[i][j].imag:.2f}\n")
+    
+    dct_output = np.transpose(dct_output)
+    with open(AIE_input_dir+"dct_2d_input.dat", "w") as AIE_file:
+        for i in range(size):
+            for j in range(size):
+                AIE_file.write(f"{dct_output[i][j].real:.2f}\n{dct_output[i][j].imag:.2f}\n")
 
-    idct_output = fast_idct(dct_output, axis=1)
+    dct_output = fast_dct(dct_output, axis=1)
+    #print("After 1D-DCT"); print(dct_output.real)
+    with open(filepath+"dct_2d_output.dat", "w") as file:
+        for i in range(size):
+            for j in range(size):
+                file.write(f"{dct_output[i][j].real:.2f}\n{dct_output[i][j].imag:.2f}\n")
+
+    idct_output = fast_idct(np.copy(fft_input), axis=1)
     with open(filepath+"idct_output.dat", "w") as file:
+        for i in range(size):
+            for j in range(size):
+                file.write(f"{idct_output[i][j].real:.2f}\n{idct_output[i][j].imag:.2f}\n")
+
+    idct_output = np.transpose(idct_output)
+    with open(AIE_input_dir+"idct_2d_input.dat", "w") as AIE_file:
+        for i in range(size):
+            for j in range(size):
+                AIE_file.write(f"{idct_output[i][j].real:.2f}\n{idct_output[i][j].imag:.2f}\n")
+
+    idct_output = fast_idct(idct_output, axis=1)
+    with open(filepath+"idct_2d_output.dat", "w") as file:
         for i in range(size):
             for j in range(size):
                 file.write(f"{idct_output[i][j].real:.2f}\n{idct_output[i][j].imag:.2f}\n")
@@ -171,16 +195,24 @@ def createGoldenFFT(filepath, size):
     #print()
 
     print("\n***gold_idxst_output:")
-    gold_idxst_output = []
+    gold_idxst_output = np.copy(fft_input)
     for i in range(size):
-        gold_idxst_output.append( customDCT.idxst(np.copy(fft_input[i])) )
-        print(f"[{i}]")
-        #print(f"\n[{i}] [ ", end="")
-        #for j in range(size):
-        #    print(f" {gold_idxst_output[i][j]:.2f}", end=", ")
-        #print("]")
+        gold_idxst_output[i] =  customDCT.idxst(gold_idxst_output[i]) 
 
     with open(filepath+"idxst_output.dat", "w") as file:
+        for i in range(size):
+            for j in range(size):
+                file.write(f"{gold_idxst_output[i][j].real:.2f}\n{gold_idxst_output[i][j].imag:.2f}\n")
+
+    gold_idxst_output = np.transpose(gold_idxst_output)
+    with open(AIE_input_dir+"idxst_2d_input.dat", "w") as AIE_file:
+        for i in range(size):
+            for j in range(size):
+                AIE_file.write(f"{gold_idxst_output[i][j].real:.2f}\n{gold_idxst_output[i][j].imag:.2f}\n")
+
+    for i in range(size):
+        gold_idxst_output[i] = ( customDCT.idxst(gold_idxst_output[i]) )
+    with open(filepath+"idxst_2d_output.dat", "w") as file:
         for i in range(size):
             for j in range(size):
                 file.write(f"{gold_idxst_output[i][j].real:.2f}\n{gold_idxst_output[i][j].imag:.2f}\n")
