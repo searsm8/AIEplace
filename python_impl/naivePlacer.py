@@ -159,45 +159,6 @@ def greedy_placement(herds, grid):
     naive_placement(herds, grid)
     return
 
-def get_dep_herds(dictionary):
-    """Moves the dependencies from a dictionary to a list that has the length of the maximum
-       dependency number - 1, with each sub list containing the herds at that dependency level.
-
-    Args:
-        dictionary (dict): dictionary of dependencies
-
-    Returns:
-        list: list containig herds at their dependency level
-    """
-    dependency_sorted_herds = []
-    counter = 0
-    while(dictionary):
-        keys = list(dictionary.keys())
-        same_dep_keys = []
-        for i in range(len(keys)):
-            has_dependency = False
-            # check if dependencies have been placed
-            for j in range(len(dictionary[keys[i]])):
-                if dictionary[keys[i]][j] in dictionary: 
-                    has_dependency = True
-                    break
-            if not has_dependency:
-                same_dep_keys.append(keys[i])
-        unplaced_herds = []
-        for i in range(len(same_dep_keys)):
-            unplaced_herds.append(same_dep_keys[i])
-        # print(same_dep_keys)
-        while same_dep_keys:
-            del dictionary[same_dep_keys.pop(0)]
-        # unplaced_herds[i].sort(key=lambda x: x.size, reverse=True)
-        # place herds
-        dependency_sorted_herds.append(unplaced_herds)
-        counter += 1
-        if counter == 100:
-            print("max iterations reached in getting dependencies")
-            break
-    return dependency_sorted_herds
-
 def generate_part_dict(part_list, maxdims, number): 
     """Creates the dictionary necessary to generate JSON that can \
        be read by the partition viewer
@@ -220,12 +181,15 @@ def generate_part_dict(part_list, maxdims, number):
     }
     return new_part_list
 
-def write_to_json(herds, grid, output_file_name, number):
+def write_to_json(herds, grid_dims, output_file_name, number):
     """Writes the list of placed herds to a json file
 
     Args:
-        herds (list): list containing all of the herds to be placed [<Herd object>, ...]
-        grid (Grid): Grid containing the placed Herds
+        herds (list): list containing all of the herds to be placed 
+                      for each dependency [[dep 0 <Herd object>, ...], ...]
+        grid_dims (list): list containing 
+        output_file_name: string w/ output file name
+        number: number of grids needed to realize placement (used w/ naive)
 
     Returns:
         None
@@ -235,7 +199,7 @@ def write_to_json(herds, grid, output_file_name, number):
         for herd in range(len(herds[dep])): 
             herd_list.append(herds[dep][herd].convert_to_list())
     # print(grid.grid)
-    partitions = generate_part_dict(herd_list, [grid.num_rows, grid.num_cols], number)
+    partitions = generate_part_dict(herd_list, [grid_dims[0], grid_dims[1]], number)
     options = jsbeautifier.default_options()
     options.indent_size = 4
     json_object = jsbeautifier.beautify(json.dumps(partitions), options)
@@ -302,7 +266,7 @@ def naive_placement_helper(grid, herds, unplaced_herds):
     return unplaced_herds
 
 
-def run_brandon_placement(num_rows, num_cols, node_sizes, node_names, dependencies):
+def run_brandon_placement(num_rows, num_cols, node_sizes, node_names, dependency_list):
     """Performs a naive placement of the kernels.
        Starts by sorting all of the kernels based on their dependency level e.g., if a kernel 
        is on a "net" with dependency 3, it may only be placed after the previous dependencies
@@ -318,7 +282,7 @@ def run_brandon_placement(num_rows, num_cols, node_sizes, node_names, dependenci
     """
     grid = [Grid_B(num_rows, num_cols, 0)]
     herd_list = []
-    dependency_list = get_dep_herds(dependencies)
+    dependency_list
     for _ in dependency_list:
         herd_list.append([])
     for i in range(len(node_sizes)): 
@@ -338,5 +302,5 @@ def run_brandon_placement(num_rows, num_cols, node_sizes, node_names, dependenci
     for time_grid in grid:
         num_tiles_placed += np.count_nonzero(time_grid.grid > -1)
     print("Number of tiles placed: " + str(num_tiles_placed))
-    write_to_json(herd_list, grid[0], "hello.json", len(grid))
+    write_to_json(herd_list, [grid[0].num_rows, grid[0].num_cols], "naive.json", len(grid))
     return

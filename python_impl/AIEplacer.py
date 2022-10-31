@@ -13,14 +13,17 @@ import numpy as np
 import logging
 import PlaceDrawer
 import jsbeautifier
+from naivePlacer import write_to_json
 
 class Herd:
-    def __init__(self, row_loc, col_loc, row_size, col_size, number):
+    def __init__(self, row_loc, col_loc, row_size, col_size, number, name, dependency):
         self.row_loc = row_loc
         self.col_loc = col_loc
         self.row_size = row_size
         self.col_size = col_size
         self.number = number
+        self.name = name
+        self.dep = dependency
     
     def convert_to_list(self):
         """Converts the herd locations and number to a format that will be 
@@ -29,7 +32,7 @@ class Herd:
         Returns:
             list: [<number>, <name>, [<row #>, <col #>], ...]
         """
-        locations = [self.number]
+        locations = [self.number, self.name]
         for i in range(self.row_size):
             for j in range(self.col_size):
                 # Right and down
@@ -38,6 +41,8 @@ class Herd:
                 locations.append([row_coord, col_coord])
         return locations
 
+    def print_info(self):
+        print("name: " + str(self.name) + ", [" + str(self.col_loc) + ", " + str(self.row_loc) + "]")
 
 
 class Coord:
@@ -61,6 +66,8 @@ class Grid:
     def print_grid(self):
         temp_grid = np.asarray(self.vals)
         print(temp_grid)
+    def get_dims(self):
+        print("rows: " + str(self.num_rows) + ", cols: " + str(self.num_cols))
 
 class Design:
     # primary lists which hold design information
@@ -73,9 +80,10 @@ class Design:
                     # e.g. [4,7,9] means nodes 4, 7, and 9 are connect by a net
         
 class AIEplacer:
-    def __init__(self, grid, design) -> None:
+    def __init__(self, grid, design, num_cols) -> None:
         self.grid = grid
         self.design = design
+        self.num_cols_original = num_cols
         self.bin_width = 1 # arbitrary
         self.bin_height= 1 # arbitrary
         self.bin_grid = Grid(int(grid.num_rows/self.bin_height), int(grid.num_cols/self.bin_width))
@@ -274,6 +282,9 @@ class AIEplacer:
                 dependency_force = depend_weight*(self.design.dependencies[i]-0.5)*(self.grid.num_cols-self.design.coords[i].col)/self.grid.num_cols
                 # Subtract the electro force because we want to model REPULSIVE force
                 self.design.coords[i].row -= step_len * (hpwl_gradient[i].row  - density_penalty * force.row)
+                if self.design.coords[i].row < -1:
+                    self.design.coords[i].row == -1
+
                 #self.design.coords[i].row -= step_len * (0 - density_penalty * force.row)
                                             #- density_penalty*electroForceX[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
                                             # WHY IS THIS MINUS SIGN NEEDED????
@@ -283,7 +294,8 @@ class AIEplacer:
                 self.design.coords[i].col -= step_len * (hpwl_gradient[i].col - dependency_force - density_penalty * force.col)
                 #self.design.coords[i].col -= step_len * (0 - density_penalty * force.col)
                                             #- density_penalty*electroForceY[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
-                #if self.design.coords[i].col < 0: self.design.coords[i].col = 0
+                if self.design.coords[i].col < -1: self.design.coords[i].col = -1
+                if self.design.coords[i].col > self.grid.num_cols + 1: self.design.coords[i] = self.grid.num_cols + 1
                 #if self.design.coords[i].col + self.design.node_sizes[i].col  >= self.grid.num_cols : self.design.coords[i].col = self.grid.num_cols-1
 
             #prettyPrint.coord(self.design.coords[my_node])
@@ -350,6 +362,7 @@ class AIEplacer:
                     filename = os.path.join("results", f"run_{self.design_run}", filename)
                             
                     ret = PlaceDrawer.PlaceDrawer.forward(
+                            self.num_cols_original,
                             pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  + 
                                 [self.design.coords[i].row for i in range(len(self.design.coords))], 
                             node_size_x=[self.design.node_sizes[i].col for i in range(len(self.design.coords))], 
@@ -420,7 +433,7 @@ class AIEplacer:
             # if the top left corner is filled on the grid or if it's empty
             if lg.vals[coord.row][coord.col] == 0:
                 # Do not go out of the top or the left of the grid
-            
+
                 # Because we're looking @ the top left corner, move the herd upwards until all
                 # rows have been checked.
                 for row in range(coord.row, coord.row - size.row, -1):
@@ -500,14 +513,24 @@ class AIEplacer:
             if (legalized):
                 coord.row = curr_row
                 coord.col = curr_col
-                herdList.append(Herd(self.grid.num_rows - curr_row - 1, curr_col, size.row, size.col, number))
+                herdList.append(Herd(self.grid.num_rows - curr_row - 1, curr_col, size.row, size.col, self.design.dependencies[i], self.design.node_names[i], self.design.dependencies[i]))
                 number += 1
+                # is this right? for the row
                 for row in range(coord.row, coord.row + size.row):
                     for col in range(coord.col, coord.col + size.col):
                         lg.vals[row][col] = 1
                 continue
         print(lg.print_grid())
+        dep_herd_list = []
+        for dep in range(max(self.design.dependencies) + 1):
+            temp = []
+            for herd in range(len(herdList)):
+                if herdList[herd].dep == dep:
+                    temp.append(herdList[herd])
+            dep_herd_list.append(temp)
+        total_tiles_placed = np.sum(np.asarray(lg.vals))
+        write_to_json(dep_herd_list, [lg.num_rows, self.num_cols_original], "forcePlacer.json",  math.ceil(total_tiles_placed / (self.grid.num_rows + self.num_cols_original)))
         print("===============")
-        print("Total tiles placed: " + str(np.sum(np.asarray(lg.vals))))
+        print("Total tiles placed: " + str(total_tiles_placed))
 
         logging.info("End legalization")
