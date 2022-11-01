@@ -332,7 +332,7 @@ class AIEplacer:
 
             nets_to_draw = []
             if converged:
-                self.legalize()
+                self.legalize(list(range(len(self.design.node_sizes))))
                 # choose a random node and draw all nets for that node
                 for i in range(1):
                     while True:
@@ -399,6 +399,7 @@ class AIEplacer:
                 Args:
                     coords (list): [row, col] to place herd
                     herd (Herd): herd to be checked
+                    lg (Grid): Grid containing current partition
                 """
                 original_timeslot = math.floor(grid_coords[1] / self.num_cols_original)
                 for row in range(grid_coords[0], grid_coords[0] + herd.row):
@@ -415,15 +416,20 @@ class AIEplacer:
                             return False
                 return True
                 
-    def legalize(self):
-        ''' After running placement, legalize the design'''
+    def legalize(self, herds_of_interest):
+        """After some level of placement, perform a legalization
+
+        Args:
+            herds_of_interest (list): herds numbers to be placed at the current time
+        """
+
         logging.info("Begin legalization")
         lg = Grid (self.grid.num_rows, self.grid.num_cols) # legalization grid
         herdList = []
         number = 0
         dependency_ordered_array = []
         for j in range(max(self.design.dependencies) + 1):
-            for i in range(len(self.design.dependencies)):
+            for i in herds_of_interest:
                 if self.design.dependencies[i] == j:
                     dependency_ordered_array.append(i)
         print(self.design.dependencies)
