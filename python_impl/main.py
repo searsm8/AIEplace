@@ -8,24 +8,25 @@ import random
 from naivePlacer import *
 
 ExampleDict = {
-    "k0": [[], [2, 2]],
-    "k1": [[], [2, 2]],
-    "k2": [[], [2, 2]],
-    "k3": [["k0", "k1"], [2, 2]],
-    "k4": [["k1", "k2"], [2, 2]],
-    "k5": [[], [2, 2]],
-    "k6": [["k3"], [2, 2]],
-    "k7": [["k4"], [2, 2]],
-    "k8": [["k4", "k5"], [2, 2]],
-    "k9": [["k6", "k7"], [2, 2]],
-    "k10": [["k8"], [2, 2]],
-    "k11": [[], [2, 2]],
-    "k12": [["k11"], [2, 2]],
-    "k13": [["k12", "k10"], [2, 2]],
-    "k14": [[], [2, 2]],
-    "k15": [["k14"], [2, 2]]
+    "a": [[], [2, 1]],
+    "b": [[], [2, 2]],
+    "c": [[], [1, 2]],
+    "d": [["a", "b"], [2, 2]],
+    "e": [["b", "c"], [2, 1]],
+    "f": [[], [2, 2]],
+    "g": [["d"], [2, 2]],
+    "h": [["e"], [1, 1]],
+    "i": [["e", "f"], [2, 1]],
+    "j": [["g", "h"], [2, 1]],
+    "k": [["i"], [2, 2]],
+    "l": [[], [1, 2]],
+    "m": [["l"], [1, 1]],
+    "n": [["m", "k"], [2, 2]],
+    "o": [[], [2, 2]],
+    "p": [["o"], [1, 1]]
 }
-
+# ExampleDictNet = [["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n"], ["o", "p"]]
+ExampleDictNet = [["a", "d"], ["b", "d", "e"], ["c", "e"], ["d", "g"], ["e", "h", "i"], ["g", "j"], ["h", "j"], ["f", "i"], ["l", "m"], ["o", "p"], ["i", "k"], ["m", "n"], ["k", "n"]]
 AIE_dependency_dict = {
     "a+": [[], [1, 1]], # a+
     "a-": [[], [1, 1]], # a-
@@ -42,6 +43,20 @@ AIE_dependency_dict = {
     "D": [["psi"], [1, 1]], # D
     "dD": [["xi"], [1, 1]] # dD
 }
+
+def map_nets_to_list(nets):
+    Dict = {}
+    number = 0
+    out_list = []
+    for i in range(len(nets)):
+        temp_list = []
+        for net in range(len(nets[i])):
+            if nets[i][net] not in Dict:
+                Dict[nets[i][net]] = number
+                number += 1
+            temp_list.append(Dict[nets[i][net]])
+        out_list.append(temp_list)
+    return out_list  
 
 def convert_dep_to_force(dependency_list, node_names):
     new_dep_list = []
@@ -169,7 +184,7 @@ def runAIEPlacer():
     if make_random:
         node_count = 4
     else:
-        node_count = 14
+        node_count = 16
     coords = initializeCoords(grid, node_count)
     dependencies = []
     dep_dict = {}
@@ -195,7 +210,7 @@ def runAIEPlacer():
         for i in range(int((2+random.random()) * len(coords))):
             nets.append(makeRandomNet(len(coords)))
     else:
-        dep_dict = AIE_dependency_dict
+        dep_dict = ExampleDict
         node_names = list(dep_dict.keys())
         for i in range(len(node_names)):
             node_sizes.append(Coord(dep_dict[node_names[i]][1][0], dep_dict[node_names[i]][1][1]))
@@ -208,8 +223,7 @@ def runAIEPlacer():
     if (total_size > num_rows * num_cols):
         # + 5 is arbitrary - should be larger for larger problems.
         grid = Grid(num_rows, math.ceil(total_size / num_rows) + num_cols)
-
-    design = Design(coords, node_names, node_sizes, dependencies, nets)
+    design = Design(coords, node_names, node_sizes, dependencies, map_nets_to_list(ExampleDictNet))
     print(dependencies)
     placer = AIEplacer(grid, design, num_cols)
     placer.run(999)
