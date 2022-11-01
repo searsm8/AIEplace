@@ -2,7 +2,9 @@ golden
 *.o
 *.out
 */__pycache__
-AIEmath/__pycache__
+AIEmath/__pycache__/
+python_impl/AIEmath/__pychache__/
 python_impl/results
 *:Zone.Identifier
 Vitis/workspace
+*.json
