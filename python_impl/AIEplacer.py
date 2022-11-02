@@ -627,7 +627,8 @@ class AIEplacer:
             if coord_col < 0: coord_col = 0
             if coord_row >= self.grid.num_rows: coord_row = self.grid.num_rows-1
             if coord_col >= self.grid.num_cols: coord_col = self.grid.num_cols-1
-
+            curr_row = -1
+            curr_col = -1
             # if the top left corner is filled on the grid or if it's empty
             if lg.vals[coord_row][coord_col] == 0:
                 # Do not go out of the top or the left of the grid
