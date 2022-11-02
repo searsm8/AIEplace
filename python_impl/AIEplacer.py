@@ -606,9 +606,17 @@ class AIEplacer:
         number = 0
         dependency_ordered_array = []
         for j in range(max(self.design.dependencies) + 1):
+            temp = []
+            coord_dict = {}
             for i in herds_of_interest:
                 if self.design.dependencies[i] == j:
-                    dependency_ordered_array.append(i)
+                    temp.append(i)
+                    coord_dict[i] = self.design.coords[i].col
+            sorted_dict = sorted(coord_dict.items(), key=lambda x: x[1])
+            sorted_list = [item[0] for item in sorted_dict]
+            dependency_ordered_array += sorted_list
+            # dependency_ordered_array.append(temp)
+            
         print(self.design.dependencies)
         print(dependency_ordered_array)
         # place all dependency 0 herds first, then dep 1, etc.
@@ -630,6 +638,12 @@ class AIEplacer:
             curr_row = -1
             curr_col = -1
 
+            for col in range(0, coord_col):
+                if (self.is_legal_placement([coord_row, col], size, lg)):
+                    curr_row = coord_row
+                    curr_col = col
+                    legalized = True
+                    break
             # if the top left corner is filled on the grid or if it's empty
             if lg.vals[coord_row][coord_col] == 0 and not legalized:
                 # Do not go out of the top or the left of the grid
