@@ -491,7 +491,7 @@ class AIEplacer:
                     
                 #use PlaceDrawer to export an image
                 if(iter%5 == 0) or converged:
-                    filename=f"{time.strftime('%y%m%d_%H%M')}_iter_{iter}.png"
+                    filename=f"{time.strftime('%y%m%d_%H%M')}_iter_{iter:03}.png"
                     filename = os.path.join("results", f"run_{self.design_run}", filename)
                     ret = PlaceDrawer.PlaceDrawer.forward(
                             num_cols=self.num_cols_original,
@@ -518,6 +518,9 @@ class AIEplacer:
                             overflow=overflow
                             )
             if converged:
+                folder = os.path.join("results", f"run_{self.design_run}" )
+                gif_name = f"_run_{self.design_run}.gif"
+                PlaceDrawer.PlaceDrawer.export_gif(folder, gif_name)
                 break
             #end iteration loop
 

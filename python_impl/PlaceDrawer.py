@@ -12,11 +12,25 @@ import math
 import cairocffi as cairo
 import numpy as np
 
+import glob
+from PIL import Image
 
 class PlaceDrawer(object):
     """
     @brief A python implementation of placement drawer as an alternative when cairo C/C++ API is not available. 
     """
+
+    @staticmethod
+    def export_gif(frame_folder, gif_name):
+        export_filename = os.path.join(frame_folder, gif_name)
+        print(f'Exporting {export_filename}')
+        frames = [Image.open(image) for image in sorted(glob.glob(f"{frame_folder}/*.png"))]
+        frame_one = frames[0]
+        durations = [400 for i in range(len(frames)+1)]
+        durations[-1] = 4000
+        frame_one.save(export_filename, format="GIF", append_images=frames,
+                save_all=True, duration=durations, loop=0)
+
     @staticmethod
     def forward(num_cols,
                 pos,
