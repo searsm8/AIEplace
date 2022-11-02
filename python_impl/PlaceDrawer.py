@@ -27,7 +27,7 @@ class PlaceDrawer(object):
         frames = [Image.open(image) for image in sorted(glob.glob(f"{frame_folder}/*.png"))]
         frame_one = frames[0]
         durations = [400 for i in range(len(frames)+1)]
-        durations[-1] = 4000
+        durations[-1] = 9999
         frame_one.save(export_filename, format="GIF", append_images=frames,
                 save_all=True, duration=durations, loop=0)
 
@@ -51,6 +51,7 @@ class PlaceDrawer(object):
                 num_filler_nodes,
                 filename,
                 nets=[],
+                node_names=[],
                 hwpl_force=[],
                 bin_force_x=[],
                 bin_force_y=[],
@@ -237,7 +238,7 @@ class PlaceDrawer(object):
             ctx.set_line_width(line_width)
 
 
-            # draw fixed macros
+            # draw kernel fill 
             ctx.set_source_rgba(1, 0, 0, alpha=0.5)
             for i in range(num_movable_nodes, num_physical_nodes):
                 if len(dependencies) > 0:
@@ -259,9 +260,18 @@ class PlaceDrawer(object):
                               node_yh[i] -
                               node_yl[i])  # Rectangle(xl, yl, w, h)
                 ctx.fill()
+            
+            # Draw kernel outline
             ctx.set_source_rgba(0, 0, 0, alpha=1.0)  # Solid color
             for i in range(num_movable_nodes, num_physical_nodes):
                 draw_rect(node_xl[i], node_yl[i], node_xh[i], node_yh[i])
+
+            # Draw kernel names
+            for i in range(len(node_names)):
+                ctx.set_font_size(10)
+                ctx.move_to(node_xl[i]+8, node_yl[i]+12)
+                ctx.show_text(f'{node_names[i]}')
+
             # draw fillers
             if len(node_xl) > num_physical_nodes:  # filler is included
                 ctx.set_line_width(line_width)
@@ -333,13 +343,13 @@ class PlaceDrawer(object):
                 for j in range(num_bins_x):
                     dx = 0.1*density_penalty*bin_force_y[i][j]
                     dy = 0.1*density_penalty*bin_force_x[i][j]
-                    arrow_length = min(math.sqrt(dx**2 + dy**2), .5)
+                    arrow_length = min(5*math.sqrt(dx**2 + dy**2), .5)
                     arrow_angle = math.atan(dy/dx)
                     if dx < 0: # mirror across y axis
                         arrow_angle = math.pi + arrow_angle
-                    #draw_arrow(normalize_x(bin_xl(j) + bin_size_x/2), 
-                    #           normalize_y(bin_yl(i) + bin_size_y/2),
-                    #           normalize_x(arrow_length), arrow_angle)
+                    draw_arrow(normalize_x(bin_xl(j) + bin_size_x/2), 
+                               normalize_y(bin_yl(i) + bin_size_y/2),
+                               normalize_x(arrow_length), arrow_angle)
 
 
             # show iteration
