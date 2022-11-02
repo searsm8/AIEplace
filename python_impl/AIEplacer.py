@@ -119,12 +119,26 @@ class Design:
     
 
 def getTotalSize(node_sizes):
-    total_size =0
+    total_size = 0
     for i in range(len(node_sizes)):
         total_size += node_sizes[i].row * node_sizes[i].col
     return total_size
 
 def convert_dep_to_force(dependency_list, node_names):
+    """ converts the dependency list to a format that can be accepted by force directed placement
+
+        Args:
+            dependency_list (list<list<string>>): each sublist contains herds at the dependency for that index
+                                            [['a', 'b'], ['c']]: a + b are dep. 0, c is dep 1
+            node_names (list): names of all the nodes
+                            ['a', 'b', 'c']
+
+        Returns:
+            list: dependency numbers lined up with the node_names list
+                            [0, 0, 1]
+        """
+    new_dep_list = []
+
     new_dep_list = []
     for i in range(len(node_names)):
         for j in range(len(dependency_list)):
@@ -134,6 +148,19 @@ def convert_dep_to_force(dependency_list, node_names):
     return new_dep_list
 
 def map_nets_to_list(nets, nodes):
+    """converts a list of nets that have string names to a list of nets that have integer names
+
+    Args:
+        nets (list<list<string>>): nets with associated nodes to each net
+                                   [['a', 'c'], ['b', 'a']]
+        nodes (dict): dict of nodes
+
+    Returns:
+        out_list: same size as nets, but with strings converted to integers
+                  [[0, 2], [1, 3]]
+        Dict (Dict): the mapping used to convert strings to ints
+                  {'a': 0, 'b': 1, 'c': 2, 'd': 3}
+    """
     Dict = {}
     out_list = []
     keys = list(nodes.keys())
