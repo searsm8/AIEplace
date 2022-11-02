@@ -286,12 +286,8 @@ def run_brandon_placement(num_rows, num_cols, node_sizes, node_names, dependency
     for _ in dependency_list:
         herd_list.append([])
     for i in range(len(node_sizes)): 
-        dependency = -1
-        for j in range(len(dependency_list)):
-            if node_names[i] in dependency_list[j]:
-                dependency = j
-        herd = Herd_B(node_sizes[i].row, node_sizes[i].col, i, node_names[i], dependency)
-        herd_list[dependency].append(herd)
+        herd = Herd_B(node_sizes[i].row, node_sizes[i].col, i, node_names[i], dependency_list[i])
+        herd_list[dependency_list[i]].append(herd)
     naive_placement(herd_list, grid)
     for dep in range(len(herd_list)):
         for herd in range(len(herd_list[dep])):
