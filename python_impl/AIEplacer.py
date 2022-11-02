@@ -105,7 +105,7 @@ class Design:
             dependencies = get_dep_herds(node_info) #[node_info[i][0] for i in range(len(node_info))]
             net_names = list(JSON["nets"].values())
             #nets = [node_names.index(name) for name in net_names]
-            nets = map_nets_to_list(net_names, JSON["node_info"])
+            nets, map_dict = map_nets_to_list(net_names, JSON["node_info"])
             dependencies = convert_dep_to_force(dependencies, node_names)
             
             total_size = getTotalSize(node_sizes)
@@ -116,7 +116,7 @@ class Design:
             coords = Design.initializeCoords(grid, len(node_names))
             design = Design(coords, node_names, node_sizes, dependencies, nets)
         
-        return design, grid, num_cols
+        return design, grid, num_cols, map_dict
     
 
 def getTotalSize(node_sizes):
@@ -172,7 +172,7 @@ def map_nets_to_list(nets, nodes):
         for net in range(len(nets[i])):
             temp_list.append(Dict[nets[i][net]])
         out_list.append(temp_list)
-    return out_list
+    return out_list, Dict
 
 def get_dep_herds(dictionary):
     """Moves the dependencies from a dictionary to a list that has the length of the maximum
@@ -588,8 +588,9 @@ class AIEplacer:
             if coord_col >= self.grid.num_cols: coord_col = self.grid.num_cols-1
             curr_row = -1
             curr_col = -1
+
             # if the top left corner is filled on the grid or if it's empty
-            if lg.vals[coord_row][coord_col] == 0:
+            if lg.vals[coord_row][coord_col] == 0 and not legalized:
                 # Do not go out of the top or the left of the grid
 
                 # Because we're looking @ the top left corner, move the herd upwards until all
