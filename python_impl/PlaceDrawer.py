@@ -18,7 +18,8 @@ class PlaceDrawer(object):
     @brief A python implementation of placement drawer as an alternative when cairo C/C++ API is not available. 
     """
     @staticmethod
-    def forward(pos,
+    def forward(num_cols,
+                pos,
                 node_size_x,
                 node_size_y,
                 pin_offset_x,
@@ -191,10 +192,15 @@ class PlaceDrawer(object):
             ## draw bins
             ctx.set_source_rgba(1, 0, 0, alpha=0.5)
             for i in range(1, num_bins_x):
+                if (i % num_cols == 0): 
+                    ctx.set_source_rgba(0, 0, 1, alpha=1)
+                    ctx.set_line_width(4)
                 ctx.move_to(normalize_x(bin_xl(i)), normalize_y(yl))
                 ctx.line_to(normalize_x(bin_xl(i)), normalize_y(yh))
                 ctx.close_path()
                 ctx.stroke()
+                ctx.set_source_rgba(1, 0, 0, alpha=0.5)
+                ctx.set_line_width(1)
             for i in range(1, num_bins_y):
                 ctx.move_to(normalize_x(xl), normalize_y(bin_yl(i)))
                 ctx.line_to(normalize_x(xh), normalize_y(bin_yl(i)))
@@ -225,6 +231,14 @@ class PlaceDrawer(object):
                         ctx.set_source_rgba(1, 0, 0, alpha=0.5)
                     elif dependencies[i] == 1:    
                         ctx.set_source_rgba(0, 1, 0, alpha=0.5)
+                    elif dependencies[i] == 2:
+                        ctx.set_source_rgba(0, 1, 1, alpha=0.5)
+                    elif dependencies[i] == 3:
+                        ctx.set_source_rgba(1, 1, 0, alpha=0.5)
+                    elif dependencies[i] == 4:
+                        ctx.set_source_rgba(1, 0, 1, alpha=0.5)
+                    elif dependencies[i] == 5:
+                        ctx.set_source_rgba(1, 1, 1, alpha=0.5)
                     else:
                         ctx.set_source_rgba(0, 0, 1, alpha=0.5)
                 ctx.rectangle(node_xl[i], node_yl[i], node_xh[i] - node_xl[i],
