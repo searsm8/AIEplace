@@ -82,16 +82,16 @@ class Design:
                     # e.g. [4,7,9] means nodes 4, 7, and 9 are connect by a net
         
     @classmethod
-    def initializeCoords(cls, grid, node_count):
+    def initializeCoords(cls, num_rows, num_cols, node_count):
         #random initial position
         coords = []
         for i in range(node_count):
             # CENTER INITIALIZATION
             #coords.append( Coord( random.choice(range(round(grid.num_rows*.4), round(grid.num_rows*.6))) + random.random(), 
             #                      random.choice(range(round(grid.num_cols*.4), round(grid.num_cols*.6))) + random.random() ) )
-            # CENTER INITIALIZATION
-            coords.append( Coord( random.choice(range(round(grid.num_rows*.3), round(grid.num_rows*.7))) + random.random(), 
-                                random.choice(range(0, round(grid.num_cols*.3))) + random.random() ) )
+            # EDGE INITIALIZATION
+            coords.append( Coord( random.choice(range(math.floor(num_rows*.2), math.ceil(num_rows*.5))) + random.random(), 
+                                  random.choice(range(math.floor(num_rows*.2), math.ceil(num_cols*.5))) + random.random() ) )
         return coords
 
     @classmethod
@@ -108,12 +108,14 @@ class Design:
             nets, map_dict = map_nets_to_list(net_names, JSON["node_info"])
             dependencies = convert_dep_to_force(dependencies, node_names)
             
-            total_size = getTotalSize(node_sizes)
             num_rows = JSON["grid_info"]["num_rows"]
             num_cols = JSON["grid_info"]["num_cols"]
-            # grid = Grid(num_rows, num_cols)
-            grid = Grid(num_rows, math.ceil(total_size / num_rows) + num_cols)
-            coords = Design.initializeCoords(grid, len(node_names))
+            coords = Design.initializeCoords(num_rows, num_cols, len(node_names))
+
+            total_size = getTotalSize(node_sizes)
+            total_cols = num_cols
+            while total_cols*num_rows*0.8 < total_size: total_cols += num_cols
+            grid = Grid(num_rows, total_cols)
             design = Design(coords, node_names, node_sizes, dependencies, nets)
         
         return design, grid, num_cols, map_dict
@@ -224,7 +226,7 @@ class AIEplacer:
         self.design_run = 0
         while(os.path.exists(f"results/run_{self.design_run}")):
             self.design_run += 1
-        os.system(f"mkdir results/run_{self.design_run}")
+        os.system(f"mkdir results/run_{self.design_run}/nodes -p")
     
     def computeActualHPWL(self):
         hpwls = []
@@ -251,8 +253,8 @@ class AIEplacer:
             self.bin_grid.vals[i] = [0]*self.bin_grid.num_cols
 
         for i in range(len(self.design.coords)):
-            row = self.design.coords[i].row
-            col = self.design.coords[i].col
+            row = self.design.coords[i].row + self.design.node_sizes[i].row/2
+            col = self.design.coords[i].col + self.design.node_sizes[i].col/2
             #print(f"({row}, {col})")
             #print(f"({int(row/self.bin_height)}, {int(col/self.bin_width)})")
             #print(f"bin_grid.vals[{self.bin_grid.num_rows}][{self.bin_grid.num_cols}]")
@@ -310,6 +312,12 @@ class AIEplacer:
         stagnant_iterations = 0 # number of iterations without seeing any improvement
         converged = False 
         
+        # choose a random node and draw all nets for that node
+        while True:
+            target_node=random.randint(0, len(self.design.coords)-1)
+            if self.design.dependencies[target_node] >= 1:
+                break
+
         for iter in range(iterations):
             logging.root.name = 'ITER ' + str(iter)
             logging.info(f"***Begin Iteration {iter}***")
@@ -397,11 +405,11 @@ class AIEplacer:
             electroForceY = AIEmath.customDCT.idcst_2d(electroForceY)
 
             step_len = 0.09
-            density_penalty = 0.02*(iter) if iter < 50 else 0.05*iter
+            density_penalty = 0.02*(iter) if iter < 50 else 0.05*50
             print(f"density_penalty: {density_penalty}")
 
             # Update node locations
-            depend_weight = 3 if iter < 50 else 1.5#max(0.5, 0.02*(100-iter))
+            depend_weight = 1 if iter < 50 else 1.5#max(0.5, 0.02*(100-iter))
             for i in range(len(self.design.coords)):
                 # Compute the electro force for each node, accounting for bin overlaps
                 force = Coord(0, 0)
@@ -416,8 +424,8 @@ class AIEplacer:
                 dependency_force = depend_weight*(self.design.dependencies[i]-0.5)*(self.grid.num_cols-self.design.coords[i].col)/self.grid.num_cols
                 # Subtract the electro force because we want to model REPULSIVE force
                 self.design.coords[i].row -= step_len * (hpwl_gradient[i].row  - density_penalty * force.row)
-                if self.design.coords[i].row < -1:
-                    self.design.coords[i].row == -1
+                #if self.design.coords[i].row < -1:
+                #    self.design.coords[i].row == -1
 
                 #self.design.coords[i].row -= step_len * (0 - density_penalty * force.row)
                                             #- density_penalty*electroForceX[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
@@ -428,8 +436,8 @@ class AIEplacer:
                 self.design.coords[i].col -= step_len * (hpwl_gradient[i].col - dependency_force - density_penalty * force.col)
                 #self.design.coords[i].col -= step_len * (0 - density_penalty * force.col)
                                             #- density_penalty*electroForceY[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
-                if self.design.coords[i].col < -1: self.design.coords[i].col = -1
-                if self.design.coords[i].col > self.grid.num_cols + 1: self.design.coords[i] = self.grid.num_cols + 1
+                #if self.design.coords[i].col < -1: self.design.coords[i].col = -1
+                #if self.design.coords[i].col > self.grid.num_cols + 1: self.design.coords[i] = self.grid.num_cols + 1
                 #if self.design.coords[i].col + self.design.node_sizes[i].col  >= self.grid.num_cols : self.design.coords[i].col = self.grid.num_cols-1
 
             #prettyPrint.coord(self.design.coords[my_node])
@@ -456,9 +464,10 @@ class AIEplacer:
                 min_overflow = overflow
 
             logging.info(f"\t\t{stagnant_iterations} stagnant_iterations\t{overflow} overflow\t {min_overflow} min_overflow")
-            convergence_iterations = 20
-            if iter > 40 and stagnant_iterations >= convergence_iterations:
-                logging.info(f"No improvement in overflow for {convergence_iterations} iterations...Stopping.")
+            MAX_STAGNANT_ITERS = 20
+            MIN_ITERS = 200
+            if iter > MIN_ITERS and stagnant_iterations >= MAX_STAGNANT_ITERS:
+                logging.info(f"No improvement in overflow for {MAX_STAGNANT_ITERS} iterations...Stopping.")
                 converged = True
 
             if iter == iterations-1:
@@ -467,15 +476,11 @@ class AIEplacer:
             nets_to_draw = []
             if converged:
                 self.legalize(list(range(len(self.design.node_sizes))))
-                # choose a random node and draw all nets for that node
-                for i in range(1):
-                    while True:
-                        target_node=random.randint(0, len(self.design.coords)-1)
-                        if self.design.dependencies[target_node] >= 1:
-                            break
-                    for net in self.design.nets:
-                        if net.count(target_node):
-                            nets_to_draw.append(net)
+
+            for net in self.design.nets:
+                if net.count(target_node):
+                    nets_to_draw.append(net)
+
 
             if export_images:
                 self.computeBinDensities()
@@ -509,6 +514,7 @@ class AIEplacer:
                             num_movable_nodes=0, num_filler_nodes=0, 
                             filename=filename,
                             nets=nets_to_draw,
+                            node_names=self.design.node_names,
                             hwpl_force=[],
                             bin_force_x=electroForceX,
                             bin_force_y=electroForceY,
@@ -519,9 +525,44 @@ class AIEplacer:
                             overflow=overflow
                             )
             if converged:
+                # Export collected images as a .gif
                 folder = os.path.join("results", f"run_{self.design_run}" )
                 gif_name = f"_run_{self.design_run}.gif"
                 PlaceDrawer.PlaceDrawer.export_gif(folder, gif_name)
+
+                # Export images showing nets for target nodes
+                for target_node in range(len(self.design.coords)):
+                    nets_to_draw = []
+                    for net in self.design.nets:
+                        if net.count(target_node):
+                            nets_to_draw.append(net)
+                            
+                    filename = os.path.join("results", f"run_{self.design_run}", "nodes", f"node_{self.design.node_names[target_node]}.png")
+                    ret = PlaceDrawer.PlaceDrawer.forward(
+                            num_cols=self.num_cols_original,
+                            pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  +  \
+                                [self.design.coords[i].row for i in range(len(self.design.coords))], 
+                            node_size_x=[self.design.node_sizes[i].col for i in range(len(self.design.coords))], 
+                            node_size_y=[self.design.node_sizes[i].row for i in range(len(self.design.coords))], 
+                            pin_offset_x=[0 for i in range(len(self.design.coords))],
+                            pin_offset_y=[0 for i in range(len(self.design.coords))],
+                            pin2node_map={}, 
+                            xl=0, yl=0, xh=self.grid.num_cols, yh=self.grid.num_rows, 
+                            site_width=1, row_height=1,
+                            bin_size_x=self.bin_width, bin_size_y=self.bin_height, 
+                            num_movable_nodes=0, num_filler_nodes=0, 
+                            filename=filename,
+                            nets=nets_to_draw,
+                            node_names=self.design.node_names,
+                            hwpl_force=[],
+                            bin_force_x=electroForceX,
+                            bin_force_y=electroForceY,
+                            density_penalty=density_penalty,
+                            iteration=iter,
+                            dependencies=self.design.dependencies,
+                            hpwl=total_hpwl,
+                            overflow=overflow
+                            )
                 break
             #end iteration loop
 
