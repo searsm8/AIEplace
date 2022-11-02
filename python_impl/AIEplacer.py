@@ -111,11 +111,12 @@ class Design:
             total_size = getTotalSize(node_sizes)
             num_rows = JSON["grid_info"]["num_rows"]
             num_cols = JSON["grid_info"]["num_cols"]
+            # grid = Grid(num_rows, num_cols)
             grid = Grid(num_rows, math.ceil(total_size / num_rows) + num_cols)
             coords = Design.initializeCoords(grid, len(node_names))
             design = Design(coords, node_names, node_sizes, dependencies, nets)
         
-        return design, grid
+        return design, grid, num_cols
     
 
 def getTotalSize(node_sizes):
