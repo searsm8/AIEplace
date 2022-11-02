@@ -1,7 +1,7 @@
 #ifndef FUNCTION_KERNELS_H
 #define FUNCTION_KERNELS_H
 
-#define POINT_SIZE 1024 // Must be a power of two for FFT
+#define POINT_SIZE 32 // Must be a power of two for FFT
 #define FFT_DATA_TYPE cfloat // cfloat, cint32, or cint16
 #define TWIDDLE_TYPE cfloat // cfloat, or cint16
 // ---EACH LINE OF IO IS ALWAYS 32b---

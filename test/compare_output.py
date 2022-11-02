@@ -10,7 +10,7 @@ rel_tol = 0.01
 def compare_hpwl_outputs():
     #filenames = ["a_plus", "a_minus", "b_plus", "b_minus", "c_plus", "c_minus", "HPWL", "partials"]
     filenames = ["hpwl", "partials"]
-    AIE_output_dir = AIE_workspace_dir + "hpwl/Emulation-AIE/aiesimulator_output/data/"
+    AIE_output_dir = AIE_workspace_dir + "hpwl/aiesimulator_output/data/"
     golden_hpwl_dir = golden_dir + "hpwl/test0/"
     all_match = True
     for filename in filenames:
@@ -19,8 +19,8 @@ def compare_hpwl_outputs():
     return all_match
 
 def compare_dct_outputs():
-    filenames = ["dct_output", "idct_output", "idxst_output"]
-    AIE_output_dir = AIE_workspace_dir + "AIEplace/build/aiesimulator_output/data/"
+    filenames = ["dct_output", "dct_2d_output", "idct_output", "idct_2d_output", "idxst_output", "idxst_2d_output"]
+    AIE_output_dir = AIE_workspace_dir + "AIEplace/aiesimulator_output/data/"
     golden_fft_dir = golden_dir + "density/fft/"
     all_match = True
     for filename in filenames:

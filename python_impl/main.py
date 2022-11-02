@@ -44,7 +44,29 @@ AIE_dependency_dict = {
     "dD": [["xi"], [1, 1]] # dD
 }
 
+def map_nets_to_list(nets):
+    Dict = {}
+    number = 0
+    out_list = []
+    for i in range(len(nets)):
+        temp_list = []
+        for net in range(len(nets[i])):
+            if nets[i][net] not in Dict:
+                Dict[nets[i][net]] = number
+                number += 1
+            temp_list.append(Dict[nets[i][net]])
+        out_list.append(temp_list)
+    return out_list  
 
+def convert_dep_to_force(dependency_list, node_names):
+    new_dep_list = []
+    for i in range(len(node_names)):
+        for j in range(len(dependency_list)):
+            if node_names[i] in dependency_list[j]:
+                new_dep_list.append(j)
+                break
+    return new_dep_list
+        
 def makeRandomNet(node_count):
     netsize = 2
     num = random.random()
