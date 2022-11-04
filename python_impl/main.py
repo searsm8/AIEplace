@@ -28,8 +28,16 @@ def runPartitionAndForce(filename):
     design, grid, orig_num_cols, map_dict = Design.readJSON("./benchmarks/" + filename + ".json")
     partition_information = partition_initialization(design.nets, design.dependencies, design.node_sizes)
     target_part_size = grid.num_rows * orig_num_cols
-    for t in range(3):
+    max_iters = 10
+    curr_timeslot = 0
+    while True:
+        if max_iters == curr_timeslot:
+            break
         curr_part_herds= partition(partition_information, target_part_size, max(design.dependencies))
+        
+        if (not curr_part_herds):
+            break
+        
         new_design, herd_number_dict = Design.partition_design(partition_information, design, curr_part_herds)
         placer = AIEplacer(Grid(grid.num_rows, orig_num_cols), new_design, orig_num_cols)
         unplaced_herds = placer.run(999, "Partition")
@@ -42,8 +50,9 @@ def runPartitionAndForce(filename):
                     break
 
         curr_part_herds = list(set(curr_part_herds) - set(unplaced_herds))
-        update_placed_status(partition_information, curr_part_herds, t)
+        update_placed_status(partition_information, curr_part_herds, curr_timeslot)
         break_spanning_nets(partition_information, unplaced_herds)
+        curr_timeslot += 1
         
 
 if __name__ == "__main__":
