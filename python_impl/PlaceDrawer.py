@@ -264,7 +264,7 @@ class PlaceDrawer(object):
                     elif dependencies[i] == 4:
                         ctx.set_source_rgba(1, 0, 1, alpha=0.5)
                     elif dependencies[i] == 5:
-                        ctx.set_source_rgba(1, 1, 1, alpha=0.5)
+                        ctx.set_source_rgba(0, 0, 0, alpha=0.5)
                     else:
                         ctx.set_source_rgba(0, 0, 1, alpha=0.5)
                 ctx.rectangle(node_xl[i], node_yl[i], node_xh[i] - node_xl[i],
