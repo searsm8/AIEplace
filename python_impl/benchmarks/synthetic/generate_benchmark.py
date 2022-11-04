@@ -40,4 +40,5 @@ if __name__ == "__main__":
     bench_name_root = "synthetic"
     NUM_TO_GENERATE = 10
     for i in range(NUM_TO_GENERATE):
+        random.seed(1)
         generateAIEplaceBenchmark(bench_name_root + "_" + str(i))
