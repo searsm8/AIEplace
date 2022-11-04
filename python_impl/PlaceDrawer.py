@@ -81,6 +81,15 @@ class PlaceDrawer(object):
         @param filename output filename 
         @param iteration current optimization step 
         """
+        # CONFIG OPTIONS
+        #########################################
+        disp_info   = False
+        disp_labels = False
+        disp_borders= False
+        disp_bins   = True #False
+        disp_arrows = False
+        #########################################
+
         num_nodes = len(pos) // 2
         num_movable_nodes = num_movable_nodes
         num_filler_nodes = num_filler_nodes
@@ -97,10 +106,10 @@ class PlaceDrawer(object):
         try:
             tt = time.time()
             if xh - xl < yh - yl:
-                height = 800 
+                height = round(800 * num_bins_y / 10)
                 width = round(height * (xh - xl) / (yh - yl))
             else:
-                width = 800 
+                width = round(800 * num_bins_x / 10)
                 height = round(width * (yh - yl) / (xh -xl))
             line_width = 1 # make lines visible!
             padding = 0
@@ -204,23 +213,25 @@ class PlaceDrawer(object):
             ctx.line_to(normalize_x(xh), normalize_y(yl))
             ctx.close_path()
             ctx.stroke()
+
             ## draw bins
-            ctx.set_source_rgba(1, 0, 0, alpha=0.5)
-            for i in range(1, num_bins_x):
-                if (i % num_cols == 0): 
-                    ctx.set_source_rgba(0, 0, 1, alpha=1)
-                    ctx.set_line_width(4)
-                ctx.move_to(normalize_x(bin_xl(i)), normalize_y(yl))
-                ctx.line_to(normalize_x(bin_xl(i)), normalize_y(yh))
-                ctx.close_path()
-                ctx.stroke()
+            if disp_bins:
                 ctx.set_source_rgba(1, 0, 0, alpha=0.5)
-                ctx.set_line_width(1)
-            for i in range(1, num_bins_y):
-                ctx.move_to(normalize_x(xl), normalize_y(bin_yl(i)))
-                ctx.line_to(normalize_x(xh), normalize_y(bin_yl(i)))
-                ctx.close_path()
-                ctx.stroke()
+                for i in range(1, num_bins_x):
+                    if (i % num_cols == 0): 
+                        ctx.set_source_rgba(0, 0, 1, alpha=1)
+                        ctx.set_line_width(4)
+                    ctx.move_to(normalize_x(bin_xl(i)), normalize_y(yl))
+                    ctx.line_to(normalize_x(bin_xl(i)), normalize_y(yh))
+                    ctx.close_path()
+                    ctx.stroke()
+                    ctx.set_source_rgba(1, 0, 0, alpha=0.5)
+                    ctx.set_line_width(1)
+                for i in range(1, num_bins_y):
+                    ctx.move_to(normalize_x(xl), normalize_y(bin_yl(i)))
+                    ctx.line_to(normalize_x(xh), normalize_y(bin_yl(i)))
+                    ctx.close_path()
+                    ctx.stroke()
 
 
             # draw cells
@@ -262,15 +273,17 @@ class PlaceDrawer(object):
                 ctx.fill()
             
             # Draw kernel outline
-            ctx.set_source_rgba(0, 0, 0, alpha=1.0)  # Solid color
-            for i in range(num_movable_nodes, num_physical_nodes):
-                draw_rect(node_xl[i], node_yl[i], node_xh[i], node_yh[i])
+            if disp_borders:
+                ctx.set_source_rgba(0, 0, 0, alpha=1.0)  # Solid color
+                for i in range(num_movable_nodes, num_physical_nodes):
+                    draw_rect(node_xl[i], node_yl[i], node_xh[i], node_yh[i])
 
-            # Draw kernel names
-            for i in range(len(node_names)):
-                ctx.set_font_size(10)
-                ctx.move_to(node_xl[i]+8, node_yl[i]+12)
-                ctx.show_text(f'{node_names[i]}')
+            # Draw kernel labels 
+            if disp_labels:
+                for i in range(len(node_names)):
+                    ctx.set_font_size(10)
+                    ctx.move_to(node_xl[i]+8, node_yl[i]+12)
+                    ctx.show_text(f'{node_names[i]}')
 
             # draw fillers
             if len(node_xl) > num_physical_nodes:  # filler is included
@@ -301,12 +314,6 @@ class PlaceDrawer(object):
             ctx.set_source_rgba(0, 0, 0.8, alpha=0.8)  # Solid color
             for i in range(num_movable_nodes):
                 draw_rect(node_xl[i], node_yl[i], node_xh[i], node_yh[i])
-            ## draw cell indices
-            # but only for small grids
-            if xh < 10 and yh < 10:
-                for i in range(num_nodes):
-                    ctx.move_to((node_xl[i]+node_xh[i])/2, (node_yl[i]+node_yh[i])/2)
-                    ctx.show_text("%d" % (i))
 
             # draw selected nets
             for net in nets:
@@ -334,42 +341,44 @@ class PlaceDrawer(object):
                     ctx.stroke()
 
             # draw force arrows
-            ctx.set_source_rgb(0, 0, 0)
-            ctx.set_line_width(line_width * 10)
-            ctx.select_font_face("monospace", cairo.FONT_SLANT_NORMAL,
-                                    cairo.FONT_WEIGHT_NORMAL)
-            ctx.set_font_size(6)
-            for i in range(num_bins_y):
-                for j in range(num_bins_x):
-                    dx = 0.1*density_penalty*bin_force_y[i][j]
-                    dy = 0.1*density_penalty*bin_force_x[i][j]
-                    arrow_length = min(5*math.sqrt(dx**2 + dy**2), .5)
-                    arrow_angle = math.atan(dy/dx)
-                    if dx < 0: # mirror across y axis
-                        arrow_angle = math.pi + arrow_angle
-                    draw_arrow(normalize_x(bin_xl(j) + bin_size_x/2), 
-                               normalize_y(bin_yl(i) + bin_size_y/2),
-                               normalize_x(arrow_length), arrow_angle)
-
-
-            # show iteration
-            if iteration:
+            if disp_arrows:
                 ctx.set_source_rgb(0, 0, 0)
                 ctx.set_line_width(line_width * 10)
                 ctx.select_font_face("monospace", cairo.FONT_SLANT_NORMAL,
-                                     cairo.FONT_WEIGHT_NORMAL)
-                ctx.set_font_size(16)
-                ctx.move_to((xl), (yl+16))
-                ctx.show_text('iter: {:4}'.format(iteration))
-            
-            # show HPWL
-            if hpwl:
-                ctx.move_to((xl), (yl+32))
-                ctx.show_text('hpwl: {:.1f}'.format(hpwl))
+                                        cairo.FONT_WEIGHT_NORMAL)
+                ctx.set_font_size(6)
+                for i in range(num_bins_y):
+                    for j in range(num_bins_x):
+                        dx = 0.1*density_penalty*bin_force_y[i][j]
+                        dy = 0.1*density_penalty*bin_force_x[i][j]
+                        arrow_length = min(math.sqrt(dx**2 + dy**2), .5)
+                        arrow_angle = math.atan(dy/dx)
+                        if dx < 0: # mirror across y axis
+                            arrow_angle = math.pi + arrow_angle
+                        draw_arrow(normalize_x(bin_xl(j) + bin_size_x/2), 
+                                   normalize_y(bin_yl(i) + bin_size_y/2),
+                                   normalize_x(arrow_length), arrow_angle)
+
+
+            if disp_info:
+                # show iteration
+                if iteration:
+                    ctx.set_source_rgb(0, 0, 0)
+                    ctx.set_line_width(line_width * 10)
+                    ctx.select_font_face("monospace", cairo.FONT_SLANT_NORMAL,
+                                        cairo.FONT_WEIGHT_NORMAL)
+                    ctx.set_font_size(16)
+                    ctx.move_to((xl), (yl+16))
+                    ctx.show_text('iter: {:4}'.format(iteration))
                 
-            # show overlap
-            ctx.move_to((xl), (yl+48))
-            ctx.show_text('overflow: {:.1f}'.format(overflow))
+                # show HPWL
+                if hpwl:
+                    ctx.move_to((xl), (yl+32))
+                    ctx.show_text('hpwl: {:.1f}'.format(hpwl))
+                    
+                # show overlap
+                ctx.move_to((xl), (yl+48))
+                ctx.show_text('overflow: {:.1f}'.format(overflow))
 
             surface.write_to_png(filename)  # Output to PNG
             print("[I] plotting to %s takes %.3f seconds" %

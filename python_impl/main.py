@@ -6,7 +6,7 @@ import sys
 import logging
 import random
 from naivePlacer import *
-from partitioner import partition
+#from partitioner import partition
 
 def runAIEPlacer(filename):
     make_random = False
@@ -18,7 +18,6 @@ def runAIEPlacer(filename):
     # Create a design environment and run AIEplacer
     #design, grid = createRandomDesign()
     design, grid, orig_num_cols, _ = Design.readJSON("./benchmarks/"+filename+".json")
-    print(design.dependencies)
     placer = AIEplacer(grid, design, orig_num_cols)
     placer.run(999)
 
@@ -44,7 +43,7 @@ def runPartitionAndForce(filename):
 
 if __name__ == "__main__":
     random.seed(1)
-    filename = "simple"
+    filename = "synthetic/synthetic_5"
     #cProfile.run('runAIEPlacer()')
     runAIEPlacer(filename)
     runNaivePlacer(filename)

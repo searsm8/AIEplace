@@ -98,15 +98,13 @@ class Design:
     def readJSON(cls, filepath):
         with open(filepath) as file:
             JSON = json.load(file)
-            node_names = list(JSON["node_info"].keys())
-            node_info = deepcopy(JSON["node_info"])
-            node_sizes = [list(node_info.values())[i][1] for i in range(len(list(node_info)))]
+            node_names = list(JSON["node_sizes"].keys())
+            node_info = deepcopy(JSON["node_sizes"])
+            node_sizes = [list(node_info.values())[i] for i in range(len(list(node_info)))]
             node_sizes = [Coord(node_sizes[i][0], node_sizes[i][1]) for i in range(len(list(node_info)))]
-            dependencies = get_dep_herds(node_info) #[node_info[i][0] for i in range(len(node_info))]
             net_names = list(JSON["nets"].values())
-            #nets = [node_names.index(name) for name in net_names]
-            nets, map_dict = map_nets_to_list(net_names, JSON["node_info"])
-            dependencies = convert_dep_to_force(dependencies, node_names)
+            nets, map_dict = map_nets_to_list(net_names, JSON["node_sizes"])
+            dependencies = extractDependenciesFromNetlist(nets, len(map_dict))
             
             num_rows = JSON["grid_info"]["num_rows"]
             num_cols = JSON["grid_info"]["num_cols"]
@@ -114,7 +112,8 @@ class Design:
 
             total_size = getTotalSize(node_sizes)
             total_cols = num_cols
-            while total_cols*num_rows*0.8 < total_size: total_cols += num_cols
+            while total_cols*num_rows*0.8 < total_size: 
+                total_cols += num_cols
             grid = Grid(num_rows, total_cols)
             design = Design(coords, node_names, node_sizes, dependencies, nets)
         
@@ -126,6 +125,15 @@ def getTotalSize(node_sizes):
     for i in range(len(node_sizes)):
         total_size += node_sizes[i].row * node_sizes[i].col
     return total_size
+
+def extractDependenciesFromNetlist(nets, num_nodes):
+    '''Assumes that nets are sorted by dependency'''
+    dependencies = [0]*num_nodes
+    for net in nets:
+        for i in range(1, len(net)):
+            dependencies[net[i]] = max(dependencies[net[i]], dependencies[net[0]]+1)
+    return dependencies
+
 
 def convert_dep_to_force(dependency_list, node_names):
     """ converts the dependency list to a format that can be accepted by force directed placement
@@ -226,7 +234,7 @@ class AIEplacer:
         self.design_run = 0
         while(os.path.exists(f"results/run_{self.design_run}")):
             self.design_run += 1
-        os.system(f"mkdir results/run_{self.design_run}/nodes -p")
+        os.system(f"mkdir -p results/run_{self.design_run}/nodes")
     
     def computeActualHPWL(self):
         hpwls = []
@@ -465,7 +473,7 @@ class AIEplacer:
 
             logging.info(f"\t\t{stagnant_iterations} stagnant_iterations\t{overflow} overflow\t {min_overflow} min_overflow")
             MAX_STAGNANT_ITERS = 20
-            MIN_ITERS = 200
+            MIN_ITERS = 50
             if iter > MIN_ITERS and stagnant_iterations >= MAX_STAGNANT_ITERS:
                 logging.info(f"No improvement in overflow for {MAX_STAGNANT_ITERS} iterations...Stopping.")
                 converged = True
@@ -477,9 +485,9 @@ class AIEplacer:
             if converged:
                 self.legalize(list(range(len(self.design.node_sizes))))
 
-            for net in self.design.nets:
-                if net.count(target_node):
-                    nets_to_draw.append(net)
+            #for net in self.design.nets:
+            #    if net.count(target_node):
+            #        nets_to_draw.append(net)
 
 
             if export_images:
@@ -537,7 +545,7 @@ class AIEplacer:
                         if net.count(target_node):
                             nets_to_draw.append(net)
                             
-                    filename = os.path.join("results", f"run_{self.design_run}", "nodes", f"node_{self.design.node_names[target_node]}.png")
+                    filename = os.path.join("results", f"run_{self.design_run}", "nodes", f"{self.design.node_names[target_node]}.png")
                     ret = PlaceDrawer.PlaceDrawer.forward(
                             num_cols=self.num_cols_original,
                             pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  +  \
