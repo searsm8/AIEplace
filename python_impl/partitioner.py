@@ -1,8 +1,18 @@
-import pprint
-import math
-import random
-
 def partition_initialization(graph, dependencies, node_sizes):
+    """Creates the partitioning structure that holds all of the nodes (herds) and nets
+       (sub-graphs of herds)
+
+    Args:
+        graph (list<list<int>>): list containing sublists with herd numbers, with each
+                                 sublist representing a net.
+        dependencies (list): list of dependencies for each herd
+        node_sizes (list<coords>): list of node sizes, with each node size represented
+                                   by a coord 
+
+    Returns:
+        partition_information (dict): information about the nodes and nets
+
+    """
     partition_information = {}
     partition_information["nodes"] = {}
     partition_information["nets"] = {}
@@ -17,36 +27,37 @@ def partition_initialization(graph, dependencies, node_sizes):
                 if i == graph[j][k]:
                     partition_information["nodes"][i]["anets"].append(j)
 
-    
-    # curr_part_herds, curr_part_size, curr_max_dep = partition(partition_information, target_part_size, max(dependencies))
-    # random.shuffle(curr_part_herds)
-    # print(curr_part_herds)
-
-    # update_net_cuts(partition_information, curr_part_herds)
-    # other_max_dep_herds = []
-    # for i in range(len(partition_information["nodes"])):
-    #     if partition_information["nodes"][i]["deps"] == curr_max_dep and \
-    #        partition_information["nodes"][i]["placed"] == 0 and \
-    #        i not in curr_part_herds:
-           
-    #        other_max_dep_herds.append(i)
-
     # ###TODO: Create swapping method
 
     return partition_information
 
 def partition(partition_information, target_part_size, max_dependency):
+    """Partitions herds into partition at or less than the target size. Groups
+       all of the lowest dependency herds that are still unplaced first. Will
+       not increase the current dependency level until all nodes in a dependency
+       level have been placed, or are in the target_partition_herd_names
+       list.
+
+    Args:
+        partition_information (dict): information about the nodes and nets
+        target_part_size (int): size of target partitions
+        max_dependency (int): max dependency level in the entire graph (across all
+                              timeslots)
+
+    Returns:
+        list: herd names in the target partition
+    """
     curr_size = 0
-    curr_dep = 0
     target_partition_herd_names = []
     for dep in range(0, max_dependency + 1):
-        # print(dep)
         # e.g., we don't want to add all dep 0, then no dep 1, then some dep 2's.
         keys = list(partition_information["nodes"].keys())
         dep_herds = []
         for key in keys:
             if partition_information["nodes"][key]["deps"] == dep:
                 dep_herds.append(key)
+        # Checks to make sure that all herds in a dependency level have been placed,
+        # or are in the target_partition_herd_names list
         accounted_herds = 0
         for key in dep_herds:
             if partition_information["nodes"][key]["placed"] == -1:
@@ -60,7 +71,7 @@ def partition(partition_information, target_part_size, max_dependency):
             break
 
     update_net_cuts(partition_information, target_partition_herd_names)
-    return target_partition_herd_names, curr_dep
+    return target_partition_herd_names
 
 def update_net_cuts(partition_information, herds_of_interest):
     """Updates the "broken" field in the partition information dictionary if there are
