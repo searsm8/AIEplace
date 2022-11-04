@@ -6,20 +6,20 @@ import sys
 import logging
 import random
 from naivePlacer import *
-#from partitioner import partition
+
+from partitioner import *
 
 def runAIEPlacer(filename):
-    make_random = False
     logging.root.name = 'AIEplace'
     logging.basicConfig(level=logging.INFO,
                         format='[%(levelname)-7s] %(name)s - %(message)s',
                         stream=sys.stdout)
-    
-    # Create a design environment and run AIEplacer
-    #design, grid = createRandomDesign()
+
     design, grid, orig_num_cols, _ = Design.readJSON("./benchmarks/"+filename+".json")
+
+    print(design.nets)
     placer = AIEplacer(grid, design, orig_num_cols)
-    placer.run(999)
+    _ = placer.run(999, "Force")
 
 def runNaivePlacer(filename):
     
@@ -28,25 +28,42 @@ def runNaivePlacer(filename):
 
 def runPartitionAndForce(filename):
     design, grid, orig_num_cols, map_dict = Design.readJSON("./benchmarks/" + filename + ".json")
-    # print(design.node_names)
-    # print(design.dependencies)
-    # print(design.nets)
-    # print(map_dict)
-    # for i in range(len(design.node_sizes)):
-    #     print("[" + str(design.node_sizes[i].row) + ", " + str(design.node_sizes[i].col) + "]")
-    # coords
-    # node_names
-    # node_sizes
-    # dependencies
-    # nets
-    partition(design.nets, design.dependencies, map_dict, design.node_sizes, Grid(grid.num_rows, orig_num_cols))
+    partition_information = partition_initialization(design.nets, design.dependencies, design.node_sizes)
+    target_part_size = grid.num_rows * orig_num_cols
+    max_iters = 10
+    curr_timeslot = 0
+    while True:
+        if max_iters == curr_timeslot:
+            break
+        curr_part_herds= partition(partition_information, target_part_size, max(design.dependencies))
+        
+        if (not curr_part_herds):
+            break
+        
+        new_design, herd_number_dict = Design.partition_design(partition_information, design, curr_part_herds)
+        placer = AIEplacer(Grid(grid.num_rows, orig_num_cols), new_design, orig_num_cols)
+        unplaced_herds = placer.run(999, "Partition")
+        
+        for herd in range(len(unplaced_herds)):
+            unplaced_herds[herd]
+            for key, value in herd_number_dict.items():
+                if value == unplaced_herds[herd]:
+                    unplaced_herds[herd] = key
+                    break
+
+        curr_part_herds = list(set(curr_part_herds) - set(unplaced_herds))
+        update_placed_status(partition_information, curr_part_herds, curr_timeslot)
+        break_spanning_nets(partition_information, unplaced_herds)
+        curr_timeslot += 1
+        
 
 if __name__ == "__main__":
     random.seed(1)
     filename = "synthetic/synthetic_5"
     #cProfile.run('runAIEPlacer()')
     runAIEPlacer(filename)
+    print("==================")
     runNaivePlacer(filename)
-    # runPartitionAndForce(filename)
+    runPartitionAndForce(filename)
 
 

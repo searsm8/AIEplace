@@ -258,7 +258,7 @@ class PlaceDrawer(object):
                     elif dependencies[i] == 1:    
                         ctx.set_source_rgba(0, 1, 0, alpha=0.5)
                     elif dependencies[i] == 2:
-                        ctx.set_source_rgba(0, 1, 1, alpha=0.5)
+                        ctx.set_source_rgba(0, 0, 1, alpha=0.5)
                     elif dependencies[i] == 3:
                         ctx.set_source_rgba(1, 1, 0, alpha=0.5)
                     elif dependencies[i] == 4:
@@ -381,8 +381,8 @@ class PlaceDrawer(object):
                 ctx.show_text('overflow: {:.1f}'.format(overflow))
 
             surface.write_to_png(filename)  # Output to PNG
-            print("[I] plotting to %s takes %.3f seconds" %
-                  (filename, time.time() - tt))
+            # print("[I] plotting to %s takes %.3f seconds" %
+            #       (filename, time.time() - tt))
         except Exception as e:
             print("[E] failed to plot")
             print(str(e))
