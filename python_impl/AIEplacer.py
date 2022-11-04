@@ -2,6 +2,7 @@
 # Implement the a rudimentary ePlace algorithm to place designs
 # Intended only to run on small designs, such as a 5.row8 AIE array
 
+from platform import node
 import AIEmath.computeTerm
 import AIEmath.customDCT
 import sys, os
@@ -12,8 +13,9 @@ import time
 import numpy as np
 import logging
 import PlaceDrawer
-import jsbeautifier
+import json, jsbeautifier
 from naivePlacer import write_to_json
+from copy import deepcopy
 
 class Herd:
     def __init__(self, row_loc, col_loc, row_size, col_size, number, name, dependency):
@@ -79,6 +81,140 @@ class Design:
         self.nets = nets # each net is a list of node indices
                     # e.g. [4,7,9] means nodes 4, 7, and 9 are connect by a net
         
+    @classmethod
+    def initializeCoords(cls, num_rows, num_cols, node_count):
+        #random initial position
+        coords = []
+        for i in range(node_count):
+            # CENTER INITIALIZATION
+            #coords.append( Coord( random.choice(range(round(grid.num_rows*.4), round(grid.num_rows*.6))) + random.random(), 
+            #                      random.choice(range(round(grid.num_cols*.4), round(grid.num_cols*.6))) + random.random() ) )
+            # EDGE INITIALIZATION
+            coords.append( Coord( random.choice(range(math.floor(num_rows*.2), math.ceil(num_rows*.5))) + random.random(), 
+                                  random.choice(range(math.floor(num_rows*.2), math.ceil(num_cols*.5))) + random.random() ) )
+        return coords
+
+    @classmethod
+    def readJSON(cls, filepath):
+        with open(filepath) as file:
+            JSON = json.load(file)
+            node_names = list(JSON["node_info"].keys())
+            node_info = deepcopy(JSON["node_info"])
+            node_sizes = [list(node_info.values())[i][1] for i in range(len(list(node_info)))]
+            node_sizes = [Coord(node_sizes[i][0], node_sizes[i][1]) for i in range(len(list(node_info)))]
+            dependencies = get_dep_herds(node_info) #[node_info[i][0] for i in range(len(node_info))]
+            net_names = list(JSON["nets"].values())
+            #nets = [node_names.index(name) for name in net_names]
+            nets, map_dict = map_nets_to_list(net_names, JSON["node_info"])
+            dependencies = convert_dep_to_force(dependencies, node_names)
+            
+            num_rows = JSON["grid_info"]["num_rows"]
+            num_cols = JSON["grid_info"]["num_cols"]
+            coords = Design.initializeCoords(num_rows, num_cols, len(node_names))
+
+            total_size = getTotalSize(node_sizes)
+            total_cols = num_cols
+            while total_cols*num_rows*0.8 < total_size: total_cols += num_cols
+            grid = Grid(num_rows, total_cols)
+            design = Design(coords, node_names, node_sizes, dependencies, nets)
+        
+        return design, grid, num_cols, map_dict
+    
+
+def getTotalSize(node_sizes):
+    total_size = 0
+    for i in range(len(node_sizes)):
+        total_size += node_sizes[i].row * node_sizes[i].col
+    return total_size
+
+def convert_dep_to_force(dependency_list, node_names):
+    """ converts the dependency list to a format that can be accepted by force directed placement
+
+        Args:
+            dependency_list (list<list<string>>): each sublist contains herds at the dependency for that index
+                                            [['a', 'b'], ['c']]: a + b are dep. 0, c is dep 1
+            node_names (list): names of all the nodes
+                            ['a', 'b', 'c']
+
+        Returns:
+            list: dependency numbers lined up with the node_names list
+                            [0, 0, 1]
+        """
+    new_dep_list = []
+
+    new_dep_list = []
+    for i in range(len(node_names)):
+        for j in range(len(dependency_list)):
+            if node_names[i] in dependency_list[j]:
+                new_dep_list.append(j)
+                break
+    return new_dep_list
+
+def map_nets_to_list(nets, nodes):
+    """converts a list of nets that have string names to a list of nets that have integer names
+
+    Args:
+        nets (list<list<string>>): nets with associated nodes to each net
+                                   [['a', 'c'], ['b', 'a']]
+        nodes (dict): dict of nodes
+
+    Returns:
+        out_list: same size as nets, but with strings converted to integers
+                  [[0, 2], [1, 3]]
+        Dict (Dict): the mapping used to convert strings to ints
+                  {'a': 0, 'b': 1, 'c': 2, 'd': 3}
+    """
+    Dict = {}
+    out_list = []
+    keys = list(nodes.keys())
+    for i in range(len(keys)):
+        Dict[keys[i]] = i
+    for i in range(len(nets)):
+        temp_list = []
+        for net in range(len(nets[i])):
+            temp_list.append(Dict[nets[i][net]])
+        out_list.append(temp_list)
+    return out_list, Dict
+
+def get_dep_herds(dictionary):
+    """Moves the dependencies from a dictionary to a list that has the length of the maximum
+       dependency number + 1, with each sub list containing the herds at that dependency level.
+
+    Args:
+        dictionary (dict): dictionary of dependencies
+
+    Returns:
+        list: list containig herds at their dependency level
+    """
+    dependency_sorted_herds = []
+    counter = 0
+    while(dictionary):
+        keys = list(dictionary.keys())
+        same_dep_keys = []
+        for i in range(len(keys)):
+            has_dependency = False
+            # check if dependencies have been placed
+            for j in range(len(dictionary[keys[i]][0])):
+                if dictionary[keys[i]][0][j] in dictionary: 
+                    has_dependency = True
+                    break
+            if not has_dependency:
+                same_dep_keys.append(keys[i])
+        unplaced_herds = []
+        for i in range(len(same_dep_keys)):
+            unplaced_herds.append(same_dep_keys[i])
+        # print(same_dep_keys)
+        while same_dep_keys:
+            del dictionary[same_dep_keys.pop(0)]
+        # unplaced_herds[i].sort(key=lambda x: x.size, reverse=True)
+        # place herds
+        dependency_sorted_herds.append(unplaced_herds)
+        counter += 1
+        if counter == 100:
+            print("max iterations reached in getting dependencies")
+            break
+    return dependency_sorted_herds
+        
 class AIEplacer:
     def __init__(self, grid, design, num_cols) -> None:
         self.grid = grid
@@ -90,7 +226,7 @@ class AIEplacer:
         self.design_run = 0
         while(os.path.exists(f"results/run_{self.design_run}")):
             self.design_run += 1
-        os.system(f"mkdir results/run_{self.design_run}")
+        os.system(f"mkdir results/run_{self.design_run}/nodes -p")
     
     def computeActualHPWL(self):
         hpwls = []
@@ -117,8 +253,8 @@ class AIEplacer:
             self.bin_grid.vals[i] = [0]*self.bin_grid.num_cols
 
         for i in range(len(self.design.coords)):
-            row = self.design.coords[i].row
-            col = self.design.coords[i].col
+            row = self.design.coords[i].row + self.design.node_sizes[i].row/2
+            col = self.design.coords[i].col + self.design.node_sizes[i].col/2
             #print(f"({row}, {col})")
             #print(f"({int(row/self.bin_height)}, {int(col/self.bin_width)})")
             #print(f"bin_grid.vals[{self.bin_grid.num_rows}][{self.bin_grid.num_cols}]")
@@ -176,6 +312,12 @@ class AIEplacer:
         stagnant_iterations = 0 # number of iterations without seeing any improvement
         converged = False 
         
+        # choose a random node and draw all nets for that node
+        while True:
+            target_node=random.randint(0, len(self.design.coords)-1)
+            if self.design.dependencies[target_node] >= 1:
+                break
+
         for iter in range(iterations):
             logging.root.name = 'ITER ' + str(iter)
             logging.info(f"***Begin Iteration {iter}***")
@@ -263,11 +405,11 @@ class AIEplacer:
             electroForceY = AIEmath.customDCT.idcst_2d(electroForceY)
 
             step_len = 0.09
-            density_penalty = 0.02*(iter) if iter < 50 else 0.05*iter
+            density_penalty = 0.02*(iter) if iter < 50 else 0.05*50
             print(f"density_penalty: {density_penalty}")
 
             # Update node locations
-            depend_weight = 3 if iter < 50 else 1.5#max(0.5, 0.02*(100-iter))
+            depend_weight = 1 if iter < 50 else 1.5#max(0.5, 0.02*(100-iter))
             for i in range(len(self.design.coords)):
                 # Compute the electro force for each node, accounting for bin overlaps
                 force = Coord(0, 0)
@@ -282,8 +424,8 @@ class AIEplacer:
                 dependency_force = depend_weight*(self.design.dependencies[i]-0.5)*(self.grid.num_cols-self.design.coords[i].col)/self.grid.num_cols
                 # Subtract the electro force because we want to model REPULSIVE force
                 self.design.coords[i].row -= step_len * (hpwl_gradient[i].row  - density_penalty * force.row)
-                if self.design.coords[i].row < -1:
-                    self.design.coords[i].row == -1
+                #if self.design.coords[i].row < -1:
+                #    self.design.coords[i].row == -1
 
                 #self.design.coords[i].row -= step_len * (0 - density_penalty * force.row)
                                             #- density_penalty*electroForceX[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
@@ -294,8 +436,8 @@ class AIEplacer:
                 self.design.coords[i].col -= step_len * (hpwl_gradient[i].col - dependency_force - density_penalty * force.col)
                 #self.design.coords[i].col -= step_len * (0 - density_penalty * force.col)
                                             #- density_penalty*electroForceY[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
-                if self.design.coords[i].col < -1: self.design.coords[i].col = -1
-                if self.design.coords[i].col > self.grid.num_cols + 1: self.design.coords[i] = self.grid.num_cols + 1
+                #if self.design.coords[i].col < -1: self.design.coords[i].col = -1
+                #if self.design.coords[i].col > self.grid.num_cols + 1: self.design.coords[i] = self.grid.num_cols + 1
                 #if self.design.coords[i].col + self.design.node_sizes[i].col  >= self.grid.num_cols : self.design.coords[i].col = self.grid.num_cols-1
 
             #prettyPrint.coord(self.design.coords[my_node])
@@ -322,9 +464,10 @@ class AIEplacer:
                 min_overflow = overflow
 
             logging.info(f"\t\t{stagnant_iterations} stagnant_iterations\t{overflow} overflow\t {min_overflow} min_overflow")
-            convergence_iterations = 20
-            if iter > 200 and stagnant_iterations >= convergence_iterations:
-                logging.info(f"No improvement in overflow for {convergence_iterations} iterations...Stopping.")
+            MAX_STAGNANT_ITERS = 20
+            MIN_ITERS = 200
+            if iter > MIN_ITERS and stagnant_iterations >= MAX_STAGNANT_ITERS:
+                logging.info(f"No improvement in overflow for {MAX_STAGNANT_ITERS} iterations...Stopping.")
                 converged = True
 
             if iter == iterations-1:
@@ -333,15 +476,11 @@ class AIEplacer:
             nets_to_draw = []
             if converged:
                 self.legalize(list(range(len(self.design.node_sizes))))
-                # choose a random node and draw all nets for that node
-                for i in range(1):
-                    while True:
-                        target_node=random.randint(0, len(self.design.coords)-1)
-                        if self.design.dependencies[target_node] >= 1:
-                            break
-                    for net in self.design.nets:
-                        if net.count(target_node):
-                            nets_to_draw.append(net)
+
+            for net in self.design.nets:
+                if net.count(target_node):
+                    nets_to_draw.append(net)
+
 
             if export_images:
                 self.computeBinDensities()
@@ -358,12 +497,11 @@ class AIEplacer:
                     
                 #use PlaceDrawer to export an image
                 if(iter%5 == 0) or converged:
-                    filename=f"{time.strftime('%y%m%d_%H%M')}_iter_{iter}.png"
+                    filename=f"{time.strftime('%y%m%d_%H%M')}_iter_{iter:03}.png"
                     filename = os.path.join("results", f"run_{self.design_run}", filename)
-                            
                     ret = PlaceDrawer.PlaceDrawer.forward(
-                            self.num_cols_original,
-                            pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  + 
+                            num_cols=self.num_cols_original,
+                            pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  +  \
                                 [self.design.coords[i].row for i in range(len(self.design.coords))], 
                             node_size_x=[self.design.node_sizes[i].col for i in range(len(self.design.coords))], 
                             node_size_y=[self.design.node_sizes[i].row for i in range(len(self.design.coords))], 
@@ -376,6 +514,7 @@ class AIEplacer:
                             num_movable_nodes=0, num_filler_nodes=0, 
                             filename=filename,
                             nets=nets_to_draw,
+                            node_names=self.design.node_names,
                             hwpl_force=[],
                             bin_force_x=electroForceX,
                             bin_force_y=electroForceY,
@@ -386,6 +525,44 @@ class AIEplacer:
                             overflow=overflow
                             )
             if converged:
+                # Export collected images as a .gif
+                folder = os.path.join("results", f"run_{self.design_run}" )
+                gif_name = f"_run_{self.design_run}.gif"
+                PlaceDrawer.PlaceDrawer.export_gif(folder, gif_name)
+
+                # Export images showing nets for target nodes
+                for target_node in range(len(self.design.coords)):
+                    nets_to_draw = []
+                    for net in self.design.nets:
+                        if net.count(target_node):
+                            nets_to_draw.append(net)
+                            
+                    filename = os.path.join("results", f"run_{self.design_run}", "nodes", f"node_{self.design.node_names[target_node]}.png")
+                    ret = PlaceDrawer.PlaceDrawer.forward(
+                            num_cols=self.num_cols_original,
+                            pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  +  \
+                                [self.design.coords[i].row for i in range(len(self.design.coords))], 
+                            node_size_x=[self.design.node_sizes[i].col for i in range(len(self.design.coords))], 
+                            node_size_y=[self.design.node_sizes[i].row for i in range(len(self.design.coords))], 
+                            pin_offset_x=[0 for i in range(len(self.design.coords))],
+                            pin_offset_y=[0 for i in range(len(self.design.coords))],
+                            pin2node_map={}, 
+                            xl=0, yl=0, xh=self.grid.num_cols, yh=self.grid.num_rows, 
+                            site_width=1, row_height=1,
+                            bin_size_x=self.bin_width, bin_size_y=self.bin_height, 
+                            num_movable_nodes=0, num_filler_nodes=0, 
+                            filename=filename,
+                            nets=nets_to_draw,
+                            node_names=self.design.node_names,
+                            hwpl_force=[],
+                            bin_force_x=electroForceX,
+                            bin_force_y=electroForceY,
+                            density_penalty=density_penalty,
+                            iteration=iter,
+                            dependencies=self.design.dependencies,
+                            hpwl=total_hpwl,
+                            overflow=overflow
+                            )
                 break
             #end iteration loop
 
@@ -429,9 +606,17 @@ class AIEplacer:
         number = 0
         dependency_ordered_array = []
         for j in range(max(self.design.dependencies) + 1):
+            temp = []
+            coord_dict = {}
             for i in herds_of_interest:
                 if self.design.dependencies[i] == j:
-                    dependency_ordered_array.append(i)
+                    temp.append(i)
+                    coord_dict[i] = self.design.coords[i].col
+            sorted_dict = sorted(coord_dict.items(), key=lambda x: x[1])
+            sorted_list = [item[0] for item in sorted_dict]
+            dependency_ordered_array += sorted_list
+            # dependency_ordered_array.append(temp)
+            
         print(self.design.dependencies)
         print(dependency_ordered_array)
         # place all dependency 0 herds first, then dep 1, etc.
@@ -450,9 +635,17 @@ class AIEplacer:
             if coord_col < 0: coord_col = 0
             if coord_row >= self.grid.num_rows: coord_row = self.grid.num_rows-1
             if coord_col >= self.grid.num_cols: coord_col = self.grid.num_cols-1
+            curr_row = -1
+            curr_col = -1
 
+            for col in range(0, coord_col):
+                if (self.is_legal_placement([coord_row, col], size, lg)):
+                    curr_row = coord_row
+                    curr_col = col
+                    legalized = True
+                    break
             # if the top left corner is filled on the grid or if it's empty
-            if lg.vals[coord_row][coord_col] == 0:
+            if lg.vals[coord_row][coord_col] == 0 and not legalized:
                 # Do not go out of the top or the left of the grid
 
                 # Because we're looking @ the top left corner, move the herd upwards until all
