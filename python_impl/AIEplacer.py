@@ -2,7 +2,6 @@
 # Implement the a rudimentary ePlace algorithm to place designs
 # Intended only to run on small designs, such as a 5.row8 AIE array
 
-from platform import node
 import AIEmath.computeTerm
 import AIEmath.customDCT
 import sys, os
@@ -117,8 +116,58 @@ class Design:
             while total_cols*num_rows*0.8 < total_size: total_cols += num_cols
             grid = Grid(num_rows, total_cols)
             design = Design(coords, node_names, node_sizes, dependencies, nets)
-        
         return design, grid, num_cols, map_dict
+    
+    @classmethod
+    def partition_design(cls, partition_information, design, curr_part_herds):
+        """Generates a subset of the design, containing only herds that will be placed
+           in a given timeslot. These herds are mapped from their alphabetic values to
+           values from 0 -> <# herds in timeslot - 1> to comply with the current input
+           accepted by the force directed placement.
+
+        Args:
+            partition_information (dict): dict containing all of the herds (nodes) and 
+                                          dependency sub-graphs (nets).
+            design (Design): Design containing all of the herd information across all 
+                             timeslots.
+            curr_part_herds (list): herds to place in a timeslot
+
+        Returns:
+            new_design (Design): subset of new_design, to be used in a single timeslot
+            herd_number_dict (Dict): mapping of herds from their "new_design" numbers
+                                     to their original "design" numbers
+        """
+        new_coords = []
+        new_node_names = []
+        new_node_sizes = []
+        new_dependencies = []
+        new_nets = []
+        herd_number_dict = {}
+        number = 0
+        for i in curr_part_herds:
+            new_coords.append(design.coords[i])
+            herd_number_dict[i] = number
+            new_node_names.append(number)
+            number += 1
+            new_node_sizes.append(design.node_sizes[i])
+            # we don't want a right / left pulling dep. force
+            new_dependencies.append(design.dependencies[i])
+        net_keys = list(partition_information["nets"].keys())
+        for net in range(len(net_keys)):
+            unbroken_net = True
+            for herd in partition_information["nets"][net]["nodes"]:
+                if herd in curr_part_herds:
+                    continue
+                else:
+                    unbroken_net = False
+                    break
+            if (unbroken_net):
+                temp_net = partition_information["nets"][net]["nodes"]
+                for node in range(len(temp_net)):
+                    temp_net[node] = herd_number_dict[temp_net[node]]
+                new_nets.append(temp_net)
+        new_design = Design(new_coords, new_node_names, new_node_sizes, new_dependencies, new_nets)
+        return new_design, herd_number_dict
     
 
 def getTotalSize(node_sizes):
@@ -291,20 +340,27 @@ class AIEplacer:
         return a[0]
 
     def getSortedRows(self, net):
-        rows = [self.design.coords[i].row for i in net]
+        rows = []
+        for i in range(len(net)):
+            rows.append(self.design.coords[net[i]].row)
         rows = list(zip(rows, net))
         rows.sort(key=self.get0)
         return rows
 
     def getSortedCols(self, net):
-        cols = [self.design.coords[i].col for i in net]
+        cols = []
+        for i in range(len(net)):
+            cols.append(self.design.coords[net[i]].col)
         cols = list(zip(cols, net))
         cols.sort(key=self.get0)
         return cols
 
-    def run(self, iterations):
+    def run(self, iterations, method):
         ''' Runs the ePlace algorithm'''
         export_images = True
+        
+        # unplaced herds
+        herds_to_return = []
 
         logging.info("Begin AIEplace")
         os.system("mkdir results")
@@ -313,10 +369,7 @@ class AIEplacer:
         converged = False 
         
         # choose a random node and draw all nets for that node
-        while True:
-            target_node=random.randint(0, len(self.design.coords)-1)
-            if self.design.dependencies[target_node] >= 1:
-                break
+        target_node=random.randint(0, len(self.design.coords)-1)
 
         for iter in range(iterations):
             logging.root.name = 'ITER ' + str(iter)
@@ -420,12 +473,16 @@ class AIEplacer:
                         if overlap > 0:
                             force.row += overlap * electroForceX[bin_row][bin_col]
                             force.col += overlap * electroForceY[bin_row][bin_col]
-
-                dependency_force = depend_weight*(self.design.dependencies[i]-0.5)*(self.grid.num_cols-self.design.coords[i].col)/self.grid.num_cols
+                
+                dependency_force = 0
+                if method == "Force":
+                    dependency_force = depend_weight*(self.design.dependencies[i]-0.5)*(self.grid.num_cols-self.design.coords[i].col)/self.grid.num_cols
                 # Subtract the electro force because we want to model REPULSIVE force
                 self.design.coords[i].row -= step_len * (hpwl_gradient[i].row  - density_penalty * force.row)
-                #if self.design.coords[i].row < -1:
-                #    self.design.coords[i].row == -1
+                if self.design.coords[i].row < -1:
+                   self.design.coords[i].row == -1
+                if self.design.coords[i].row > self.grid.num_rows + 1:
+                    self.design.coords[i].row = self.grid.num_rows + 1
 
                 #self.design.coords[i].row -= step_len * (0 - density_penalty * force.row)
                                             #- density_penalty*electroForceX[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
@@ -436,8 +493,8 @@ class AIEplacer:
                 self.design.coords[i].col -= step_len * (hpwl_gradient[i].col - dependency_force - density_penalty * force.col)
                 #self.design.coords[i].col -= step_len * (0 - density_penalty * force.col)
                                             #- density_penalty*electroForceY[int(self.design.coords[i].row/self.bin_height)][int(self.design.coords[i].col/self.bin_width)] )
-                #if self.design.coords[i].col < -1: self.design.coords[i].col = -1
-                #if self.design.coords[i].col > self.grid.num_cols + 1: self.design.coords[i] = self.grid.num_cols + 1
+                if self.design.coords[i].col < -1: self.design.coords[i].col = -1
+                if self.design.coords[i].col > self.grid.num_cols + 1: self.design.coords[i] = self.grid.num_cols + 1
                 #if self.design.coords[i].col + self.design.node_sizes[i].col  >= self.grid.num_cols : self.design.coords[i].col = self.grid.num_cols-1
 
             #prettyPrint.coord(self.design.coords[my_node])
@@ -465,7 +522,7 @@ class AIEplacer:
 
             logging.info(f"\t\t{stagnant_iterations} stagnant_iterations\t{overflow} overflow\t {min_overflow} min_overflow")
             MAX_STAGNANT_ITERS = 20
-            MIN_ITERS = 200
+            MIN_ITERS = 40
             if iter > MIN_ITERS and stagnant_iterations >= MAX_STAGNANT_ITERS:
                 logging.info(f"No improvement in overflow for {MAX_STAGNANT_ITERS} iterations...Stopping.")
                 converged = True
@@ -475,7 +532,7 @@ class AIEplacer:
 
             nets_to_draw = []
             if converged:
-                self.legalize(list(range(len(self.design.node_sizes))))
+                herds_to_return += self.legalize(list(range(len(self.design.node_sizes))))
 
             for net in self.design.nets:
                 if net.count(target_node):
@@ -569,6 +626,8 @@ class AIEplacer:
         logging.root.name = 'AIEplace'
         logging.info("End AIEplace")
 
+        return herds_to_return
+
     def is_legal_placement(self, grid_coords, herd, lg):
                 """Checks if a herd fits in the grid at the specified grid tile. 
                     Assumes the first tile in the grid will be the upper left hand
@@ -617,8 +676,8 @@ class AIEplacer:
             dependency_ordered_array += sorted_list
             # dependency_ordered_array.append(temp)
             
-        print(self.design.dependencies)
-        print(dependency_ordered_array)
+        # print(self.design.dependencies)
+        # print(dependency_ordered_array)
         # place all dependency 0 herds first, then dep 1, etc.
         for i in dependency_ordered_array:
         # for coord in self.design.coords:
@@ -720,10 +779,12 @@ class AIEplacer:
                 if (not attempted_placement):
                     print("failed")
                     logging.info(f"Legalization FAILED: no legal placement found for node at {coord_row, coord_col}.")
-                    return
+                    # return unplaced herds
+                    return dependency_ordered_array[(dependency_ordered_array.index(i)):]
                 elif (dist > max(self.grid.num_rows, self.grid.num_cols)):
                     logging.info(f"Legalization FAILED: no legal placement found for node at {coord_row, coord_col}.")
-                    return
+                    # return unplaced herds
+                    return dependency_ordered_array[(dependency_ordered_array.index(i)):]
                 else: 
                     dist += 1
             if (legalized):
@@ -733,12 +794,11 @@ class AIEplacer:
                 self.design.coords[i].col = coord_col
                 herdList.append(Herd(self.grid.num_rows - curr_row - 1, curr_col, size.row, size.col, self.design.dependencies[i], self.design.node_names[i], self.design.dependencies[i]))
                 number += 1
-                # is this right? for the row
                 for row in range(coord_row, coord_row + size.row):
                     for col in range(coord_col, coord_col + size.col):
                         lg.vals[row][col] = 1
                 continue
-        print(lg.print_grid())
+        # print(lg.print_grid())
         dep_herd_list = []
         for dep in range(max(self.design.dependencies) + 1):
             temp = []
@@ -752,3 +812,4 @@ class AIEplacer:
         print("Total tiles placed: " + str(total_tiles_placed))
 
         logging.info("End legalization")
+        return []
