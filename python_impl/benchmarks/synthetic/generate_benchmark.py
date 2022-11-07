@@ -23,7 +23,11 @@ node_types2size = {
 }
 def generateAIEplaceBenchmark(bench_name, bench_num):
 
-    mult = max(1, bench_num) # size multiplier
+    row_factor = 1 #random.choice(range(1, 9, 1))
+    mult = row_factor * max(1, bench_num) # size multiplier
+    num_rows = 8 * row_factor
+    num_cols = random.choice(range(5, 16, 5))
+
     node_counts = {}
     node_counts["mm"]= random.choice(range(6*mult, 20*mult, 1))
     node_counts["gelu"] = round(node_counts["mm"] / 2)
@@ -35,9 +39,6 @@ def generateAIEplaceBenchmark(bench_name, bench_num):
     num_nodes= sum(node_counts.values())
     num_nets = random.choice(range(round(num_nodes*.75), num_nodes, 1))
 
-    num_rows = 8 #random.choice(range(8, 9, 4))
-    num_cols = random.choice(range(5, 16, 5))
-    area = num_rows*num_cols
 
     nodes = []
     sizes = []

@@ -85,7 +85,7 @@ class PlaceDrawer(object):
         #########################################
         disp_info   = False
         disp_labels = False
-        disp_borders= False
+        disp_borders= True
         disp_bins   = True #False
         disp_arrows = False
         #########################################
