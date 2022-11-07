@@ -21,15 +21,16 @@ node_types2size = {
     "x": "[1, 1]",
     "y": "[2, 2]"
 }
-def generateAIEplaceBenchmark(bench_name):
+def generateAIEplaceBenchmark(bench_name, bench_num):
 
+    mult = max(1, bench_num) # size multiplier
     node_counts = {}
-    node_counts["mm"] = random.choice(range(4, 20, 1))
-    node_counts["gelu"] = round(node_counts["mm"] / 10)
-    node_counts["n"] = random.choice(range(4, 10, 1))
-    node_counts["k"] = random.choice(range(4, 10, 1))
-    node_counts["x"] = random.choice(range(1, 5, 1))
-    node_counts["y"] = random.choice(range(1, 5, 1))
+    node_counts["mm"]= random.choice(range(6*mult, 20*mult, 1))
+    node_counts["gelu"] = round(node_counts["mm"] / 2)
+    node_counts["n"] = random.choice(range(6*mult, 10*mult, 1))
+    node_counts["k"] = random.choice(range(6*mult, 10*mult, 1))
+    node_counts["x"] = random.choice(range(2*mult, 5*mult, 1))
+    node_counts["y"] = random.choice(range(2*mult, 5*mult, 1))
 
     num_nodes= sum(node_counts.values())
     num_nets = random.choice(range(round(num_nodes*.75), num_nodes, 1))
@@ -47,7 +48,7 @@ def generateAIEplaceBenchmark(bench_name):
             sizes.append(node_types2size[key])
             runtimes.append(node_types2runtimes[key])
 
-    with open(bench_name+".json", "w") as bench:
+    with open(bench_name+"_" + str(bench_num) + ".json", "w") as bench:
         bench.write("{\n")
         bench.write('"grid_info": {\n')
         bench.write(f'\t"num_rows": {num_rows},\n')
@@ -83,4 +84,4 @@ if __name__ == "__main__":
     bench_name_root = "synthetic"
     NUM_TO_GENERATE = 10
     for i in range(NUM_TO_GENERATE):
-        generateAIEplaceBenchmark(bench_name_root + "_" + str(i))
+        generateAIEplaceBenchmark(bench_name_root, i)
