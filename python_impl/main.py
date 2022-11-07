@@ -6,7 +6,6 @@ import sys
 import logging
 import random
 from naivePlacer import *
-
 from partitioner import *
 
 def runAIEPlacer(filename):
@@ -27,7 +26,7 @@ def runNaivePlacer(filename):
 
 def runPartitionAndForce(filename):
     design, grid, orig_num_cols, map_dict = Design.readJSON("./benchmarks/" + filename + ".json")
-    partition_information = partition_initialization(design.nets, design.dependencies, design.node_sizes)
+    partition_information = partition_initialization(design.nets, design.dependencies, design.node_sizes, design.times)
     target_part_size = grid.num_rows * orig_num_cols
     max_iters = 10
     curr_timeslot = 0
@@ -35,6 +34,8 @@ def runPartitionAndForce(filename):
         if max_iters == curr_timeslot:
             break
         curr_part_herds= partition(partition_information, target_part_size, max(design.dependencies))
+        
+        break
         
         if (not curr_part_herds):
             break
