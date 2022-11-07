@@ -72,14 +72,14 @@ class Grid:
 
 class Design:
     # primary lists which hold design information
-    def __init__(self, coords, node_names, node_sizes, dependencies, nets) -> None:
+    def __init__(self, coords, node_names, node_sizes, dependencies, nets, times) -> None:
         self.coords = coords
         self.node_names = node_names
         self.node_sizes = node_sizes
         self.dependencies = dependencies
         self.nets = nets # each net is a list of node indices
                     # e.g. [4,7,9] means nodes 4, 7, and 9 are connect by a net
-        
+        self.times = times
     @classmethod
     def initializeCoords(cls, num_rows, num_cols, node_count):
         #random initial position
@@ -104,6 +104,10 @@ class Design:
             net_names = list(JSON["nets"].values())
             nets, map_dict = map_nets_to_list(net_names, JSON["node_sizes"])
             dependencies = extractDependenciesFromNetlist(nets, len(map_dict))
+
+            node_runtimes = JSON["node_runtimes"]
+            print(node_runtimes)
+            times = [list(node_runtimes.values())[i] for i in range(len(list(node_runtimes)))]
             
             num_rows = JSON["grid_info"]["num_rows"]
             num_cols = JSON["grid_info"]["num_cols"]
@@ -114,7 +118,8 @@ class Design:
             while total_cols*num_rows*0.8 < total_size: 
                 total_cols += num_cols
             grid = Grid(num_rows, total_cols)
-            design = Design(coords, node_names, node_sizes, dependencies, nets)
+            design = Design(coords, node_names, node_sizes, dependencies, nets, times)
+            print(times)
         return design, grid, num_cols, map_dict
     
     @classmethod
@@ -141,10 +146,12 @@ class Design:
         new_node_sizes = []
         new_dependencies = []
         new_nets = []
+        new_times = []
         herd_number_dict = {}
         number = 0
         for i in curr_part_herds:
             new_coords.append(design.coords[i])
+            new_times.append(design.times)
             herd_number_dict[i] = number
             new_node_names.append(number)
             number += 1
@@ -165,7 +172,7 @@ class Design:
                 for node in range(len(temp_net)):
                     temp_net[node] = herd_number_dict[temp_net[node]]
                 new_nets.append(temp_net)
-        new_design = Design(new_coords, new_node_names, new_node_sizes, new_dependencies, new_nets)
+        new_design = Design(new_coords, new_node_names, new_node_sizes, new_dependencies, new_nets, new_times)
         return new_design, herd_number_dict
     
 
@@ -707,12 +714,12 @@ class AIEplacer:
             curr_row = -1
             curr_col = -1
 
-            for col in range(0, coord_col):
-                if (self.is_legal_placement([coord_row, col], size, lg)):
-                    curr_row = coord_row
-                    curr_col = col
-                    legalized = True
-                    break
+            # for col in range(0, coord_col):
+            #     if (self.is_legal_placement([coord_row, col], size, lg)):
+            #         curr_row = coord_row
+            #         curr_col = col
+            #         legalized = True
+            #         break
             # if the top left corner is filled on the grid or if it's empty
             if lg.vals[coord_row][coord_col] == 0 and not legalized:
                 # Do not go out of the top or the left of the grid

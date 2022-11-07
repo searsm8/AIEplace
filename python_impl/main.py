@@ -6,7 +6,6 @@ import sys
 import logging
 import random
 from naivePlacer import *
-
 from partitioner import *
 
 def runAIEPlacer(filename):
@@ -28,6 +27,7 @@ def runNaivePlacer(filename):
 
 def runPartitionAndForce(filename):
     design, grid, orig_num_cols, map_dict = Design.readJSON("./benchmarks/" + filename + ".json")
+    print(map_dict)
     partition_information = partition_initialization(design.nets, design.dependencies, design.node_sizes)
     target_part_size = grid.num_rows * orig_num_cols
     max_iters = 10
@@ -59,11 +59,11 @@ def runPartitionAndForce(filename):
 
 if __name__ == "__main__":
     random.seed(1)
-    filename = "synthetic/synthetic_5"
+    filename = "simple"
     #cProfile.run('runAIEPlacer()')
-    runAIEPlacer(filename)
+    # runAIEPlacer(filename)
     print("==================")
-    runNaivePlacer(filename)
+    # runNaivePlacer(filename)
     runPartitionAndForce(filename)
 
 
