@@ -106,7 +106,6 @@ class Design:
             dependencies = extractDependenciesFromNetlist(nets, len(map_dict))
 
             node_runtimes = JSON["node_runtimes"]
-            print(node_runtimes)
             times = [list(node_runtimes.values())[i] for i in range(len(list(node_runtimes)))]
             
             num_rows = JSON["grid_info"]["num_rows"]
@@ -119,7 +118,6 @@ class Design:
                 total_cols += num_cols
             grid = Grid(num_rows, total_cols)
             design = Design(coords, node_names, node_sizes, dependencies, nets, times)
-            print(times)
         return design, grid, num_cols, map_dict
     
     @classmethod
