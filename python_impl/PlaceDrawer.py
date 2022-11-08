@@ -85,7 +85,7 @@ class PlaceDrawer(object):
         #########################################
         disp_info   = False
         disp_labels = False
-        disp_borders= False
+        disp_borders= True
         disp_bins   = True #False
         disp_arrows = False
         #########################################
@@ -220,7 +220,7 @@ class PlaceDrawer(object):
                 for i in range(1, num_bins_x):
                     if (i % num_cols == 0): 
                         ctx.set_source_rgba(0, 0, 1, alpha=1)
-                        ctx.set_line_width(4)
+                        ctx.set_line_width(6)
                     ctx.move_to(normalize_x(bin_xl(i)), normalize_y(yl))
                     ctx.line_to(normalize_x(bin_xl(i)), normalize_y(yh))
                     ctx.close_path()

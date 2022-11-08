@@ -57,6 +57,7 @@ def time_partition(partition_information, target_part_size, longest_dep_list, to
     curr_size = 0
     dependencies = []
     partition_herds = []
+    chains = []
     for _ in range(len(longest_dep_list)):
         dependencies.append([])
         partition_herds.append([])
@@ -66,23 +67,123 @@ def time_partition(partition_information, target_part_size, longest_dep_list, to
         dependencies[partition_information["nodes"][herd]["deps"]].append(herd)
     
     initial_herd = longest_dep_list[0][random.randint(0, len(longest_dep_list[0]) - 1)]
+
     partition_herds[0].append(initial_herd)
-    print(partition_herds)
+
+    chains.append([initial_herd])
+
     curr_max_time = partition_information["nodes"][initial_herd]["time"]
     curr_size += partition_information["nodes"][initial_herd]["size"]
 
+    # This adds all of the herds that are the same dependency to the partition_herds list, as long
+    # as they execute in less time than the initial herd + some tolerance.
     for dep in range(len(dependencies)):
+        # debugging
+        if dep >= 1:
+            break
         for herd in range(len(dependencies[dep])):
             if curr_size + partition_information["nodes"][dependencies[dep][herd]]["size"] > target_part_size or \
-               partition_information["nodes"][dependencies[dep][herd]]["time"] > curr_max_time + tolerance:
+               partition_information["nodes"][dependencies[dep][herd]]["time"] > curr_max_time + tolerance or \
+               dependencies[dep][herd] == initial_herd:
                continue
             else:
                 partition_herds[dep].append(dependencies[dep][herd])
                 curr_size += partition_information["nodes"][dependencies[dep][herd]]["size"]
+                chains.append([dependencies[dep][herd]])
+
+    # some sort of breaking condition needed here
+
+    breaking_condition = False
+    iteration = 0
+    
+    while not breaking_condition:
+        if iteration == 1:
+            break
+        iteration += 1
+
+        # Loops over higher dependencies than we started with. Ensures that the new tiles will fit, 
+        # comply with program order (dependencies already placed, or already in placed_list), and
+        # that the execution time is within some max tolerance for the "chain" e.g., if A + B + C are
+        # in the same partition, and A depends on B but C is independent, ensure that the time for 
+        # A + B is approximately the same time as C (in order to reduce idle time).
+
+        for dep in range(1, len(dependencies)):
+            # temporary; for debugging
+            if dep == 2:
+                break
+            for herd in dependencies[dep]:
+                print("herd: "+ str(herd))
+                # print(dependencies[dep][herd])
+                legal_add = True
+                for anet in partition_information["nodes"][herd]["anets"]:
+                    print("new anet: " + str(anet))
+                    for node in partition_information["nets"][anet]["nodes"]:
+                        print(node)
+                        # don't trip over itself b/c first herd in a net would be self
+                        if node == herd:
+                            print("valid!")
+                            continue
+                        # We don't care if the higher dep. nodes are placed in a net
+                        elif partition_information["nodes"][node]["deps"] >= dep:
+                            print("valid")
+                            continue
+                        # if we've already placed it in a partition / placement
+                        elif (partition_information["nodes"][node]["placed"] == 1 or \
+                           node_in_partition(partition_herds, node)): 
+                            # add the chain time, compare to the initial time
+                            # finding the relevant chain, seeing how long it takes:
+                            print("made it to here")
+                            acceptable_times = 0
+                            node_occurances_in_chain = 0
+                            for i in range(len(chains)):
+                                if node in chains[i]:
+                                    node_occurances_in_chain += 1
+                                    chain_time = 0
+                                    for j in range(len(chains[i])):
+                                        chain_time += partition_information["nodes"][chains[i][j]]["time"]
+                                    if chain_time + partition_information["nodes"][herd]["time"] < curr_max_time + tolerance:
+                                        acceptable_times += 1
+                                    else:
+                                        break
+                            if acceptable_times > 0 and acceptable_times == node_occurances_in_chain:
+                                print("as;ldfj;ldsakjf;dsalkjf")
+                                continue
+                            else:
+                                legal_add = False
+                                break
+                                # Check all "Chains" that this node would be added to, find how long
+                                # they'd take to execute. Only add the node in if for all chains, the
+                                # execution time is within the current max + the tolerance.
+
+                        else:
+                            legal_add = False
+                            break
+                    if legal_add == False:
+                        break
+                if legal_add == False:
+                    continue
+                else: 
+                    ### TODO: add to chain
+                    partition_herds[dep].append(herd)
+                    curr_size += partition_information["nodes"][node]["size"]
+    # if dependencies placed and 
+    # @  correct dependency level
+    #    and fits
+
+        
 
     # shuffle herds
+    print(chains)
+    print(dependencies)
+    # for i in partition_herds[0]:
+    #     print(partition_information["nodes"][i]["time"])
     return partition_herds
 
+def node_in_partition(curr_part, node):
+    for i in range(len(curr_part)):
+        if node in curr_part[i]:
+            return True
+    return False
 
 def build_longest_dep_list(partition_information, longest_dep_key):
     longest_dep = partition_information["nodes"][longest_dep_key]["deps"]

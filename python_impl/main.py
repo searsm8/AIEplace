@@ -62,9 +62,9 @@ if __name__ == "__main__":
     random.seed(1)
     filename = "simple"
     #cProfile.run('runAIEPlacer()')
-    # runAIEPlacer(filename)
+    runAIEPlacer(filename)
     print("==================")
     # runNaivePlacer(filename)
-    runPartitionAndForce(filename)
+    # runPartitionAndForce(filename)
 
 
