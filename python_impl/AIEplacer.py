@@ -83,14 +83,16 @@ class Grid:
 
 class Design:
     # primary lists which hold design information
-    def __init__(self, coords, node_names, node_sizes, dependencies, nets, times) -> None:
+    def __init__(self, coords, node_names, node_sizes, dependencies, predecessors, nets, times) -> None:
         self.coords = coords
         self.node_names = node_names
         self.node_sizes = node_sizes
         self.dependencies = dependencies
+        self.predecessors = predecessors
         self.nets = nets # each net is a list of node indices
                     # e.g. [4,7,9] means nodes 4, 7, and 9 are connect by a net
         self.times = times
+
     @classmethod
     def initializeCoords(cls, num_rows, num_cols, node_count):
         #random initial position
@@ -114,7 +116,7 @@ class Design:
             node_sizes = [Coord(node_sizes[i][0], node_sizes[i][1]) for i in range(len(list(node_info)))]
             net_names = list(JSON["nets"].values())
             nets, map_dict = map_nets_to_list(net_names, JSON["node_sizes"])
-            dependencies = extractDependenciesFromNetlist(nets, len(map_dict))
+            dependencies, predecessors = extractDependenciesFromNetlist(nets, len(map_dict))
 
             node_runtimes = JSON["node_runtimes"]
             times = [list(node_runtimes.values())[i] for i in range(len(list(node_runtimes)))]
@@ -126,7 +128,7 @@ class Design:
             total_size = getTotalSize(node_sizes)
             num_timeslots = math.ceil(total_size / (num_rows*num_cols)) + 1
             grid = Grid(num_rows, num_cols, num_timeslots)
-            design = Design(coords, node_names, node_sizes, dependencies, nets, times)
+            design = Design(coords, node_names, node_sizes, dependencies, predecessors, nets, times)
         return design, grid, num_cols, map_dict
     
     @classmethod
@@ -192,10 +194,14 @@ def getTotalSize(node_sizes):
 def extractDependenciesFromNetlist(nets, num_nodes):
     '''Assumes that nets are sorted by dependency'''
     dependencies = [0]*num_nodes
+    predecessors = {}
+    for i in range(num_nodes): predecessors[i] = []
+
     for net in nets:
         for i in range(1, len(net)):
             dependencies[net[i]] = max(dependencies[net[i]], dependencies[net[0]]+1)
-    return dependencies
+            predecessors[net[i]].append(net[0])
+    return dependencies, predecessors
 
 
 def convert_dep_to_force(dependency_list, node_names):
@@ -635,7 +641,7 @@ class AIEplacer:
                 PlaceDrawer.PlaceDrawer.export_gif(folder, gif_name)
 
                 # Report metrics after finishing
-                self.reportMetrics()
+                self.printMetrics()
                 break
             #end iteration loop
 
@@ -644,7 +650,7 @@ class AIEplacer:
 
         return herds_to_return
 
-    def reportMetrics(self):
+    def printMetrics(self):
         # Print timeslot execution times
         print("\n###############")
         print("### METRICS ###")
@@ -652,16 +658,44 @@ class AIEplacer:
         print("Timeslot execution times:")
         nodes_by_timeslot = []
         for i in range(self.grid.num_timeslots): nodes_by_timeslot.append([])
+
         for i in range(len(self.design.coords)):
             node = self.design.coords[i]
             timeslot = math.floor(node.col / self.grid.timeslot_cols)
             nodes_by_timeslot[timeslot].append(i)
-        #worst_execution_by_timeslot = self.getWorstTimes(nodes_by_timeslot)
-        for slot in range(self.grid.num_timeslots):
-            print(f"Slot {slot}: {nodes_by_timeslot[slot]}")
-            print(f"\tExecution times: {[self.design.node_sizes[i] for i in nodes_by_timeslot[slot]]}")
         
+        # For each time slot, find the longest "chain" execution time.
+        # If a node has a predecessor within the same timeslot, their 
+        # execution times must be added together
+        worst_times = []
+        for slot in range(self.grid.num_timeslots):
+            worst_times.append(0)
+            for i in nodes_by_timeslot[slot]:
+                worst_times[-1] = max(worst_times[-1],self.getExecutionTimeOfNode(i, deepcopy(nodes_by_timeslot[slot])))
+                #print(f"Execution time of node {self.design.node_names[i]}: {t}")
+            #print(f"Slot {slot}: {[self.design.node_names[i] for i in nodes_by_timeslot[slot]]}")
+            #print(f"\tExecution times: {[self.design.times[i] for i in nodes_by_timeslot[slot]]}")
+            print(f"Worst execution time for slot {slot} is {worst_times[-1]}")
         #min_col, max_col = self.grid.getColsInTimeslot(timeslot_num)
+
+    def getExecutionTimeOfNode(self, index, nodes_by_timeslot):
+        t = self.design.times[index]
+        #print(f"{self.design.node_names[index]}: t = {t}")
+        if index in nodes_by_timeslot:
+            nodes_by_timeslot.remove(index)
+            for pred in self.design.predecessors[index]:
+                if pred in nodes_by_timeslot:
+                    t += self.getExecutionTimeOfNode(pred, nodes_by_timeslot)
+        return t
+
+    def printPredecessors(self, nodes):
+        for node in nodes:
+            print(f"node: {node}\tPreds of {self.design.node_names[node]}:")
+            preds = self.design.predecessors[node]
+            for pred in preds:
+                print(f"\t{self.design.node_names[pred]}")
+
+
 
 
     def is_legal_placement(self, grid_coords, herd, lg):
