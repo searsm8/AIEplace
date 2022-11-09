@@ -59,7 +59,7 @@ def runPartitionAndForce(filename):
 
 if __name__ == "__main__":
     random.seed(1)
-    for i in range(1):
+    for i in [2]:
         filename = "synthetic/synthetic_" + str(i)
         #cProfile.run('runAIEPlacer()')
         runAIEPlacer(filename)

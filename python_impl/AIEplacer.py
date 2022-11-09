@@ -15,6 +15,7 @@ import PlaceDrawer
 import json, jsbeautifier
 from naivePlacer import write_to_json
 from copy import deepcopy
+from statistics import mean
 
 class Herd:
     def __init__(self, row_loc, col_loc, row_size, col_size, number, name, dependency):
@@ -396,7 +397,7 @@ class AIEplacer:
     def run(self, iterations, method):
         ''' Runs the ePlace algorithm'''
         EXPORT_IMAGES = True
-        EXPORT_NET_IMAGES = False
+        EXPORT_NET_IMAGES = True
         
         # unplaced herds
         herds_to_return = []
@@ -661,31 +662,65 @@ class AIEplacer:
 
         for i in range(len(self.design.coords)):
             node = self.design.coords[i]
-            timeslot = math.floor(node.col / self.grid.timeslot_cols)
-            nodes_by_timeslot[timeslot].append(i)
+            slot = math.floor(node.col / self.grid.timeslot_cols)
+            nodes_by_timeslot[slot].append(i)
         
         # For each time slot, find the longest "chain" execution time.
         # If a node has a predecessor within the same timeslot, their 
         # execution times must be added together
-        worst_times = []
+        timeslot_area = self.grid.num_rows * self.grid.timeslot_cols
+        execution_times = [0]*len(self.design.node_names)
+        stats = []
         for slot in range(self.grid.num_timeslots):
-            worst_times.append(0)
+            print(f"\n### Execution times for timeslot {slot}")
             for i in nodes_by_timeslot[slot]:
-                worst_times[-1] = max(worst_times[-1],self.getExecutionTimeOfNode(i, deepcopy(nodes_by_timeslot[slot])))
+                execution_times[i] = (self.getExecutionTimeOfNode(i, nodes_by_timeslot[slot]))
+                #print(f"{self.design.node_names[i]}: {execution_times[i]}")
                 #print(f"Execution time of node {self.design.node_names[i]}: {t}")
+            stats.append(self.computeStatsForSlot(nodes_by_timeslot[slot], execution_times))
+            t_avg, t_max, area = stats[-1]
+            print(f"### Timeslot execution time: {t_max}\tAvg execution time: {t_avg:.2f}\tTime Efficiency: {t_avg/t_max:.2f}")
+            print(f"### Area: {area}\tTimeslot area: {timeslot_area}\tArea Utilization: {area/timeslot_area}")
+            print(f"##################################################################")
             #print(f"Slot {slot}: {[self.design.node_names[i] for i in nodes_by_timeslot[slot]]}")
             #print(f"\tExecution times: {[self.design.times[i] for i in nodes_by_timeslot[slot]]}")
-            print(f"Worst execution time for slot {slot} is {worst_times[-1]}")
+            #print(f"Worst execution time for slot {slot} is {worst_times[-1]}")
         #min_col, max_col = self.grid.getColsInTimeslot(timeslot_num)
+        #for slot in range(self.grid.num_timeslots):
+        #    print(f"Stats for Timeslot {slot}:")
+        #    print(f"{stats[slot]}")
+        overall_exec_eff  = mean([stats[i][0]/stats[i][1] for i in range(len(stats))])
+        overall_area_util = mean([stats[i][2]/timeslot_area for i in range(len(stats))])
+        print(f"\nOverall execution time efficiency: {overall_exec_eff*100:.1f}%")
+        print(f"Overall Area utilization: {overall_area_util*100:.1f}%")
+        print("")
+        print(f"##################################################################")
 
-    def getExecutionTimeOfNode(self, index, nodes_by_timeslot):
+    def computeStatsForSlot(self, nodes_in_slot, execution_times):
+        sum = max = area = 0
+        for i in nodes_in_slot:
+            sum += execution_times[i]
+            size = self.design.node_sizes[i]
+            area += size.row * size.col
+            if execution_times[i] > max:
+                max = execution_times[i]
+        avg = sum / len(nodes_in_slot)
+        return avg, max, area
+
+
+    def getExecutionTimeOfNode(self, index, nodes_in_timeslot):
+        nodes = deepcopy(nodes_in_timeslot)
         t = self.design.times[index]
         #print(f"{self.design.node_names[index]}: t = {t}")
-        if index in nodes_by_timeslot:
-            nodes_by_timeslot.remove(index)
+        if index in nodes:
+            nodes.remove(index)
+            longest_pred_time = 0
             for pred in self.design.predecessors[index]:
-                if pred in nodes_by_timeslot:
-                    t += self.getExecutionTimeOfNode(pred, nodes_by_timeslot)
+                if pred in nodes:
+                    pred_time = self.getExecutionTimeOfNode(pred, nodes)
+                    if pred_time > longest_pred_time:
+                        longest_pred_time = pred_time
+            t += longest_pred_time
         return t
 
     def printPredecessors(self, nodes):
