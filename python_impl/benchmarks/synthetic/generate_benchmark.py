@@ -29,7 +29,7 @@ def generateAIEplaceBenchmark(bench_name, bench_num):
     if num_rows == 4: 
         num_cols = 5
     else:
-        num_cols = random.choice([20, 50])
+        num_cols = random.choice([10, 20, 50])
 
     node_counts = {}
     node_counts["mm"]= random.choice(range(6*mult, 20*mult, 1))
