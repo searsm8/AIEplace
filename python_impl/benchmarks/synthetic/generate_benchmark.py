@@ -23,10 +23,13 @@ node_types2size = {
 }
 def generateAIEplaceBenchmark(bench_name, bench_num):
 
-    row_factor = 1 #random.choice(range(1, 9, 1))
+    row_factor = random.choice([1, 2])
     mult = row_factor * max(1, bench_num) # size multiplier
-    num_rows = 8 * row_factor
-    num_cols = random.choice(range(5, 16, 5))
+    num_rows = 4 * row_factor
+    if num_rows == 4: 
+        num_cols = 5
+    else:
+        num_cols = random.choice([20, 50])
 
     node_counts = {}
     node_counts["mm"]= random.choice(range(6*mult, 20*mult, 1))
