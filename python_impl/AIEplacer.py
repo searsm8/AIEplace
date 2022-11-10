@@ -536,7 +536,7 @@ class AIEplacer:
             logging.info(f"\t\t{stagnant_iterations} stagnant_iterations\t{overflow} overflow\t {min_overflow} min_overflow")
             MAX_STAGNANT_ITERS = 20
 
-            MIN_ITERS = 50
+            MIN_ITERS = 100
 
             if iter > MIN_ITERS and stagnant_iterations >= MAX_STAGNANT_ITERS:
                 logging.info(f"No improvement in overflow for {MAX_STAGNANT_ITERS} iterations...Stopping.")

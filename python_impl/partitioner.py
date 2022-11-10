@@ -1,5 +1,6 @@
 import pprint
 import random
+from copy import deepcopy
 def partition_initialization(graph, dependencies, node_sizes, times):
     """Creates the partitioning structure that holds all of the nodes (herds) and nets
        (sub-graphs of herds)
@@ -44,15 +45,30 @@ def partition_initialization(graph, dependencies, node_sizes, times):
     # At the same time, we want to be considering time.
 
     # How do we balance all of those?
-    max_dep_key = get_max_dependency(partition_information)
-    longest_dep_list = build_longest_dep_list(partition_information, max_dep_key)
-    curr_part_herds = time_partition(partition_information, 20, longest_dep_list, 50)
-    print(curr_part_herds)
+    
+    # print(curr_part_herds)
     return partition_information
 
-def time_partition(partition_information, target_part_size, longest_dep_list, tolerance):
-    """Does partitioning based on completion time
+def time_part_structure_init(partition_information, longest_dep_list):
+    """Creates structures + sets initial size & size needed for the time partitioner
 
+    Args:
+        partition_information (dict): information about the nodes and nets
+        longest_dep_list (list(list(int))): each sublist contains herd @ each dependency level e.g.,
+                                            sublist 0 contains herds at dep. 0, sub 1 @ dep 1, etc.
+                                            for the longest chain (chain w/ highest dependency)
+
+    Returns:
+        dependencies (list(list(int))): each sublist contains herd @ each dependency level e.g.,
+                                        sublist 0 contains herds at dep. 0, sub 1 @ dep 1, etc.
+        curr_base_herd (int): herd to base all "acceptable" times off of
+        initial_dep (int): dependency of curr_base_herd
+        curr_max_time (int): time of curr_base_herd
+        curr_size (int): size of curr_base_herd
+        partition_herds (list(list(int))): each sublist contains herd @ each dependency level e.g.,
+                                           sublist 0 contains herds at dep. 0, sub 1 @ dep 1, etc.
+                                           for herds that have added to the partition
+        chains (list(list(int))): 
     """
     curr_size = 0
     dependencies = []
@@ -66,38 +82,99 @@ def time_partition(partition_information, target_part_size, longest_dep_list, to
             continue
         dependencies[partition_information["nodes"][herd]["deps"]].append(herd)
     
-    initial_herd = longest_dep_list[0][random.randint(0, len(longest_dep_list[0]) - 1)]
+    curr_base_herd = -1
 
-    partition_herds[0].append(initial_herd)
+    for dep in range(len(longest_dep_list)):
+        for herd in longest_dep_list[dep]:
+            if partition_information["nodes"][herd]["placed"] == -1:
+                curr_base_herd = herd
+                break
+        # Check to make sure that we've placed all nodes at the lowest dependency
+        # level before we move to the next level of dependency as our base.
+        if curr_base_herd == -1:
+            for herd in range(len(partition_information["nodes"])):
+                if partition_information["nodes"][herd]["placed"] == -1 and \
+                   partition_information["nodes"][herd]["deps"] == dep:
+                   curr_base_herd = herd
+                   break
+        if curr_base_herd > -1:
+            break
+    # curr_base_herd = longest_dep_list[0][random.randint(0, len(longest_dep_list[0]) - 1)]
+    initial_dep = partition_information["nodes"][curr_base_herd]["deps"]
+    
+    partition_herds[initial_dep].append(curr_base_herd)
+    for _ in range(get_fanout(partition_information, curr_base_herd)):
+        chains.append([curr_base_herd])
+    curr_max_time = partition_information["nodes"][curr_base_herd]["time"]
+    curr_size += partition_information["nodes"][curr_base_herd]["size"]
 
-    chains.append([initial_herd])
+    return dependencies, curr_base_herd, initial_dep, curr_max_time, curr_size, partition_herds, chains
 
-    curr_max_time = partition_information["nodes"][initial_herd]["time"]
-    curr_size += partition_information["nodes"][initial_herd]["size"]
+def update_chain(partition_information, chains, herd):
+    """Adds a herd to the correct chains
 
+    Returns:
+        link_added (boolean): if a chain was updated or not
+    """
+    link_added = False
+    for chain in range(len(chains)):
+        for net in partition_information["nets"]:
+            if chains[chain][-1] in partition_information["nets"][net]["nodes"] and \
+                herd in partition_information["nets"][net]["nodes"]:
+                
+                # this is to deal with fanouts. We don't want to build multiple identical chains;
+                # we want chains that feed into different output nodes.
+
+                new_chain = deepcopy(chains[chain])
+                new_chain.append(herd)
+                if new_chain in chains:
+                    break
+
+                chains[chain].append(herd)
+                link_added = True
+                break
+    return link_added
+
+
+def get_fanout(partition_information, node):
+    """Finds the max fanout of a node
+
+    Args:
+        partition_information (_type_): _description_
+        node (_type_): _description_
+    Returns:
+        # of fanouts from node
+    """
+    for net in range(len(partition_information["nets"])):
+        if partition_information["nets"][net]["nodes"][0] == node:
+            return len(partition_information["nets"][net]["nodes"]) - 1
+    return 1
+
+def time_partition(partition_information, target_part_size, longest_dep_list, tolerance):
+    """Does partitioning based on estimated completion time
+
+    """
+
+    dependencies, curr_base_herd, initial_dep, curr_max_time, curr_size, partition_herds, chains = \
+        time_part_structure_init(partition_information, longest_dep_list)
+    print(initial_dep)
     # This adds all of the herds that are the same dependency to the partition_herds list, as long
     # as they execute in less time than the initial herd + some tolerance.
-    for dep in range(len(dependencies)):
-        # debugging
-        if dep >= 1:
-            break
+    for dep in range(initial_dep, min(initial_dep + 1, len(dependencies))):
         for herd in range(len(dependencies[dep])):
             if curr_size + partition_information["nodes"][dependencies[dep][herd]]["size"] > target_part_size or \
                partition_information["nodes"][dependencies[dep][herd]]["time"] > curr_max_time + tolerance or \
-               dependencies[dep][herd] == initial_herd:
+               dependencies[dep][herd] == curr_base_herd:
                continue
             else:
                 partition_herds[dep].append(dependencies[dep][herd])
                 curr_size += partition_information["nodes"][dependencies[dep][herd]]["size"]
                 chains.append([dependencies[dep][herd]])
 
-    # some sort of breaking condition needed here
-
     breaking_condition = False
     iteration = 0
-    
     while not breaking_condition:
-        if iteration == 1:
+        if iteration == 3:
             break
         iteration += 1
 
@@ -107,32 +184,25 @@ def time_partition(partition_information, target_part_size, longest_dep_list, to
         # in the same partition, and A depends on B but C is independent, ensure that the time for 
         # A + B is approximately the same time as C (in order to reduce idle time).
 
-        for dep in range(1, len(dependencies)):
-            # temporary; for debugging
-            if dep == 2:
-                break
+        for dep in range(initial_dep + 1, len(dependencies)):
             for herd in dependencies[dep]:
-                print("herd: "+ str(herd))
-                # print(dependencies[dep][herd])
+                if partition_information["nodes"][herd]["size"] + curr_size > target_part_size:
+                    continue
                 legal_add = True
+                print("herd: " + str(herd))
                 for anet in partition_information["nodes"][herd]["anets"]:
-                    print("new anet: " + str(anet))
                     for node in partition_information["nets"][anet]["nodes"]:
-                        print(node)
                         # don't trip over itself b/c first herd in a net would be self
                         if node == herd:
-                            print("valid!")
                             continue
                         # We don't care if the higher dep. nodes are placed in a net
                         elif partition_information["nodes"][node]["deps"] >= dep:
-                            print("valid")
                             continue
                         # if we've already placed it in a partition / placement
                         elif (partition_information["nodes"][node]["placed"] == 1 or \
                            node_in_partition(partition_herds, node)): 
                             # add the chain time, compare to the initial time
                             # finding the relevant chain, seeing how long it takes:
-                            print("made it to here")
                             acceptable_times = 0
                             node_occurances_in_chain = 0
                             for i in range(len(chains)):
@@ -145,16 +215,12 @@ def time_partition(partition_information, target_part_size, longest_dep_list, to
                                         acceptable_times += 1
                                     else:
                                         break
-                            if acceptable_times > 0 and acceptable_times == node_occurances_in_chain:
-                                print("as;ldfj;ldsakjf;dsalkjf")
+                            # if acceptable_times > 0 and acceptable_times == node_occurances_in_chain:
+                            if acceptable_times == node_occurances_in_chain:
                                 continue
                             else:
                                 legal_add = False
                                 break
-                                # Check all "Chains" that this node would be added to, find how long
-                                # they'd take to execute. Only add the node in if for all chains, the
-                                # execution time is within the current max + the tolerance.
-
                         else:
                             legal_add = False
                             break
@@ -162,22 +228,49 @@ def time_partition(partition_information, target_part_size, longest_dep_list, to
                         break
                 if legal_add == False:
                     continue
-                else: 
-                    ### TODO: add to chain
+                else:
+                    # if the herd we are trying to add and the previous herd in the chain are both
+                    # in any of the same nets, we know there is a dependence.
+                    link_added = update_chain(partition_information, chains, herd)
+                    # Not sure if this is in the right place or not to add a chain
+                    if not link_added:
+                        chains.append([herd])
                     partition_herds[dep].append(herd)
-                    curr_size += partition_information["nodes"][node]["size"]
-    # if dependencies placed and 
-    # @  correct dependency level
-    #    and fits
+                    curr_size += partition_information["nodes"][herd]["size"]
+        if curr_size >= target_part_size * .8:
+            break
+        else:
+            # Add another node from the longest dependency list
+            for dep in range(len(longest_dep_list)):
+                for node in longest_dep_list[dep]:
+                    if partition_information["nodes"][node]["placed"] == -1 and \
+                    node not in partition_herds:
+                        if curr_size + partition_information["nodes"][node]["size"] > target_part_size:
+                            return partition_herds
+                        else:
+                            partition_herds[partition_information["nodes"][node]["deps"]].append(node)
+                            curr_size += partition_information["nodes"][node]["size"]
+                            
+                            link_added = update_chain(partition_information, chains, node)
+                            if not link_added:
+                                for _ in range(get_fanout(partition_information, node)):
+                                    chains.append([node])
 
-        
+                            # Update new max time
+                            for chain in chains:
+                                curr_chain_time = 0
+                                for link in chain:
+                                    curr_chain_time += partition_information["nodes"][link]["time"]
+                                if curr_chain_time > curr_max_time:
+                                    curr_max_time = curr_chain_time
 
     # shuffle herds
     print(chains)
-    print(dependencies)
-    # for i in partition_herds[0]:
-    #     print(partition_information["nodes"][i]["time"])
-    return partition_herds
+    # print(dependencies)
+    print(curr_size)
+    
+    # flatten list
+    return list(set([item for sublist in partition_herds for item in sublist]))
 
 def node_in_partition(curr_part, node):
     for i in range(len(curr_part)):
@@ -221,7 +314,6 @@ def get_max_dependency(partition_information):
             max_dependency = partition_information["nodes"][i]["deps"]
             max_key = i
     return max_key
-
 
 def partition(partition_information, target_part_size, max_dependency):
     """Partitions herds into partition at or less than the target size. Groups

@@ -34,9 +34,8 @@ def runPartitionAndForce(filename):
     while True:
         if max_iters == curr_timeslot:
             break
-        curr_part_herds= partition(partition_information, target_part_size, max(design.dependencies))
-        
         break
+        curr_part_herds= partition(partition_information, target_part_size, max(design.dependencies))
         
         if (not curr_part_herds):
             break
@@ -62,9 +61,10 @@ if __name__ == "__main__":
     random.seed(1)
     filename = "simple"
     #cProfile.run('runAIEPlacer()')
-    runAIEPlacer(filename)
+    # runAIEPlacer(filename)
     print("==================")
     # runNaivePlacer(filename)
-    # runPartitionAndForce(filename)
+
+    runPartitionAndForce(filename)
 
 
