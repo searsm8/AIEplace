@@ -16,7 +16,6 @@ def runAIEPlacer(filename):
 
     design, grid, orig_num_cols, _ = Design.readJSON("./benchmarks/"+filename+".json")
 
-    print(design.nets)
     placer = AIEplacer(grid, design, orig_num_cols)
     _ = placer.run(999, "Force")
 
@@ -76,12 +75,12 @@ def runPartitionAndForce(filename, method):
 
 if __name__ == "__main__":
     random.seed(1)
-    filename = "synthetic/synthetic_5"
-    #cProfile.run('runAIEPlacer()')
-    # runAIEPlacer(filename)
-    print("==================")
-    # runNaivePlacer(filename)
-
-    runPartitionAndForce(filename, "time")
+    for i in [2]:
+        filename = "synthetic/synthetic_" + str(i)
+        #cProfile.run('runAIEPlacer()')
+        runAIEPlacer(filename)
+        print("==================")
+        #runNaivePlacer(filename)
+        #runPartitionAndForce(filename)
 
 
