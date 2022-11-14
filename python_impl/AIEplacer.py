@@ -493,7 +493,7 @@ class AIEplacer:
 
             step_len = 0.09
             density_penalty = 0.02*(iter) if iter < 50 else 0.05*50
-            print(f"density_penalty: {density_penalty}")
+            # print(f"density_penalty: {density_penalty}")
 
             # Update node locations
             depend_weight = 1 if iter < 50 else 1.5#max(0.5, 0.02*(100-iter))
@@ -540,7 +540,7 @@ class AIEplacer:
             logging.info(f"\t\t{stagnant_iterations:.2f} stagnant_iterations\t{overflow:.2f} overflow\t {min_overflow:.2f} min_overflow")
             MAX_STAGNANT_ITERS = 20
 
-            MIN_ITERS = 50
+            MIN_ITERS = 100
 
             if iter > MIN_ITERS and stagnant_iterations >= MAX_STAGNANT_ITERS:
                 logging.info(f"No improvement in overflow for {MAX_STAGNANT_ITERS} iterations...Stopping.")
@@ -568,8 +568,10 @@ class AIEplacer:
                 total_hpwl = 0
                 for i in range(len(self.design.nets)):
                     total_hpwl += hpwl_actual[i].row + hpwl_actual[i].col
+
                 logging.info(f"Total HPWL actual: {total_hpwl:.2f}")
                 logging.info(f"overflow: {overflow:.2f}")
+
                     
                 #use PlaceDrawer to export an image
                 if(iter%5 == 0) or converged:
@@ -884,10 +886,14 @@ class AIEplacer:
                 if (not attempted_placement):
                     logging.info(f"Legalization FAILED: no legal placement found for node at {coord_row, coord_col}.")
                     # return unplaced herds
+                    total_tiles_placed = np.sum(np.asarray(lg.vals))
+                    print("Total tiles placed: " + str(total_tiles_placed))
                     return dependency_ordered_array[(dependency_ordered_array.index(i)):]
                 elif (dist > max(self.grid.num_rows, self.grid.num_cols)):
                     logging.info(f"Legalization FAILED: no legal placement found for node at {coord_row, coord_col}.")
                     # return unplaced herds
+                    total_tiles_placed = np.sum(np.asarray(lg.vals))
+                    print("Total tiles placed: " + str(total_tiles_placed))
                     return dependency_ordered_array[(dependency_ordered_array.index(i)):]
                 else: 
                     dist += 1
