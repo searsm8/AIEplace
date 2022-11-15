@@ -7,6 +7,8 @@ import logging
 import random
 from naivePlacer import *
 from partitioner import *
+
+import metrics
 from jsonCombiner import *
 
 def runAIEPlacer(filename):
@@ -19,11 +21,13 @@ def runAIEPlacer(filename):
 
     placer = AIEplacer(grid, design, orig_num_cols)
     _ = placer.run(999, "Force", 0)
+    metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Force")
 
 def runNaivePlacer(filename):
     
     design, grid, orig_num_cols, _ = Design.readJSON("./benchmarks/" + filename + ".json")
     run_brandon_placement(grid.num_rows, orig_num_cols, design.node_sizes, design.node_names, design.dependencies)
+    metrics.printMetrics("./benchmarks/"+filename+".json", "naive.json", method_label="Naive")
 
 def runPartitionAndForce(filename, method):
     os.system(f"mkdir -p partition")
@@ -51,11 +55,10 @@ def runPartitionAndForce(filename, method):
             curr_part_herds = time_part_new(partition_information, target_part_size, longest_dep_list, tolerance)
             for herd in curr_part_herds:
                 printing_curr_herds.append(design.node_names[herd])
-            print(printing_curr_herds)
             # curr_part_herds = time_partition(partition_information, target_part_size, longest_dep_list, tolerance)
         else:
             curr_part_herds = partition(partition_information, target_part_size, max(design.dependencies))
-        print(curr_part_herds)
+
         if (not curr_part_herds):
             break
         
@@ -78,9 +81,13 @@ def runPartitionAndForce(filename, method):
         update_placed_status(partition_information, curr_part_herds, curr_timeslot)
         break_spanning_nets(partition_information, unplaced_herds)
         curr_timeslot += 1
+    # END while True
+    
     super_partition, num_rows, num_cols = create_super_list()
     # +1 because 1 is subtracted when creating the switchbox
     write_to_json_super(super_partition, [num_rows, orig_num_cols], "superForcePartPlacer.json", curr_timeslot)
+    metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Partition")
+
 
 if __name__ == "__main__":
     random.seed(1)
@@ -91,5 +98,6 @@ if __name__ == "__main__":
     # runNaivePlacer(filename)
 
     runPartitionAndForce(filename, "time")
+
 
 
