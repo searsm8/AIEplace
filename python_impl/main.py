@@ -7,7 +7,9 @@ import logging
 import random
 from naivePlacer import *
 from partitioner import *
+
 import metrics
+from jsonCombiner import *
 
 def runAIEPlacer(filename):
     logging.root.name = 'AIEplace'
@@ -18,7 +20,7 @@ def runAIEPlacer(filename):
     design, grid, orig_num_cols, _ = Design.readJSON("./benchmarks/"+filename+".json")
 
     placer = AIEplacer(grid, design, orig_num_cols)
-    _ = placer.run(999, "Force")
+    _ = placer.run(999, "Force", 0)
     metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Force")
 
 def runNaivePlacer(filename):
@@ -28,6 +30,7 @@ def runNaivePlacer(filename):
     metrics.printMetrics("./benchmarks/"+filename+".json", "naive.json", method_label="Naive")
 
 def runPartitionAndForce(filename, method):
+    os.system(f"mkdir -p partition")
     design, grid, orig_num_cols, map_dict = Design.readJSON("./benchmarks/" + filename + ".json")
     partition_information = partition_initialization(design.nets, design.dependencies, design.node_sizes, design.times)
     total_size = 0
@@ -47,9 +50,9 @@ def runPartitionAndForce(filename, method):
 
         if max_iters == curr_timeslot:
             break
+        printing_curr_herds = []
         if (method == "time"):
             curr_part_herds = time_part_new(partition_information, target_part_size, longest_dep_list, tolerance)
-            printing_curr_herds = []
             for herd in curr_part_herds:
                 printing_curr_herds.append(design.node_names[herd])
             # curr_part_herds = time_partition(partition_information, target_part_size, longest_dep_list, tolerance)
@@ -60,8 +63,12 @@ def runPartitionAndForce(filename, method):
             break
         
         new_design, herd_number_dict = Design.partition_design(partition_information, design, curr_part_herds)
+        map_to_name = {}
+        for herd in range(len(new_design.node_names)):
+            map_to_name[herd] = printing_curr_herds[herd]
+        new_design.map_dict = map_to_name
         placer = AIEplacer(Grid(grid.num_rows, orig_num_cols), new_design, orig_num_cols)
-        unplaced_herds = placer.run(999, "Partition")
+        unplaced_herds = placer.run(999, "time", curr_timeslot)
         
         for herd in range(len(unplaced_herds)):
             unplaced_herds[herd]
@@ -75,18 +82,22 @@ def runPartitionAndForce(filename, method):
         break_spanning_nets(partition_information, unplaced_herds)
         curr_timeslot += 1
     # END while True
-
+    
+    super_partition, num_rows, num_cols = create_super_list()
+    # +1 because 1 is subtracted when creating the switchbox
+    write_to_json_super(super_partition, [num_rows, orig_num_cols], "superForcePartPlacer.json", curr_timeslot)
     metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Partition")
+
 
 if __name__ == "__main__":
     random.seed(1)
-    for i in [0]:
-        filename = "synthetic/synthetic_" + str(i)
-        #filename = "simple"
-        #cProfile.run('runAIEPlacer()')
-        #runAIEPlacer(filename)
-        print("==================")
-        #runNaivePlacer(filename)
-        runPartitionAndForce(filename, method="time")
+    filename = "synthetic/synthetic_5"
+    #cProfile.run('runAIEPlacer()')
+    # runAIEPlacer(filename)
+    print("==================")
+    # runNaivePlacer(filename)
+
+    runPartitionAndForce(filename, "time")
+
 
 

@@ -208,6 +208,16 @@ def write_to_json(herds, grid_dims, output_file_name, number):
     f.close()
     return
 
+def write_to_json_super(part_dict, grid_dims, output_file_name, number):
+    partitions = generate_part_dict(part_dict, [grid_dims[0], grid_dims[1]], number)
+    options = jsbeautifier.default_options()
+    options.indent_size = 4
+    json_object = jsbeautifier.beautify(json.dumps(partitions), options)
+    with open(output_file_name, 'w', encoding='utf-8') as f:
+        f.write(json_object)
+    f.close()
+    return
+
 def naive_placement(herds, grid):
     """Tries to place herds in a naive way, starting with the first herd in the
        list, trying to place it starting in the upper left hand corner and gradually
@@ -291,8 +301,6 @@ def run_brandon_placement(num_rows, num_cols, node_sizes, node_names, dependency
     naive_placement(herd_list, grid)
     for dep in range(len(herd_list)):
         for herd in range(len(herd_list[dep])):
-            # herd_list[dep][herd].print_self()
-            # herd_list[dep][herd].print_positions()
             herd_list[dep][herd].number = herd_list[dep][herd].dep
     num_tiles_placed = 0
     for time_grid in grid:
