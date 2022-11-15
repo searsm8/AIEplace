@@ -93,7 +93,7 @@ class Design:
         self.nets = nets # each net is a list of node indices
                     # e.g. [4,7,9] means nodes 4, 7, and 9 are connect by a net
         self.times = times
-
+        self.map_dict = {}
     @classmethod
     def initializeCoords(cls, num_rows, num_cols, node_count):
         #random initial position
@@ -394,7 +394,7 @@ class AIEplacer:
         cols.sort(key=self.get0)
         return cols
 
-    def run(self, iterations, method):
+    def run(self, iterations, method, current_timeslot):
         ''' Runs the ePlace algorithm'''
         EXPORT_IMAGES = True
         EXPORT_NET_IMAGES = True
@@ -551,7 +551,7 @@ class AIEplacer:
 
             nets_to_draw = []
             if converged:
-                herds_to_return += self.legalize(list(range(len(self.design.node_sizes))))
+                herds_to_return += self.legalize(list(range(len(self.design.node_sizes))), current_timeslot, method)
 
             #for net in self.design.nets:
             #    if net.count(target_node):
@@ -758,8 +758,17 @@ class AIEplacer:
                         if (lg.vals[row][col] != 0):
                             return False
                 return True
-                
-    def legalize(self, herds_of_interest):
+    def create_dep_herd_list(self, herdList):
+        dep_herd_list = []
+        for dep in range(max(self.design.dependencies) + 1):
+            temp = []
+            for herd in range(len(herdList)):
+                if herdList[herd].dep == dep:
+                    temp.append(herdList[herd])
+            dep_herd_list.append(temp)
+        return dep_herd_list
+
+    def legalize(self, herds_of_interest, current_timeslot, method):
         """After some level of placement, perform a legalization
 
         Args:
@@ -887,12 +896,37 @@ class AIEplacer:
                     logging.info(f"Legalization FAILED: no legal placement found for node at {coord_row, coord_col}.")
                     # return unplaced herds
                     total_tiles_placed = np.sum(np.asarray(lg.vals))
+                    dep_herd_list = self.create_dep_herd_list(herdList)
+                    arg = -1
+                    file = ""
+                    if method == "time":
+                        arg = 1
+                        for herd in range(len(herdList)):
+                            herdList[herd].name = self.design.map_dict[herdList[herd].name]
+                        file = "partition/forcePartPlacer" + str(current_timeslot) + ".json"
+                    else:
+                        arg = math.ceil(total_tiles_placed / (self.grid.num_rows + self.num_cols_original))
+                        file = "forcePlacer.json"
+                    write_to_json(dep_herd_list, [lg.num_rows, self.num_cols_original], file, arg)
                     print("Total tiles placed: " + str(total_tiles_placed))
                     return dependency_ordered_array[(dependency_ordered_array.index(i)):]
                 elif (dist > max(self.grid.num_rows, self.grid.num_cols)):
                     logging.info(f"Legalization FAILED: no legal placement found for node at {coord_row, coord_col}.")
                     # return unplaced herds
                     total_tiles_placed = np.sum(np.asarray(lg.vals))
+                    dep_herd_list = self.create_dep_herd_list(herdList)
+                    arg = -1
+                    file = ""
+                    if method == "time":
+                        arg = 1
+                        for herd in range(len(herdList)):
+                            herdList[herd].name = self.design.map_dict[herdList[herd].name]
+                        file = "partition/forcePartPlacer" + str(current_timeslot) + ".json"
+                    else:
+                        arg = math.ceil(total_tiles_placed / (self.grid.num_rows + self.num_cols_original))
+                        file = "forcePlacer.json"
+                    write_to_json(dep_herd_list, [lg.num_rows, self.num_cols_original], file, arg)
+
                     print("Total tiles placed: " + str(total_tiles_placed))
                     return dependency_ordered_array[(dependency_ordered_array.index(i)):]
                 else: 
@@ -908,6 +942,7 @@ class AIEplacer:
                     for col in range(coord_col, coord_col + size.col):
                         lg.vals[row][col] = 1
                 continue
+        # print(lg.print_grid())
         dep_herd_list = []
         for dep in range(max(self.design.dependencies) + 1):
             temp = []
@@ -916,7 +951,18 @@ class AIEplacer:
                     temp.append(herdList[herd])
             dep_herd_list.append(temp)
         total_tiles_placed = np.sum(np.asarray(lg.vals))
-        write_to_json(dep_herd_list, [lg.num_rows, self.num_cols_original], "forcePlacer.json",  math.ceil(total_tiles_placed / (self.grid.num_rows + self.num_cols_original)))
+        # Path
+        arg = -1
+        file = ""
+        if method == "time":
+            arg = 1
+            for herd in range(len(herdList)):
+                herdList[herd].name = self.design.map_dict[herdList[herd].name]
+            file = "partition/forcePartPlacer" + str(current_timeslot) + ".json"
+        else:
+            arg = math.ceil(total_tiles_placed / (self.grid.num_rows + self.num_cols_original))
+            file = "forcePlacer.json"
+        write_to_json(dep_herd_list, [lg.num_rows, self.num_cols_original], file, arg)
         print("===============")
         print("Total tiles placed: " + str(total_tiles_placed))
 
