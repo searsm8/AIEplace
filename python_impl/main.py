@@ -7,6 +7,7 @@ import logging
 import random
 from naivePlacer import *
 from partitioner import *
+import metrics
 
 def runAIEPlacer(filename):
     logging.root.name = 'AIEplace'
@@ -18,11 +19,13 @@ def runAIEPlacer(filename):
 
     placer = AIEplacer(grid, design, orig_num_cols)
     _ = placer.run(999, "Force")
+    metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Force")
 
 def runNaivePlacer(filename):
     
     design, grid, orig_num_cols, _ = Design.readJSON("./benchmarks/" + filename + ".json")
     run_brandon_placement(grid.num_rows, orig_num_cols, design.node_sizes, design.node_names, design.dependencies)
+    metrics.printMetrics("./benchmarks/"+filename+".json", "naive.json", method_label="Naive")
 
 def runPartitionAndForce(filename, method):
     design, grid, orig_num_cols, map_dict = Design.readJSON("./benchmarks/" + filename + ".json")
@@ -49,11 +52,10 @@ def runPartitionAndForce(filename, method):
             printing_curr_herds = []
             for herd in curr_part_herds:
                 printing_curr_herds.append(design.node_names[herd])
-            print(printing_curr_herds)
             # curr_part_herds = time_partition(partition_information, target_part_size, longest_dep_list, tolerance)
         else:
             curr_part_herds = partition(partition_information, target_part_size, max(design.dependencies))
-        print(curr_part_herds)
+
         if (not curr_part_herds):
             break
         
@@ -72,15 +74,19 @@ def runPartitionAndForce(filename, method):
         update_placed_status(partition_information, curr_part_herds, curr_timeslot)
         break_spanning_nets(partition_information, unplaced_herds)
         curr_timeslot += 1
+    # END while True
+
+    metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Partition")
 
 if __name__ == "__main__":
     random.seed(1)
-    for i in [2]:
+    for i in [0]:
         filename = "synthetic/synthetic_" + str(i)
+        #filename = "simple"
         #cProfile.run('runAIEPlacer()')
-        runAIEPlacer(filename)
+        #runAIEPlacer(filename)
         print("==================")
         #runNaivePlacer(filename)
-        #runPartitionAndForce(filename)
+        runPartitionAndForce(filename, method="time")
 
 
