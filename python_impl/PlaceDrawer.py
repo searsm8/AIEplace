@@ -85,6 +85,8 @@ class PlaceDrawer(object):
         #########################################
         disp_info   = False
         disp_labels = False
+        disp_labels = True
+
         disp_borders= True
         disp_bins   = True #False
         disp_arrows = False
@@ -254,19 +256,19 @@ class PlaceDrawer(object):
             for i in range(num_movable_nodes, num_physical_nodes):
                 if len(dependencies) > 0:
                     if dependencies[i] == 0:    
-                        ctx.set_source_rgba(1, 0, 0, alpha=0.5)
+                        ctx.set_source_rgba(1, 0, 0, alpha=0.5) # Red
                     elif dependencies[i] == 1:    
-                        ctx.set_source_rgba(0, 1, 0, alpha=0.5)
+                        ctx.set_source_rgba(0, 1, 0, alpha=0.5) # Green
                     elif dependencies[i] == 2:
-                        ctx.set_source_rgba(0, 0, 1, alpha=0.5)
+                        ctx.set_source_rgba(0, 0, 1, alpha=0.5) # Blue
                     elif dependencies[i] == 3:
-                        ctx.set_source_rgba(1, 1, 0, alpha=0.5)
+                        ctx.set_source_rgba(1, 1, 0, alpha=0.5) # Yellow
                     elif dependencies[i] == 4:
-                        ctx.set_source_rgba(1, 0, 1, alpha=0.5)
+                        ctx.set_source_rgba(1, 0, 1, alpha=0.5) # Purple
                     elif dependencies[i] == 5:
-                        ctx.set_source_rgba(0, 0, 0, alpha=0.5)
+                        ctx.set_source_rgba(0, 1, 1, alpha=0.5) # Teal
                     else:
-                        ctx.set_source_rgba(0, 0, 1, alpha=0.5)
+                        ctx.set_source_rgba(0, 0, 0, alpha=0.5) # Black
                 ctx.rectangle(node_xl[i], node_yl[i], node_xh[i] - node_xl[i],
                               node_yh[i] -
                               node_yl[i])  # Rectangle(xl, yl, w, h)
