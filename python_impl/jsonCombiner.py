@@ -9,7 +9,7 @@ def readJSON(filepath, file_number):
         parameters = (JSON["switchbox01"])
         for herd in range(len(node_names)):
             for tile in range(2, len(node_names[herd])):
-                node_names[herd][tile][1] += file_number * (parameters["col"])
+                node_names[herd][tile][1] += file_number * (parameters["col"] +1)
         return node_names
 
 def create_super_list():

@@ -128,7 +128,7 @@ class Design:
             coords = Design.initializeCoords(num_rows, num_cols, len(node_names))
 
             total_size = getTotalSize(node_sizes)
-            num_timeslots = math.ceil(total_size / (num_rows*num_cols)) + 1
+            num_timeslots = math.ceil(total_size / (num_rows*num_cols)) + 2
             grid = Grid(num_rows, num_cols, num_timeslots)
             design = Design(coords, node_names, node_sizes, dependencies, predecessors, nets, times)
             design.name = os.path.split(filepath)[1].split(".")[0]
@@ -406,7 +406,7 @@ class AIEplacer:
         herds_to_return = []
 
         logging.info("Begin AIEplace")
-        os.system("mkdir results")
+        os.system("mkdir -p results")
 
         stagnant_iterations = 0 # number of iterations without seeing any improvement
         converged = False 
