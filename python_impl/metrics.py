@@ -24,6 +24,9 @@ def printMetrics(JSON_input, JSON_output, method_label="NO_METHOD"):
         nodes = JSON["partition"]
         for node in nodes:
             slot = math.floor(node[2][1] / grid.timeslot_cols)
+            #print(f"node[1]: {node[1]}")
+            #print(f"slot: {slot}")
+            #print(f"len: {len(nodes_by_timeslot)}")
             nodes_by_timeslot[slot].append(design.node_names.index(node[1]))
             
         # For each time slot, find the longest "chain" execution time.

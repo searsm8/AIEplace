@@ -30,6 +30,7 @@ def runNaivePlacer(filename):
     metrics.printMetrics("./benchmarks/"+filename+".json", "naive.json", method_label="Naive")
 
 def runPartitionAndForce(filename, method):
+    os.system(f"rm -rf partition")
     os.system(f"mkdir -p partition")
     design, grid, orig_num_cols, map_dict = Design.readJSON("./benchmarks/" + filename + ".json")
     partition_information = partition_initialization(design.nets, design.dependencies, design.node_sizes, design.times)
@@ -86,18 +87,17 @@ def runPartitionAndForce(filename, method):
     super_partition, num_rows, num_cols = create_super_list()
     # +1 because 1 is subtracted when creating the switchbox
     write_to_json_super(super_partition, [num_rows, orig_num_cols], "superForcePartPlacer.json", curr_timeslot)
-    metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Partition")
+    metrics.printMetrics("./benchmarks/"+filename+".json", "superForcePartPlacer.json", method_label="Partition")
 
 
 if __name__ == "__main__":
     random.seed(1)
-    filename = "synthetic/synthetic_5"
-    #cProfile.run('runAIEPlacer()')
-    # runAIEPlacer(filename)
-    print("==================")
-    # runNaivePlacer(filename)
-
-    runPartitionAndForce(filename, "time")
+    for i in range(10):
+        filename = f"synthetic/synthetic_{i}"
+        #cProfile.run('runAIEPlacer()')
+        runAIEPlacer(filename)
+        runNaivePlacer(filename)
+        runPartitionAndForce(filename, "time")
 
 
 
