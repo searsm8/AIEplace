@@ -51,7 +51,8 @@ def printMetrics(JSON_input, JSON_output, method_label="NO METHOD SPECIFIED"):
             print(f"\n### Execution times for timeslot {slot}")
             for i in nodes_by_timeslot[slot]:
                 execution_times[i] = (getExecutionTimeOfNode(design, i, nodes_by_timeslot[slot]))
-            stats.append(computeStatsForSlot(design, nodes_by_timeslot[slot], execution_times))
+            stat = computeStatsForSlot(design, nodes_by_timeslot[slot], execution_times)
+            if stat: stats.append(stat)
             t_avg, t_max, area = stats[-1]
             print(f"### Timeslot execution time: {t_max}\tAvg execution time: {t_avg:.2f}\tTime Efficiency: {t_avg/t_max:.2f}")
             print(f"### Area: {area}\tTimeslot area: {timeslot_area}\tArea Utilization: {area/timeslot_area}")
@@ -69,6 +70,8 @@ def printMetrics(JSON_input, JSON_output, method_label="NO METHOD SPECIFIED"):
         print(f"\nOverall execution time efficiency: {overall_exec_eff*100:.1f}%")
         print(f"Overall Area utilization: {overall_area_util*100:.1f}%")
         print()
+        for i in range(len(stats)):
+            print(f"time for slot {i}: {stats[i][1]}")
         print("")
         print(f"##################################################################")
 
@@ -84,17 +87,17 @@ def printMetrics(JSON_input, JSON_output, method_label="NO METHOD SPECIFIED"):
             os.system(f"mkdir -p csv/")
             with open(f'csv/metrics.csv', 'w', encoding='UTF8') as f:
                 writer = csv.writer(f)
-                writer.writerow(["Method", "Benchmark", "Area Util", "Time Util", "Wirelen", "Run #"])
+                writer.writerow(["Method", "Benchmark", "Area Util", "Time Util", "Total Time", "Wirelen", "Run #"])
         
         # write the data
         with open(f'csv/metrics.csv', 'a', encoding='UTF8') as f:
             writer = csv.writer(f)
-            writer.writerow([method_label, design.name, f'{overall_area_util:.3f}', f'{overall_exec_eff:.3f}', wirelen, run_num])
+            writer.writerow([method_label, design.name, f'{overall_area_util:.3f}', f'{overall_exec_eff:.3f}', f'{sum([stats[i][1] for i in range(len(stats))])}', wirelen, run_num])
     # END printMetrics()
 
 
 def computeStatsForSlot(design, nodes_in_slot, execution_times):
-    if len(nodes_in_slot) == 0: return -1, -1, -1
+    if len(nodes_in_slot) == 0: return None
 
     sum = max = area = 0
     for i in nodes_in_slot:
