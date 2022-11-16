@@ -1,6 +1,7 @@
 import json
 import os
 from copy import deepcopy
+import re
 
 def readJSON(filepath, file_number):
     with open(filepath) as file:
@@ -18,11 +19,12 @@ def create_super_list(directory):
         f = os.path.join(directory, filename)
         # checking if it is a file
         if os.path.isfile(f):
-            print(f)
             files.append(f)
     i = 0
     super_node_list = []
-    files = sorted(files)
+    # files = sorted(files)
+    files.sort(key=lambda f: int(re.sub('\D', '', f)))
+    print(files)
     for file in files:
         super_node_list += readJSON(file, i)
         i += 1
