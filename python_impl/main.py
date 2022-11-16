@@ -21,13 +21,13 @@ def runAIEPlacer(filename):
 
     placer = AIEplacer(grid, design, orig_num_cols)
     _ = placer.run(999, "Force", 0)
-    metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Force")
+    metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Force          ")
 
 def runNaivePlacer(filename):
     
     design, grid, orig_num_cols, _ = Design.readJSON("./benchmarks/" + filename + ".json")
     _ = run_brandon_placement(grid.num_rows, orig_num_cols, design, -1)
-    metrics.printMetrics("./benchmarks/"+filename+".json", "naive.json", method_label="Naive")
+    metrics.printMetrics("./benchmarks/"+filename+".json", "naive.json", method_label="Naive          ")
 
 def runPartitionAndForce(filename, method):
     os.system(f"rm -rf partition")
@@ -39,7 +39,7 @@ def runPartitionAndForce(filename, method):
         total_size += design.node_sizes[i].row * design.node_sizes[i].col
     print("total size of all herds: " + str(total_size))
     target_part_size = grid.num_rows * orig_num_cols
-    max_iters = 10
+    max_iters = 100
     curr_timeslot = 0
     curr_part_herds = []
     tolerance = 50
@@ -87,7 +87,7 @@ def runPartitionAndForce(filename, method):
     super_partition, num_rows, num_cols = create_super_list("partition")
     # +1 because 1 is subtracted when creating the switchbox
     write_to_json_super(super_partition, [num_rows, orig_num_cols], "superForcePartPlacer.json", curr_timeslot)
-    metrics.printMetrics("./benchmarks/"+filename+".json", "superForcePartPlacer.json", method_label="PartitionForce")
+    metrics.printMetrics("./benchmarks/"+filename+".json", "superForcePartPlacer.json", method_label="PartitionForce ")
 
 def runPartitionAndGreedy(filename, method):
     os.system(f"rm -rf PartitionGreedy")
@@ -105,7 +105,7 @@ def runPartitionAndGreedy(filename, method):
     curr_timeslot = 0
     while True:
         curr_part_herds = []
-        if curr_timeslot > 10:
+        if curr_timeslot > 100:
             break
         printing_curr_herds = []
         if (method == "partition"):
@@ -132,7 +132,7 @@ def runPartitionAndGreedy(filename, method):
         print("unplaced herds: " + str(temp))
 
         curr_part_herds = list(set(curr_part_herds) - set(temp))
-        print(curr_part_herds)
+        # print(curr_part_herds)
         update_placed_status(partition_information, curr_part_herds, curr_timeslot)
        
         curr_timeslot += 1
@@ -144,7 +144,7 @@ def runPartitionAndGreedy(filename, method):
 
 if __name__ == "__main__":
     random.seed(1)
-    for i in range(1):
+    for i in range(10):
         filename = f"synthetic/synthetic_{i}"
         # filename = "simple"
         #cProfile.run('runAIEPlacer()')
@@ -152,6 +152,9 @@ if __name__ == "__main__":
         runNaivePlacer(filename)
         runPartitionAndGreedy(filename, "partition")
         runPartitionAndForce(filename, "time")
+        with open(f'csv/metrics.csv', 'a', encoding='UTF8') as f:
+            writer = csv.writer(f)
+            writer.writerow([])
 
 
 
