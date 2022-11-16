@@ -184,7 +184,7 @@ def time_part_new(partition_information, target_part_size, longest_dep_list, tol
     condition = True
     partition_herds = [curr_base_herd]
     while condition:
-        print("current base herd: " + str(curr_base_herd))
+        # print("current base herd: " + str(curr_base_herd))
         for herd in range(len(partition_information["nodes"])):
             if partition_information["nodes"][herd]["placed"] != -1 or \
                 herd in partition_herds or \

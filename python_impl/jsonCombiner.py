@@ -12,8 +12,7 @@ def readJSON(filepath, file_number):
                 node_names[herd][tile][1] += file_number * (parameters["col"] +1)
         return node_names
 
-def create_super_list():
-    directory = "partition"
+def create_super_list(directory):
     files = []
     for filename in os.listdir(directory):
         f = os.path.join(directory, filename)
