@@ -18,7 +18,7 @@ BUILD_DIR := $(PWD)/build
 
 TOP := AIEplaceGraph
 AIE_TOP_CPP := $(AIE_SRC_DIR)/$(TOP).cpp
-XILINX_OBJECTS := mm2s.xo transpose.xo s2mm_transpose.xo
+XILINX_OBJECTS := #mm2s.xo transpose.xo s2mm_transpose.xo
 CONFIG_FILE := $(PWD)/src/system.cfg
 
 AIE_INCLUDES := -include=$(AIE_SRC_DIR)
@@ -109,7 +109,7 @@ simulate: aie
 ifeq ($(TARGET),sw_emu)
 	$(TIME) x86simulator $(SIM_FLAGS)  2>&1 | tee -a x86sim.log
 else
-	$(TIME) aiesimulator $(SIM_FLAGS) > aiesim.log
+	$(TIME) aiesimulator $(SIM_FLAGS)  2>&1 | tee -a aiesim.log
 endif 
 	@echo "####################################"
 	@echo "END: AIE Simulation"
@@ -206,11 +206,11 @@ GCC_LIB := -lxaiengine -ladf_api_xrt -lxrt_core -lxrt_coreutil -L$(SDKTARGETSYSR
 # Compile the host program to run on the PS
 ps: application # alias
 
-application: $(PS_SRC_DIR)/host.cpp
+application: $(AIE_TOP_CPP)
 	@echo "Begin PS host app compilation..."
-	@cd $(PS_SRC_DIR); \
+	cd $(AIE_SRC_DIR); \
 	$(CXX) $(GCC_FLAGS) $(GCC_INCLUDES) -o aie_control_xrt.o $(PWD)/Work/ps/c_rts/aie_control_xrt.cpp; \
-	$(CXX) $(GCC_FLAGS) $(GCC_INCLUDES) -o host.o host.cpp; \
+	$(CXX) $(GCC_FLAGS) $(GCC_INCLUDES) -o $(TOP).o $(AIE_TOP_CPP); \
 	$(CXX) *.o $(GCC_LIB) -std=c++14 -o $(PWD)/host.exe 
 	@echo "####################################"
 	@echo "END: make ps"
