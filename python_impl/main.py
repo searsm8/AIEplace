@@ -7,7 +7,7 @@ import logging
 import random
 from naivePlacer import *
 from partitioner import *
-from longest_chain import get_min_runtime
+#from longest_chain import get_min_runtime
 from verifyer import get_validity
 
 import metrics
@@ -23,8 +23,8 @@ def runAIEPlacer(filename):
 
     placer = AIEplacer(grid, design, orig_num_cols)
     _ = placer.run(999, "Force", 0)
-    metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Force          ")
     print(get_validity("benchmarks/" + filename + ".json", "forcePlacer.json"))
+    #metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Force")
 
 def runNaivePlacer(filename):
     
@@ -149,18 +149,15 @@ def runPartitionAndGreedy(filename, method):
     return
 
 if __name__ == "__main__":
-    random.seed(1)
-    for i in range(10):
+    for i in range(0, 10):
+        random.seed(1)
         filename = f"synthetic/synthetic_{i}"
         # filename = "simple"
         #cProfile.run('runAIEPlacer()')
         runAIEPlacer(filename)
-        runNaivePlacer(filename)
-        runPartitionAndGreedy(filename, "partition")
-        runPartitionAndForce(filename, "time")
-        with open(f'csv/metrics.csv', 'a', encoding='UTF8') as f:
-            writer = csv.writer(f)
-            writer.writerow(["min_time: " + str(get_min_runtime(filename + ".json"))])
+        #runNaivePlacer(filename)
+        #runPartitionAndGreedy(filename, "partition")
+        #runPartitionAndForce(filename, "time")
 
 
 
