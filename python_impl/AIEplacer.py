@@ -72,6 +72,24 @@ class Grid:
         for _ in range(num_rows):
             self.vals.append([0]*num_cols)
 
+    def hasEmptySpot(self, c: Coord, s: Coord):
+        # Checks location c for an empty spot of size s
+        if c.col+s.col > self.num_cols: return False
+        if c.row+s.row > self.num_rows: return False
+        for col in range(c.col, c.col+s.col):
+            for row in range(c.row, c.row+s.row):
+                if self.vals[row][col] > 0:
+                    return False
+        return True
+
+    def placeHerd(self, c: Coord, s: Coord):
+        # Tries to place a herd. Return False if blocked
+        print(f"Placing Herd at ({c.row}, {c.col})")
+        for col in range(c.col, c.col+s.col):
+            for row in range(c.row, c.row+s.row):
+                self.vals[row][col] += 1
+        return True
+
     def getColsInTimeslot(self, timeslot_num):
         timeslot_start = (timeslot_num * self.num_cols/self.num_timeslots)
         return timeslot_start, timeslot_start + self.timeslot_cols
@@ -95,6 +113,7 @@ class Design:
                     # e.g. [4,7,9] means nodes 4, 7, and 9 are connect by a net
         self.times = times
         self.map_dict = {}
+
     @classmethod
     def initializeCoords(cls, num_rows, num_cols, node_count):
         #random initial position
@@ -543,7 +562,7 @@ class AIEplacer:
             logging.info(f"\t\t{stagnant_iterations:.2f} stagnant_iterations\t{overflow:.2f} overflow\t {min_overflow:.2f} min_overflow")
             MAX_STAGNANT_ITERS = 20
 
-            MIN_ITERS = 100
+            MIN_ITERS = 20
 
             if iter > MIN_ITERS and stagnant_iterations >= MAX_STAGNANT_ITERS:
                 logging.info(f"No improvement in overflow for {MAX_STAGNANT_ITERS} iterations...Stopping.")
@@ -554,7 +573,8 @@ class AIEplacer:
 
             nets_to_draw = []
             if converged:
-                herds_to_return += self.legalize(list(range(len(self.design.node_sizes))), current_timeslot, method)
+                self.legalize_greedy()
+                #herds_to_return += self.legalize(list(range(len(self.design.node_sizes))), current_timeslot, method)
 
             #for net in self.design.nets:
             #    if net.count(target_node):
@@ -898,3 +918,56 @@ class AIEplacer:
 
         logging.info("End legalization")
         return []
+
+    def legalize_greedy(self):
+        logging.info("Begin greedy legalization")
+        coords = deepcopy(self.design.coords)
+        num_nodes = len(coords)        
+        lg = Grid (self.grid.num_rows, self.grid.num_cols) # legalization grid
+
+        # Sort node coords by increasing cols to form a queue
+        coordQ = [x for _, x in sorted(zip([coords[i].col for i in range(num_nodes)], range(num_nodes)))] 
+        start_coord = Coord(0, 0)
+
+        curr_index = 0
+        while len(coordQ) > 0 : # loop until Q is empty
+            node_index = coordQ[curr_index]
+            # for this node_index, check if any dependencies still need to be placed
+            pred_found = False
+            for pred in self.design.predecessors[node_index]:
+                if pred in coordQ: # If there is an unplaced dependency, skip this node for now
+                    curr_index += 1
+                    pred_found = True; break
+            if pred_found: continue
+
+            placed = False
+            coord = Coord(start_coord.row, start_coord.col)
+            size = self.design.node_sizes[node_index]
+            attempts = 0; MAX_ATTEMPTS = 10000
+            print(f"Begin looking for a spot for {self.design.node_names[node_index]}...")
+            while not placed:
+                print(f"coord: {coord}\tsize: {size}")
+                if lg.hasEmptySpot(coord, size): 
+                    lg.placeHerd(coord, size)
+                    # Record this placment in the design
+                    self.design.coords[node_index] = deepcopy(coord)
+                    # Remove this herd from Q
+                    del coordQ[curr_index]
+                    curr_index = 0
+                    placed = True
+                    # Update start_coord after placing a herd
+                    #start_coord.row += size.row
+                    #if start_coord.row >= lg.num_rows:
+                    #    start_coord.row = 0
+                    #    start_coord.col += 1
+                coord.row += 1
+                if coord.row >= lg.num_rows:
+                    coord.row = 0
+                    coord.col += 1
+                attempts += 1
+                if attempts >= MAX_ATTEMPTS: # failed to find placment for herd
+                    curr_index += 1
+                    break
+
+        return True # Successful legalization!
+
