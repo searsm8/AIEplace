@@ -7,6 +7,8 @@ import logging
 import random
 from naivePlacer import *
 from partitioner import *
+from longest_chain import get_min_runtime
+from verifyer import get_validity
 
 import metrics
 from jsonCombiner import *
@@ -22,12 +24,14 @@ def runAIEPlacer(filename):
     placer = AIEplacer(grid, design, orig_num_cols)
     _ = placer.run(999, "Force", 0)
     metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Force          ")
+    print(get_validity("benchmarks/" + filename + ".json", "forcePlacer.json"))
 
 def runNaivePlacer(filename):
     
     design, grid, orig_num_cols, _ = Design.readJSON("./benchmarks/" + filename + ".json")
     _ = run_brandon_placement(grid.num_rows, orig_num_cols, design, -1)
     metrics.printMetrics("./benchmarks/"+filename+".json", "naive.json", method_label="Naive          ")
+    print(get_validity("benchmarks/" + filename + ".json", "naive.json"))
 
 def runPartitionAndForce(filename, method):
     os.system(f"rm -rf partition")
@@ -88,6 +92,7 @@ def runPartitionAndForce(filename, method):
     # +1 because 1 is subtracted when creating the switchbox
     write_to_json_super(super_partition, [num_rows, orig_num_cols], "superForcePartPlacer.json", curr_timeslot)
     metrics.printMetrics("./benchmarks/"+filename+".json", "superForcePartPlacer.json", method_label="PartitionForce ")
+    print(get_validity("benchmarks/" + filename + ".json", "superForcePartPlacer.json"))
 
 def runPartitionAndGreedy(filename, method):
     os.system(f"rm -rf PartitionGreedy")
@@ -140,6 +145,7 @@ def runPartitionAndGreedy(filename, method):
     super_partition, num_rows, num_cols = create_super_list("PartitionGreedy")
     write_to_json_super(super_partition, [num_rows, orig_num_cols], "superGreedyPlacer.json", curr_timeslot)
     metrics.printMetrics("./benchmarks/"+filename+".json", "superGreedyPlacer.json", method_label="GreedyPartition")
+    print(get_validity("benchmarks/" + filename + ".json", "superGreedyPlacer.json"))
     return
 
 if __name__ == "__main__":
@@ -154,7 +160,7 @@ if __name__ == "__main__":
         runPartitionAndForce(filename, "time")
         with open(f'csv/metrics.csv', 'a', encoding='UTF8') as f:
             writer = csv.writer(f)
-            writer.writerow([])
+            writer.writerow(["min_time: " + str(get_min_runtime(filename + ".json"))])
 
 
 
