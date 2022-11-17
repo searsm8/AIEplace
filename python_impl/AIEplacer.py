@@ -84,11 +84,19 @@ class Grid:
 
     def placeHerd(self, c: Coord, s: Coord):
         # Tries to place a herd. Return False if blocked
-        print(f"Placing Herd at ({c.row}, {c.col})")
         for col in range(c.col, c.col+s.col):
             for row in range(c.row, c.row+s.row):
                 self.vals[row][col] += 1
         return True
+
+    def getFirstOpenCoord(self, col_start=0, row_start=0):
+        print(f"col_start: {col_start}\t row_start: {row_start}")
+        for col in range(col_start, self.num_cols):
+            for row in range(row_start, self.num_rows):
+                if self.vals[row][col] == 0:
+                    return Coord(row, col)
+        return None
+        
 
     def getColsInTimeslot(self, timeslot_num):
         timeslot_start = (timeslot_num * self.num_cols/self.num_timeslots)
@@ -147,7 +155,7 @@ class Design:
             coords = Design.initializeCoords(num_rows, num_cols, len(node_names))
 
             total_size = getTotalSize(node_sizes)
-            num_timeslots = math.ceil(total_size / (num_rows*num_cols)) + 2
+            num_timeslots = math.ceil(total_size / (num_rows*num_cols)) + 0
             grid = Grid(num_rows, num_cols, num_timeslots)
             design = Design(coords, node_names, node_sizes, dependencies, predecessors, nets, times)
             design.name = os.path.split(filepath)[1].split(".")[0]
@@ -927,27 +935,40 @@ class AIEplacer:
 
         # Sort node coords by increasing cols to form a queue
         coordQ = [x for _, x in sorted(zip([coords[i].col for i in range(num_nodes)], range(num_nodes)))] 
-        start_coord = Coord(0, 0)
 
         curr_index = 0
+        curr_timeslot = 0
         while len(coordQ) > 0 : # loop until Q is empty
+            
+            # If tried to place all nodes, move to next timeslot
+            if curr_index >= len(coordQ):
+                curr_index = 0
+                curr_timeslot += 1
+
             node_index = coordQ[curr_index]
             # for this node_index, check if any dependencies still need to be placed
             pred_found = False
             for pred in self.design.predecessors[node_index]:
                 if pred in coordQ: # If there is an unplaced dependency, skip this node for now
-                    curr_index += 1
                     pred_found = True; break
-            if pred_found: continue
+            if pred_found:
+                curr_index += 1; continue
 
-            placed = False
-            coord = Coord(start_coord.row, start_coord.col)
+            coord = lg.getFirstOpenCoord(col_start=curr_timeslot * self.grid.timeslot_cols)
+            #if coord.row == 0 and coord.col % self.grid.timeslot_cols == 0:
+            #    curr_timeslot += 1
+            if not coord: # No more open spots, placement failed
+                print(f"ERROR: PLACEMENT FAILED")
+                print(f"Unplaced herds:")
+                print(f"{[self.design.node_names[i] for i in coordQ]}")
             size = self.design.node_sizes[node_index]
             attempts = 0; MAX_ATTEMPTS = 10000
-            print(f"Begin looking for a spot for {self.design.node_names[node_index]}...")
+            placed = False
             while not placed:
-                print(f"coord: {coord}\tsize: {size}")
-                if lg.hasEmptySpot(coord, size): 
+                #print(f"coord: {coord}\tsize: {size}")
+                # Ensure this herd will not cross a partition boundary
+                crosses_partition = (coord.col % self.grid.timeslot_cols > self.grid.timeslot_cols - size.col)
+                if lg.hasEmptySpot(coord, size) and not crosses_partition:
                     lg.placeHerd(coord, size)
                     # Record this placment in the design
                     self.design.coords[node_index] = deepcopy(coord)
@@ -955,19 +976,19 @@ class AIEplacer:
                     del coordQ[curr_index]
                     curr_index = 0
                     placed = True
-                    # Update start_coord after placing a herd
-                    #start_coord.row += size.row
-                    #if start_coord.row >= lg.num_rows:
-                    #    start_coord.row = 0
-                    #    start_coord.col += 1
                 coord.row += 1
                 if coord.row >= lg.num_rows:
                     coord.row = 0
                     coord.col += 1
+                    # Check if this moves into a new timeslot
+                    if coord.col % self.grid.timeslot_cols == 0:
+                        # We want to finish this timeslot before moving on, 
+                        # so we skip this herd for now
+                        curr_index += 1; break
                 attempts += 1
                 if attempts >= MAX_ATTEMPTS: # failed to find placment for herd
-                    curr_index += 1
-                    break
+                    # Move to the next herd for now
+                    curr_index += 1; break
 
         return True # Successful legalization!
 

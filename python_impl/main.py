@@ -143,7 +143,7 @@ def runPartitionAndGreedy(filename, method):
     return
 
 if __name__ == "__main__":
-    for i in range(0, 1):
+    for i in range(0, 10):
         random.seed(1)
         filename = f"synthetic/synthetic_{i}"
         # filename = "simple"
