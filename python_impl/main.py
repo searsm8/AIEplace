@@ -31,7 +31,8 @@ def runNaivePlacer(filename):
     design, grid, orig_num_cols, _ = Design.readJSON("./benchmarks/" + filename + ".json")
     _ = run_brandon_placement(grid.num_rows, orig_num_cols, design, -1)
     metrics.printMetrics("./benchmarks/"+filename+".json", "naive.json", method_label="Naive          ")
-    print(get_validity("benchmarks/" + filename + ".json", "naive.json"))
+    status, message = get_validity("benchmarks/" + filename + ".json", "naive.json")
+    print(message)
 
 def runPartitionAndForce(filename, method):
     os.system(f"rm -rf partition")
@@ -92,7 +93,8 @@ def runPartitionAndForce(filename, method):
     # +1 because 1 is subtracted when creating the switchbox
     write_to_json_super(super_partition, [num_rows, orig_num_cols], "superForcePartPlacer.json", curr_timeslot)
     metrics.printMetrics("./benchmarks/"+filename+".json", "superForcePartPlacer.json", method_label="PartitionForce ")
-    print(get_validity("benchmarks/" + filename + ".json", "superForcePartPlacer.json"))
+    status, message = get_validity("benchmarks/" + filename + ".json", "superForcePartPlacer.json")
+    print(message)
 
 def runPartitionAndGreedy(filename, method):
     os.system(f"rm -rf PartitionGreedy")
@@ -109,6 +111,7 @@ def runPartitionAndGreedy(filename, method):
     longest_dep_list = build_longest_dep_list(partition_information, max_dep_key)
     curr_timeslot = 0
     while True:
+        print(f"==================Current timeslot: {curr_timeslot}================")
         curr_part_herds = []
         if curr_timeslot > 100:
             break
@@ -131,13 +134,12 @@ def runPartitionAndGreedy(filename, method):
         unplaced_herds = run_brandon_placement(grid.num_rows, orig_num_cols, new_design, curr_timeslot)
         unplaced_herds = [item for sublist in unplaced_herds for item in sublist]
         temp = []
+
         for herd in range(len(unplaced_herds)):
             temp.append(new_number_to_old_number[unplaced_herds[herd].name])
-
         print("unplaced herds: " + str(temp))
-
         curr_part_herds = list(set(curr_part_herds) - set(temp))
-        # print(curr_part_herds)
+       
         update_placed_status(partition_information, curr_part_herds, curr_timeslot)
        
         curr_timeslot += 1
@@ -145,8 +147,8 @@ def runPartitionAndGreedy(filename, method):
     super_partition, num_rows, num_cols = create_super_list("PartitionGreedy")
     write_to_json_super(super_partition, [num_rows, orig_num_cols], "superGreedyPlacer.json", curr_timeslot)
     metrics.printMetrics("./benchmarks/"+filename+".json", "superGreedyPlacer.json", method_label="GreedyPartition")
-    print(get_validity("benchmarks/" + filename + ".json", "superGreedyPlacer.json"))
-    return
+    status, message = get_validity("benchmarks/" + filename + ".json", "superGreedyPlacer.json")
+    print(message)
 
 if __name__ == "__main__":
     for i in [9]:#range(0, 1):

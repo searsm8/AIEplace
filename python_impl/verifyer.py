@@ -1,5 +1,6 @@
 import json
 import math
+from collections import Counter
 from AIEplacer import Design, Coord
 
 def get_validity(JSON_input, JSON_output):
@@ -16,10 +17,13 @@ def get_validity(JSON_input, JSON_output):
         for node in temp:
             node_names_output.append(node[1])
         if len(set(node_names_output)) != len(node_names_output):
-            return f"######## ERROR: Invalid placement - Duplicating Nodes. #######"
+            return False, f"######## ERROR: Invalid placement - Duplicating Nodes: {[k for k,v in Counter(node_names_output).items() if v>1]}. #######"
+        # print(node_names_input)
+        # print("======")
+        # print(node_names_output)
         for i in range(len(node_names_input)):
             if node_names_input[i] not in node_names_output:
-                return f"######## ERROR: Invalid placement. Not all nodes in input file are in output file (missing {node_names_input[i]}). #######"
+                return False, f"######## ERROR: Invalid placement. Not all nodes in input file are in output file (missing {node_names_input[i]}). #######"
         nodes_by_timeslot = []*grid.num_timeslots
         for _ in range(grid.num_timeslots): nodes_by_timeslot.append([])
 
@@ -51,6 +55,6 @@ def get_validity(JSON_input, JSON_output):
                     curr_timeslot = math.floor(design.coords[herd].col / grid.timeslot_cols)
                     for j in design.predecessors[herd]:
                         if dependencies_satisfied[j] > curr_timeslot:
-                            return f"######## ERROR: Invalid placement @ Node {design.node_names[herd]}, timeslot {curr_timeslot}. Dependency not satisfied: {design.node_names[j]}, timeslot {dependencies_satisfied[j]}. #######"
+                            return False, f"######## ERROR: Invalid placement @ Node {design.node_names[herd]}, timeslot {curr_timeslot}. Dependency not satisfied: {design.node_names[j]}, timeslot {dependencies_satisfied[j]}. #######"
                     dependencies_satisfied[herd] = curr_timeslot
-        return "###### Legal placement; all dependencies satisfied ######"
+        return True, "###### Legal placement; all dependencies satisfied ######"
