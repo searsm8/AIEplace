@@ -23,8 +23,8 @@ def runAIEPlacer(filename):
 
     placer = AIEplacer(grid, design, orig_num_cols)
     _ = placer.run(999, "Force", 0)
+    metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Force")
     print(get_validity("benchmarks/" + filename + ".json", "forcePlacer.json"))
-    #metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Force")
 
 def runNaivePlacer(filename):
     
@@ -149,7 +149,7 @@ def runPartitionAndGreedy(filename, method):
     return
 
 if __name__ == "__main__":
-    for i in range(0, 10):
+    for i in [9]:#range(0, 1):
         random.seed(1)
         filename = f"synthetic/synthetic_{i}"
         # filename = "simple"

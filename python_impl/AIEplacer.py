@@ -90,7 +90,6 @@ class Grid:
         return True
 
     def getFirstOpenCoord(self, col_start=0, row_start=0):
-        print(f"col_start: {col_start}\t row_start: {row_start}")
         for col in range(col_start, self.num_cols):
             for row in range(row_start, self.num_rows):
                 if self.vals[row][col] == 0:
@@ -155,7 +154,7 @@ class Design:
             coords = Design.initializeCoords(num_rows, num_cols, len(node_names))
 
             total_size = getTotalSize(node_sizes)
-            num_timeslots = math.ceil(total_size / (num_rows*num_cols)) + 0
+            num_timeslots = math.ceil(total_size / (num_rows*num_cols)) + 1
             grid = Grid(num_rows, num_cols, num_timeslots)
             design = Design(coords, node_names, node_sizes, dependencies, predecessors, nets, times)
             design.name = os.path.split(filepath)[1].split(".")[0]
@@ -958,9 +957,10 @@ class AIEplacer:
             #if coord.row == 0 and coord.col % self.grid.timeslot_cols == 0:
             #    curr_timeslot += 1
             if not coord: # No more open spots, placement failed
-                print(f"ERROR: PLACEMENT FAILED")
+                print(f"ERROR: legalize_greedy FAILED")
                 print(f"Unplaced herds:")
                 print(f"{[self.design.node_names[i] for i in coordQ]}")
+                return False
             size = self.design.node_sizes[node_index]
             attempts = 0; MAX_ATTEMPTS = 10000
             placed = False
@@ -968,6 +968,8 @@ class AIEplacer:
                 #print(f"coord: {coord}\tsize: {size}")
                 # Ensure this herd will not cross a partition boundary
                 crosses_partition = (coord.col % self.grid.timeslot_cols > self.grid.timeslot_cols - size.col)
+
+                # Add a condition to skip the herd if it significantly increases the partition time
                 if lg.hasEmptySpot(coord, size) and not crosses_partition:
                     lg.placeHerd(coord, size)
                     # Record this placment in the design
@@ -986,9 +988,21 @@ class AIEplacer:
                         # so we skip this herd for now
                         curr_index += 1; break
                 attempts += 1
-                if attempts >= MAX_ATTEMPTS: # failed to find placment for herd
+                if attempts >= MAX_ATTEMPTS: # failed to find placement for herd
                     # Move to the next herd for now
                     curr_index += 1; break
+        
+        # Prepare Herd structure to export to output JSON
+        herds = []
+        for i in range(max(self.design.dependencies)+1):
+            herds.append([])
+        for i in range(num_nodes):
+            h = Herd(self.grid.num_rows - self.design.coords[i].row - 1, self.design.coords[i].col, \
+                    self.design.node_sizes[i].row, self.design.node_sizes[i].col, \
+                    self.design.dependencies[i], self.design.node_names[i], self.design.dependencies[i])
+            herds[self.design.dependencies[i]].append(h)
+        num_timeslots = self.grid.num_cols / self.num_cols_original
+        write_to_json(herds, [lg.num_rows, self.num_cols_original], "forcePlacer.json", num_timeslots)
 
         return True # Successful legalization!
 
