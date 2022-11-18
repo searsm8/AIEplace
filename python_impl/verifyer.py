@@ -3,14 +3,18 @@ import math
 from AIEplacer import Design, Coord
 
 def get_validity(JSON_input, JSON_output):
-    node_names_output = []
-    with open (JSON_input) as file:
+    node_names_input = []
+    with open(JSON_input) as file:
         JSON = json.load(file)
-        node_names_output = list(JSON["node_sizes"].keys())
+        node_names_input = list(JSON["node_sizes"].keys())
+
     with open(JSON_output) as file:
         design, grid, orig_num_cols, _ = Design.readJSON(JSON_input)
         JSON = json.load(file)
-        node_names_input = design.node_names
+        temp = list(JSON["partition"])
+        node_names_output = []
+        for node in temp:
+            node_names_output.append(node[1])
         if len(set(node_names_output)) != len(node_names_output):
             return f"######## ERROR: Invalid placement - Duplicating Nodes. #######"
         for i in range(len(node_names_input)):
@@ -26,16 +30,8 @@ def get_validity(JSON_input, JSON_output):
             index = 0
             if node[1] in design.node_names:
                 index = design.node_names.index(node[1])
-            else:
-                print("WARNING: Node name not found!")
-                print(f"node[1]: {node[1]}")
-                print(design.node_names)
             if slot < len(nodes_by_timeslot):
                 nodes_by_timeslot[slot].append(index)
-            else:
-                print("WARNING: slot out of range!")
-                print(f"slot: {slot}")
-                print(f"len: {len(nodes_by_timeslot)}")
 
             # Update coords in design (to compute wirelen of placed nodes)
             design.coords[index] = Coord(node[2][0], node[2][1])
