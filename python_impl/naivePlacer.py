@@ -4,6 +4,8 @@ import jsbeautifier
 from copy import deepcopy
 # from AIEplacer import Design
 
+color_map = {0: 6, 1: 12, 2: 4, 3: 2, 4: 0}
+
 class Design_B:
     # primary lists which hold design information
     def __init__(self, coords, node_names, node_sizes, dependencies, predecessors, nets, times) -> None:
@@ -322,7 +324,12 @@ def run_brandon_placement(num_rows, num_cols, design, timeslot):
     for _ in range(max(design.dependencies) + 1):
         herd_list.append([])
     for i in range(len(design.node_sizes)): 
-        herd = Herd_B(design.node_sizes[i].row, design.node_sizes[i].col, i, design.node_names[i], design.dependencies[i])
+        color = -1
+        if design.dependencies[i] < 5:
+            color = color_map[design.dependencies[i]]
+        else:
+            color = design.dependencies[i]
+        herd = Herd_B(design.node_sizes[i].row, design.node_sizes[i].col, i, design.node_names[i], color)
         herd_list[design.dependencies[i]].append(herd)
     unplaced_herds = greedy_placement(herd_list, grid, timeslot, design)
     for dep in range(len(herd_list)):
