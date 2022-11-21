@@ -153,6 +153,7 @@ def time_part_new(partition_information, target_part_size, longest_dep_list, tol
                 herd in partition_herds or \
                 partition_information["nodes"][herd]["size"] + curr_size > target_part_size:
                 continue
+
             chains = []
             new_chains = get_chains(partition_information, herd, chains, [])
             if not can_place(partition_information, new_chains, partition_herds, herd):
@@ -166,6 +167,7 @@ def time_part_new(partition_information, target_part_size, longest_dep_list, tol
         elif all_placed(partition_information, partition_herds):
             condition = False
         else:
+            curr_base_herd = -1
             lowest_dep = 1000
             shortest_time = 1000000
             for herd in range(len(partition_information["nodes"])):
@@ -180,6 +182,9 @@ def time_part_new(partition_information, target_part_size, longest_dep_list, tol
                     if new_time < shortest_time:
                         curr_base_herd = herd
                         lowest_dep = partition_information["nodes"][herd]["deps"]
+            # unexpected case when sizes change
+            if curr_base_herd == -1:
+                return partition_herds
             curr_size += partition_information["nodes"][curr_base_herd]["size"]
             partition_herds.append(curr_base_herd)
             new_chains = get_chains(partition_information, curr_base_herd, chains, [])

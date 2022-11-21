@@ -159,7 +159,7 @@ class Herd_B:
                 locations.append([row_coord, col_coord])
         return locations
 
-def greedy_placement(herds, grid, timeslot):
+def greedy_placement(herds, grid, timeslot, design):
     """Organizes the herds by size before passing to the naive placer
 
     Args:
@@ -170,7 +170,7 @@ def greedy_placement(herds, grid, timeslot):
     # Will need to add dimentionality to the herds
     for i in range(len(herds)):
         herds[i].sort(key=lambda x: x.size, reverse=True)
-    unplaced_herds = naive_placement(herds, grid, timeslot)
+    unplaced_herds = naive_placement(herds, grid, timeslot, design)
     return unplaced_herds
 
 def generate_part_dict(part_list, maxdims, number): 
@@ -232,7 +232,7 @@ def write_to_json_super(part_dict, grid_dims, output_file_name, number):
     f.close()
     return
 
-def naive_placement(herds, grid, timeslot):
+def naive_placement(herds, grid, timeslot, design):
     """Tries to place herds in a naive way, starting with the first herd in the
        list, trying to place it starting in the upper left hand corner and gradually
        working its way down to the bottom right. Updates the herd + grid objects.
@@ -270,6 +270,11 @@ def naive_placement_helper(grid, herds, unplaced_herds):
         for col in range(grid.num_cols):
             if curr_herd_dep == len(unplaced_herds):
                 break
+            while not unplaced_herds[curr_herd_dep]:
+                if curr_herd_dep == len(unplaced_herds):
+                    break
+                curr_herd_dep += 1
+
             if(grid.grid[grid.num_rows - row - 1][col] == -1):
                 if not unplaced_herds[curr_herd_dep]:
                     curr_herd_dep += 1
@@ -292,6 +297,7 @@ def naive_placement_helper(grid, herds, unplaced_herds):
             break
         elif (not unplaced_herds[dep]):
            del unplaced_herds[dep]
+        #    dep += 1
         else: 
             break
     return unplaced_herds
@@ -318,7 +324,7 @@ def run_brandon_placement(num_rows, num_cols, design, timeslot):
     for i in range(len(design.node_sizes)): 
         herd = Herd_B(design.node_sizes[i].row, design.node_sizes[i].col, i, design.node_names[i], design.dependencies[i])
         herd_list[design.dependencies[i]].append(herd)
-    unplaced_herds = greedy_placement(herd_list, grid, timeslot)
+    unplaced_herds = greedy_placement(herd_list, grid, timeslot, design)
     for dep in range(len(herd_list)):
         for herd in range(len(herd_list[dep])):
             herd_list[dep][herd].number = herd_list[dep][herd].dep
