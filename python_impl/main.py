@@ -23,16 +23,30 @@ def runAIEPlacer(filename):
 
     placer = AIEplacer(grid, design, orig_num_cols)
     _ = placer.run(999, "Force", 0)
-    metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", method_label="Force")
-    print(get_validity("benchmarks/" + filename + ".json", "forcePlacer.json"))
+    placer.legalize_greedy("forcePlacer.json")
+    copyJSON("forcePlacer.json")
+    success, message = get_validity("benchmarks/" + filename + ".json", "forcePlacer.json")
+    print(message)
+    metrics.printMetrics("./benchmarks/"+filename+".json", "forcePlacer.json", success, method_label="Force",)
+
+def runGreedyLegalizeOnly(filename):
+    design, grid, orig_num_cols, _ = Design.readJSON("./benchmarks/"+filename+".json")
+
+    placer = AIEplacer(grid, design, orig_num_cols)
+    placer.legalize_greedy("greedyLegalizer.json")
+    copyJSON("greedyLegalizer.json")
+    success, message = get_validity("benchmarks/" + filename + ".json", "greedyLegalizer.json")
+    print(message)
+    metrics.printMetrics("./benchmarks/"+filename+".json", "greedyLegalizer.json", success, method_label="greedy")
 
 def runNaivePlacer(filename):
     
     design, grid, orig_num_cols, _ = Design.readJSON("./benchmarks/" + filename + ".json")
     _ = run_brandon_placement(grid.num_rows, orig_num_cols, design, -1)
-    metrics.printMetrics("./benchmarks/"+filename+".json", "naive.json", method_label="Naive          ")
-    status, message = get_validity("benchmarks/" + filename + ".json", "naive.json")
+    copyJSON("naive.json")
+    success, message = get_validity("benchmarks/" + filename + ".json", "naive.json")
     print(message)
+    metrics.printMetrics("./benchmarks/"+filename+".json", "naive.json", success, method_label="Naive          ")
 
 def runPartitionAndForce(filename, method):
     os.system(f"rm -rf partition")
@@ -92,9 +106,10 @@ def runPartitionAndForce(filename, method):
     super_partition, num_rows, num_cols = create_super_list("partition")
     # +1 because 1 is subtracted when creating the switchbox
     write_to_json_super(super_partition, [num_rows, orig_num_cols], "superForcePartPlacer.json", curr_timeslot)
-    metrics.printMetrics("./benchmarks/"+filename+".json", "superForcePartPlacer.json", method_label="PartitionForce ")
-    status, message = get_validity("benchmarks/" + filename + ".json", "superForcePartPlacer.json")
+    copyJSON("superForcePartPlacer.json")
+    success, message = get_validity("benchmarks/" + filename + ".json", "superForcePartPlacer.json")
     print(message)
+    metrics.printMetrics("./benchmarks/"+filename+".json", "superForcePartPlacer.json", success, method_label="PartitionForce ")
 
 def runPartitionAndGreedy(filename, method):
     os.system(f"rm -rf PartitionGreedy")
@@ -146,20 +161,33 @@ def runPartitionAndGreedy(filename, method):
     print("finished!")
     super_partition, num_rows, num_cols = create_super_list("PartitionGreedy")
     write_to_json_super(super_partition, [num_rows, orig_num_cols], "superGreedyPlacer.json", curr_timeslot)
-    metrics.printMetrics("./benchmarks/"+filename+".json", "superGreedyPlacer.json", method_label="GreedyPartition")
-    status, message = get_validity("benchmarks/" + filename + ".json", "superGreedyPlacer.json")
+    copyJSON("superGreedyPlacer.json")
+    success, message = get_validity("benchmarks/" + filename + ".json", "superGreedyPlacer.json")
     print(message)
+    metrics.printMetrics("./benchmarks/"+filename+".json", "superGreedyPlacer.json", success, method_label="GreedyPartition")
+
+def copyJSON(outputJSONfile):
+    '''Copies an output JSON file to appropriate folder. '''
+    outputJSONname = outputJSONfile.split(".")[0]
+    output_folder = os.path.join("results/JSON_outputs", outputJSONname)
+    os.system(f"mkdir -p " + output_folder)
+    num = 0
+    output_file = f"{output_folder}/{outputJSONname}_{num}.json"
+    while os.path.exists(output_file):
+        num += 1
+        output_file = f"{output_folder}/{outputJSONname}_{num}.json"
+    os.system(f"cp {outputJSONfile} {output_file}")
+
 
 if __name__ == "__main__":
-    for i in [9]:#range(0, 1):
+    for i in range(0, 10):
         random.seed(1)
         filename = f"synthetic/synthetic_{i}"
         # filename = "simple"
         #cProfile.run('runAIEPlacer()')
+        runNaivePlacer(filename)
+        runPartitionAndGreedy(filename, "partition")
+        runPartitionAndForce(filename, "time")
         runAIEPlacer(filename)
-        #runNaivePlacer(filename)
-        #runPartitionAndGreedy(filename, "partition")
-        #runPartitionAndForce(filename, "time")
-
-
+        runGreedyLegalizeOnly(filename)
 

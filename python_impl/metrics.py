@@ -6,7 +6,7 @@ from AIEplacer import Design, Coord
 from copy import deepcopy
 from statistics import mean
 
-def printMetrics(JSON_input, JSON_output, method_label="NO METHOD SPECIFIED"):
+def printMetrics(JSON_input, JSON_output, success, method_label="NO METHOD SPECIFIED"):
 
     print("\n###############")
     print("### METRICS ###")
@@ -15,7 +15,6 @@ def printMetrics(JSON_input, JSON_output, method_label="NO METHOD SPECIFIED"):
     with open(JSON_output) as file:
         design, grid, orig_num_cols, _ = Design.readJSON(JSON_input)
         JSON = json.load(file)
-
 
         print("Timeslot execution times:")
         nodes_by_timeslot = []*grid.num_timeslots
@@ -47,7 +46,12 @@ def printMetrics(JSON_input, JSON_output, method_label="NO METHOD SPECIFIED"):
         timeslot_area = grid.num_rows * grid.timeslot_cols
         execution_times = [0]*len(design.node_names)
         stats = []
+        timeslots_used = 0
         for slot in range(grid.num_timeslots):
+            if len(nodes_by_timeslot[slot]) == 0:
+                print(f"\n### Timeslot {slot} is empty! It must not have been needed...")
+                break
+            timeslots_used += 1
             print(f"\n### Execution times for timeslot {slot}")
             for i in nodes_by_timeslot[slot]:
                 execution_times[i] = (getExecutionTimeOfNode(design, i, nodes_by_timeslot[slot]))
@@ -83,16 +87,17 @@ def printMetrics(JSON_input, JSON_output, method_label="NO METHOD SPECIFIED"):
 
         # Write results to csv
         # If file doesn't exist yet, create it and write the header
-        if(not os.path.exists(f"csv/metrics.csv")):
-            os.system(f"mkdir -p csv/")
-            with open(f'csv/metrics.csv', 'w', encoding='UTF8') as f:
+        metrics_filename = f"results/metrics/{JSON_output.split('.')[0]}.csv"
+        if(not os.path.exists(metrics_filename)):
+            os.system(f"mkdir -p results/metrics")
+            with open(metrics_filename, 'w', encoding='UTF8') as f:
                 writer = csv.writer(f)
-                writer.writerow(["Method", "Benchmark", "Area Util", "Time Util", "Total Time", "Wirelen", "Run #"])
+                writer.writerow(["Method", "Benchmark", "Area Util", "Time Util", "Total Time", "Timeslots Used", "Wirelen", "Run ref#", "Success"])
         
         # write the data
-        with open(f'csv/metrics.csv', 'a', encoding='UTF8') as f:
+        with open(metrics_filename, 'a', encoding='UTF8') as f:
             writer = csv.writer(f)
-            writer.writerow([method_label, design.name, f'{overall_area_util:.3f}', f'{overall_exec_eff:.3f}', f'{sum([stats[i][1] for i in range(len(stats))])}', wirelen, run_num])
+            writer.writerow([method_label, design.name, f'{overall_area_util:.3f}', f'{overall_exec_eff:.3f}', f'{sum([stats[i][1] for i in range(len(stats))])}', timeslots_used, wirelen, run_num, success])
     # END printMetrics()
 
 

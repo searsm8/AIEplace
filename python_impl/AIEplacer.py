@@ -330,9 +330,9 @@ class AIEplacer:
         self.bin_height= 1 # arbitrary
         self.bin_grid = Grid(int(grid.num_rows/self.bin_height), int(grid.num_cols/self.bin_width))
         self.design_run = 0
-        while(os.path.exists(f"results/run_{self.design_run}")):
+        while(os.path.exists(f"results/force_runs/run_{self.design_run}")):
             self.design_run += 1
-        os.system(f"mkdir -p results/run_{self.design_run}/nodes")
+        os.system(f"mkdir -p results/force_runs/run_{self.design_run}/nodes")
     
     def computeActualHPWL(self):
         hpwls = []
@@ -425,14 +425,14 @@ class AIEplacer:
 
     def run(self, iterations, method, current_timeslot):
         ''' Runs the ePlace algorithm'''
-        EXPORT_IMAGES = True
-        EXPORT_NET_IMAGES = True
+        EXPORT_IMAGES = False
+        EXPORT_NET_IMAGES = False
         
         # unplaced herds
         herds_to_return = []
 
         logging.info("Begin AIEplace")
-        os.system("mkdir -p results")
+        os.system("mkdir -p results/force_runs/")
 
         stagnant_iterations = 0 # number of iterations without seeing any improvement
         converged = False 
@@ -579,9 +579,11 @@ class AIEplacer:
                 converged = True
 
             nets_to_draw = []
+            
+            #converged = True
             if converged:
-                self.legalize_greedy()
-                #herds_to_return += self.legalize(list(range(len(self.design.node_sizes))), current_timeslot, method)
+                #self.legalize_greedy("forcePlacer.json")
+                herds_to_return += self.legalize(list(range(len(self.design.node_sizes))), current_timeslot, method)
 
             #for net in self.design.nets:
             #    if net.count(target_node):
@@ -606,7 +608,7 @@ class AIEplacer:
                 #use PlaceDrawer to export an image
                 if(iter%5 == 0) or converged:
                     filename=f"{time.strftime('%y%m%d_%H%M')}_iter_{iter:03}.png"
-                    filename = os.path.join("results", f"run_{self.design_run}", filename)
+                    filename = os.path.join("results", "force_runs", f"run_{self.design_run}", filename)
                     ret = PlaceDrawer.PlaceDrawer.forward(
                             num_cols=self.num_cols_original,
                             pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  +  \
@@ -640,7 +642,7 @@ class AIEplacer:
                         if net.count(target_node):
                             nets_to_draw.append(net)
                             
-                    filename = os.path.join("results", f"run_{self.design_run}", "nodes", f"{self.design.node_names[target_node]}.png")
+                    filename = os.path.join("results", "force_runs", f"run_{self.design_run}", "nodes", f"{self.design.node_names[target_node]}.png")
                     ret = PlaceDrawer.PlaceDrawer.forward(
                             num_cols=self.num_cols_original,
                             pos= [self.design.coords[i].col for i in range(len(self.design.coords))]  +  \
@@ -669,9 +671,10 @@ class AIEplacer:
 
             if converged:
                 # Export collected images as a .gif
-                folder = os.path.join("results", f"run_{self.design_run}" )
+                folder = os.path.join("results", "force_runs", f"run_{self.design_run}" )
                 gif_name = f"_run_{self.design_run}.gif"
-                PlaceDrawer.PlaceDrawer.export_gif(folder, gif_name)
+                if EXPORT_IMAGES:
+                    PlaceDrawer.PlaceDrawer.export_gif(folder, gif_name)
 
                 break
             #end iteration loop
@@ -926,7 +929,7 @@ class AIEplacer:
         logging.info("End legalization")
         return []
 
-    def legalize_greedy(self):
+    def legalize_greedy(self, output_json):
         logging.info("Begin greedy legalization")
         coords = deepcopy(self.design.coords)
         num_nodes = len(coords)        
@@ -937,6 +940,7 @@ class AIEplacer:
 
         curr_index = 0
         curr_timeslot = 0
+        
         while len(coordQ) > 0 : # loop until Q is empty
             
             # If tried to place all nodes, move to next timeslot
@@ -1002,7 +1006,7 @@ class AIEplacer:
                     self.design.dependencies[i], self.design.node_names[i], self.design.dependencies[i])
             herds[self.design.dependencies[i]].append(h)
         num_timeslots = self.grid.num_cols / self.num_cols_original
-        write_to_json(herds, [lg.num_rows, self.num_cols_original], "forcePlacer.json", num_timeslots)
+        write_to_json(herds, [lg.num_rows, self.num_cols_original], output_json, num_timeslots)
 
         return True # Successful legalization!
 

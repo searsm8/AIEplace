@@ -3,41 +3,52 @@
 # Create a synthetic benchmark to be used with the AIEplacer.py algorithm
 # Outputs a .json file which specifies a grid size, herd sizes, and dependencies
 
-import random
+import random, math
 
 node_types2runtimes = {
     "mm": 500,
     "gelu": 50,
-    "n": 200,
+    "a": 100,
+    "b": 200,
+    "c": 300,
+    "n": 250,
     "k": 150,
     "x": 800,
-    "y": 1000
+    "y": 1000,
+    "z": 2000
 }
 node_types2size = {
     "mm": "[2, 2]",
     "gelu": "[1, 1]",
+    "a": "[1, 1]",
+    "b": "[2, 1]",
+    "c": "[1, 2]",
     "n": "[1, 2]",
     "k": "[2, 1]",
     "x": "[1, 1]",
-    "y": "[2, 2]"
+    "y": "[2, 2]",
+    "z": "[2, 2]"
 }
-def generateAIEplaceBenchmark(bench_name, bench_num):
 
-    row_factor = random.choice([1, 2])
-    mult = row_factor * max(1, bench_num) # size multiplier
-    num_rows = 4 * row_factor
-    if num_rows == 4: 
-        num_cols = 5
-    else:
-        num_cols = random.choice([10, 20, 50])
+grid_sizes = [(4,5), (4,10), (8,10), (8,20), (8,50)]
+def generateAIEplaceBenchmark(bench_name, bench_num, grid_index):
+
+    num_rows = grid_sizes[grid_index][0]
+    num_cols = grid_sizes[grid_index][1]
+    mult = bench_num%10 + 1 # size multiplier
 
     node_counts = {}
-    node_counts["mm"]= random.choice(range(6*mult, 20*mult, 1))
+    node_counts["mm"]= random.choice(range(6*mult, 10*mult, 1))
     node_counts["gelu"] = round(node_counts["mm"] / 2)
-    node_counts["n"] = random.choice(range(6*mult, 10*mult, 1))
-    node_counts["k"] = random.choice(range(6*mult, 10*mult, 1))
-    node_counts["x"] = random.choice(range(2*mult, 5*mult, 1))
-    node_counts["y"] = random.choice(range(2*mult, 5*mult, 1))
+    node_counts["a"] = random.choice(range(3*mult, 5*mult, 1))
+    node_counts["b"] = random.choice(range(3*mult, 5*mult, 1))
+    node_counts["c"] = random.choice(range(3*mult, 5*mult, 1))
+    node_counts["n"] = random.choice(range(3*mult, 5*mult, 1))
+    node_counts["k"] = random.choice(range(3*mult, 5*mult, 1))
+
+    node_counts["x"] = random.choice(range(1*mult, 3*mult, 1))
+    node_counts["y"] = random.choice(range(1*mult, 3*mult, 1))
+    node_counts["z"] = random.choice(range(1*mult, 3*mult, 1))
 
     num_nodes= sum(node_counts.values())
     num_nets = random.choice(range(round(num_nodes*.75), num_nodes, 1))
@@ -86,6 +97,6 @@ def generateAIEplaceBenchmark(bench_name, bench_num):
 if __name__ == "__main__":
     random.seed(1)
     bench_name_root = "synthetic"
-    NUM_TO_GENERATE = 10
+    NUM_TO_GENERATE = 100
     for i in range(NUM_TO_GENERATE):
-        generateAIEplaceBenchmark(bench_name_root, i)
+        generateAIEplaceBenchmark(bench_name_root, i, math.floor(i / (NUM_TO_GENERATE / 5)))
