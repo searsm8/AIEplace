@@ -10,9 +10,10 @@ import customDCT
 
 # Directory names
 golden_dir    = "/home/msears/AIEplace/golden/density/"
-AIE_input_dir = "/home/msears/AIEplace/Vitis/AIEplace/data/"
+AIE_input_dir = "/home/msears/AIEplace/Vitis/gmio/data/"
 fft_filepath = golden_dir + "fft/"
-fft_size = 32 
+fft_size = 16
+input_len = fft_size*fft_size*2
 alpha = -1*cmath.pi/2/fft_size # constant term used in fast DCT computation
 
 def shuffle_input(input, axis=1):
@@ -119,24 +120,29 @@ def createGoldenFFT(filepath, size):
     #                        [19,210,111,312],
     #                        [213,314,15,216]])
     #fft_input = np.array([  [11,12],[13,24] ])
-    fft_input = np.random.rand(size, size) * 100
+    fft_input = np.random.rand(size, size)
 
     #mathtest.electro_test(fft_input)
     print("#"*50)
     print()
+    with open(AIE_input_dir+"data.h", "w") as AIE_file:
+        AIE_file.write(f"#pragma once\n\nfloat dct_input[{fft_size*fft_size*2}] = {{\n")
+
     # write random inputs to file (with padding)
     with open(filepath+"input.dat", "w") as file, \
-            open(AIE_input_dir+"input.dat", "w") as AIE_file:
-        #for row in range(len(fft_input)):
+            open(AIE_input_dir+"data.h", "a") as AIE_file:
         for row in range(size):
             for col in range(size):
                 file.write(f"{fft_input[row][col].real}\n{fft_input[row][col].imag}\n")
-                AIE_file.write(f"{fft_input[row][col].real}\n{fft_input[row][col].imag}\n")
+                AIE_file.write(f"{fft_input[row][col].real:.2f}, {fft_input[row][col].imag:.2f},\n")
+        AIE_file.write("};\n\n")
 
     #fft_output = np.fft.fft(shuffle_input(np.copy(fft_input)))
     #ifft_output = np.fft.ifft(fft_output)
 
     # Compute the DCT along rows
+    print("***Generating gold_dct_output...")
+    print("************")
     dct_output = fast_dct(np.copy(fft_input), axis=1)
     with open(filepath+"dct_output.dat", "w") as file:
         for i in range(size):
@@ -144,19 +150,21 @@ def createGoldenFFT(filepath, size):
                 file.write(f"{dct_output[i][j].real:.2f}\n{dct_output[i][j].imag:.2f}\n")
     
     dct_output = np.transpose(dct_output)
-    with open(AIE_input_dir+"dct_2d_input.dat", "w") as AIE_file:
-        for i in range(size):
-            for j in range(size):
-                AIE_file.write(f"{dct_output[i][j].real:.2f}\n{dct_output[i][j].imag:.2f}\n")
-
     dct_output = fast_dct(dct_output, axis=1)
-    #print("After 1D-DCT"); print(dct_output.real)
-    with open(filepath+"dct_2d_output.dat", "w") as file:
+    dct_output = np.transpose(dct_output)
+
+    with open(filepath+"dct_2d_output.dat", "w") as file, \
+        open(AIE_input_dir+"data.h", "a") as AIE_file:
+        AIE_file.write(f"float golden_dct_2d[{input_len}] = {{\n")
         for i in range(size):
             for j in range(size):
                 file.write(f"{dct_output[i][j].real:.2f}\n{dct_output[i][j].imag:.2f}\n")
+                AIE_file.write(f"{dct_output[i][j].real:.2f}, {dct_output[i][j].imag:.2f}{'' if i==size-1 and j==size-1 else ','}\n")
+        AIE_file.write("};\n\n")
 
-    idct_output = fast_idct(np.copy(fft_input), axis=1)
+    print("***Generating gold_idct_output...")
+    print("************")
+    idct_output = fast_idct(np.copy(dct_output), axis=1)
     with open(filepath+"idct_output.dat", "w") as file:
         for i in range(size):
             for j in range(size):
@@ -169,147 +177,140 @@ def createGoldenFFT(filepath, size):
                 AIE_file.write(f"{idct_output[i][j].real:.2f}\n{idct_output[i][j].imag:.2f}\n")
 
     idct_output = fast_idct(idct_output, axis=1)
-    with open(filepath+"idct_2d_output.dat", "w") as file:
+    idct_output = np.transpose(idct_output)
+    with open(filepath+"idct_2d_output.dat", "w") as file, \
+        open(AIE_input_dir+"data.h", "a") as AIE_file:
+        AIE_file.write(f"float golden_idct_2d[{input_len}] = {{\n")
         for i in range(size):
             for j in range(size):
                 file.write(f"{idct_output[i][j].real:.2f}\n{idct_output[i][j].imag:.2f}\n")
+                AIE_file.write(f"{idct_output[i][j].real:.2f}, {idct_output[i][j].imag:.2f}{'' if i==size-1 and j==size-1 else ','}\n")
+        AIE_file.write("};\n\n")
 
-
-    #print("\n***gold_dct_output:")
-    #gold_dct_output = []
-    #for i in range(16):
-    #    gold_dct_output.append( customDCT.dct(np.copy(fft_input[i])) )
-    #    print("\n[ ", end="")
-    #    for j in range(16):
-    #        print(f"{gold_dct_output[i][j]:.2f}", end=", ")
-    #    print("]")
-
-    #print("\n***gold_idct_output:")
-    #gold_idct_output = []
-    #for i in range(16):
-    #    gold_idct_output.append( customDCT.idct(np.copy(gold_dct_output[i])) )
-    #    print("\n[ ", end="")
-    #    for j in range(16):
-    #        print(f"{gold_idct_output[i][j]:.2f}", end=", ")
-    #    print("]")
-    #print()
-
-    print("\n***gold_idxst_output:")
-    gold_idxst_output = np.copy(fft_input)
+    print("***Generating idxst_output...")
+    print("************")
+    idxst_output = np.copy(dct_output)
     for i in range(size):
-        gold_idxst_output[i] =  customDCT.idxst(gold_idxst_output[i]) 
+        idxst_output[i] =  customDCT.idxst(idxst_output[i]) 
 
     with open(filepath+"idxst_output.dat", "w") as file:
         for i in range(size):
             for j in range(size):
-                file.write(f"{gold_idxst_output[i][j].real:.2f}\n{gold_idxst_output[i][j].imag:.2f}\n")
+                file.write(f"{idxst_output[i][j].real:.2f}\n{idxst_output[i][j].imag:.2f}\n")
 
-    gold_idxst_output = np.transpose(gold_idxst_output)
+    idxst_output = np.transpose(idxst_output)
     with open(AIE_input_dir+"idxst_2d_input.dat", "w") as AIE_file:
         for i in range(size):
             for j in range(size):
-                AIE_file.write(f"{gold_idxst_output[i][j].real:.2f}\n{gold_idxst_output[i][j].imag:.2f}\n")
+                AIE_file.write(f"{idxst_output[i][j].real:.2f}\n{idxst_output[i][j].imag:.2f}\n")
 
     for i in range(size):
-        gold_idxst_output[i] = ( customDCT.idxst(gold_idxst_output[i]) )
-    with open(filepath+"idxst_2d_output.dat", "w") as file:
+        idxst_output[i] = ( customDCT.idxst(idxst_output[i]) )
+    idxst_output = np.transpose(idxst_output)
+
+    with open(filepath+"idxst_2d_output.dat", "w") as file, \
+        open(AIE_input_dir+"data.h", "a") as AIE_file:
+        AIE_file.write(f"float golden_idxst_2d[{input_len}] = {{\n")
         for i in range(size):
             for j in range(size):
-                file.write(f"{gold_idxst_output[i][j].real:.2f}\n{gold_idxst_output[i][j].imag:.2f}\n")
+                file.write(f"{idxst_output[i][j].real:.2f}\n{idxst_output[i][j].imag:.2f}\n")
+                AIE_file.write(f"{idxst_output[i][j].real:.2f}, {idxst_output[i][j].imag:.2f}{'' if i==size-1 and j==size-1 else ','}\n")
+        AIE_file.write("};\n\n")
+
     return
 
-    # Compute the DCT along cols
-    dct_output = fast_dct(dct_output, axis=0)
-    #print("After 2D-DCT: "); print(dct_output.real)
+    ## Compute the DCT along cols
+    #dct_output = fast_dct(dct_output, axis=0)
+    ##print("After 2D-DCT: "); print(dct_output.real)
 
-    with open(filepath+"2d_dct_output.dat", "w") as file:
-        for i in range(size):
-            for j in range(size):
-                file.write(f"{dct_output[i][j].real:.2f}\n")
+    #with open(filepath+"2d_dct_output.dat", "w") as file:
+    #    for i in range(size):
+    #        for j in range(size):
+    #            file.write(f"{dct_output[i][j].real:.2f}\n")
 
-    # adjustment
-    # perform all scaling factors in one step instead of after each DCT or IDCT
-    #dct_output *= 4/size
-    #dct_output *= 16/(size*size*size)
+    ## adjustment
+    ## perform all scaling factors in one step instead of after each DCT or IDCT
+    ##dct_output *= 4/size
+    ##dct_output *= 16/(size*size*size)
 
-    for i in range(size):
-        dct_output[i][0] *= 0.5 # why cut in half? boundary conditions?
-    for i in range(size):
-        dct_output[0][i] *= 0.5
-    for i in range(size):
-        for j in range(size):
-            dct_output[i][j] *= 4.0 / size /size 
+    #for i in range(size):
+    #    dct_output[i][0] *= 0.5 # why cut in half? boundary conditions?
+    #for i in range(size):
+    #    dct_output[0][i] *= 0.5
+    #for i in range(size):
+    #    for j in range(size):
+    #        dct_output[i][j] *= 4.0 / size /size 
 
-    electroPhi    = np.zeros((size, size), dtype=complex)
-    electroForceX = np.zeros((size, size), dtype=complex)
-    electroForceY = np.zeros((size, size), dtype=complex)
+    #electroPhi    = np.zeros((size, size), dtype=complex)
+    #electroForceX = np.zeros((size, size), dtype=complex)
+    #electroForceY = np.zeros((size, size), dtype=complex)
 
-    # generate w_u and w_v factors
-    for u in range(size):
-        for v in range(size):
-            w_u = 1*cmath.pi*u / size # why not 2*pi?
-            w_u2 = w_u*w_u
-            w_v = 1*cmath.pi*v / size
-            w_v2 = w_v*w_v
-            if u == 0 and v == 0:
-                electroPhi[u][v] = 0
-            else:
-                electroPhi[u][v] = dct_output[u][v] / (w_u2 + w_v2)
-                electroForceX[u][v] = electroPhi[u][v] * w_u
-                electroForceY[u][v] = electroPhi[u][v] * w_v
+    ## generate w_u and w_v factors
+    #for u in range(size):
+    #    for v in range(size):
+    #        w_u = 1*cmath.pi*u / size # why not 2*pi?
+    #        w_u2 = w_u*w_u
+    #        w_v = 1*cmath.pi*v / size
+    #        w_v2 = w_v*w_v
+    #        if u == 0 and v == 0:
+    #            electroPhi[u][v] = 0
+    #        else:
+    #            electroPhi[u][v] = dct_output[u][v] / (w_u2 + w_v2)
+    #            electroForceX[u][v] = electroPhi[u][v] * w_u
+    #            electroForceY[u][v] = electroPhi[u][v] * w_v
     
-    # perform 2D-IDCT to obtain phi
-    idct_input = np.copy(electroPhi)
+    ## perform 2D-IDCT to obtain phi
+    #idct_input = np.copy(electroPhi)
 
-    # Ref golden output
-    idct_golden = np.zeros((size, size), dtype=complex)
-    #print("new idct input"); print(idct_input)
-    for i in range(size):
-        idct_golden[i] = customDCT.idct(idct_input[i])
-    #print("idct_golden "); print(idct_golden.real)
+    ## Ref golden output
+    #idct_golden = np.zeros((size, size), dtype=complex)
+    ##print("new idct input"); print(idct_input)
+    #for i in range(size):
+    #    idct_golden[i] = customDCT.idct(idct_input[i])
+    ##print("idct_golden "); print(idct_golden.real)
 
-    # Compute the DCT along rows
-    idct_output = fast_idct(idct_input, axis=1)
-    #print("After 1D-IDCT"); print(idct_output)
+    ## Compute the DCT along rows
+    #idct_output = fast_idct(idct_input, axis=1)
+    ##print("After 1D-IDCT"); print(idct_output)
 
-    # Compute the DCT along cols
-    idct_output = fast_idct(idct_output, axis=0)
-    #print("After 2D-IDCT"); print(idct_output)
+    ## Compute the DCT along cols
+    #idct_output = fast_idct(idct_output, axis=0)
+    ##print("After 2D-IDCT"); print(idct_output)
 
-    # modify IFFT outputs to get IDCT as result
-    # DCT = Re[e^{-i pi k / 2N} * FFT*]
+    ## modify IFFT outputs to get IDCT as result
+    ## DCT = Re[e^{-i pi k / 2N} * FFT*]
 
-    # compute the 2N ifft (padded) along all cols
+    ## compute the 2N ifft (padded) along all cols
 
-    #electroPhi = idct_output
+    ##electroPhi = idct_output
 
-    # perform 2D-IDSCT to obtain electroX
+    ## perform 2D-IDSCT to obtain electroX
 
-    # perform 2D-IDCST to obtain electroY
+    ## perform 2D-IDCST to obtain electroY
 
 
    
-    # write golden output
-    with open(filepath+"fft_output.dat", "w") as file:
-        for i in range(len(fft_output)):
-            for j in range(size):
-                file.write(f"{fft_output[i][j].real:.2f}\n{fft_output[i][j].imag:.2f}\n")
-    with open(filepath+"ifft_output.dat", "w") as file:
-        for i in range(len(ifft_output)):
-            for j in range(size):
-                file.write(f"{ifft_output[i][j].real:.2f}\n{ifft_output[i][j].imag:.2f}\n")
-    with open(filepath+"electroPhi.dat", "w") as file:
-        for i in range(size):
-            for j in range(size):
-                file.write(f"{electroPhi[i][j]:.2f}\n")
-    with open(filepath+"electroX.dat", "w") as file:
-        for i in range(size):
-            for j in range(size):
-                file.write(f"{electroForceX[i][j]:.2f}\n")
-    with open(filepath+"electroY.dat", "w") as file:
-        for i in range(size):
-            for j in range(size):
-                file.write(f"{electroForceY[i][j]:.2f}\n")
+    ## write golden output
+    #with open(filepath+"fft_output.dat", "w") as file:
+    #    for i in range(len(fft_output)):
+    #        for j in range(size):
+    #            file.write(f"{fft_output[i][j].real:.2f}\n{fft_output[i][j].imag:.2f}\n")
+    #with open(filepath+"ifft_output.dat", "w") as file:
+    #    for i in range(len(ifft_output)):
+    #        for j in range(size):
+    #            file.write(f"{ifft_output[i][j].real:.2f}\n{ifft_output[i][j].imag:.2f}\n")
+    #with open(filepath+"electroPhi.dat", "w") as file:
+    #    for i in range(size):
+    #        for j in range(size):
+    #            file.write(f"{electroPhi[i][j]:.2f}\n")
+    #with open(filepath+"electroX.dat", "w") as file:
+    #    for i in range(size):
+    #        for j in range(size):
+    #            file.write(f"{electroForceX[i][j]:.2f}\n")
+    #with open(filepath+"electroY.dat", "w") as file:
+    #    for i in range(size):
+    #        for j in range(size):
+    #            file.write(f"{electroForceY[i][j]:.2f}\n")
 
 
 if __name__ == "__main__":

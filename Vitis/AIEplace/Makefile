@@ -1,6 +1,6 @@
 
 TARGET := hw_emu #sw_emu, hw_emu, or hw
-TIME := time # leave blank to not time commands
+TIME := # leave blank to not time commands
 
 ROOTFS ?= /home/msears/tools/xilinx-versal-common-v2022.1/rootfs.ext4
 IMAGE ?=  /home/msears/tools/xilinx-versal-common-v2022.1/Image
@@ -18,7 +18,7 @@ BUILD_DIR := $(PWD)/build
 
 TOP := AIEplaceGraph
 AIE_TOP_CPP := $(AIE_SRC_DIR)/$(TOP).cpp
-XILINX_OBJECTS := mm2s.xo transpose.xo s2mm_transpose.xo
+XILINX_OBJECTS := #mm2s.xo transpose.xo s2mm_transpose.xo
 CONFIG_FILE := $(PWD)/src/system.cfg
 
 AIE_INCLUDES := -include=$(AIE_SRC_DIR)
@@ -60,9 +60,11 @@ all: aie pl sim xsa ps package
 
 aie: aiengine_graph 
 
-aiengine_graph: ./libadf.a
+LIBADF := ./libadf.a
 
-./libadf.a: $(AIE_SRC_DIR)/* $(AIE_SRC_DIR)/kernels/*
+aiengine_graph: $(LIBADF)
+
+$(LIBADF): $(AIE_SRC_DIR)/* $(AIE_SRC_DIR)/kernels/*
 	@echo "####################################"
 	@echo "BEGIN: make aie"
 	@echo "####################################"
@@ -95,12 +97,13 @@ SIM_FLAGS += -i=$(PWD)
 # is profile option needed if you plan to run hw emulation later?
 SIM_FLAGS += --profile 
 #SIM_FLAGS += --dump-vcd=$(TOP) # BEWARE: creating a VCD can eat a TON of disk space for large sims!
+SIM_FLAGS += --hang-detect-time=1000000
 
 # Run the AIE simulator, reading ./data/input.dat files.
 # Output to ./build/aiesimulator_output/data
 sim: simulate # alias
 
-simulate: aie
+simulate: $(LIBADF)
 	@echo ""
 	@echo "####################################"
 	@echo "BEGIN: AIE Simulation"
@@ -109,7 +112,7 @@ simulate: aie
 ifeq ($(TARGET),sw_emu)
 	$(TIME) x86simulator $(SIM_FLAGS)  2>&1 | tee -a x86sim.log
 else
-	$(TIME) aiesimulator $(SIM_FLAGS) > aiesim.log
+	$(TIME) aiesimulator $(SIM_FLAGS)  2>&1 | tee -a aiesim.log
 endif 
 	@echo "####################################"
 	@echo "END: AIE Simulation"
@@ -138,7 +141,7 @@ analyze_link:
 analyze_sim:
 	vitis_analyzer ./build/aiesimulator_output/default.aierun_summary
 
-VPP_LINK_FLAGS := --target $(TARGET) --platform $(PLATFORM) libadf.a $(XILINX_OBJECTS) --save-temps -g --config $(CONFIG_FILE) -o AIEplace.xsa
+VPP_LINK_FLAGS := --target $(TARGET) --platform $(PLATFORM) $(LIBADF) $(XILINX_OBJECTS) --save-temps -g --config $(CONFIG_FILE) -o AIEplace.xsa
 #VPP_LINK_FLAGS := -l -t $(TARGET) --platform $(BASE_PLATFORM) $(KERNEL_XO) $(GRAPH_O)  --save-temps -g --config $(CONFIG_FILE) -o $(PFM).xsa
 
 # Link Xilinx Object Files (.xo) into a .xsa file
@@ -206,11 +209,11 @@ GCC_LIB := -lxaiengine -ladf_api_xrt -lxrt_core -lxrt_coreutil -L$(SDKTARGETSYSR
 # Compile the host program to run on the PS
 ps: application # alias
 
-application: $(PS_SRC_DIR)/host.cpp
+application: $(AIE_TOP_CPP)
 	@echo "Begin PS host app compilation..."
-	@cd $(PS_SRC_DIR); \
+	cd $(AIE_SRC_DIR); \
 	$(CXX) $(GCC_FLAGS) $(GCC_INCLUDES) -o aie_control_xrt.o $(PWD)/Work/ps/c_rts/aie_control_xrt.cpp; \
-	$(CXX) $(GCC_FLAGS) $(GCC_INCLUDES) -o host.o host.cpp; \
+	$(CXX) $(GCC_FLAGS) $(GCC_INCLUDES) -o $(TOP).o $(AIE_TOP_CPP); \
 	$(CXX) *.o $(GCC_LIB) -std=c++14 -o $(PWD)/host.exe 
 	@echo "####################################"
 	@echo "END: make ps"
@@ -232,7 +235,7 @@ package: #guard-PLATFORM_REPO_PATHS guard-IMAGE guard-ROOTFS
 		--package.boot_mode=sd \
 		--package.kernel_image=${IMAGE} \
 		--package.defer_aie_run \
-		--package.sd_file host.exe AIEplace.xsa libadf.a 
+		--package.sd_file host.exe AIEplace.xsa $(LIBADF)
 	@echo "####################################"
 	@echo "END: make package."
 	@echo "####################################"
@@ -244,3 +247,4 @@ package: #guard-PLATFORM_REPO_PATHS guard-IMAGE guard-ROOTFS
 clean:
 	rm -rf $(BUILD_DIR) _x .Xil emu_qemu_scripts sd_card sim aiesimulator_output
 	rm -rf *.xo* *.xsa* *.a *.exe *.o *.bin *.BIN *xclbin *.bif *.log *summary *img qemu* *.wcfg *.wdb *.txt
+	

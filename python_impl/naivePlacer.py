@@ -2,6 +2,22 @@ import numpy as np
 import json
 import jsbeautifier
 from copy import deepcopy
+# from AIEplacer import Design
+
+color_map = {0: 6, 1: 12, 2: 4, 3: 2, 4: 0}
+
+class Design_B:
+    # primary lists which hold design information
+    def __init__(self, coords, node_names, node_sizes, dependencies, predecessors, nets, times) -> None:
+        self.coords = coords
+        self.node_names = node_names
+        self.node_sizes = node_sizes
+        self.dependencies = dependencies
+        self.predecessors = predecessors
+        self.nets = nets # each net is a list of node indices
+                    # e.g. [4,7,9] means nodes 4, 7, and 9 are connect by a net
+        self.times = times
+        self.map_dict = {}
 
 class Grid_B:
     def __init__(self, num_rows, num_cols, number):
@@ -145,7 +161,7 @@ class Herd_B:
                 locations.append([row_coord, col_coord])
         return locations
 
-def greedy_placement(herds, grid):
+def greedy_placement(herds, grid, timeslot, design):
     """Organizes the herds by size before passing to the naive placer
 
     Args:
@@ -156,8 +172,8 @@ def greedy_placement(herds, grid):
     # Will need to add dimentionality to the herds
     for i in range(len(herds)):
         herds[i].sort(key=lambda x: x.size, reverse=True)
-    naive_placement(herds, grid)
-    return
+    unplaced_herds = naive_placement(herds, grid, timeslot, design)
+    return unplaced_herds
 
 def generate_part_dict(part_list, maxdims, number): 
     """Creates the dictionary necessary to generate JSON that can \
@@ -208,7 +224,17 @@ def write_to_json(herds, grid_dims, output_file_name, number):
     f.close()
     return
 
-def naive_placement(herds, grid):
+def write_to_json_super(part_dict, grid_dims, output_file_name, number):
+    partitions = generate_part_dict(part_dict, [grid_dims[0], grid_dims[1]], number)
+    options = jsbeautifier.default_options()
+    options.indent_size = 4
+    json_object = jsbeautifier.beautify(json.dumps(partitions), options)
+    with open(output_file_name, 'w', encoding='utf-8') as f:
+        f.write(json_object)
+    f.close()
+    return
+
+def naive_placement(herds, grid, timeslot, design):
     """Tries to place herds in a naive way, starting with the first herd in the
        list, trying to place it starting in the upper left hand corner and gradually
        working its way down to the bottom right. Updates the herd + grid objects.
@@ -220,22 +246,25 @@ def naive_placement(herds, grid):
     """
     unplaced_herds = deepcopy(herds)
     curr_grid = 0
-    while unplaced_herds:
+    if timeslot == -1:
+        while unplaced_herds:
+            unplaced_herds = naive_placement_helper(grid[curr_grid], herds, unplaced_herds)
+            if unplaced_herds:
+                curr_grid += 1
+                new_grid = Grid_B(grid[0].num_rows, grid[0].num_cols, curr_grid)
+                grid.append(new_grid)
+    else:
         unplaced_herds = naive_placement_helper(grid[curr_grid], herds, unplaced_herds)
-        if unplaced_herds:
-            curr_grid += 1
-            new_grid = Grid_B(grid[0].num_rows, grid[0].num_cols, curr_grid)
-            grid.append(new_grid)
 
     # for i in range(len(grid)):
     #     print(grid[i].grid)
 
-    if (unplaced_herds):
-        print("Placement failed. Unplaced herds: ")
-        for dep in range(len(unplaced_herds)):
-            for herd in range(len(unplaced_herds[dep])):
-                unplaced_herds[dep][herd].print_self()
-    return
+    # if (unplaced_herds):
+    #     print("Placement failed. Unplaced herds: ")
+    #     for dep in range(len(unplaced_herds)):
+    #         for herd in range(len(unplaced_herds[dep])):
+    #             unplaced_herds[dep][herd].print_self()
+    return unplaced_herds
 
 def naive_placement_helper(grid, herds, unplaced_herds):
     curr_herd_dep = 0
@@ -243,7 +272,14 @@ def naive_placement_helper(grid, herds, unplaced_herds):
         for col in range(grid.num_cols):
             if curr_herd_dep == len(unplaced_herds):
                 break
+            while not unplaced_herds[curr_herd_dep]:
+                if curr_herd_dep == len(unplaced_herds):
+                    break
+                curr_herd_dep += 1
+
             if(grid.grid[grid.num_rows - row - 1][col] == -1):
+                if not unplaced_herds[curr_herd_dep]:
+                    curr_herd_dep += 1
                 for herd in range(len(unplaced_herds[curr_herd_dep])):
                     if not grid.does_herd_fit([row, col], unplaced_herds[curr_herd_dep][herd]):
                         grid.place_herd(unplaced_herds[curr_herd_dep][herd])
@@ -253,6 +289,8 @@ def naive_placement_helper(grid, herds, unplaced_herds):
                                     herds[i][j].set_position(row, col + (grid.number * grid.num_cols))
                         unplaced_herds[curr_herd_dep].remove(unplaced_herds[curr_herd_dep][herd])
                         if len(unplaced_herds[curr_herd_dep]) == 0:
+                            if not unplaced_herds[curr_herd_dep] and curr_herd_dep == len(unplaced_herds):
+                                return []
                             curr_herd_dep += 1
                         break  
     dep = 0
@@ -261,12 +299,13 @@ def naive_placement_helper(grid, herds, unplaced_herds):
             break
         elif (not unplaced_herds[dep]):
            del unplaced_herds[dep]
+        #    dep += 1
         else: 
             break
     return unplaced_herds
 
 
-def run_brandon_placement(num_rows, num_cols, node_sizes, node_names, dependency_list):
+def run_brandon_placement(num_rows, num_cols, design, timeslot):
     """Performs a naive placement of the kernels.
        Starts by sorting all of the kernels based on their dependency level e.g., if a kernel 
        is on a "net" with dependency 3, it may only be placed after the previous dependencies
@@ -282,21 +321,43 @@ def run_brandon_placement(num_rows, num_cols, node_sizes, node_names, dependency
     """
     grid = [Grid_B(num_rows, num_cols, 0)]
     herd_list = []
-    dependency_list
-    for _ in dependency_list:
+    for _ in range(max(design.dependencies) + 1):
         herd_list.append([])
-    for i in range(len(node_sizes)): 
-        herd = Herd_B(node_sizes[i].row, node_sizes[i].col, i, node_names[i], dependency_list[i])
-        herd_list[dependency_list[i]].append(herd)
-    naive_placement(herd_list, grid)
+    for i in range(len(design.node_sizes)): 
+        color = -1
+        if design.dependencies[i] < 5:
+            color = color_map[design.dependencies[i]]
+        else:
+            color = design.dependencies[i]
+        herd = Herd_B(design.node_sizes[i].row, design.node_sizes[i].col, i, design.node_names[i], color)
+        herd_list[design.dependencies[i]].append(herd)
+    unplaced_herds = greedy_placement(herd_list, grid, timeslot, design)
     for dep in range(len(herd_list)):
         for herd in range(len(herd_list[dep])):
-            # herd_list[dep][herd].print_self()
-            # herd_list[dep][herd].print_positions()
             herd_list[dep][herd].number = herd_list[dep][herd].dep
     num_tiles_placed = 0
     for time_grid in grid:
         num_tiles_placed += np.count_nonzero(time_grid.grid > -1)
     print("Number of tiles placed: " + str(num_tiles_placed))
-    write_to_json(herd_list, [grid[0].num_rows, grid[0].num_cols], "naive.json", len(grid))
-    return
+    filename = ""
+    if timeslot == -1:
+        filename = "naive.json"
+    else:
+        filename = "PartitionGreedy/partitionGreedy_" + str(timeslot) + ".json"
+        for outer_dep in range(len(unplaced_herds)):
+            for unplaced_herd in range(len(unplaced_herds[outer_dep])):
+                popped = False
+                for dep in range(len(herd_list)):
+                    for herd in range(len(herd_list[dep])):
+                        if unplaced_herds[outer_dep][unplaced_herd].name == herd_list[dep][herd].name:
+                            herd_list[dep].pop(herd)
+                            popped = True
+                            break
+                    if popped:
+                        break
+        for dep in range(len(herd_list)):
+            for herd in range(len(herd_list[dep])):
+            # herd_list[herd] = design.map_dict[herd]
+                herd_list[dep][herd].name = design.map_dict[herd_list[dep][herd].name]
+    write_to_json(herd_list, [grid[0].num_rows, grid[0].num_cols], filename, len(grid))
+    return unplaced_herds
