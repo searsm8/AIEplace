@@ -11,20 +11,22 @@ from customDCT import *
 
 MAX_COORD = 10000
 golden_dir    = "/home/msears/AIEplace/golden/hpwl/"
-AIE_input_dir = "/home/msears/AIEplace/Vitis/hpwl/data/"
+AIE_input_dir = "/home/msears/AIEplace/Vitis/data/"
 
 def createGoldenHPWL(filepath, N=1):
     ''' Generates a new directory and random input vectors
     '''
     if(not os.path.exists(filepath)):
         os.makedirs(filepath)
+    if(not os.path.exists(AIE_input_dir)):
+        os.makedirs(AIE_input_dir)
     # delete old files
     filenames = ["input", "a_plus", "a_minus", "b_plus", "b_minus", "c_plus", "c_minus", "hpwl", "partials"]
     for filename in filenames:
         try: os.remove(filepath+f"/{filename}.dat")
         except: pass
     try:
-        os.remove(AIE_input_dir+f"/input.dat")
+        os.remove(AIE_input_dir+f"/nets.dat")
     except: pass
 
     gamma = 4 # same as in RePlace
@@ -78,10 +80,10 @@ def createGoldenHPWL(filepath, N=1):
         #    f.write(f"{c_minus_vec[n]}\n")            
 
     with    open(filepath+"/input.dat", "a") as golden_input_file, \
-            open(AIE_input_dir+"/input.dat", "a") as AIE_input_file, \
+            open(AIE_input_dir+"/nets.dat", "a") as AIE_input_file, \
             open(filepath+"/partials.dat", "a") as partials_file:
         for iter in range(int(N/8)):
-            for i in range(netsize-1, -1, -1):
+            for i in range(netsize-1, -1, -1): # print to file max value first
                 for lane in range(8):
                     n = 8*iter + lane
                     # write input files to golden
@@ -101,10 +103,6 @@ def createGoldenHPWL(filepath, N=1):
 def createRandomDensitys(filepath, M=16):
     ''' Generates a random MxM density map
     '''
-    #TODO: what range of values should this density map be?
-    # 0 < rho < 1
-    RHO_MIN = 0
-    RHO_MAX = 1
     rho = np.random.rand(M, M)
     with open(filepath+"/electro_input_density_map.dat", "w") as f:
         for row in range(M):
@@ -174,7 +172,7 @@ if __name__ == "__main__":
     benchmark_count = 1
     #Create benchhmarks for wirelength
     for i in range(benchmark_count):
-        createGoldenHPWL(golden_dir, N=8*1000*1000)
+        createGoldenHPWL(golden_dir, N=8*10)
 
     #Create benchhmarks for density
     #for i in range(benchmark_count):
