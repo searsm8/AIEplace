@@ -1,7 +1,11 @@
 
 #ifndef AIEPLACE_DATABASE_H
 #define AIEPLACE_DATABASE_H
-#include "aieplace.h"
+#include "AIEplace.h"
+#include "Position.h"
+#include "MacroClass.h"
+#include "Node.h"
+#include "Net.h"
 
 #include <limbo/parsers/lef/adapt/LefDriver.h> // LEF parser 
 #include <limbo/parsers/def/adapt/DefDriver.h> // DEF parser 
@@ -17,14 +21,22 @@ AIEPLACE_NAMESPACE_BEGIN
 class DataBase: public DefParser::DefDataBase, public LefParser::LefDataBase
 {
     public:
+        // Member Data, prefixed with types
+        std::map<string, MacroClass> macros;
+        std::map<string, Node> nodes;
+        std::map<string, Net>  nets;
 
-        /// default constructor
+        /// Default Constructor
         DataBase(); 
 
-        /// destructor
+        /// Destructor
         virtual ~DataBase() {}
 
-        // parse functions
+        void printNodes();
+        void printNets();
+        void printStats();
+
+        // Parse functions
         bool readLEF();
         bool readDEF();
         //void prereadDEF(std::string const& filename);

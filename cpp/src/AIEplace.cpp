@@ -1,5 +1,5 @@
-#include "aieplace.h"
-#include "database.h"
+#include "AIEplace.h"
+#include "Database.h"
 
 int main()
 {
@@ -7,7 +7,8 @@ int main()
     AIEplace::DataBase db = AIEplace::DataBase();
     db.readLEF();
     db.readDEF();
-//  test1(filename);
-//	bool flag = aieplace::readLef(db);
+    db.printNodes();
+    //db.printNets();
+    db.printStats();
 
 }
