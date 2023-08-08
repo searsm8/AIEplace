@@ -1,27 +1,32 @@
 
 .PHONY: all
 
-TOP := AIEplace.cpp
+GCC := g++
 TOP_DIR ?= ..
-ITEMS:= AIEplace Database Net Node Position MacroClass
+MAIN = main.cpp
+ITEMS:= AIEplace DataBase Grid Net DCT Visualizer
 OBJS := $(addsuffix .o, ${ITEMS})
 EXE := ${TOP_DIR}/AIEplace.exe
 
-INCLUDES := -I ../include
+INCLUDES := -I ./include
 INCLUDES += -I ${LIMBO_DIR}
 
-COMPILE_FLAGS := -L ${LIMBO_DIR}/lib 
+COMPILE_FLAGS := -std=c++17
+COMPILE_FLAGS += -L ${LIMBO_DIR}/lib 
 COMPILE_FLAGS += -llefparseradapt 
 COMPILE_FLAGS += -ldefparseradapt 
 #COMPILE_FLAGS += -lverilogparser
 #COMPILE_FLAGS += -lbookshelfparser
+COMPILE_FLAGS += -lcairo
 COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 
-all: ${OBJS}
-	g++ -o ${EXE} ${OBJS} ${COMPILE_FLAGS}
+all: ${EXE}
 
-%.o: %.cpp ../include/%.h
-	g++ -c $< ${INCLUDES} ${COMPILE_FLAGS} -o $@
+${EXE}: ${MAIN} ${OBJS}
+	${GCC} -o ${EXE} ${MAIN} ${OBJS} ${INCLUDES} ${COMPILE_FLAGS}
+
+$(OBJS): %.cpp ./include/%.h ./include/Common.h
+	${GCC} -c $< ${INCLUDES} ${COMPILE_FLAGS} -o $@
 
 clean:
 	rm -rf ${EXE} *.o
