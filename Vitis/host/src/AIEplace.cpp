@@ -140,7 +140,7 @@ void Placer::compute_a_terms_CPU(Net* net_p)
 {
     // X positions
     net_p->sortPositionsByX();
-    vector<Node*> nodes = net_p->getNodes();
+    std::vector<Node*> nodes = net_p->getNodes();
     position_type max_x = nodes.front()->getX();
     position_type min_x = nodes.back ()->getX();
     for (Node* node_p : nodes)
@@ -284,9 +284,9 @@ void Placer::compute_eField_naive()
 /* @brief: Compute the intermediate term a_uv using DCTs*/
 void Placer::compute_a_uv_DCT()
 {
-    vector< vector<float> > rho = grid.getRho();
-    vector< vector<float> > temp;
-    vector< vector<float> > a_uv;
+    std::vector< std::vector<float> > rho = grid.getRho();
+    std::vector< std::vector<float> > temp;
+    std::vector< std::vector<float> > a_uv;
 
     // Perform 1-D DCT on rows
     for (int row_index = 0; row_index < grid.getBinsPerCol(); row_index++)
@@ -313,9 +313,9 @@ void Placer::compute_eField_DCT()
 {
     int num_rows = grid.getBinsPerCol();
     int num_cols = grid.getBinsPerRow();
-    vector< vector<float> > Ex     (num_rows, vector<float>(num_cols));
-    vector< vector<float> > Ey     (num_rows, vector<float>(num_cols));
-    vector< vector<float> > a_uv = grid.get_a_uv();
+    std::vector< std::vector<float> > Ex     (num_rows, std::vector<float>(num_cols));
+    std::vector< std::vector<float> > Ey     (num_rows, std::vector<float>(num_cols));
+    std::vector< std::vector<float> > a_uv = grid.get_a_uv();
 
     float w = 2 * M_PI / num_cols;
     Ex[0][0] = 0; Ey[0][0] = 0;

@@ -45,7 +45,7 @@ struct Bin
     float overlap; // Total Node overlap within this bin
     float a_uv;
     XY eField; // Computed eField in this Bin
-    vector<Node*> overlapping_nodes; // list of nodes overlapping this bin
+    std::vector<Node*> overlapping_nodes; // list of nodes overlapping this bin
     float lambda; // Weight of density constraint for this bin. 
                     // Bigger lambda means the eField will push harder in this bin.
 

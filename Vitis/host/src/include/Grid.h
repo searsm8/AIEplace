@@ -11,7 +11,7 @@ private:
     Box<position_type> m_die_area;
     int m_bins_per_row;
     int m_bins_per_col;
-    vector<vector<Bin> > m_bins; // 2D grid of bins to compute eField
+    std::vector<std::vector<Bin> > m_bins; // 2D grid of bins to compute eField
 
 public:
     // Constructors
@@ -36,8 +36,8 @@ public:
 
     void computeBinOverlaps(Node* node_p);
 
-    vector< vector<float> > getRho();
-    vector< vector<float> > get_a_uv();
+    std::vector< std::vector<float> > getRho();
+    std::vector< std::vector<float> > get_a_uv();
 
     float computeTotalOverflow();
 

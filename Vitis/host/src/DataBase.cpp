@@ -172,7 +172,7 @@ double DataBase::computeTotalWirelength()
 
         void DataBase::add_def_pin(DefParser::Pin const& p) {
             Pin* new_pin = new Pin(p.pin_name);
-            vector<int> bb = p.vBbox.front();
+            std::vector<int> bb = p.vBbox.front();
             new_pin->setBoundingBox(bb[0], bb[1], bb[2], bb[3]);
             new_pin->setPlacementStatus(p.status);
             new_pin->setPosition(Position((position_type)p.origin[0], (position_type)p.origin[1]));

@@ -48,8 +48,8 @@ private:
     string m_name;
     Position<position_type> m_pos;
     PlacementStatus m_status;
-    vector<Net*> mv_nets; // List of all nets this node is on
-    vector<BinOverlap> mv_bin_overlaps; // List of bins this node is currently overlapping
+    std::vector<Net*> mv_nets; // List of all nets this node is on
+    std::vector<BinOverlap> mv_bin_overlaps; // List of bins this node is currently overlapping
 
 public:
 
@@ -68,8 +68,8 @@ public:
     const position_type& getX() { return m_pos.getX(); }
     const position_type& getY() { return m_pos.getY(); }
 
-    vector<Net*> getNets() { return mv_nets; }
-    vector<BinOverlap> getBinOverlaps() { return mv_bin_overlaps; }
+    std::vector<Net*> getNets() { return mv_nets; }
+    std::vector<BinOverlap> getBinOverlaps() { return mv_bin_overlaps; }
 
     // Setters
     void iterationReset()

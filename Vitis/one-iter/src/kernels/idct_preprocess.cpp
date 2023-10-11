@@ -8,7 +8,8 @@ void idct_preprocess(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TY
    * 
    */
 
-	aie::vector<float, 8> factor = aie::broadcast<float, 8>( 0.0000152587890625 ); // 1 / 2^16
+	//aie::vector<float, 8> factor = aie::broadcast<float, 8>( 0.00152587890625 ); // 1 / 2^16
+	//aie::vector<float, 8> factor = aie::broadcast<float, 8>( 0.0000009536743164); // 1 / 2^20
 	aie::vector<FFT_DATA_TYPE, 8> data;
 
 	float k_init[8]={0,1,2,3,4,5,6,7};

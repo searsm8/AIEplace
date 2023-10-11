@@ -9,7 +9,7 @@ void Grid::init()
 
     for( int x_index = 0; x_index < m_bins_per_row; x_index++)
     {
-        m_bins.push_back(vector<Bin>());
+        m_bins.push_back(std::vector<Bin>());
         for( int y_index = 0; y_index < m_bins_per_col; y_index++)
         {
             Bin b = Bin(x_index*bin_width, y_index*bin_height, 
@@ -77,13 +77,13 @@ void Grid::computeBinOverlaps(Node* node_p)
 
 }
 
-vector< vector<float> > Grid::getRho()
+std::vector< std::vector<float> > Grid::getRho()
 {
-    vector< vector<float> > rho;
+    std::vector< std::vector<float> > rho;
 
     for (int col = 0; col < m_bins_per_row; col++)
     {
-        rho.push_back(vector<float>(m_bins_per_col));
+        rho.push_back(std::vector<float>(m_bins_per_col));
         for (int row = 0; row < m_bins_per_col; row++)
         {
             rho[col][row] = m_bins[col][row].overlap;
@@ -92,13 +92,13 @@ vector< vector<float> > Grid::getRho()
     return rho;
 }
 
-vector< vector<float> > Grid::get_a_uv()
+std::vector< std::vector<float> > Grid::get_a_uv()
 {
-    vector< vector<float> > a_uv;
+    std::vector< std::vector<float> > a_uv;
 
     for (int col = 0; col < m_bins_per_row; col++)
     {
-        a_uv.push_back(vector<float>(m_bins_per_col));
+        a_uv.push_back(std::vector<float>(m_bins_per_col));
         for (int row = 0; row < m_bins_per_col; row++)
         {
             a_uv[col][row] = m_bins[col][row].a_uv;

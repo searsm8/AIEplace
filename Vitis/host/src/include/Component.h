@@ -4,9 +4,10 @@
 
 #include "Common.h"
 #include "Node.h"
-#include "MacroClass.h"
 
 AIEPLACE_NAMESPACE_BEGIN
+
+class MacroClass;
 
 class Component : public Node
 {

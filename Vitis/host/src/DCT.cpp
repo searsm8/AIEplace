@@ -2,11 +2,11 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-vector< vector<float> > transpose   (vector< vector<float> > input)
+std::vector< std::vector<float> > transpose   (std::vector< std::vector<float> > input)
 {
     int num_rows = input.size();
     int num_cols = input[0].size();
-    vector< vector<float> > output(num_rows, vector<float>(num_cols));
+    std::vector< std::vector<float> > output(num_rows, std::vector<float>(num_cols));
 
     for (int row_index = 0; row_index < num_rows; row_index++)
     {
@@ -21,10 +21,10 @@ vector< vector<float> > transpose   (vector< vector<float> > input)
 /* @brief: perform Discrete Cosine transform naively using the definition
  * DCT(x_n)_k = SUM ( x_n * cos(PI/N * (n+.5) * k))
  */
-vector<float> DCT_naive   (vector<float> input)
+std::vector<float> DCT_naive   (std::vector<float> input)
 {
     int N = input.size();
-    vector<float> result(N);
+    std::vector<float> result(N);
     for (int k = 0; k < N; k++)
     {
         float sum = 0;
@@ -40,10 +40,10 @@ vector<float> DCT_naive   (vector<float> input)
 /* @brief: perform Inverse Discrete Cosine transform naively using the definition
  * IDCT(x_n)_k = .5*x_0 + SUM ( x_n * cos(PI/N * (k+.5) * n))
  */
-vector<float> IDCT_naive  (vector<float> input)
+std::vector<float> IDCT_naive  (std::vector<float> input)
 {
     int N = input.size();
-    vector<float> result(N);
+    std::vector<float> result(N);
     for (int k = 0; k < N; k++)
     {
         float sum = 0;
@@ -59,10 +59,10 @@ vector<float> IDCT_naive  (vector<float> input)
 /* @brief: perform Inverse Discrete Cosine transform naively using the definition
  * IDXST(x_n)_k = (-1)^k * IDCT({x_(N-n)})_k
  */
-vector<float> IDXST_naive (vector<float> input)
+std::vector<float> IDXST_naive (std::vector<float> input)
 {
     int N = input.size();
-    vector<float> temp(N);
+    std::vector<float> temp(N);
 
     // reorder input to be x_(N-n)
     // x[0] remains unchanged
@@ -75,25 +75,25 @@ vector<float> IDXST_naive (vector<float> input)
 
 /* @brief: perform Discrete Cosine transform using fft as a subroutine
 */
-vector<float> DCT_fft   (vector<float> input)
+std::vector<float> DCT_fft   (std::vector<float> input)
 {
-  vector<float> result(input.size());
+  std::vector<float> result(input.size());
 
   return result;
 
 }
 
-vector<float> IDCT_fft  (vector<float> input)
+std::vector<float> IDCT_fft  (std::vector<float> input)
 {
-  vector<float> result(input.size());
+  std::vector<float> result(input.size());
 
   return result;
 
 }
 
-vector<float> IDXST_fft (vector<float> input)
+std::vector<float> IDXST_fft (std::vector<float> input)
 {
-  vector<float> result(input.size());
+  std::vector<float> result(input.size());
 
   return result;
 

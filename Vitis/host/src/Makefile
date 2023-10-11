@@ -1,10 +1,10 @@
 
 .PHONY: all
 
-GCC := g++
+GCC := g++ #${CXX} # For CPU only build, set to g++
 TOP_DIR ?= ..
 MAIN = main.cpp
-ITEMS:= AIEplace DataBase Grid Net DCT Visualizer
+ITEMS:= AIEplace DataBase Grid Net DCT #Visualizer
 OBJS := $(addsuffix .o, ${ITEMS})
 EXE := ${TOP_DIR}/AIEplace.exe
 
@@ -25,7 +25,9 @@ all: ${EXE}
 ${EXE}: ${MAIN} ${OBJS}
 	${GCC} -o ${EXE} ${MAIN} ${OBJS} ${INCLUDES} ${COMPILE_FLAGS}
 
-$(OBJS): %.cpp ./include/%.h ./include/Common.h
+objs: ${OBJS}
+
+%.o: %.cpp ./include/%.h ./include/Common.h
 	${GCC} -c $< ${INCLUDES} ${COMPILE_FLAGS} -o $@
 
 clean:

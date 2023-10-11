@@ -4,7 +4,10 @@
 #include "Common.h"
 #include "DataBase.h"
 #include "Grid.h"
-#include "Visualizer.h"
+
+#ifdef CREATE_VISUALIZATION
+    #include "Visualizer.h"
+#endif
    
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -17,13 +20,21 @@ public:
                        // larger means less smooth but more accurate
     int iteration = 0;
     float learning_rate = 1000;
+#ifdef CREATE_VISUALIZATION
     Visualizer viz;
+#endif
 
     // Constructors
+#ifdef CREATE_VISUALIZATION
     Placer(fs::path input_dir) : 
         db(DataBase(input_dir)), 
-        grid(Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_COL)),
+        grid(Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_COL)), 
         viz(Visualizer(db.getDieArea())) { }
+#else
+    Placer(fs::path input_dir) : 
+        db(DataBase(input_dir)), 
+        grid(Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_COL)) { }
+#endif
 
     static void printVersionInfo();
 

@@ -29,7 +29,7 @@ private:
     map<string, Component *> mm_components;
     map<string, Pin *> mm_pins;
     map<string, Net *> mm_nets;
-    map<int, vector<Net *>> mmv_nets_by_degree;
+    map<int, std::vector<Net *>> mmv_nets_by_degree;
 
     Box<position_type> m_die_area;
 
@@ -56,12 +56,12 @@ public:
     const map<string, Component *> &getComponents() { return mm_components; }
     const map<string, Pin *> &getPins() { return mm_pins; }
     const map<string, Net *> &getNets() { return mm_nets; }
-    const map<int, vector<Net *>> &getNetsByDegree() { return mmv_nets_by_degree; }
+    const map<int, std::vector<Net *>> &getNetsByDegree() { return mmv_nets_by_degree; }
 
     Box<position_type> &getDieArea() { return m_die_area; }
 
     // Parse functions
-    vector<fs::path> findExtensions(fs::path, string);
+    std::vector<fs::path> findExtensions(fs::path, string);
     bool readLEF();
     bool readDEF();
     // void prereadDEF(string const& filename);
