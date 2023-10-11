@@ -47,11 +47,11 @@ void transpose(float * input, float * output, int num_cols=POINT_SIZE, int num_r
     }
 }
 
-void run_graph(gmio_graph * gr, float * input, float * temp) {
+void run_graph(gmio_graph * gr, float * input, float * output) {
     std::cout<<"Running graph \tPOINT_SIZE = " << std::to_string(POINT_SIZE) <<std::endl;
     gr->gmio_in.gm2aie_nb(input, BLOCK_SIZE_in_Bytes);
     gr->run(POINT_SIZE);
-    gr->gmio_out.aie2gm_nb(temp, BLOCK_SIZE_in_Bytes);
+    gr->gmio_out.aie2gm_nb(output, BLOCK_SIZE_in_Bytes);
     gr->wait();
     gr->gmio_out.wait();
 }
@@ -80,9 +80,7 @@ int checkOutput(std::string name, float * output, float * golden) {
     int print_count = 0, failure_count = 0, max_error_ind = 0;
     float error, total_error = 0, max_error = 0;
     for(unsigned int i = 0; i < BLOCK_SIZE; i+=2){ // increment +2 to skip imaginary part (all zeroes...)
-        if(golden[i] < 0.1)
-            error = std::abs((output[i] - 0.1) / 0.1);
-        else error = std::abs((output[i] - golden[i]) / golden[i]);
+        error = std::abs(output[i] / golden[i] - 1);
 
         if(error > max_error && std::abs(golden[i]) > 1) {
             max_error = error;
@@ -128,17 +126,18 @@ int main(int argc, char ** argv) {
     auto time_start = std::chrono::steady_clock::now();
     // Setup inputs, Perform 2D-DCT (BLOCKING)
     std::copy(dct_input, dct_input + BLOCK_SIZE, dct_data);
-    std::cout<<"DCT input copy completed."<<std::endl;
+    // NO PRINTS WHILE TIMING PLEASE!!!
+    //std::cout<<"DCT input copy completed."<<std::endl;
     run_2d_dct(&dct_gr, dct_data, temp);
 
     // Setup inputs, Perform 2D-IDCT (BLOCKING)
     std::copy(dct_data, dct_data + BLOCK_SIZE, idct_data);
-    std::cout<<"IDCT input copy completed."<<std::endl;
+    //std::cout<<"IDCT input copy completed."<<std::endl;
     run_2d_dct(&idct_gr, idct_data, temp);
 
     // Setup inputs, Perform 2D-IDXST (BLOCKING)
     std::copy(dct_data, dct_data + BLOCK_SIZE, idxst_data);
-    std::cout<<"IDXST input copy completed."<<std::endl;
+    //std::cout<<"IDXST input copy completed."<<std::endl;
     run_2d_dct(&idxst_gr, idxst_data, temp);
 
     auto time_stop = std::chrono::steady_clock::now();

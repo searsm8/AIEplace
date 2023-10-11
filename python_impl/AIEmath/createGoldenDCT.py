@@ -10,7 +10,7 @@ import customDCT
 
 # Directory names
 golden_dir    = "/home/msears/AIEplace/golden/density/"
-AIE_input_dir = "/home/msears/AIEplace/Vitis/gmio/data/"
+AIE_input_dir = "/home/msears/AIEplace/Vitis/data/"
 fft_filepath = golden_dir + "fft/"
 fft_size = 16
 input_len = fft_size*fft_size*2
