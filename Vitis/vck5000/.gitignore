@@ -1,0 +1,45 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+*.log
+bin/
+.Xil/
+reference_files_*
+
+# AI engine generated files
+aie/Work
+aie/aiesimulator_*
+aie/x86simulator_*
+aie/pl_sample_counts
+aie/ISS_RPC_SERVER_PORT
+aie/.AIE_SIM_CMD_LINE_OPTIONS
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app

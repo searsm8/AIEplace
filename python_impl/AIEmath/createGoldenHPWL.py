@@ -10,27 +10,24 @@ import numpy as np
 from customDCT import *
 
 MAX_COORD = 10000
-golden_dir    = "/home/msears/AIEplace/golden/hpwl/"
-AIE_input_dir = "/home/msears/AIEplace/Vitis/data/"
+
+home_dir = os.path.expanduser('~')
+data_dir = home_dir + "/AIEplace/Vitis/vck5000/aie/data/"
+golden_dir = data_dir + "golden/hpwl/"
 
 def createGoldenHPWL(filepath, N=1):
     ''' Generates a new directory and random input vectors
     '''
     if(not os.path.exists(filepath)):
         os.makedirs(filepath)
-    if(not os.path.exists(AIE_input_dir)):
-        os.makedirs(AIE_input_dir)
     # delete old files
-    filenames = ["input", "a_plus", "a_minus", "b_plus", "b_minus", "c_plus", "c_minus", "hpwl", "partials"]
+    filenames = ["input_nets", "a_plus", "a_minus", "b_plus", "b_minus", "c_plus", "c_minus", "hpwl", "partials"]
     for filename in filenames:
         try: os.remove(filepath+f"/{filename}.dat")
         except: pass
-    try:
-        os.remove(AIE_input_dir+f"/nets.dat")
-    except: pass
 
     gamma = 4 # same as in RePlace
-    netsize = 3 #random.randint(2, 5)
+    netsize = 4 #random.randint(2, 5)
     input_vectors = []
     a_plus_vec = []
     a_minus_vec = []
@@ -67,9 +64,31 @@ def createGoldenHPWL(filepath, N=1):
         partials_vec.append(partials)
         
     # write terms to files
+    print("Writing data files to " + filepath)
+    with    open(filepath+"/input_nets.dat", "a") as golden_input_file, \
+            open(filepath+"/partials.dat", "a") as partials_file, \
+            open(filepath+"/a_plus.dat", "a") as a_plus_file, \
+            open(filepath+"/a_minus.dat", "a") as a_minus_file:
+        # write control values to input stream (netsize and num_nets)
+        golden_input_file.write(f"{netsize}\n{N}\n")
+
+        for iter in range(int(N/8)):
+            # print to file max value first, min val second
+            for i in [-1] + list(range(netsize-1)):
+                for lane in range(8):
+                    n = 8*iter + lane
+                    # write input files to golden
+                    golden_input_file.write(f"{input_vectors[n][i]}\n")
+                    # write a^pm terms
+                    a_plus_file.write(f"{a_plus_vec[n][i]}\n")            
+                    a_minus_file.write(f"{a_minus_vec[n][i]}\n")            
+                    # write golden outputs for all HPWL partials
+                    partials_file.write(f"{partials_vec[n][i]}\n")            
+
     with open(filepath+"/hpwl.dat", "a") as f:
         for n in range(N):
             f.write(f"{WA_vec[n]}\n")            
+        # write golden outputs for all HPWL intermediate terms
         #with open(filepath+"/b_plus.dat", "a") as f:
         #    f.write(f"{b_plus_vec[n]}\n")            
         #with open(filepath+"/b_minus.dat", "a") as f:
@@ -79,25 +98,7 @@ def createGoldenHPWL(filepath, N=1):
         #with open(filepath+"/c_minus.dat", "a") as f:
         #    f.write(f"{c_minus_vec[n]}\n")            
 
-    with    open(filepath+"/input.dat", "a") as golden_input_file, \
-            open(AIE_input_dir+"/nets.dat", "a") as AIE_input_file, \
-            open(filepath+"/partials.dat", "a") as partials_file:
-        for iter in range(int(N/8)):
-            for i in range(netsize-1, -1, -1): # print to file max value first
-                for lane in range(8):
-                    n = 8*iter + lane
-                    # write input files to golden
-                    golden_input_file.write(f"{input_vectors[n][i]}\n")
-                    # write input files to Vitis AIE workspace
-                    AIE_input_file.write(f"{input_vectors[n][i]}\n")
-                    # write golden outputs for all HPWL partials
-                    partials_file.write(f"{partials_vec[n][i]}\n")            
 
-                    # write golden outputs for all HPWL terms
-                    #with open(filepath+"/a_plus.dat", "a") as f:
-                    #    f.write(f"{a_plus_vec[n][i]}\n")            
-                    #with open(filepath+"/a_minus.dat", "a") as f:
-                    #    f.write(f"{a_minus_vec[n][i]}\n")            
 
     
 def createRandomDensitys(filepath, M=16):
