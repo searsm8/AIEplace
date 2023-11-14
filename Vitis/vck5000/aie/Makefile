@@ -13,8 +13,8 @@
 # limitations under the License.
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-all: aie_compile aie_simulate
-all_x86: aie_compile_x86 aie_simulate_x86
+all: aie aiesim
+all_x86: aie_x86 aiesim_x86
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 #Clean build products
@@ -25,22 +25,23 @@ clean:
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 #Compile AIE code
-.PHONY: aie_compile
 aie: libadf.a
+
+GRAPH_TOP := src/hpwlGraph.cpp
 
 libadf.a: src/*
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	@echo "INFO:Running aiecompiler for hw..."
 	@rm -rf Work libadf.a
 	@mkdir -p Work
-	aiecompiler --target=hw --include="src" --workdir=./Work src/graph.cpp
+	aiecompiler --target=hw --include="src" --workdir=./Work ${GRAPH_TOP}
 
 aie_x86: 
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	@echo "INFO:Running aiecompiler for x86sim..."
 	@rm -rf Work libadf.a
 	@mkdir -p Work
-	aiecompiler --target=x86sim --include="src" --workdir=./Work src/graph.cpp
+	aiecompiler --target=x86sim --include="src" --workdir=./Work ${GRAPH_TOP}
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 #Simulate AIE code

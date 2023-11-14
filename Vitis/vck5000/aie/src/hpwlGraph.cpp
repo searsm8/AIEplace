@@ -1,6 +1,6 @@
-#include "graph.h"
+#include "hpwlGraph.h"
 
-simpleGraph mygraph;
+hpwlGraph mygraph;
 
 int main(void) {
   adf::return_code ret;

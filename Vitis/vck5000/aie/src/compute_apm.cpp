@@ -1,3 +1,6 @@
+// compute_apm.cpp
+// AIEngine kernel to compute a_plus and a_minus for the ePlace algorithm
+
 #include "compute_a.h"
 //#include "aie_api/aie.hpp"
 //#include "aie_api/aie_adf.hpp"
@@ -14,10 +17,10 @@ void fast_exp(aie::vector<float, 8>& data, aie::vector<float, 8>& factor, aie::v
       data = aie::mul(data, data);
 }
 
-void compute_a(input_stream<float> * x_in, output_stream<float> * a_plus_out, output_stream<float> * a_minus_out)
+void compute_apm(input_stream<float> * x_in, output_stream<float> * a_plus_out, output_stream<float> * a_minus_out)
 {
   int32 net_size = readincr(x_in); 
-  int32 num_nets = readincr(x_in); // will be multiple of 8
+  int32 net_count = readincr(x_in); // will be multiple of 8?
 
 	aie::vector<float, 8> max_vals, min_vals;
 
@@ -25,7 +28,7 @@ void compute_a(input_stream<float> * x_in, output_stream<float> * a_plus_out, ou
 	aie::vector<float, 8> ones   = aie::broadcast<float, 8>( 1.0 );
 	aie::vector<float, 8> data, temp;
 
-  for (int net_idx = 0; net_idx < num_nets/8; net_idx++) {
+  for (int net_idx = 0; net_idx < net_count/8; net_idx++) {
     max_vals = readincr_v<8>(x_in); // first 8 vals are always the max for these nets(pre-sorted)
     min_vals = readincr_v<8>(x_in); // second 8 vals are always the min for these nets
 
