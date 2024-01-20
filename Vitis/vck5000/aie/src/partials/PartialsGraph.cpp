@@ -1,8 +1,6 @@
 #include "PartialsGraph.h"
-#include "PartialsGraphBuf.h"
 
 PartialsGraph partials_graph;
-//PartialsGraphBuf partials_graph;
 
 int main(void) {
   adf::return_code ret;
