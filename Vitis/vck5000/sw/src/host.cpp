@@ -10,35 +10,26 @@
 
 static long getEpoch();
 static double getTiming(long, long);
-static bool check_results(float*, float, int);
-static void init_problem(float*, int);
+//static bool check_results(float*, float, int);
+//static void init_problem(float*, int);
 
 int main(int argc, char * argv[]) {
   if (argc != 3) {
-    fprintf(stderr, "Must provide bitstream and number of elements as command line option\n");
+    fprintf(stderr, "Must provide bitstream and design files for AIEplace\n");
     return -1;
   }
-  int data_size=atoi(argv[2]);
-  if (data_size % 8 != 0) {
-    data_size=((data_size/8)+1)*8;
-  }
-
-  printf("Running sum example on VCK5000 with %d elements\n", data_size);
-
-  float * input_data=new float[data_size];
-  float * result_data=new float[data_size];
-  init_problem(input_data, data_size);
-  float add_value=50.0;
+  printf("Running AIEplace on VCK5000\n");
 
   std::string xclbin_file=std::string(argv[1]);
+  std::string input_dir = argv[2];
 
-  std::cout << "Load " << xclbin_file << std::endl;
+  std::cout << "Loading xclbin: " << xclbin_file << std::endl;
   xrt::device device = xrt::device(DEVICE_ID);
   std::cout << "Device ID " << DEVICE_ID << " found!" << std::endl;
   // Load xclbin which includes PL and AIE graph
   xrt::uuid xclbin_uuid = device.load_xclbin(xclbin_file);
 
-  std::cout << "Create kernels" << std::endl;
+  std::cout << "Create PL kernels" << std::endl;
   xrt::kernel device_mm2s = xrt::kernel(device, xclbin_uuid, "device_mm2s");
   xrt::kernel device_s2mm = xrt::kernel(device, xclbin_uuid, "device_s2mm");
 
@@ -87,7 +78,7 @@ int main(int argc, char * argv[]) {
   double xfer_off_time=getTiming(getEpoch(), start);
   std::cout << "Done" << std::endl;
 
-  bool results_validated=check_results(result_data, add_value, data_size);
+  //bool results_validated=check_results(result_data, add_value, data_size);
 
   if (results_validated) {
     printf("Results validated OK\n");
@@ -116,17 +107,17 @@ static double getTiming(long end_time, long start_time) {
   return (end_time - start_time) /1.0e6 ;
 }
 
-static bool check_results(float * results, float add_value, int data_size) {
-  int i;
-  for (i=0;i<data_size;i++) {
-    if (results[i] != i+add_value) return false;
-  }
-  return true;
-}
+//static bool check_results(float * results, float add_value, int data_size) {
+//  int i;
+//  for (i=0;i<data_size;i++) {
+//    if (results[i] != i+add_value) return false;
+//  }
+//  return true;
+//}
 
-static void init_problem(float * input_data, int data_size) {
-  int i;
-  for (i=0;i<data_size;i++) {
-    input_data[i]=i;
-   }
-}
+//static void init_problem(float * input_data, int data_size) {
+//  int i;
+//  for (i=0;i<data_size;i++) {
+//    input_data[i]=i;
+//   }
+//}

@@ -2,8 +2,7 @@
 // kernel for computing HPWL partials (see ePlace/DREAMplace)
 // dWL_e / dx_i= [a+ * ((1 + x/gamma)*b+ - c+/gamma)/(b+^2)]  \
 // - [a- * ((1 - x/gamma)*b- + c-/gamma)/(b-^2)]
-#include <adf.h>
-#include "kernels.h"
+#include "partials_kernels.h"
 
 #include "aie_api/aie.hpp"
 #include "aie_api/aie_adf.hpp"
@@ -12,11 +11,9 @@
 void compute_partials( input_stream<float> * __restrict xa_in, input_stream<float> * __restrict bc_in, output_stream<float> * __restrict partials_out)
 {
 	// Read control data
-	aie::vector<float, 4> ctrl = readincr_v4(xa_in);
+	aie::vector<float, 4> ctrl = readincr_v4(bc_in);
 	float net_size  = ctrl.get(0);
 	float net_count = ctrl.get(1); // will always be multiple of 8?
-	//float net_size  = 3;
-	//float net_count = 8;
 
 	aie::vector<float, 8> a_plus, b_plus, c_plus, a_minus, b_minus, c_minus, x_vals;
 	aie::vector<float, 8> ones   = aie::broadcast<float, 8>( 1.0 );
@@ -24,25 +21,19 @@ void compute_partials( input_stream<float> * __restrict xa_in, input_stream<floa
 	aie::accum<accfloat, 8> plus_term, minus_term;
 
 	for(int i = 0; i < net_count/8; i++) { // will always be multiple of 8?
+
 		// read in bc stream for a vector of 8 nets
-		b_plus.insert(0, readincr_v<4>(bc_in));
-		b_plus.insert(1, readincr_v<4>(bc_in));
-		c_plus.insert(0, readincr_v<4>(bc_in));
-		c_plus.insert(1, readincr_v<4>(bc_in));
-		b_minus.insert(0, readincr_v<4>(bc_in));
-		b_minus.insert(1, readincr_v<4>(bc_in));
-		c_minus.insert(0, readincr_v<4>(bc_in));
-		c_minus.insert(1, readincr_v<4>(bc_in));
+		b_plus = readincr_v<8>(bc_in);
+		c_plus = readincr_v<8>(bc_in);
+		b_minus = readincr_v<8>(bc_in);
+		c_minus = readincr_v<8>(bc_in);
 
 		// compute partials for each x val on these nets
 		for(int n = 0; n < net_size; n++) {
 			// read in xa stream values
-			x_vals.insert(0, readincr_v<4>(xa_in)); // 4 sets of 32b float
-			x_vals.insert(1, readincr_v<4>(xa_in));
-			a_plus.insert(0, readincr_v<4>(xa_in));
-			a_plus.insert(1, readincr_v<4>(xa_in));
-			a_minus.insert(0, readincr_v<4>(xa_in));
-			a_minus.insert(1, readincr_v<4>(xa_in));
+			x_vals = readincr_v<8>(xa_in); // 4 sets of 32b flot
+			a_plus = readincr_v<8>(xa_in);
+			a_minus = readincr_v<8>(xa_in);
 
 			// compute the plus term
 			plus_term.from_vector(ones, 0);
@@ -63,8 +54,7 @@ void compute_partials( input_stream<float> * __restrict xa_in, input_stream<floa
 
 			// subtract and write result
 			plus_term = aie::msc(plus_term, minus_term.to_vector<float>(0), a_minus);
-			writeincr(partials_out, plus_term.to_vector<float>(0).extract<4>(0));
-			writeincr(partials_out, plus_term.to_vector<float>(0).extract<4>(1));
+			writeincr(partials_out, plus_term.to_vector<float>(0));
 	  	}
 	}
 }

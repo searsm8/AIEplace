@@ -25,7 +25,7 @@ KERNEL_XO := device_s2mm.xo device_mm2s.xo
 
 KERNEL_NAME := sum_kernel
 
-AIE_OBJ := ../../aiengine/libadf.a
+AIE_OBJ := ../../aie/libadf.a
 
 # Kernel compiler & linker global settings
 KRNL_COMPILE_OPTS := -t $(TARGET) --config ../design.cfg --save-temps -j 26 -g
