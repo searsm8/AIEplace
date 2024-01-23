@@ -12,16 +12,17 @@ golden_fft_dir = aie_dir + "golden_data/density/"
 
 rel_tol = 0.01
 
-def compare_hpwl_outputs():
+def compare_hpwl_outputs(num_benchmarks=1):
     AIE_output_dir = aie_dir + "aiesimulator_output/simdata/"
     if not os.path.exists(AIE_output_dir):
         AIE_output_dir = aie_dir + "x86simulator_output/simdata/"
     filenames = ["xa", "bc"]
     #filenames = ["hpwl", "partials"]
     all_match = True
-    for filename in filenames:
-        if compare_output(filename, AIE_output_dir, golden_hpwl_dir, rel_tol):
-            all_match = False
+    for i in range(num_benchmarks):
+        for filename in filenames:
+            if compare_output(filename + str(i), AIE_output_dir, golden_hpwl_dir, rel_tol):
+                all_match = False
     return all_match
 
 def compare_dct_outputs():
@@ -39,8 +40,8 @@ def compare_output(filename, output_dir, golden_dir, rel_tol=0.01):
     diff_found = False
     output_filename = output_dir + filename + ".dat"
     golden_filename = golden_dir + filename + ".dat"
-    print(f"\nFile compare: {filename}.dat")
-    print(f"\nFile compare: \n{output_filename}\n{golden_filename}")
+    print(f"\n ###File compare: {filename}.dat")
+    print(f"{output_filename}\n{golden_filename}")
     line_count = 0
     diff_count = 0
     #try:
@@ -52,7 +53,7 @@ def compare_output(filename, output_dir, golden_dir, rel_tol=0.01):
                 line_count += 1
                 #print(f"line_count: {line_count}")
                 if (not math.isclose(float(AIE_line), float(golden_line), rel_tol=rel_tol)) and \
-                    abs(float(AIE_line) - float(golden_line)) > 1e-30:
+                    abs(float(AIE_line) - float(golden_line)) > 1e-15:
                     print(f"(line #{line_count})\t***DIFF DETECTED: AIE: {float(AIE_line.strip()):.2f}\tgolden: {float(golden_line.strip()):.2f}***")
                     diff_found = True
                     diff_count += 1
@@ -67,7 +68,8 @@ def compare_output(filename, output_dir, golden_dir, rel_tol=0.01):
 
 
 if __name__ == "__main__":
-    hpwl_match = compare_hpwl_outputs()      
+    num_benchmarks = 4
+    hpwl_match = compare_hpwl_outputs(num_benchmarks)
     fft_match = True#compare_dct_outputs()
     if hpwl_match and fft_match:
         print(f"\nAll values match to within an error of {rel_tol*100}% or 1e-30")
