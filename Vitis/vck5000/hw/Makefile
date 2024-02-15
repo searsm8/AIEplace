@@ -15,15 +15,16 @@ help:
 	@echo "      Command to remove the generated files."
 	@echo ""
 #######################################################################################
-TARGET := sw_emu
+TARGET := hw_emu#sw_emu, hw_emu, hw
 PLATFORM := xilinx_vck5000_gen4x8_xdma_2_202210_1
-XO := sum.$(TARGET).xo
-XSA_OBJ := sum.$(TARGET).xsa
-XCLBIN := sum.$(TARGET).xclbin
+XO := aieplace.$(TARGET).xo
+XSA_OBJ := aieplace.$(TARGET).xsa
+XCLBIN := aieplace.$(TARGET).xclbin
 
 KERNEL_XO := device_s2mm.xo device_mm2s.xo
+#KERNEL_XO := device_mm2aie2mm.xo
 
-KERNEL_NAME := sum_kernel
+#KERNEL_NAME := sum_kernel
 
 AIE_OBJ := ../../aie/libadf.a
 
@@ -33,6 +34,7 @@ KRNL_LINK_OPTS := -t $(TARGET) --config ../link.cfg -j 26 -g --save-temps
 	
 .PHONY: device
 .ONESHELL:
+
 device: mkrefdir $(XO) $(XCLBIN)
 	cp reference_files_$(TARGET)/$(XCLBIN) ../bin/.
 

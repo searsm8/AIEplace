@@ -1,7 +1,4 @@
-#include <adf.h>
-#include "kernels.h"
-#include <aie_api/utils.hpp>
-//#include "system_settings.h"
+#include "density_kernels.h"
 
 void idct_preprocess(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out) {
   /* EXPECTED INPUT

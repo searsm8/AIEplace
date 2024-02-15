@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#/usr/bin/python
 # -*- coding: utf-8 -*-
 # createGolden.py
 #
@@ -136,9 +136,9 @@ if __name__ == "__main__":
 
     cleanFiles(golden_dir)
     #Create benchmarks for wirelength
-    num_benchmarks = 4
+    num_benchmarks = 1
     for i in range(num_benchmarks):
-        createGoldenHPWL(golden_dir , netsize=2, N=32, bench_num=i)
+        createGoldenHPWL(golden_dir , netsize=2, N=8, bench_num=i)
     #createGoldenHPWL(golden_dir , netsize=2, N=8*4)
     #createGoldenHPWL(golden_dir , netsize=7, N=8*1)
     #createGoldenHPWL(golden_dir , netsize=8, N=8*1)
