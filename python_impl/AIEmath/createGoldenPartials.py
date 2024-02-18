@@ -1,14 +1,13 @@
-#!/usr/bin/python
+#/usr/bin/python
 # -*- coding: utf-8 -*-
 # createGolden.py
 #
 # Driver code which takes an input list and writes terms to a test file
-import os
+import os, shutil 
 import random
 import computeTerm
 import numpy as np
 import math
-from customDCT import *
 
 MAX_COORD = 10000
   
@@ -18,16 +17,20 @@ home_dir = os.path.expanduser('~')
 golden_dir = home_dir + "/AIEplace/Vitis/vck5000/aie/golden_data/partials"
 
 def cleanFiles(filepath):
-    if(not os.path.exists(filepath)):
-        os.makedirs(filepath)
+    shutil.rmtree(filepath)
+    os.makedirs(filepath)
     # delete old files
-    filenames = ["ctrl", "x_in", "xa", "bc", "input_nets", "a_plus", "a_minus", "b_plus", "b_minus", "c_plus", "c_minus", "hpwl", "partials"]
-    for filename in filenames:
-        try: os.remove(filepath+f"/{filename}.dat")
-        except: pass
+    #filenames = ["ctrl", "x_in", "xa", "bc", "input_nets", "a_plus", "a_minus", "b_plus", "b_minus", "c_plus", "c_minus", "hpwl", "partials"]
+    #for filename in filenames:
+    #    try: os.remove(filepath+f"/{filename}.dat")
+    #    except: pass
 
-def createGoldenHPWL(filepath, netsize=2, N=1):
+def createGoldenHPWL(filepath, netsize=2, N=1, bench_num=0):
     ''' Generates a new directory and random input vectors
+        @param: filepath - directory to output gold files to
+        @param: netsize: the size of the nets generated and computed for
+        @param: N - number of nets of this size
+        @param: bench_num - benchmark specifier, appended to file names 
     '''
 
     gamma = 4 # same as in RePlace
@@ -71,17 +74,17 @@ def createGoldenHPWL(filepath, netsize=2, N=1):
     # write terms to files
     print("Writing golden data files to " + filepath)
     print(f"netsize: {netsize}\tnet_count: {N}")
-    with    open(filepath+"/ctrl.dat", "a") as ctrl_file, \
-            open(filepath+"/x_in.dat", "a") as x_in_file, \
-            open(filepath+"/a_plus.dat", "a") as ap_file, \
-            open(filepath+"/a_minus.dat", "a") as am_file, \
-            open(filepath+"/b_plus.dat", "a") as bp_file, \
-            open(filepath+"/b_minus.dat", "a") as bm_file, \
-            open(filepath+"/c_plus.dat", "a") as cp_file, \
-            open(filepath+"/c_minus.dat", "a") as cm_file, \
-            open(filepath+"/partials.dat", "a") as partials_file, \
-            open(filepath+"/xa.dat", "a") as xa_file, \
-            open(filepath+"/bc.dat", "a") as bc_file:
+    with    open(filepath+"/ctrl"+str(bench_num)+".dat", "a") as ctrl_file, \
+            open(filepath+"/x_in"+str(bench_num)+".dat", "a") as x_in_file, \
+            open(filepath+"/a_plus"+str(bench_num)+".dat", "a") as ap_file, \
+            open(filepath+"/a_minus"+str(bench_num)+".dat", "a") as am_file, \
+            open(filepath+"/b_plus"+str(bench_num)+".dat", "a") as bp_file, \
+            open(filepath+"/b_minus"+str(bench_num)+".dat", "a") as bm_file, \
+            open(filepath+"/c_plus"+str(bench_num)+".dat", "a") as cp_file, \
+            open(filepath+"/c_minus"+str(bench_num)+".dat", "a") as cm_file, \
+            open(filepath+"/partials"+str(bench_num)+".dat", "a") as partials_file, \
+            open(filepath+"/xa"+str(bench_num)+".dat", "a") as xa_file, \
+            open(filepath+"/bc"+str(bench_num)+".dat", "a") as bc_file:
 
         # write control values to input stream (netsize and num_nets)
         ctrl_file.write(f"{netsize}\n{N}\n")
@@ -128,122 +131,15 @@ def createGoldenHPWL(filepath, netsize=2, N=1):
                 cp_file.write("0\n")
                 cm_file.write("0\n")
 
-    #with    open(filepath+"/input_nets.dat", "w") as golden_input_file, \
-    #        open(filepath+"/partials.dat", "w") as partials_file, \
-    #        open(filepath+"/a_plus.dat", "w") as a_plus_file, \
-    #        open(filepath+"/a_minus.dat", "w") as a_minus_file:
-
-    #with    open(filepath+"/input_nets.dat", "w") as golden_input_file, \
-    #        open(filepath+"/partials.dat", "w") as partials_file, \
-    #        open(filepath+"/a_plus.dat", "w") as a_plus_file, \
-    #        open(filepath+"/a_minus.dat", "w") as a_minus_file:
-    #    # write control values to input stream (netsize and num_nets)
-    #    golden_input_file.write(f"{netsize}\n{N}\n")
-    #    a_plus_file.write(f"{netsize}\n{N}\n")
-
-    #    for iter in range(int(N/8)):
-    #        # print to file max value first, min val second
-    #        for i in [-1] + list(range(netsize-1)):
-    #            for lane in range(8):
-    #                n = 8*iter + lane
-    #                # write input files to golden
-    #                golden_input_file.write(f"{input_vectors[n][i]}\n")
-    #                # write a^pm terms
-    #                a_plus_file.write(f"{a_plus_vec[n][i]}\n")            
-    #                a_minus_file.write(f"{a_minus_vec[n][i]}\n")            
-    #                # write golden outputs for all HPWL partials
-    #                partials_file.write(f"{partials_vec[n][i]}\n")            
-
-    ## write golden outputs for all HPWL intermediate terms
-    #with open(filepath+"/hpwl.dat", "w") as hpwl_file, \
-    #     open(filepath+"/b_plus.dat", "w") as b_plus_file, \
-    #     open(filepath+"/b_minus.dat", "w") as b_minus_file, \
-    #     open(filepath+"/c_plus.dat", "w") as c_plus_file, \
-    #     open(filepath+"/c_minus.dat", "w") as c_minus_file:
-    #    for n in range(N):
-    #        hpwl_file.write(f"{WA_vec[n]}\n")            
-    #        b_plus_file.write(f"{b_plus_vec[n]}\n")            
-    #        b_minus_file.write(f"{b_minus_vec[n]}\n")            
-    #        c_plus_file.write(f"{c_plus_vec[n]}\n")            
-    #        c_minus_file.write(f"{c_minus_vec[n]}\n")            
-#def createRandomDensitys(filepath, M=16):
-#    ''' Generates a random MxM density map
-#    '''
-#    rho = np.random.rand(M, M)
-#    with open(filepath+"/electro_input_density_map.dat", "w") as f:
-#        for row in range(M):
-#            for col in range(M):
-#                f.write(str(rho[row][col]) + ' ')
-#            f.write('\n')
-#
-#    return rho
-#
-#def computeAllDCTs(filepath, rho):
-#    M = len(rho)
-#    a = dct_2d(rho) # compute 'a' terms
-#    with open(filepath+"/electro_a_vals.dat", "w") as f:
-#        for row in range(M):
-#            for col in range(M):
-#                f.write(str(a[row][col]) + ' ')
-#            f.write('\n')
-#            
-#    # Manipulations
-#    for i in range(len(a)):
-#        a[i][0] *= 0.5
-#    for i in range(len(a[0])):
-#        a[0][i] *= 0.5
-#    for i in range(len(a)):
-#        for j in range(len(a[0])):
-#            a[i][j] *= 4.0 / len(a) / len(a[0])
-#    electroPhi    = np.zeros((len(a), len(a[0])))
-#    electroForceX = np.zeros((len(a), len(a[0])))
-#    electroForceY = np.zeros((len(a), len(a[0])))
-#    # w_u and w_v factors
-#    for u in range(len(a)):
-#        for v in range(len(a[0])):
-#            w_u = 1*math.pi*u / len(a) # why not 2*pi?
-#            w_u2 = w_u*w_u
-#            w_v = 1*math.pi*v / len(a[0])
-#            w_v2 = w_v*w_v
-#            if u == 0 and v == 0:
-#                electroPhi[u][v] = 0
-#            else:
-#                electroPhi[u][v] = a[u][v] / (w_u2 + w_v2)
-#                electroForceX[u][v] = electroPhi[u][v] * w_u
-#                electroForceY[u][v] = electroPhi[u][v] * w_v
-#            
-#    electroPhi = idct_2d(electroPhi)
-#    electroForceX = idsct_2d(electroForceX)
-#    electroForceY = idcst_2d(electroForceY)
-#
-#    with open(filepath+"/electroPhi.dat", "w") as f:
-#        for row in range(M):
-#            for col in range(M):
-#                f.write(str(electroPhi[row][col]) + ' ')
-#            f.write('\n')
-#    with open(filepath+"/electroForceX.dat", "w") as f:
-#        for row in range(M):
-#            for col in range(M):
-#                f.write(str(electroForceX[row][col]) + ' ')
-#            f.write('\n')
-#    with open(filepath+"/electroForceY.dat", "w") as f:
-#        for row in range(M):
-#            for col in range(M):
-#                f.write(str(electroForceY[row][col]) + ' ')
-#            f.write('\n')
-#    
-#    return
 
 if __name__ == "__main__":
 
     cleanFiles(golden_dir)
-    #Create benchhmarks for wirelength
+    #Create benchmarks for wirelength
+    num_benchmarks = 1
+    for i in range(num_benchmarks):
+        createGoldenHPWL(golden_dir , netsize=2, N=8, bench_num=i)
     #createGoldenHPWL(golden_dir , netsize=2, N=8*4)
-    createGoldenHPWL(golden_dir , netsize=3, N=17)
     #createGoldenHPWL(golden_dir , netsize=7, N=8*1)
     #createGoldenHPWL(golden_dir , netsize=8, N=8*1)
-
-    #Create benchhmarks for density
-    #rho = createRandomDensitys(golden_dir+"test"+str(i), 16)
-    #computeAllDCTs(golden_dir+"test"+str(i), rho)
 

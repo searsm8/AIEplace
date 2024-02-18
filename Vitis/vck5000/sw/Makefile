@@ -15,7 +15,7 @@ help:
 	@echo "      Command to remove the generated files."
 	@echo ""
 #######################################################################################
-HOST_EXE := host
+HOST_EXE := host_aieplace.exe
 
 # Host building global settings
 CXXFLAGS := -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/ -I/lustre/home/nx08/shared/fpga/xilinx/include/ -Wall -O0 -g -std=c++17 -L$(XILINX_XRT)/lib/ -lpthread -lrt -lstdc++ 
@@ -23,9 +23,10 @@ CXXFLAGS2 := -lxrt_coreutil -lxilinxopencl
 
 .PHONY: $(HOST_EXE)
 # Building Host
-$(HOST_EXE): src/host.cpp
+host: $(HOST_EXE)
+$(HOST_EXE): src/AIEplaceHost.cpp
 	mkdir -p ../bin
-	g++ $(CXXFLAGS) -o ../bin/host '$<' $(CXXFLAGS2)
+	g++ $(CXXFLAGS) -o ../bin/$(HOST_EXE) '$<' $(CXXFLAGS2)
 
 .PHONY: emconfig
 emconfig:

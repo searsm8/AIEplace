@@ -1,17 +1,4 @@
-# Copyright 2021 Xilinx Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+# Makefile for AIEplace: Versal implementation of ePlace algorithm
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 all: aie aiesim
 all_x86: aie_x86 aiesim_x86
@@ -53,55 +40,58 @@ AIE_FLAGS += --kernel-linting
 
 #libadf.a: src/* 
 
-# Compile a full graph for AIEplace application
+TARGET := hw
+
+# Compile a full graph for AIEplace application, including multiple partials graphs and density graph
 libadf.a: src/*
-	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
-	@echo "INFO:Running aiecompiler for all AIEplace graphs and kernels..."
+	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+	@echo "INFO: Running aiecompiler for all AIEplace graphs and kernels..."
 	@rm -rf Work libadf.a
 	@mkdir -p Work
 	aiecompiler --target=hw ${AIE_FLAGS} --workdir=./Work src/TopGraph.cpp
 
 # Compile a graph for only partials computation
 partials: src/partials/*
-	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
-	@echo "INFO:Running aiecompiler for partials..."
+	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+	@echo "INFO: Running aiecompiler for partials..."
 	@rm -rf Work libadf.a
 	@mkdir -p Work
-	aiecompiler --target=hw ${AIE_FLAGS} --workdir=./Work src/partials/PartialsGraph.cpp
+	aiecompiler --target=${TARGET} ${AIE_FLAGS} --workdir=./Work src/partials/PartialsGraph.cpp
 
 # Compile a graph for only density computation
 density: src/density/*
-	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
-	@echo "INFO:Running aiecompiler for density..."
+	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+	@echo "INFO: Running aiecompiler for density..."
 	@rm -rf Work libadf.a
 	@mkdir -p Work
-	aiecompiler --target=hw ${AIE_FLAGS} --workdir=./Work src/density/DCTGraph.cpp
+	aiecompiler --target=${TARGET} ${AIE_FLAGS} --workdir=./Work src/density/DCTGraph.cpp
 
 
 
 aie_x86: 
-	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
-	@echo "INFO:Running aiecompiler for x86sim..."
+	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+	@echo "INFO: Running aiecompiler for x86sim..."
 	@rm -rf Work libadf.a
 	@mkdir -p Work
 	aiecompiler --target=x86sim --include="src" --workdir=./Work ${GRAPH_TOP}
 
-#- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+#- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # Simulate AIE code
 aiesim: cleansim
-	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
-	@echo "INFO:Running aiesimulator..."
+	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+	@echo "INFO: Running aiesimulator..."
 	aiesimulator --pkg-dir=./Work --profile --dump-vcd AIEplace --hang-detect-time=10000
 
 aiesim_x86: cleansim
-	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
-	@echo "INFO:Running x86simulator..."
+	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+	@echo "INFO: Running x86simulator..."
 	x86simulator --pkg-dir=./Work
 
 
-#- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+#- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # Analysis
 #.PHONY: vcdanalyze system.wdb
+# make vcdanalyze processes the trace, but this can also be done in the analyzer GUI
 vcdanalyze: system.wdb
 
 system.wdb:

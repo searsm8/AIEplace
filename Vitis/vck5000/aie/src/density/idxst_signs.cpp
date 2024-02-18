@@ -1,9 +1,5 @@
 
-#include <adf.h>
-#include "kernels.h"
-#include "aie_api/aie.hpp"
-#include "aie_api/aie_adf.hpp"
-#include <aie_api/utils.hpp>
+#include "density_kernels.h"
 
 void idxst_signs(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out) {
 	float signs_init[8]={1,-1,1,-1,1,-1,1,-1};

@@ -1,8 +1,4 @@
-#include <adf.h>
 #include "density_kernels.h"
-#include "aie_api/aie.hpp"
-#include "aie_api/aie_adf.hpp"
-#include <aie_api/utils.hpp>
 
 /* unshuffle function for IFFT to enable IDCT
 * for N = 8:

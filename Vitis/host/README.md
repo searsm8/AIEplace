@@ -2,7 +2,7 @@
 
 Host code to run AIEplace algorithm. The role of the host is to read in the design and send coordinate data to the AI Engines.
 
-The host code for running AIEplace can be found in `./src` and compiled with `make`.
+The host code for running AIEplace can be found in `./src` and compiled with `make`
 
 Limbo libraries are used to read LEF/DEF benchmarks, and must be built:
 

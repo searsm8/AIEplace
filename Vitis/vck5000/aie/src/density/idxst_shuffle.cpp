@@ -1,9 +1,4 @@
-#include <adf.h>
-#include "kernels.h"
-#include "aie_api/aie.hpp"
-#include "aie_api/aie_adf.hpp"
-#include <aie_api/utils.hpp>
-//#include "system_settings.h"
+#include "density_kernels.h"
 
 void idxst_shuffle(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out) {
     /* Flip order, but preserve first element

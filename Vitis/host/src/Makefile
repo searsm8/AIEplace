@@ -8,6 +8,8 @@ ITEMS:= AIEplace DataBase Grid Net DCT #Visualizer
 OBJS := $(addsuffix .o, ${ITEMS})
 EXE := ${TOP_DIR}/AIEplace.exe
 
+LIMBO_DIR := ~/AIEplace/third_party/Limbo
+
 INCLUDES := -I ./include
 INCLUDES += -I ${LIMBO_DIR}
 
@@ -18,6 +20,7 @@ COMPILE_FLAGS += -ldefparseradapt
 #COMPILE_FLAGS += -lverilogparser
 #COMPILE_FLAGS += -lbookshelfparser
 COMPILE_FLAGS += -lcairo
+COMPILE_FLAGS += -lstdc++fs
 COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 
 all: ${EXE}

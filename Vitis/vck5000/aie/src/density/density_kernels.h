@@ -8,17 +8,23 @@ using namespace adf;
 // Density compute kernels
 // ********************
 
-// DCT
-void dct_shuffle(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);
-void dct_postprocess(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);
+#define USE_STREAM_IO
 
-// IDCT
-void idct_preprocess(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);
-void idct_unshuffle(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);
-
-// IDXST
-void idxst_shuffle(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);
-void idxst_signs(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);
+#ifdef USE_STREAM_IO
+    void dct_shuffle(input_stream<FFT_DATA_TYPE> * in, output_stream<FFT_DATA_TYPE> * out);
+    void dct_postprocess(input_stream<FFT_DATA_TYPE> * in, output_stream<FFT_DATA_TYPE> * out);
+    void idct_preprocess(input_stream<FFT_DATA_TYPE> * in, output_stream<FFT_DATA_TYPE> * out);
+    void idct_unshuffle(input_stream<FFT_DATA_TYPE> * in, output_stream<FFT_DATA_TYPE> * out);
+    void idxst_shuffle(input_stream<FFT_DATA_TYPE> * in, output_stream<FFT_DATA_TYPE> * out);
+    void idxst_signs(input_stream<FFT_DATA_TYPE> * in, output_stream<FFT_DATA_TYPE> * out);
+#else
+    void dct_shuffle(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);
+    void dct_postprocess(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);
+    void idct_preprocess(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);
+    void idct_unshuffle(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);
+    void idxst_shuffle(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);
+    void idxst_signs(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);
+#endif
 
 // This transpose() function should probably be implemented in a PL kernel
 //void transpose(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);

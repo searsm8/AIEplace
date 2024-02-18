@@ -4,53 +4,60 @@
 #include "partials_kernels.h"
 
 #define DEBUG_OUTPUT // output files for a+, a-, b+, b-, c+, c-
+#define NUM_GRAPHS 1
+#define str std::to_string
 
 class PartialsGraph : public adf::graph {
 private:
-  adf::kernel abc_kernel; // a plus/minus
-  adf::kernel partials_kernel;
+  adf::kernel abc_kernel[NUM_GRAPHS]; // a plus/minus
+  adf::kernel partials_kernel[NUM_GRAPHS];
 public:
-  adf::input_plio x_in;
+  adf::input_plio x_in[NUM_GRAPHS];
+  adf::output_plio outplio_partials[NUM_GRAPHS];
 
   PartialsGraph(){
-    abc_kernel = adf::kernel::create(compute_abc);
-    partials_kernel = adf::kernel::create(compute_partials);
+    for(int i = 0; i < NUM_GRAPHS; i++)
+    {
+      abc_kernel[i] = adf::kernel::create(compute_abc);
+      partials_kernel[i] = adf::kernel::create(compute_partials);
 
-    // Primary inputs to the AIE array
-    x_in = adf::input_plio::create("x_in", adf::plio_32_bits, "golden_data/partials/x_in.dat");
+      // Primary inputs to the AIE array
+      x_in[i] = adf::input_plio::create("x_in"+str(i), adf::plio_128_bits, "golden_data/partials/x_in"+str(i)+".dat");
+      outplio_partials[i] = adf::output_plio::create("outplio_partials"+str(i), adf::plio_128_bits, "simdata/partials"+str(i)+".dat");
 
-    // Input connections for abc_kernel
-    adf::connect<adf::stream>(x_in.out[0], abc_kernel.in[0]); // x-coords
+      // Input connections for abc_kernel
+      adf::connect<adf::stream>(x_in[i].out[0], abc_kernel[i].in[0]); // x-coords
 
-    // Input connections for partials_kernel
-    adf::connect<adf::stream> net_xa(abc_kernel.out[0], partials_kernel.in[0]);
-    adf::connect<adf::stream> net_bc(abc_kernel.out[1], partials_kernel.in[1]);
-    adf::fifo_depth(net_xa) = 92; // 92 is large enough to handle nets of size 7 (with minor stalls)
-                                  // or nets of size 6 without stalls
-                                  // add or subtract 24 to the buffer size to increase net size 
-                                  
-                                  // nets larger than 7 should be handled by the host code
-    //adf::fifo_depth(net_bc) = 96*2; // this one doesn't need a fifo
+      // Input connections for partials_kernel
+      adf::connect<adf::stream> net_xa(abc_kernel[i].out[0], partials_kernel[i].in[0]);
+      adf::connect<adf::stream> net_bc(abc_kernel[i].out[1], partials_kernel[i].in[1]);
+      adf::fifo_depth(net_xa) = 92; // 92 is large enough to handle nets of size 7 (with minor stalls)
+                                    // or nets of size 6 without stalls
+                                    // add or subtract 24 to the buffer size to increase net size 
+                                    
+                                    // nets larger than 7 should be handled by the host code
+      //adf::fifo_depth(net_bc) = 96*2; // this one doesn't need a fifo
 
-#ifdef DEBUG_OUTPUT
-    // Optional outputs for debugging intermediate terms
-    adf::output_plio outplio_xa, outplio_bc, outplio_partials;
+      adf::connect<adf::stream>(partials_kernel[i].out[0], outplio_partials[i].in[0]);
 
-    outplio_xa = adf::output_plio::create("outplio_xa" , adf::plio_32_bits, "simdata/xa.dat");
-    outplio_bc = adf::output_plio::create("outplio_bc", adf::plio_32_bits, "simdata/bc.dat");
-    outplio_partials = adf::output_plio::create("outplio_partials", adf::plio_32_bits, "simdata/partials.dat");
+  #ifdef DEBUG_OUTPUT
+      // Optional outputs for debugging intermediate terms
+      //adf::output_plio outplio_xa[NUM_GRAPHS], outplio_bc[NUM_GRAPHS];
+      //outplio_xa[i] = adf::output_plio::create("outplio_xa"+str(i), adf::plio_32_bits, "simdata/xa"+str(i)+".dat");
+      //outplio_bc[i] = adf::output_plio::create("outplio_bc"+str(i), adf::plio_32_bits, "simdata/bc"+str(i)+".dat");
+      
+      // Connections for debugging terms
+      //adf::connect<adf::stream>(abc_kernel[i].out[0], outplio_xa[i].in[0]);
+      //adf::connect<adf::stream>(abc_kernel[i].out[1], outplio_bc[i].in[0]);
+  #endif
 
-    // Connections for debugging terms
-    adf::connect<adf::stream>(abc_kernel.out[0], outplio_xa.in[0]);
-    adf::connect<adf::stream>(abc_kernel.out[1], outplio_bc.in[0]);
-    adf::connect<adf::stream>(partials_kernel.out[0], outplio_partials.in[0]);
-#endif
 
 
-    adf::source(abc_kernel) = "compute_abc.cpp";
-    adf::runtime<ratio>(abc_kernel) = 1;
+      adf::source(abc_kernel[i]) = "compute_abc.cpp";
+      adf::runtime<ratio>(abc_kernel[i]) = 1;
 
-    adf::source(partials_kernel) = "compute_partials.cpp";
-    adf::runtime<ratio>(partials_kernel) = 1;
+      adf::source(partials_kernel[i]) = "compute_partials.cpp";
+      adf::runtime<ratio>(partials_kernel[i]) = 1;
+    }
   }
 };
