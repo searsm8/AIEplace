@@ -1,12 +1,13 @@
 # AIEplace
 Implementation of the [RePlace](https://github.com/The-OpenROAD-Project/RePlAce)<sup>[2]</sup> algorithm on the AMD Versal architecture, utilizing AIE, PL, and PS regions of the chip.
 
-# TODO
-* Python: Add convergence detection (e.g. < 10% change)
-* Find and test AIE array benchmarks
-* Collect data on hyperparameters
-* Explore using Sparse Matrices for HPWL computation
-* 10min Progress presentation
+### Directory Structure
+
+* Vitis projects can be found in the [Vitis](./Vitis) directory, and can be built and run using the Makefiles found there.
+* A simplified version of the ePlace algorithm is implemented in the [python_impl](./python_impl).
+
+
+### Functional examples on tiny benchmarks:
 
 ![Python implementation of AIEplace 8x48](images/AIEplace_8x48.gif)
 ![Python implementation of AIEplace 8x8](images/AIEplace_8x8.gif)
