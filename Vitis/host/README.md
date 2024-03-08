@@ -6,7 +6,7 @@ The host code for running AIEplace can be found in `./src` and compiled with `ma
 
 Limbo libraries are used to read LEF/DEF benchmarks, and must be built:
 
-    cd Limbo
+    cd third_party/Limbo
     mkdir build
     cd build
     cmake .. -DCMAKE_INSTALL_PREFIX=absolute/path/to/your/installation
