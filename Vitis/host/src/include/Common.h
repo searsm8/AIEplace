@@ -24,12 +24,14 @@ using std::min;
 #define AIEPLACE_NAMESPACE_END }
 
 #define WIRELENGTH_COMPUTE_METHOD "HPWL"
-//#define USE_AIE_ACCELERATION
-//#define CREATE_VISUALIZATION
+//#define USE_AIE_ACCELERATION // set in Makefile
+//#define CREATE_VISUALIZATION // set in Makefile
 
 #define BINS_PER_ROW 128
 #define BINS_PER_COL 128
 #define INITIAL_LAMBDA 0.002
+
+#define DATA_XFER_SIZE 16 // number of floats transferred to AIE kernels per run
 
 AIEPLACE_NAMESPACE_BEGIN 
 

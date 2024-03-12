@@ -58,15 +58,20 @@ bool DataBase::readDEF()
         return false;
     }
 
-    if (def_files.size() > 1)
-    {
-        cout << "ERROR: Multiple .def files found, but only one is expected:" << endl;
-        for (fs::path file : def_files)
-            cout << file.string() << endl;
-        return false;
-    }
+    //if (def_files.size() > 1)
+    //{
+    //    cout << "ERROR: Multiple .def files found, but only one is expected:" << endl;
+    //    for (fs::path file : def_files)
+    //        cout << file.string() << endl;
+    //    return false;
+    //}
     
-    fs::path def_file = def_files[0];
+    fs::path def_file;
+    for(int i = 0; i < def_files.size(); i++)
+    {
+        if(def_files[i].filename() == "floorplan.def")
+            def_file = def_files[i];
+    }
     bool flag = DefParser::read(*this, def_file);
     if (flag) {
         cout << "### DEF file parsing successful: " << def_file.string() << endl;
@@ -113,6 +118,18 @@ double DataBase::computeTotalWirelength()
     for (auto item : mm_nets)
         total += item.second->computeWirelength();
     return total;
+}
+
+double DataBase::computeTotalComponentArea()
+{
+    double total_area = 0;
+    for(auto item : mm_components)
+    {
+        Component* comp_p = item.second;
+        total_area += comp_p->getArea();
+    }
+    cout << "Total component area: " << total_area << endl;
+    return total_area;
 }
 
         /// parser callback functions 
@@ -254,7 +271,7 @@ void DataBase::printNets()
     for(auto item : mm_nets)
     {
         Net* net_p = item.second;
-        cout << endl << net_p->to_string() << endl;
+        cout << endl << "NET: " << net_p->to_string() << endl;
 
         sortPositionsByX();
         cout << "X descending: ";

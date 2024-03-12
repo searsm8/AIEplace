@@ -22,7 +22,7 @@ void Placer::run()
     while( !converged )
     {
         performIteration();
-        if (iteration++ == 9999)
+        if (iteration++ == 1)
             converged = true;
     }
 }
@@ -34,7 +34,9 @@ void Placer::performIteration()
     iterationReset();
 
     // Compute terms for HPWL partials
-    computeAllPartials_CPU();
+    // TODO: compare output of these two functions to ensure correctness
+    //computeAllPartials_CPU();
+    computeAllPartials_AIE();
 
     // Compute Electric Fields in each bin
     computeOverlaps();
@@ -68,8 +70,7 @@ void Placer::initialPlacement(Position<position_type> target_pos, int min_dist, 
 {
     cout << "initialPlacement(" << target_pos.to_string() << ", " << min_dist << ", " << max_dist << ");\n";
     // For each component that isn't fixed
-    for (auto item : db.getComponents())
-    {
+    for (auto item : db.getComponents()) {
         // Choose a random position based on parameters
         int x_offset = min_dist + rand()%(max_dist-min_dist);
         int y_offset = min_dist + rand()%(max_dist-min_dist);
@@ -90,7 +91,24 @@ void Placer::initialPlacement(Position<position_type> target_pos, int min_dist, 
 **/
 void Placer::computeAllPartials_AIE()
 {
+    // Gather input data to send to AIE graph
+    auto nets_by_degree = db.getNetsByDegree();
+    float * input_data;
+    for(int i = 0; i < 8; i++) {
+        auto net_nodes = nets_by_degree[2][i].getNodes();
+        input_data[2*i] = net_nodes[0];
+        input_data[2*i+1] = net_nodes[1];
+    }
+
+    float * result_data;
+
     // Call AIE graph_driver to accelerate computation
+    driver.run_PL_kernels(input_data, result_data);
+
+    // print result data
+    cout << "Result data: " << endl;
+    for(float * f : result_data)
+        cout << f << endl;
 }
 
 /*
@@ -115,8 +133,7 @@ void Placer::computeElectricFields_AIE()
 **/
 void Placer::computeAllPartials_CPU()
 {
-    for (auto item : db.getNetsByDegree())
-    {
+    for (auto item : db.getNetsByDegree()) {
         for (Net* net_p : item.second)
             computeNetPartials_CPU(net_p);
     }
@@ -141,31 +158,24 @@ void Placer::compute_a_terms_CPU(Net* net_p)
     // X positions
     net_p->sortPositionsByX();
     std::vector<Node*> nodes = net_p->getNodes();
-    position_type max_x = nodes.front()->getX();
-    position_type min_x = nodes.back ()->getX();
-    for (Node* node_p : nodes)
-    {
-        node_p->terms.a.plus.x  = exp( (node_p->getX() - max_x) / gamma);
-        node_p->terms.a.minus.x = exp( (min_x - node_p->getX()) / gamma);
+    for (Node* node_p : nodes) {
+        node_p->terms.a.plus.x  = exp( (node_p->getX() - nodes.front()->getX()) / gamma);
+        node_p->terms.a.minus.x = exp( (nodes.back()->getX() - node_p->getX()) / gamma);
     }
 
     // Y positions
     net_p->sortPositionsByY();
     nodes = net_p->getNodes();
-    position_type max_y = nodes.front()->getY();
-    position_type min_y = nodes.back ()->getY();
-    for (Node* node_p : nodes)
-    {
-        node_p->terms.a.plus.y  = exp( (node_p->getY() - max_y) / gamma);
-        node_p->terms.a.minus.y = exp( (min_y - node_p->getY()) / gamma);
+    for (Node* node_p : nodes) {
+        node_p->terms.a.plus.y  = exp( (node_p->getY() - nodes.front()->getY()) / gamma);
+        node_p->terms.a.minus.y = exp( (nodes.back()->getY() - node_p->getY()) / gamma);
     }
 }
 
 void Placer::compute_bc_terms_CPU(Net* net_p)
 {
     compute_a_terms_CPU(net_p);
-    for (Node* node_p : net_p->getNodes())
-    {
+    for (Node* node_p : net_p->getNodes()) {
         // compute b terms
         net_p->terms.b.plus.x  += node_p->terms.a.plus.x;
         net_p->terms.b.minus.x += node_p->terms.a.minus.x;
@@ -186,8 +196,7 @@ void Placer::compute_bc_terms_CPU(Net* net_p)
 void Placer::computeNetPartials_CPU(Net* net_p)
 {
     compute_bc_terms_CPU(net_p);
-    for (Node* node_p : net_p->mv_nodes)
-    {
+    for (Node* node_p : net_p->mv_nodes) {
         float partial_x = (( 1 + node_p->getX()/gamma) * net_p->terms.b.plus.x - (net_p->terms.c.plus.x / gamma)) 
                                     * (node_p->terms.a.plus.x / (net_p->terms.b.plus.x * net_p->terms.b.plus.x))
                          - (( 1 - node_p->getX()/gamma) * net_p->terms.b.minus.x + (net_p->terms.c.minus.x / gamma)) 
@@ -224,21 +233,17 @@ void Placer::computeElectricFields_DCT()
 // Implements DREAMplace Eq 3a
 void Placer::compute_a_uv_naive()
 {
-    for (int u = 0; u < grid.getBinsPerRow(); u++)
-    {
+    for (int u = 0; u < grid.getBinsPerRow(); u++) {
 // cout << "Computing intermediate a at u = " << u << endl;
-        for (int v = 0; v < grid.getBinsPerCol(); v++)
-        {
+        for (int v = 0; v < grid.getBinsPerCol(); v++) {
 // cout << "v = " << v << endl;
             float w_u = 2 * M_PI * u / grid.getBinsPerRow();
             float w_v = 2 * M_PI * v / grid.getBinsPerCol();
 
             // For each bin at (u, v) compute the intermediate term a
             float a_uv = 0;
-            for (int x = 0; x < grid.getBinsPerRow(); x++)
-            {
-                for (int y = 0; y < grid.getBinsPerCol(); y++)
-                {
+            for (int x = 0; x < grid.getBinsPerRow(); x++) {
+                for (int y = 0; y < grid.getBinsPerCol(); y++) {
                     a_uv += grid.getBin(x, y).overlap * cos(w_u*x) * cos(w_v*y);
                 }
             }
@@ -252,20 +257,16 @@ void Placer::compute_a_uv_naive()
 // Implements DREAMplace Eq 3c, 3d
 void Placer::compute_eField_naive()
 {
-    for (int x = 0; x < grid.getBinsPerRow(); x++)
-    {
+    for (int x = 0; x < grid.getBinsPerRow(); x++) {
 //cout << "Computing eField at x = " << x << endl;
-        for (int y = 0; y < grid.getBinsPerCol(); y++)
-        {
+        for (int y = 0; y < grid.getBinsPerCol(); y++) {
 //cout << "y = " << y << endl;
             float w = 2 * M_PI / grid.getBinsPerRow();
             // For each bin at (u, v) compute the intermediate term a
             float Ex = 0;
             float Ey = 0;
-            for (int u = 0; u < grid.getBinsPerRow(); u++)
-            {
-                for (int v = 0; v < grid.getBinsPerCol(); v++)
-                {
+            for (int u = 0; u < grid.getBinsPerRow(); u++) {
+                for (int v = 0; v < grid.getBinsPerCol(); v++) {
                     if ( u == 0 && v == 0) continue; // avoid division by 0
                     float w_u = w*u;
                     float w_v = w*v;
@@ -302,8 +303,7 @@ void Placer::compute_a_uv_DCT()
 
     // add the computed intermediate term a_uv to all bins
     for (int u = 0; u < grid.getBinsPerRow(); u++)
-        for (int v = 0; v < grid.getBinsPerCol(); v++)
-        {
+        for (int v = 0; v < grid.getBinsPerCol(); v++) {
             grid.getBin(u, v).a_uv = a_uv[u][v];
         }
 }
@@ -320,10 +320,8 @@ void Placer::compute_eField_DCT()
     float w = 2 * M_PI / num_cols;
     Ex[0][0] = 0; Ey[0][0] = 0;
 
-    for (int u = 0; u < num_rows; u++)
-    {
-        for (int v = 0; v < num_cols; v++)
-        {
+    for (int u = 0; u < num_rows; u++) {
+        for (int v = 0; v < num_cols; v++) {
             if ( u == 0 && v == 0) continue; // avoid division by 0
             float w_u = 2*M_PI*u / num_cols;
             float w_v = 2*M_PI*v / num_rows;
@@ -335,8 +333,7 @@ void Placer::compute_eField_DCT()
     }
 
     // compute IDCT on all rows of Ex, and IDXST on all rows of Ey
-    for (int row_index = 0; row_index < num_rows; row_index++)
-    {
+    for (int row_index = 0; row_index < num_rows; row_index++) {
         Ex[row_index] = IDCT_naive (Ex[row_index]);
         Ey[row_index] = IDXST_naive(Ey[row_index]);
     }
@@ -345,8 +342,7 @@ void Placer::compute_eField_DCT()
     Ey = transpose(Ey);
 
     // compute IDCT on all rows of Ey, and IDXST on all rows of Ex
-    for (int row_index = 0; row_index < num_rows; row_index++)
-    {
+    for (int row_index = 0; row_index < num_rows; row_index++) {
         Ex[row_index] = IDXST_naive (Ex[row_index]);
         Ey[row_index] = IDCT_naive(Ey[row_index]);
     }
@@ -355,10 +351,8 @@ void Placer::compute_eField_DCT()
     Ey = transpose(Ey);
 
     // Put results in the grid bins
-    for (int x = 0; x < num_cols; x++)
-    {
-        for (int y = 0; y < num_rows; y++)
-        {
+    for (int x = 0; x < num_cols; x++) {
+        for (int y = 0; y < num_rows; y++) {
             grid.getBin(x, y).eField.x = Ex[x][y];
             grid.getBin(x, y).eField.y = Ey[x][y];
         }
@@ -409,8 +403,7 @@ void Placer::nudgeNode(Node* node_p)
     electro_force.clear();
 
     // for each bin that this node overlaps
-    for (BinOverlap b : node_p->getBinOverlaps())
-    {
+    for (BinOverlap b : node_p->getBinOverlaps()) {
         Bin* bin = b.bin;
         float overlap = b.overlap;
         // add electric force
@@ -420,8 +413,8 @@ void Placer::nudgeNode(Node* node_p)
     }
 
     XY move;
-    move.x = -learning_rate * (wirelen_gradient.x - electro_force.x);
-    move.y = -learning_rate * (wirelen_gradient.y - electro_force.y);
+    move.x = learning_rate * (-wirelen_gradient.x + electro_force.x);
+    move.y = learning_rate * (-wirelen_gradient.y + electro_force.y);
 
     // Update the position of this node
     node_p->translate(move.x, move.y);
@@ -434,17 +427,15 @@ void Placer::nudgeNode(Node* node_p)
 
 void Placer::printIterationResults()
 {
-    if (iteration % 1 == 0)
-    {
-        cout << "Iteration " << iteration << ":";
-        cout << "\t" << "Total HPWL: " << db.computeTotalWirelength();
-        cout << "\t\t" << "Total Overflow: " << grid.computeTotalOverflow();
-        cout << endl;
-    
-        #ifdef CREATE_VISUALIZATION
+    cout << "Iteration " << iteration << ":";
+    cout << "\t" << "Total HPWL: " << db.computeTotalWirelength();
+    cout << "\t\t" << "Total Overflow: " << grid.computeTotalOverflow();
+    cout << endl;
+
+    #ifdef CREATE_VISUALIZATION
+        if (iteration % 10 == 0)
             viz.drawPlacement(db, iteration);
-        #endif
-    }
+    #endif
 }
 
 void Placer::computeStatistics()

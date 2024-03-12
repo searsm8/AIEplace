@@ -48,11 +48,13 @@ void Visualizer::drawPlacement(DataBase db, int iteration)
     cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);
     cairo_paint(cr);
 
-    // Draw die boundary and bins in black
+    // Draw die boundary in black
     cairo_set_source_rgb (cr, 0.0, 0.0, 0.0);
     cairo_set_line_width (cr, 0.004);
     cairo_rectangle (cr, DIE_START, DIE_START, 1-2*DIE_START, 1-2*DIE_START);
     cairo_stroke(cr);
+
+    // Draw bins
 
     // Draw Components
     for (auto item : db.getComponents())
@@ -69,6 +71,7 @@ void Visualizer::drawPlacement(DataBase db, int iteration)
     string filename = "images/placement_";
     filename.append(std::to_string(iteration));
     filename.append(".png");
+    cout << "PNG output to " << filename << endl;
     cairo_surface_write_to_png (surface, filename.c_str());
 }
 

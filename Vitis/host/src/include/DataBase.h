@@ -73,6 +73,7 @@ public:
     void sortPositionsByY();
 
     double computeTotalWirelength();
+    double computeTotalComponentArea();
     double getTotalOverflow();
 
 

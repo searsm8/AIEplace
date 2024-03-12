@@ -1,11 +1,16 @@
 
-.PHONY: all
 
-GCC := g++ #${CXX} # For CPU only build, set to g++
+CREATE_VISUALIZATION = true# Comment this if no visualization is needed.
+
+GCC := g++#${CXX} # For CPU only build, set to g++
 TOP_DIR ?= ..
 MAIN = main.cpp
-ITEMS:= AIEplace DataBase Grid Net DCT #Visualizer
-OBJS := $(addsuffix .o, ${ITEMS})
+ITEMS := AIEplace DataBase Grid Net DCT 
+ifdef CREATE_VISUALIZATION 
+ITEMS += Visualizer
+endif
+
+OBJS := $(addprefix objs/, $(addsuffix .o, ${ITEMS}))
 EXE := ${TOP_DIR}/AIEplace.exe
 
 LIMBO_DIR := ~/AIEplace/third_party/Limbo
@@ -23,6 +28,12 @@ COMPILE_FLAGS += -lcairo
 COMPILE_FLAGS += -lstdc++fs
 COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 
+ifdef CREATE_VISUALIZATION 
+COMPILE_FLAGS += -DCREATE_VISUALIZATION
+endif
+
+.PHONY: all exe objs
+
 all: ${EXE}
 
 ${EXE}: ${MAIN} ${OBJS}
@@ -30,8 +41,9 @@ ${EXE}: ${MAIN} ${OBJS}
 
 objs: ${OBJS}
 
-%.o: %.cpp ./include/%.h ./include/Common.h
+objs/%.o: ./%.cpp ./include/%.h ./include/Common.h
+	mkdir -p objs
 	${GCC} -c $< ${INCLUDES} ${COMPILE_FLAGS} -o $@
 
 clean:
-	rm -rf ${EXE} *.o
+	rm -rf objs ${EXE} 

@@ -1,4 +1,3 @@
-golden
 *.o
 *.out
 */__pycache__

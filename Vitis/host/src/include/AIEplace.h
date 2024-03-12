@@ -4,6 +4,7 @@
 #include "Common.h"
 #include "DataBase.h"
 #include "Grid.h"
+#include "VersalDriver.h"
 
 #ifdef CREATE_VISUALIZATION
     #include "Visualizer.h"
@@ -16,28 +17,26 @@ class Placer
 public:
     DataBase db;
     Grid grid;
+    VersalDriver driver;
     float gamma = 4.0; // smoothness factor for estimations; 
                        // larger means less smooth but more accurate
     int iteration = 0;
-    float learning_rate = 1000;
+    float learning_rate = 300;
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;
 #endif
 
     // Constructors
+    Placer(fs::path input_dir, std::string xclbin_file) : 
 #ifdef CREATE_VISUALIZATION
-    Placer(fs::path input_dir) : 
+        viz(Visualizer(db.getDieArea())),
+#endif
         db(DataBase(input_dir)), 
         grid(Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_COL)), 
-        viz(Visualizer(db.getDieArea())) { }
-#else
-    Placer(fs::path input_dir) : 
-        db(DataBase(input_dir)), 
-        grid(Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_COL)) { }
-#endif
+        driver(VersalDriver(xclbin_file)) { }
+
 
     static void printVersionInfo();
-
 
     // Pre-run preparation
     void initialPlacement(Position<position_type> target_pos, int min_dist, int max_dist);
