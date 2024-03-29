@@ -34,13 +34,10 @@ AIE_FLAGS += -include=$(DSPLIB_ROOT)/L2/include/aie
 AIE_FLAGS += -include=$(DSPLIB_ROOT)/L2/tests/aie/common/inc
 #AIE_FLAGS += -include=$(XILINX_VITIS)/aietools/include/
 AIE_FLAGS += --verbose
-#AIE_FLAGS += --platform=$(PLATFORM)
-# platform not needed for VCK5000?
+#AIE_FLAGS += --platform=$(PLATFORM) # platform not needed for VCK5000?
 AIE_FLAGS += --kernel-linting
 
-#libadf.a: src/* 
-
-TARGET := hw
+TARGET ?= hw #choose: hw_emu, hw, sw_emu
 
 # Compile a full graph for AIEplace application, including multiple partials graphs and density graph
 libadf.a: src/*
@@ -48,7 +45,7 @@ libadf.a: src/*
 	@echo "INFO: Running aiecompiler for all AIEplace graphs and kernels..."
 	@rm -rf Work libadf.a
 	@mkdir -p Work
-	aiecompiler --target=hw ${AIE_FLAGS} --workdir=./Work src/TopGraph.cpp
+	aiecompiler --target=${TARGET} ${AIE_FLAGS} --workdir=./Work src/TopGraph.cpp
 
 # Compile a graph for only partials computation
 partials: src/partials/*

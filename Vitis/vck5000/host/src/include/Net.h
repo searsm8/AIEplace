@@ -65,6 +65,8 @@ public:
     // Sorting
     void sortPositionsByX();
     void sortPositionsByY();
+    void sortPositionsMaxMinX();
+    void sortPositionsMaxMinY();
 
     // Metrics
     position_type computeWirelength(); // method must be "HPWL" or "RSMT"

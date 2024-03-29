@@ -1,33 +1,37 @@
 
 
-CREATE_VISUALIZATION = true# Comment this if no visualization is needed.
+#CREATE_VISUALIZATION ?= true# Comment this if no visualization is needed.
 
 GCC := g++#${CXX} # For CPU only build, set to g++
-TOP_DIR ?= ..
+TOP_DIR := ../..
 MAIN = main.cpp
-ITEMS := AIEplace DataBase Grid Net DCT 
+ITEMS := AIEplace DataBase Grid Net DCT VersalDriver
 ifdef CREATE_VISUALIZATION 
 ITEMS += Visualizer
 endif
 
 OBJS := $(addprefix objs/, $(addsuffix .o, ${ITEMS}))
-EXE := ${TOP_DIR}/AIEplace.exe
+EXE := ${TOP_DIR}/bin/AIEplace.exe
 
-LIMBO_DIR := ~/AIEplace/third_party/Limbo
+LIMBO_DIR := ${HOME}/AIEplace/third_party/Limbo
 
 INCLUDES := -I ./include
 INCLUDES += -I ${LIMBO_DIR}
+INCLUDES += -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/ -I/lustre/home/nx08/shared/fpga/xilinx/include/ 
 
 COMPILE_FLAGS := -std=c++17
-COMPILE_FLAGS += -L ${LIMBO_DIR}/lib 
+COMPILE_FLAGS += -L${LIMBO_DIR}/lib 
 COMPILE_FLAGS += -llefparseradapt 
 COMPILE_FLAGS += -ldefparseradapt 
 #COMPILE_FLAGS += -lverilogparser
 #COMPILE_FLAGS += -lbookshelfparser
 COMPILE_FLAGS += -lcairo
 COMPILE_FLAGS += -lstdc++fs
-COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
+COMPILE_FLAGS += -lxrt_coreutil -lxilinxopencl
+COMPILE_FLAGS += -O0 -g -L$(XILINX_XRT)/lib/ -lpthread -lrt -lstdc++
+#COMPILE_FLAGS += -Wall
 
+COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 ifdef CREATE_VISUALIZATION 
 COMPILE_FLAGS += -DCREATE_VISUALIZATION
 endif
@@ -42,7 +46,7 @@ ${EXE}: ${MAIN} ${OBJS}
 objs: ${OBJS}
 
 objs/%.o: ./%.cpp ./include/%.h ./include/Common.h
-	mkdir -p objs
+	@mkdir -p objs
 	${GCC} -c $< ${INCLUDES} ${COMPILE_FLAGS} -o $@
 
 clean:

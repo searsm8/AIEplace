@@ -71,6 +71,8 @@ public:
     void iterationReset();
     void sortPositionsByX();
     void sortPositionsByY();
+    void sortPositionsMaxMinX();
+    void sortPositionsMaxMinY();
 
     double computeTotalWirelength();
     double computeTotalComponentArea();

@@ -26,6 +26,7 @@ void compute_abc(input_stream<float> * __restrict x_in, output_stream<float> * _
 	aie::vector<float, 4> ctrl = readincr_v4(x_in);
   int32 net_size  = ctrl.get(0);
   int32 net_count = ctrl.get(1); // will not always be multiple of 8
+  // ignore ctrl(2) and ctrl(3)
 
   // Push control data onto output stream for use by partials kernel
   writeincr(bc_out, ctrl);

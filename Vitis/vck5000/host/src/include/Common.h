@@ -27,11 +27,12 @@ using std::min;
 //#define USE_AIE_ACCELERATION // set in Makefile
 //#define CREATE_VISUALIZATION // set in Makefile
 
-#define BINS_PER_ROW 128
+#define BINS_PER_ROW 128 // Should be scaled up to 512 or 1024 for final application
 #define BINS_PER_COL 128
 #define INITIAL_LAMBDA 0.002
 
-#define DATA_XFER_SIZE 16 // number of floats transferred to AIE kernels per run
+#define DATA_XFER_SIZE 8*8 // number of floats transferred to AIE kernels per run
+#define NUM_PIPELINES 2
 
 AIEPLACE_NAMESPACE_BEGIN 
 

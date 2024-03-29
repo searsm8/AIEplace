@@ -111,6 +111,21 @@ void DataBase::sortPositionsByY()
         item.second->sortPositionsByY();
 }
 
+// Places Nodes in order for AIE kernel execution:
+// max_x, min_x, x, x, x...
+void DataBase::sortPositionsMaxMinX()
+{
+    for (auto item : mm_nets)
+        item.second->sortPositionsMaxMinX();
+}
+
+// Places Nodes in order for AIE kernel execution:
+// max_y, min_y, y, y, y...
+void DataBase::sortPositionsMaxMinY()
+{
+    for (auto item : mm_nets)
+        item.second->sortPositionsMaxMinY();
+}
 
 double DataBase::computeTotalWirelength()
 {
@@ -302,7 +317,7 @@ void DataBase::printNetsByDegree()
 
 void DataBase::printInfo()
 {
-    cout << "DataBase info:" << endl;
+    cout << "---###--- DataBase info ---###---" << endl;
     cout << std::scientific;
     cout << "Die Area: " << m_die_area.getArea() << "\t" << m_die_area.to_string() <<  endl;
     cout << std::fixed;

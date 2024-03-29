@@ -24,7 +24,7 @@ int main(int argc, char *argv[])
     //placer.db.printNets();
     //placer.db.printNetsByDegree();
 
-    //placer.run();
+    placer.run();
 
     return 0;
 }

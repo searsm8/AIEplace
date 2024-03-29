@@ -26,14 +26,15 @@ public:
     Visualizer viz;
 #endif
 
-    // Constructors
+    // Constructor
     Placer(fs::path input_dir, std::string xclbin_file) : 
+        db(DataBase(input_dir)), 
+        grid(Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_COL)), 
 #ifdef CREATE_VISUALIZATION
         viz(Visualizer(db.getDieArea())),
 #endif
-        db(DataBase(input_dir)), 
-        grid(Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_COL)), 
-        driver(VersalDriver(xclbin_file)) { }
+        driver(VersalDriver(xclbin_file, DEVICE_ID, NUM_PIPELINES))
+        { }
 
 
     static void printVersionInfo();
@@ -43,6 +44,7 @@ public:
     void iterationReset();
 
     // Functions which may be accelerated on AIEs
+    void prepareInputData(float * input_data, int net_size);
     void computeAllPartials_AIE ();
     void computeElectricFields_AIE ();
 

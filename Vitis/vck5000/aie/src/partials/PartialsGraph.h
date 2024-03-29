@@ -4,7 +4,7 @@
 #include "partials_kernels.h"
 
 #define DEBUG_OUTPUT // output files for a+, a-, b+, b-, c+, c-
-#define NUM_GRAPHS 1
+#define NUM_GRAPHS 2
 #define str std::to_string
 
 class PartialsGraph : public adf::graph {
@@ -22,8 +22,8 @@ public:
       partials_kernel[i] = adf::kernel::create(compute_partials);
 
       // Primary inputs to the AIE array
-      x_in[i] = adf::input_plio::create("x_in"+str(i), adf::plio_128_bits, "golden_data/partials/x_in"+str(i)+".dat");
-      outplio_partials[i] = adf::output_plio::create("outplio_partials"+str(i), adf::plio_128_bits, "simdata/partials"+str(i)+".dat");
+      x_in[i] = adf::input_plio::create("x_in_"+str(i), adf::plio_128_bits, "golden_data/partials/x_in"+str(i)+".dat");
+      outplio_partials[i] = adf::output_plio::create("outplio_partials_"+str(i), adf::plio_128_bits, "simdata/partials"+str(i)+".dat");
 
       // Input connections for abc_kernel
       adf::connect<adf::stream>(x_in[i].out[0], abc_kernel[i].in[0]); // x-coords
@@ -31,11 +31,10 @@ public:
       // Input connections for partials_kernel
       adf::connect<adf::stream> net_xa(abc_kernel[i].out[0], partials_kernel[i].in[0]);
       adf::connect<adf::stream> net_bc(abc_kernel[i].out[1], partials_kernel[i].in[1]);
-      adf::fifo_depth(net_xa) = 92; // 92 is large enough to handle nets of size 7 (with minor stalls)
-                                    // or nets of size 6 without stalls
+      adf::fifo_depth(net_xa) = 140; // 140 is large enough to handle nets of size 8 without stalls
+                                    // or nets of size 9 (with minor stalls)
                                     // add or subtract 24 to the buffer size to increase net size 
-                                    
-                                    // nets larger than 7 should be handled by the host code
+                                    // nets larger than 8 should be handled by the host code
       //adf::fifo_depth(net_bc) = 96*2; // this one doesn't need a fifo
 
       adf::connect<adf::stream>(partials_kernel[i].out[0], outplio_partials[i].in[0]);

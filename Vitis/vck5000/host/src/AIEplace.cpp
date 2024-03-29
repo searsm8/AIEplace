@@ -16,7 +16,9 @@ void Placer::run()
 {
     Position<position_type> target =
                 Position<position_type>(grid.getDieWidth()/2, grid.getDieHeight()/2);
-    initialPlacement(target, 0, (int)grid.getDieHeight()/4);
+
+    initialPlacement(target, 0, 500); // Close placement for testing purposes
+    //initialPlacement(target, 0, (int)grid.getDieHeight()/4);
 
     bool converged = false;
     while( !converged )
@@ -85,30 +87,70 @@ void Placer::initialPlacement(Position<position_type> target_pos, int min_dist, 
  * AIE acceleration functions
 ****************/
 
+
+/*
+ * @brief Prepare data in correct format to be sent to PL and then AIE input streams
+ *
+**/
+void Placer::prepareInputData(float * input_data, int net_size)
+{
+    input_data[0] = net_size;
+    input_data[1] = 8;
+    input_data[2] = 0;
+    input_data[3] = 0;
+
+    auto nets_by_degree = db.getNetsByDegree();
+    for(int i = 0; i < 8; i++) {
+        auto net = nets_by_degree[net_size][i];
+        net->sortPositionsMaxMinY(); // X or Y
+        auto nodes = net->getNodes();
+        for(int j = 0; j < net_size; j++)
+            input_data[i+4+j*8] = nodes[j]->getY(); // X or Y
+    }
+}
+
 /*
  * @brief On AIEs, compute partial derivatives
  *
 **/
 void Placer::computeAllPartials_AIE()
 {
-    // Gather input data to send to AIE graph
-    auto nets_by_degree = db.getNetsByDegree();
-    float * input_data;
-    for(int i = 0; i < 8; i++) {
-        auto net_nodes = nets_by_degree[2][i].getNodes();
-        input_data[2*i] = net_nodes[0];
-        input_data[2*i+1] = net_nodes[1];
-    }
 
-    float * result_data;
+
+    // PRINT NUMBER OF NETS BY SIZE
+    //int large_net_count = 0;
+    //for(auto nets : nets_by_degree) {
+    //    if(nets.first <= 10)
+    //        cout << "Number of nets with size " << nets.first << ": " << nets.second.size() << endl;
+    //    else large_net_count += nets.second.size();
+    //}
+    //    cout << "Number of nets with size > 10: " << large_net_count << endl;
+
+
+    //cout << "input_data:" << endl;
+    //for(int i = 0; i < DATA_XFER_SIZE+4; i++) {
+    //    cout << "input_data[" << i << "]" <<input_data[i] << endl;
+    //    if((i+1)%4 == 0) cout << endl;
+    //}
+
+    //float * result_data = new float[DATA_XFER_SIZE];
 
     // Call AIE graph_driver to accelerate computation
-    driver.run_PL_kernels(input_data, result_data);
+    for(int kernel_index = 0; kernel_index < NUM_PIPELINES; kernel_index++) {
+        // Gather input data to send to AIE graph
+        float * input_data = new float[DATA_XFER_SIZE + 4];
+        int net_size = 8;
+        prepareInputData(input_data, net_size);
+        // Send data to AIE graph
+        driver.start_PL_kernel(kernel_index, input_data, DATA_XFER_SIZE+4);
+        driver.wait_for_finish(kernel_index, result_data, DATA_XFER_SIZE);
+        driver.print_results();
+    }
 
     // print result data
     cout << "Result data: " << endl;
-    for(float * f : result_data)
-        cout << f << endl;
+    for(int i = 0; i < DATA_XFER_SIZE; i++)
+        cout << "result_data[" << i << "]" << result_data[i] << endl;
 }
 
 /*
