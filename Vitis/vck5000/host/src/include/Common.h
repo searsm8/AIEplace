@@ -32,7 +32,7 @@ using std::min;
 #define INITIAL_LAMBDA 0.002
 
 #define DATA_XFER_SIZE 8*8 // number of floats transferred to AIE kernels per run
-#define NUM_PIPELINES 2
+#define NUM_PIPELINES 1 // rename to NUM_COMPUTE_UNITS?
 
 AIEPLACE_NAMESPACE_BEGIN 
 

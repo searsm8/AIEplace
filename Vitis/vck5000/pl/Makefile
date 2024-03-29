@@ -2,20 +2,17 @@
 .PHONY: help
 help:
 	@echo "Makefile Usage:"
-	@echo "  make build TARGET=<sw_emu/hw_emu/hw>"
-	@echo "      Command to generate the design for specified Target and Device."
-	@echo ""
-	@echo "  make host "
-	@echo "      Command to generate host."
-	@echo ""
-	@echo "  make device "
+	@echo "  make pl TARGET=<sw_emu/hw_emu/hw>"
 	@echo "      Command to generate hardware platform files(xo,xclbin)."
+	@echo ""
+	@echo "  make repackage"
+	@echo "      Command to generate the design for specified Target and Device."
 	@echo ""
 	@echo "  make clean "
 	@echo "      Command to remove the generated files."
 	@echo ""
 #######################################################################################
-TARGET := hw_emu#sw_emu, hw_emu, hw
+TARGET ?= hw#choose: sw_emu, hw_emu, hw
 PLATFORM := xilinx_vck5000_gen4x8_xdma_2_202210_1
 XO := aieplace.$(TARGET).xo
 XSA_OBJ := aieplace.$(TARGET).xsa
@@ -32,10 +29,10 @@ AIE_OBJ := ../../aie/libadf.a
 KRNL_COMPILE_OPTS := -t $(TARGET) --config ../design.cfg --save-temps -j 26 -g
 KRNL_LINK_OPTS := -t $(TARGET) --config ../link.cfg -j 26 -g --save-temps
 	
-.PHONY: device
+.PHONY: pl
 .ONESHELL:
 
-device: mkrefdir $(XO) $(XCLBIN)
+pl: mkrefdir $(XO) $(XCLBIN)
 	cp reference_files_$(TARGET)/$(XCLBIN) ../bin/.
 
 mkrefdir:
@@ -68,4 +65,4 @@ emconfig:
 # Cleaning stuff
 .PHONY: clean
 clean:
-	rm -f *device.$(TARGET).$(PLATFORM).* *.log *.json *.xo
+	rm -rf reference_files_$(TARGET)

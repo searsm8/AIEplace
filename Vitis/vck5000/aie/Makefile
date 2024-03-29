@@ -37,7 +37,7 @@ AIE_FLAGS += --verbose
 #AIE_FLAGS += --platform=$(PLATFORM) # platform not needed for VCK5000?
 AIE_FLAGS += --kernel-linting
 
-TARGET ?= hw #choose: hw_emu, hw, sw_emu
+TARGET ?= hw#choose: hw_emu, hw, sw_emu
 
 # Compile a full graph for AIEplace application, including multiple partials graphs and density graph
 libadf.a: src/*

@@ -1,7 +1,7 @@
 # Top level Makefile which calls subdirectory Makefiles
 
-TARGET = hw_emu # choose: hw, hw_emu, or sw_emu
-AIE_GRAPH = partials # choose: aie, partials, or density
+TARGET = hw_emu# choose: hw, hw_emu, or sw_emu
+AIE_GRAPH = partials# choose: aie, partials, or density
 
 .PHONY: all aie partials density pl repackage host clean
 

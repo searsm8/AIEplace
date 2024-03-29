@@ -4,7 +4,7 @@
 #include "partials_kernels.h"
 
 #define DEBUG_OUTPUT // output files for a+, a-, b+, b-, c+, c-
-#define NUM_GRAPHS 2
+#define NUM_GRAPHS 1 // TODO: combine with Common.h definition
 #define str std::to_string
 
 class PartialsGraph : public adf::graph {
