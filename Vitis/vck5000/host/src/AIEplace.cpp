@@ -3,6 +3,28 @@
 #include <cmath>
 
 AIEPLACE_NAMESPACE_BEGIN
+Placer::Placer(fs::path input_dir, std::string xclbin_file) : 
+        db(DataBase(input_dir)), 
+        #ifdef CREATE_VISUALIZATION
+        viz(Visualizer(db.getDieArea())),
+        #endif
+        grid(Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_COL)) 
+        { 
+            #ifdef USE_AIE_ACCELERATION
+            // Open Xilinx Device
+            std::cout << "Loading xclbin: " << xclbin_file << std::endl;
+            xrt::device device = xrt::device(DEVICE_ID);
+            std::cout << "Device ID " << DEVICE_ID << " found!" << std::endl;
+
+            // Load xclbin which includes PL and AIE graph
+            std::cout << "Loading XCL bin..." << endl;
+            xrt::uuid xclbin_uuid = device.load_xclbin(xclbin_file);
+
+            // Create drivers which handle buffer IO
+            for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
+                drivers[i].init(device, xclbin_uuid, i);
+            #endif
+        }
 void Placer::printVersionInfo()
 {
     cout << endl << "AIEplace v0.0.1" << ": Pre-release" << endl;
@@ -24,7 +46,7 @@ void Placer::run()
     while( !converged )
     {
         performIteration();
-        if (iteration++ == 1)
+        if (iteration++ == 1) // TODO: only runs one iteration!
             converged = true;
     }
 }
@@ -92,7 +114,7 @@ void Placer::initialPlacement(Position<position_type> target_pos, int min_dist, 
  * @brief Prepare data in correct format to be sent to PL and then AIE input streams
  *
 **/
-void Placer::prepareInputData(float * input_data, int net_size)
+void Placer::prepareInputDataPacket(float * input_data, int net_size)
 {
     input_data[0] = net_size;
     input_data[1] = 8;
@@ -115,8 +137,6 @@ void Placer::prepareInputData(float * input_data, int net_size)
 **/
 void Placer::computeAllPartials_AIE()
 {
-
-
     // PRINT NUMBER OF NETS BY SIZE
     //int large_net_count = 0;
     //for(auto nets : nets_by_degree) {
@@ -133,19 +153,22 @@ void Placer::computeAllPartials_AIE()
     //    if((i+1)%4 == 0) cout << endl;
     //}
 
-    //float * result_data = new float[DATA_XFER_SIZE];
+    float * result_data = new float[DATA_XFER_SIZE];
 
     // Call AIE graph_driver to accelerate computation
-    for(int kernel_index = 0; kernel_index < NUM_PIPELINES; kernel_index++) {
+    for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
         // Gather input data to send to AIE graph
         float * input_data = new float[DATA_XFER_SIZE + 4];
         int net_size = 8;
-        prepareInputData(input_data, net_size);
+        prepareInputDataPacket(input_data, net_size);
         // Send data to AIE graph
-        driver.start_PL_kernel(kernel_index, input_data, DATA_XFER_SIZE+4);
-        driver.wait_for_finish(kernel_index, result_data, DATA_XFER_SIZE);
-        driver.print_results();
+        drivers[kernel_index].start(input_data);
     }
+    for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
+        drivers[kernel_index].wait(result_data);
+        drivers[kernel_index].print_info();
+    }
+
 
     // print result data
     cout << "Result data: " << endl;

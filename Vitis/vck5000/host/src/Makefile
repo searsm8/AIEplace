@@ -5,7 +5,7 @@
 GCC := g++#${CXX} # For CPU only build, set to g++
 TOP_DIR := ../..
 MAIN = main.cpp
-ITEMS := AIEplace DataBase Grid Net DCT VersalDriver
+ITEMS := AIEplace DataBase Grid Net DCT GraphDriver
 ifdef CREATE_VISUALIZATION 
 ITEMS += Visualizer
 endif

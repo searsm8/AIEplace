@@ -4,7 +4,9 @@
 #include "Common.h"
 #include "DataBase.h"
 #include "Grid.h"
-#include "VersalDriver.h"
+#include "GraphDriver.h"
+
+#define DEVICE_ID 0
 
 #ifdef CREATE_VISUALIZATION
     #include "Visualizer.h"
@@ -17,7 +19,8 @@ class Placer
 public:
     DataBase db;
     Grid grid;
-    VersalDriver driver;
+    PartialsGraphDriver drivers[PARTIALS_GRAPH_COUNT];
+
     float gamma = 4.0; // smoothness factor for estimations; 
                        // larger means less smooth but more accurate
     int iteration = 0;
@@ -27,15 +30,7 @@ public:
 #endif
 
     // Constructor
-    Placer(fs::path input_dir, std::string xclbin_file) : 
-        db(DataBase(input_dir)), 
-        grid(Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_COL)), 
-#ifdef CREATE_VISUALIZATION
-        viz(Visualizer(db.getDieArea())),
-#endif
-        driver(VersalDriver(xclbin_file, DEVICE_ID, NUM_PIPELINES))
-        { }
-
+    Placer(fs::path input_dir, std::string xclbin_file);
 
     static void printVersionInfo();
 
@@ -44,7 +39,7 @@ public:
     void iterationReset();
 
     // Functions which may be accelerated on AIEs
-    void prepareInputData(float * input_data, int net_size);
+    void prepareInputDataPacket(float * input_data, int net_size);
     void computeAllPartials_AIE ();
     void computeElectricFields_AIE ();
 

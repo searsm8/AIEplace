@@ -32,12 +32,13 @@ AIE_FLAGS += -include=$(DSPLIB_ROOT)/L1/tests/aie/inc
 AIE_FLAGS += -include=$(DSPLIB_ROOT)/L1/tests/aie/src
 AIE_FLAGS += -include=$(DSPLIB_ROOT)/L2/include/aie
 AIE_FLAGS += -include=$(DSPLIB_ROOT)/L2/tests/aie/common/inc
+AIE_FLAGS += -include=../host/src/include
 #AIE_FLAGS += -include=$(XILINX_VITIS)/aietools/include/
 AIE_FLAGS += --verbose
 #AIE_FLAGS += --platform=$(PLATFORM) # platform not needed for VCK5000?
 AIE_FLAGS += --kernel-linting
 
-TARGET ?= hw#choose: hw_emu, hw, sw_emu
+TARGET := hw#choose: hw_emu, hw, sw_emu
 
 # Compile a full graph for AIEplace application, including multiple partials graphs and density graph
 libadf.a: src/*

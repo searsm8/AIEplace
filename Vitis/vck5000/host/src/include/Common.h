@@ -20,19 +20,22 @@ using std::map;
 using std::max;
 using std::min;
 
-#define AIEPLACE_NAMESPACE_BEGIN namespace AIEplace {
-#define AIEPLACE_NAMESPACE_END }
-
+// ePlace hyperparameters
+#define INITIAL_LAMBDA 0.002
 #define WIRELENGTH_COMPUTE_METHOD "HPWL"
-//#define USE_AIE_ACCELERATION // set in Makefile
-//#define CREATE_VISUALIZATION // set in Makefile
+#define USE_AIE_ACCELERATION // set in Makefile?
+//#define CREATE_VISUALIZATION // set in Makefile?
 
+// other parameters
 #define BINS_PER_ROW 128 // Should be scaled up to 512 or 1024 for final application
 #define BINS_PER_COL 128
-#define INITIAL_LAMBDA 0.002
 
 #define DATA_XFER_SIZE 8*8 // number of floats transferred to AIE kernels per run
-#define NUM_PIPELINES 1 // rename to NUM_COMPUTE_UNITS?
+#define PARTIALS_GRAPH_COUNT 2 // number of compute units on AIE for partials acceleration
+
+
+#define AIEPLACE_NAMESPACE_BEGIN namespace AIEplace {
+#define AIEPLACE_NAMESPACE_END }
 
 AIEPLACE_NAMESPACE_BEGIN 
 

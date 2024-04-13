@@ -30,6 +30,7 @@ private:
     map<string, Pin *> mm_pins;
     map<string, Net *> mm_nets;
     map<int, std::vector<Net *>> mmv_nets_by_degree;
+    map<int, int> mm_data_index; // Used to track what data has been sent from mmv_nets_by_degree 
 
     Box<position_type> m_die_area;
 
