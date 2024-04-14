@@ -3,16 +3,16 @@ Implementation of the [RePlace](https://github.com/The-OpenROAD-Project/RePlAce)
 
 ### Directory Structure
 
-* Vitis projects can be found in the [Vitis](./Vitis) directory, and can be built and run using the Makefiles found there.
-* A simplified version of the ePlace algorithm is implemented in the [python_impl](./python_impl).
+* The AIEplace application targeting the VCK5000 acceleration card can be found in the [vck5000](./vck5000) directory, and can be built and run using the Makefiles found there.
+* A simplified version of the ePlace algorithm is implemented in the [python](./python).
 
 
 ### Functional examples on tiny benchmarks:
 
-![Python implementation of AIEplace 8x48](images/AIEplace_8x48.gif)
-![Python implementation of AIEplace 8x8](images/AIEplace_8x8.gif)
-![Python implementation of AIEplace 16x16](images/AIEplace_16x16.gif)
-![Python implementation of AIEplace 24x24](images/AIEplace_24x24.gif)
+![Python implementation of AIEplace 8x48](docs/images/AIEplace_8x48.gif)
+![Python implementation of AIEplace 8x8](docs/images/AIEplace_8x8.gif)
+![Python implementation of AIEplace 16x16](docs/images/AIEplace_16x16.gif)
+![Python implementation of AIEplace 24x24](docs/images/AIEplace_24x24.gif)
 
 # References
 
