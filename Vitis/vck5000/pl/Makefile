@@ -18,8 +18,8 @@ XO := aieplace.$(TARGET).xo
 XSA_OBJ := aieplace.$(TARGET).xsa
 XCLBIN := aieplace.$(TARGET).xclbin
 
-KERNEL_XO := device_s2mm.xo device_mm2s.xo
-#KERNEL_XO := device_mm2aie2mm.xo
+KERNEL_XO := pl_kernel_s2mm.xo pl_kernel_mm2s.xo
+#KERNEL_XO := pl_kernel_mm2aie2mm.xo
 
 #KERNEL_NAME := sum_kernel
 
@@ -45,7 +45,7 @@ mkrefdir:
 
 %.xo: src/%.cpp
 	cd reference_files_$(TARGET) ; v++ $(KRNL_COMPILE_OPTS) -k $(basename $(notdir $<)) ../$< -o $@
-#$(XO): src/device_m2ss.cpp src/device_s2mm.cpp
+#$(XO): src/pl_kernel_m2ss.cpp src/pl_kernel_s2mm.cpp
 #	cd reference_files_$(TARGET) ; v++ $(KRNL_COMPILE_OPTS) -c -k $(KERNEL_NAME) -I'$(<D)' -o'$@' ../$<
 .PHONY: $(XSA_OBJ)
 $(XSA_OBJ): $(KERNEL_XO)
