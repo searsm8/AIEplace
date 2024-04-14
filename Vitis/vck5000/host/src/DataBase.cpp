@@ -94,6 +94,10 @@ void DataBase::iterationReset()
 
     for (auto item : mm_nets)
         item.second->iterationReset();
+
+    // Reset mm_data_index to all zeroes
+    for(auto item : mm_data_index)
+        item.second = 0;
 }
 
 
@@ -145,6 +149,35 @@ double DataBase::computeTotalComponentArea()
     }
     cout << "Total component area: " << total_area << endl;
     return total_area;
+}
+
+/*
+ * @brief Prepare data in correct format to be sent to PL and then AIE input streams
+ *
+**/
+void DataBase::prepareXdata(float * input_data, int net_size)
+{
+    input_data[0] = net_size;
+    input_data[1] = 8;
+    input_data[2] = 0;
+    input_data[3] = 0;
+
+    int offset = mm_data_index[net_size]; // offset tracks where data should be taken from
+
+    for(int i = 0; i < 8; i++) { // prepare data for 8 nets at a time
+        auto net = mmv_nets_by_degree[net_size][i+offset];
+        net->sortPositionsMaxMinX(); // X or Y
+        auto nodes = net->getNodes();
+        cout << "\nNode order" << endl;
+        for(int j = 0; j < net_size; j++) {
+            input_data[i+4+j*8] = nodes[j]->getX(); // X or Y
+            cout << nodes[j]->getName() << "\t";
+        }
+        cout << endl;
+    }
+
+    // Move mm_data_index to the next unsent data
+    mm_data_index[net_size] += 8 * net_size;
 }
 
         /// parser callback functions 
@@ -240,8 +273,10 @@ double DataBase::computeTotalComponentArea()
             mm_nets.emplace(std::make_pair(new_net->getName(), new_net));
 
             int degree = new_net->getDegree();
-            if (mmv_nets_by_degree.count(degree) == 0)
+            if (mmv_nets_by_degree.count(degree) == 0) {
                 mmv_nets_by_degree.emplace(std::make_pair(degree, std::vector<Net*>()));
+                mm_data_index.emplace(std::make_pair(degree, 0));
+            }
             mmv_nets_by_degree[degree].push_back(new_net);
         }
 

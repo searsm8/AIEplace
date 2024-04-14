@@ -78,6 +78,8 @@ public:
     double computeTotalWirelength();
     double computeTotalComponentArea();
     double getTotalOverflow();
+    void prepareXdata(float * input_data, int net_size);
+    void prepareYdata(float * input_data, int net_size);
 
 
     /// parser callback functions

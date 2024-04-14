@@ -25,6 +25,7 @@ public:
                        // larger means less smooth but more accurate
     int iteration = 0;
     float learning_rate = 300;
+
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;
 #endif

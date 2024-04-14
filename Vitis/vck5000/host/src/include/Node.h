@@ -108,6 +108,18 @@ public:
     virtual double getYsize() { return 0.0; }
     virtual double getArea()  { return 0.0; }
 
+    void printTerms() {
+        cout << "Node " << m_name << ":";
+        cout << "\ta+x: " << terms.a.plus.x;
+        cout << "\ta-x: " << terms.a.minus.x;
+        cout << "\ta+y: " << terms.a.plus.y;
+        cout << "\ta-y: " << terms.a.minus.y;
+        cout << "\tpartial_x: " << terms.partials.x;
+        cout << "\tpartial_y: " << terms.partials.y;
+        cout << endl;
+
+    }
+
 }; // End of class Node
 
 

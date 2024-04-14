@@ -59,7 +59,7 @@ void Placer::performIteration()
 
     // Compute terms for HPWL partials
     // TODO: compare output of these two functions to ensure correctness
-    //computeAllPartials_CPU();
+    computeAllPartials_CPU();
     computeAllPartials_AIE();
 
     // Compute Electric Fields in each bin
@@ -110,26 +110,6 @@ void Placer::initialPlacement(Position<position_type> target_pos, int min_dist, 
 ****************/
 
 
-/*
- * @brief Prepare data in correct format to be sent to PL and then AIE input streams
- *
-**/
-void Placer::prepareInputDataPacket(float * input_data, int net_size)
-{
-    input_data[0] = net_size;
-    input_data[1] = 8;
-    input_data[2] = 0;
-    input_data[3] = 0;
-
-    auto nets_by_degree = db.getNetsByDegree();
-    for(int i = 0; i < 8; i++) {
-        auto net = nets_by_degree[net_size][i];
-        net->sortPositionsMaxMinY(); // X or Y
-        auto nodes = net->getNodes();
-        for(int j = 0; j < net_size; j++)
-            input_data[i+4+j*8] = nodes[j]->getY(); // X or Y
-    }
-}
 
 /*
  * @brief On AIEs, compute partial derivatives
@@ -153,27 +133,29 @@ void Placer::computeAllPartials_AIE()
     //    if((i+1)%4 == 0) cout << endl;
     //}
 
-    float * result_data = new float[DATA_XFER_SIZE];
 
     // Call AIE graph_driver to accelerate computation
     for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
         // Gather input data to send to AIE graph
-        float * input_data = new float[DATA_XFER_SIZE + 4];
+        float * input_data = new float[DATA_XFER_SIZE + 4]; // Need 4 additional Bytes for control data
         int net_size = 8;
-        prepareInputDataPacket(input_data, net_size);
+        db.prepareXdata(input_data, net_size);
         // Send data to AIE graph
         drivers[kernel_index].start(input_data);
     }
+
+    // Retrieve the result from the AIE kernels
     for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
+        float * result_data = new float[DATA_XFER_SIZE];
         drivers[kernel_index].wait(result_data);
         drivers[kernel_index].print_info();
+        // print result data
+        cout << "Result data: " << endl;
+        for(int i = 0; i < DATA_XFER_SIZE; i++)
+            cout << "result_data[" << i << "]" << result_data[i] << endl;
     }
 
 
-    // print result data
-    cout << "Result data: " << endl;
-    for(int i = 0; i < DATA_XFER_SIZE; i++)
-        cout << "result_data[" << i << "]" << result_data[i] << endl;
 }
 
 /*
@@ -198,10 +180,17 @@ void Placer::computeElectricFields_AIE()
 **/
 void Placer::computeAllPartials_CPU()
 {
-    for (auto item : db.getNetsByDegree()) {
-        for (Net* net_p : item.second)
-            computeNetPartials_CPU(net_p);
+    auto nets = db.getNetsByDegree();
+    for(int i = 0; i < 8; i++)
+    {
+        computeNetPartials_CPU(nets[8][i]);
+        nets[8][i]->printTerms();
     }
+
+    //for (auto item : db.getNetsByDegree()) {
+    //    for (Net* net_p : item.second)
+    //        computeNetPartials_CPU(net_p);
+    //}
 
     // Debugging
     //

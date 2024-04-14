@@ -101,6 +101,19 @@ string Net::to_string()
     return s;
 }
 
+void Net::printTerms()
+{
+    cout << "Terms of net " << m_name << ":" << endl;
+    cout << "\tb+x: " << terms.b.plus.x;
+    cout << "\tb-x: " << terms.b.minus.x;
+    cout << "\tc+x: " << terms.c.plus.x;
+    cout << "\tc-x: " << terms.c.minus.x;
+    cout << endl;
+
+    for(Node* np : mv_nodes)
+        np->printTerms();
+}
+
 /**
  * Compute the wirelength of this net, using HPWL or RSMT method
  * 

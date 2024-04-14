@@ -1,14 +1,8 @@
-
-
-#CREATE_VISUALIZATION ?= true# Comment this if no visualization is needed.
-
 GCC := g++#${CXX} # For CPU only build, set to g++
 TOP_DIR := ../..
 MAIN = main.cpp
 ITEMS := AIEplace DataBase Grid Net DCT GraphDriver
-ifdef CREATE_VISUALIZATION 
 ITEMS += Visualizer
-endif
 
 OBJS := $(addprefix objs/, $(addsuffix .o, ${ITEMS}))
 EXE := ${TOP_DIR}/bin/AIEplace.exe
@@ -32,9 +26,8 @@ COMPILE_FLAGS += -O0 -g -L$(XILINX_XRT)/lib/ -lpthread -lrt -lstdc++
 #COMPILE_FLAGS += -Wall
 
 COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
-ifdef CREATE_VISUALIZATION 
-COMPILE_FLAGS += -DCREATE_VISUALIZATION
-endif
+#COMPILE_FLAGS += -DCREATE_VISUALIZATION# Comment this out if no visualization is wanted.
+#COMPILE_FLAGS += -DUSE_AIE_ACCELERATION# Comment this out if no visualization is wanted.
 
 .PHONY: all exe objs
 

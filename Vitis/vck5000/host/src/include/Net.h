@@ -76,6 +76,7 @@ public:
 
     // Debugging
     string to_string();
+    void printTerms();
 
 }; // End of class Net
 
