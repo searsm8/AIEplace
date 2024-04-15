@@ -1,14 +1,14 @@
 # Top level Makefile which calls subdirectory Makefiles
 
 # Modify these parameters to determine what is built
-TARGET := hw_emu# choose: hw, hw_emu, or sw_emu
+TARGET ?= hw_emu# choose: hw, hw_emu, or sw_emu
 AIE_GRAPH = partials# choose: aie, partials, or density
 
 .PHONY: help all aie partials density pl repackage host clean
 
 help:
 	@echo *#*# Makefile for vck5000 implementation of AIEplace *#*#
-	@echo You can build the different parts of the application these commands:
+	@echo You can build the different parts of the application with these commands:
 	@echo -e '\t"make aie"':'\t' Build the AIE graph configuration. Output: libadf.a
 	@echo -e '\t"make partials"': Build the AIE graph for only partials computation.
 	@echo -e '\t"make density"':'\t' Build the AIE graph for only density computation.

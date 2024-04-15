@@ -34,6 +34,7 @@ COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 all: ${EXE}
 
 ${EXE}: ${MAIN} ${OBJS}
+	@mkdir -p ${TOP_DIR}/bin
 	${GCC} -o ${EXE} ${MAIN} ${OBJS} ${INCLUDES} ${COMPILE_FLAGS}
 
 objs: ${OBJS}

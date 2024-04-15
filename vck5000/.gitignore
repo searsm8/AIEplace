@@ -1,0 +1,5 @@
+bin/
+pl/reference_files_*
+aie/Work
+aie/libadf.a
+aie/*.log
