@@ -39,8 +39,8 @@ public:
     PartialsGraphDriver();
     void init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id);
 
-    void start(float *input_data);
-    float wait(float * output_data);
+    void send_input(float *input_data);
+    float receive_output(float * output_data);
 
     void print_info();
 

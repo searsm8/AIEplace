@@ -34,7 +34,7 @@ void PartialsGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int 
     run_device_s2mm.set_arg(1, DATA_XFER_SIZE );
 }
 
-void PartialsGraphDriver::start(float * input_data)
+void PartialsGraphDriver::send_input(float * input_data)
 {
     cout << "Versal Driver starting kernel." << endl;
     //if(print) std::cout << "Transfer input data to device... ";
@@ -51,7 +51,7 @@ void PartialsGraphDriver::start(float * input_data)
     run_device_s2mm.start();
 }
 
-float PartialsGraphDriver::wait( float * output_data)
+float PartialsGraphDriver::receive_output(float * output_data)
 {
     run_device_s2mm.wait();
     kernel_exec_time = getTiming(getEpoch(), start_time);

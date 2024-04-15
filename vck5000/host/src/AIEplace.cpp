@@ -147,19 +147,19 @@ void Placer::computeAllPartials_AIE()
             float * input_data = new float[DATA_XFER_SIZE + 4]; // Need 4 additional Bytes for control data
             db.prepareXdata(input_data, net_size);
             // Send data to AIE graph
-            cout << "Starting kernel " << kernel_count++ << endl;
-            drivers[kernel_index].start(input_data);
+            cout << "Sending data to kernel " << kernel_count++ << endl;
+            drivers[kernel_index].send_input(input_data);
         }
 
         // Retrieve the result from the AIE kernels
         for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
-            float * result_data = new float[DATA_XFER_SIZE];
-            drivers[kernel_index].wait(result_data);
+            float * output_data = new float[DATA_XFER_SIZE];
+            drivers[kernel_index].receive_output(output_data);
             drivers[kernel_index].print_info();
-            // print result data
-            //cout << "Result data: " << endl;
+            // print output data
+            //cout << "output data: " << endl;
             //for(int i = 0; i < DATA_XFER_SIZE; i++)
-            //    cout << "result_data[" << i << "]" << result_data[i] << endl;
+            //    cout << "output_data[" << i << "]" << result_data[i] << endl;
         }
     }
 
