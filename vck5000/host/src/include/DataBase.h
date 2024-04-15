@@ -30,7 +30,7 @@ private:
     map<string, Pin *> mm_pins;
     map<string, Net *> mm_nets;
     map<int, std::vector<Net *>> mmv_nets_by_degree;
-    map<int, int> mm_data_index; // Used to track what data has been sent from mmv_nets_by_degree 
+    map<int, int> mm_net_index; // Used to track what data has been sent from mmv_nets_by_degree 
 
     Box<position_type> m_die_area;
 
@@ -58,6 +58,7 @@ public:
     const map<string, Pin *> &getPins() { return mm_pins; }
     const map<string, Net *> &getNets() { return mm_nets; }
     const map<int, std::vector<Net *>> &getNetsByDegree() { return mmv_nets_by_degree; }
+    bool hasMoreData(int net_size) { return mm_net_index[net_size] < mmv_nets_by_degree[net_size].size(); }
 
     Box<position_type> &getDieArea() { return m_die_area; }
 

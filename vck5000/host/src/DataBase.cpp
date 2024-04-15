@@ -95,8 +95,8 @@ void DataBase::iterationReset()
     for (auto item : mm_nets)
         item.second->iterationReset();
 
-    // Reset mm_data_index to all zeroes
-    for(auto item : mm_data_index)
+    // Reset mm_net_index to all zeroes
+    for(auto item : mm_net_index)
         item.second = 0;
 }
 
@@ -162,22 +162,39 @@ void DataBase::prepareXdata(float * input_data, int net_size)
     input_data[2] = 0;
     input_data[3] = 0;
 
-    int offset = mm_data_index[net_size]; // offset tracks where data should be taken from
+    int offset = mm_net_index[net_size]; // offset tracks where data should be taken from
+    cout << "Prepare data @offset = " << offset << endl;
 
     for(int i = 0; i < 8; i++) { // prepare data for 8 nets at a time
+        // check if we have reached the end of nets with this degree
+        if(i+offset >= mmv_nets_by_degree[net_size].size()) {
+            // prep data with trailing zeroes
+            cout << "Zeroes at index: " << i+offset << endl; 
+            for(int j = 0; j < net_size; j++)
+                input_data[i+4+j*8] = 0;
+            continue;
+        }
+
+        // otherwise, prep X coordinate data
         auto net = mmv_nets_by_degree[net_size][i+offset];
         net->sortPositionsMaxMinX(); // X or Y
         auto nodes = net->getNodes();
-        cout << "\nNode order" << endl;
         for(int j = 0; j < net_size; j++) {
             input_data[i+4+j*8] = nodes[j]->getX(); // X or Y
-            cout << nodes[j]->getName() << "\t";
         }
-        cout << endl;
     }
 
-    // Move mm_data_index to the next unsent data
-    mm_data_index[net_size] += 8 * net_size;
+    // DEBUG: print the prepared data!
+    cout << "Prepared X data:";
+    for(int i = 0; i < DATA_XFER_SIZE + 4; i++) {
+        if(i%4 == 0) cout << endl;
+        cout << input_data[i] << " ";
+    }
+
+    cout << endl;
+
+    // Move mm_net_index to the next unsent data
+    mm_net_index[net_size] += 8;
 }
 
         /// parser callback functions 
@@ -275,7 +292,7 @@ void DataBase::prepareXdata(float * input_data, int net_size)
             int degree = new_net->getDegree();
             if (mmv_nets_by_degree.count(degree) == 0) {
                 mmv_nets_by_degree.emplace(std::make_pair(degree, std::vector<Net*>()));
-                mm_data_index.emplace(std::make_pair(degree, 0));
+                mm_net_index.emplace(std::make_pair(degree, 0));
             }
             mmv_nets_by_degree[degree].push_back(new_net);
         }

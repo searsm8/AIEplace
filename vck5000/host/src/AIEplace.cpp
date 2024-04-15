@@ -59,7 +59,8 @@ void Placer::performIteration()
 
     // Compute terms for HPWL partials
     // TODO: compare output of these two functions to ensure correctness
-    computeAllPartials_CPU();
+    // DONE: preliminary comparison is correct!
+    //computeAllPartials_CPU();
     computeAllPartials_AIE();
 
     // Compute Electric Fields in each bin
@@ -135,24 +136,31 @@ void Placer::computeAllPartials_AIE()
 
 
     // Call AIE graph_driver to accelerate computation
-    for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
-        // Gather input data to send to AIE graph
-        float * input_data = new float[DATA_XFER_SIZE + 4]; // Need 4 additional Bytes for control data
-        int net_size = 8;
-        db.prepareXdata(input_data, net_size);
-        // Send data to AIE graph
-        drivers[kernel_index].start(input_data);
-    }
+    int net_size = 8;
+    int kernel_count = 0;
+    auto m_nets = db.getNetsByDegree();
+    auto nets = m_nets[net_size];
+    cout << "### Running partials graphs on " << nets.size() << " nets of size " << net_size << endl;
+    while(db.hasMoreData(net_size)) {
+        for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
+            // Gather input data to send to AIE graph
+            float * input_data = new float[DATA_XFER_SIZE + 4]; // Need 4 additional Bytes for control data
+            db.prepareXdata(input_data, net_size);
+            // Send data to AIE graph
+            cout << "Starting kernel " << kernel_count++ << endl;
+            drivers[kernel_index].start(input_data);
+        }
 
-    // Retrieve the result from the AIE kernels
-    for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
-        float * result_data = new float[DATA_XFER_SIZE];
-        drivers[kernel_index].wait(result_data);
-        drivers[kernel_index].print_info();
-        // print result data
-        cout << "Result data: " << endl;
-        for(int i = 0; i < DATA_XFER_SIZE; i++)
-            cout << "result_data[" << i << "]" << result_data[i] << endl;
+        // Retrieve the result from the AIE kernels
+        for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
+            float * result_data = new float[DATA_XFER_SIZE];
+            drivers[kernel_index].wait(result_data);
+            drivers[kernel_index].print_info();
+            // print result data
+            //cout << "Result data: " << endl;
+            //for(int i = 0; i < DATA_XFER_SIZE; i++)
+            //    cout << "result_data[" << i << "]" << result_data[i] << endl;
+        }
     }
 
 
@@ -180,19 +188,20 @@ void Placer::computeElectricFields_AIE()
 **/
 void Placer::computeAllPartials_CPU()
 {
-    auto nets = db.getNetsByDegree();
-    for(int i = 0; i < 8; i++)
-    {
-        computeNetPartials_CPU(nets[8][i]);
-        nets[8][i]->printTerms();
-    }
-
-    //for (auto item : db.getNetsByDegree()) {
-    //    for (Net* net_p : item.second)
-    //        computeNetPartials_CPU(net_p);
+    // DEBUG: run a small subset of nets
+    //auto nets = db.getNetsByDegree();
+    //for(int i = 0; i < 8; i++)
+    //{
+    //    computeNetPartials_CPU(nets[8][i]);
+    //    nets[8][i]->printTerms();
     //}
 
-    // Debugging
+    for (auto item : db.getNetsByDegree()) {
+        for (Net* net_p : item.second)
+            computeNetPartials_CPU(net_p);
+    }
+
+    // DEBUG: Print partials results
     //
     //for ( auto item :  db.getComponents() )
     //{
@@ -483,7 +492,7 @@ void Placer::printIterationResults()
 {
     cout << "Iteration " << iteration << ":";
     cout << "\t" << "Total HPWL: " << db.computeTotalWirelength();
-    cout << "\t\t" << "Total Overflow: " << grid.computeTotalOverflow();
+    cout << "\t\t" << "total overflow: " << grid.computeTotalOverflow();
     cout << endl;
 
     #ifdef CREATE_VISUALIZATION
