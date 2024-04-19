@@ -96,7 +96,10 @@ void DataBase::iterationReset()
         item.second->iterationReset();
 
     // Reset mm_input_index to all zeroes
-    for(auto item : mm_input_index)
+    for(auto &item : mm_input_index) // Need to use & so that it is a reference to the actual object, not a copy
+        item.second = 0;
+    
+    for(auto item : mm_output_index)
         item.second = 0;
 }
 
@@ -151,18 +154,19 @@ double DataBase::computeTotalComponentArea()
     return total_area;
 }
 
-void DataBase::prepareCtrlPacket(float * ctrl_data, int net_size) 
+void DataBase::prepareCtrlPacket(float * ctrl_data, int net_size, int num_packets) 
 {
     // Compute how many Packet Groups of this net_size will be needed
     // Each Packet Group contains the data for 8 nets (or 4 if doing X and Y data)
     ctrl_data[0] = net_size;
-    ctrl_data[1] = 1; // number of Packet Groups to follow
+    ctrl_data[1] = num_packets; // number of Packet Groups to follow
     ctrl_data[2] = 0;
     ctrl_data[3] = 0;
     ctrl_data[4] = 0;
     ctrl_data[5] = 0;
     ctrl_data[6] = 0;
     ctrl_data[7] = 0;
+    cout << "Control data: " << net_size << ", " << num_packets << endl;
 }
 
 /*
@@ -194,12 +198,12 @@ void DataBase::prepareNextPacketGroup(float * input_data, int net_size)
     }
 
     //// DEBUG: print the prepared data!
-    //cout << "Prepared X data:";
-    //for(int i = 0; i < PACKET_SIZE*net_size; i++) {
-    //    if(i%8 == 0) cout << endl;
-    //    cout << input_data[i] << " ";
-    //}
-    //cout << endl;
+    cout << "Prepared X data:";
+    for(int i = 0; i < PACKET_SIZE*net_size; i++) {
+        if(i%8 == 0) cout << endl;
+        cout << input_data[i] << " ";
+    }
+    cout << endl;
 
     // Move mm_input_index to the next unsent data
     mm_input_index[net_size] += 8;

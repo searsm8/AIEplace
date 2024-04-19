@@ -103,14 +103,12 @@ void Placer::initialPlacement(Position<position_type> target_pos, int min_dist, 
     }
 
     printIterationResults();
-    iteration++;
+    iteration = 1;
 }
 
 /***************
  * AIE acceleration functions
 ****************/
-
-
 
 /*
  * @brief On AIEs, compute partial derivatives
@@ -133,33 +131,43 @@ void Placer::computeAllPartials_AIE()
     //}
 
     // Use AIE graph_driver to send data to AIE accelerater
-    for(int net_size = 2; net_size <= MAX_AIE_NET_SIZE; net_size++) {
-        while(db.hasMorePackets(net_size)) {
-            for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
+    for(int net_size = 8; net_size <= MAX_AIE_NET_SIZE; net_size++) {
+        while(db.hasMorePacketsToSend(net_size)) {
+            int num_nets = db.getNetCountOfDegree(net_size);
+            int nets_per_graph = ceil(num_nets / PARTIALS_GRAPH_COUNT);
+            int packets_per_graph = ceil(nets_per_graph / 8);
+            cout << "num_nets: " << num_nets << endl;
+            cout << "nets_per_graph: " << nets_per_graph << endl;
+
+            for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
                 // Send control data packet
                 float * ctrl_packet = new float[PACKET_SIZE]; 
-                db.prepareCtrlPacket(ctrl_packet, net_size);
-                drivers[kernel_index].send_packet(ctrl_packet);
+                db.prepareCtrlPacket(ctrl_packet, net_size, packets_per_graph);
+                drivers[graph_index].send_packet(ctrl_packet);
 
-                // Send coordinate data packet
-                float * input_data = new float[net_size*PACKET_SIZE]; 
-                // Gather input data to send to AIE graph
-                db.prepareNextPacketGroup(input_data, net_size);
-                for(int n = 0; n < net_size; n++) {
-                    // Send the packet of 8 floats to AIE graph
-                    drivers[kernel_index].send_packet(input_data + n*PACKET_SIZE);
-                }
-            }
-
-            // Retrieve the result from the AIE kernels
-            for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
+                // Send all data packets for this Partials graph compute unit
+                float * input_data  = new float[net_size*PACKET_SIZE]; 
                 float * output_data = new float[net_size*PACKET_SIZE];
-                for(int n = 0; n < net_size; n++) {
-                    drivers[kernel_index].receive_packet(output_data + n*PACKET_SIZE);
-                    drivers[kernel_index].print_info();
+                for(int net_index = 0; net_index < packets_per_graph; net_index++) {
+                    // Gather input data to send to AIE graph
+                    db.prepareNextPacketGroup(input_data, net_size);
+                // Send coordinate data packet for this net
+                    cout << "Sending packet for graph: " << graph_index << "\tNet: " << net_index << endl;
+                    for(int n = 0; n < net_size; n++) {
+                        // Send the packet of 8 floats to AIE graph
+                        drivers[graph_index].send_packet(input_data + n*PACKET_SIZE);
+                    }
+
+                    // Retrieve the result from the AIE kernels
+                    cout << "Receiving packet for graph: " << graph_index << "\tNet: " << net_index << endl;
+                    for(int n = 0; n < net_size; n++) {
+                        drivers[graph_index].receive_packet(output_data + n*PACKET_SIZE);
+                        //drivers[graph_index].print_info();
+                    }
+                    cout << "Done receiving!" << endl;
+                    // Store results in node terms.partials
+                    db.storePacket(output_data, net_size);
                 }
-                // Store results in node terms.partials
-                db.storePacket(output_data, net_size);
             }
         }
     }

@@ -30,12 +30,12 @@ private:
     map<string, Pin *> mm_pins;
     map<string, Net *> mm_nets;
     map<int, std::vector<Net *>> mmv_nets_by_degree;
-    map<int, int> mm_input_index; // Used to track what data has been sent as input to AIEs
     map<int, int> mm_output_index; // Used to track what data has been received as output from AIEs
 
     Box<position_type> m_die_area;
 
 public:
+    map<int, int> mm_input_index; // Used to track what data has been sent as input to AIEs
     /// Default Constructor
     DataBase() {}
     DataBase(fs::path input_dir) : m_input_dir(input_dir)
@@ -59,8 +59,7 @@ public:
     const map<string, Pin *> &getPins() { return mm_pins; }
     const map<string, Net *> &getNets() { return mm_nets; }
     const map<int, std::vector<Net *>> &getNetsByDegree() { return mmv_nets_by_degree; }
-    bool hasMorePackets(int net_size) { return mm_input_index[net_size] < mmv_nets_by_degree[net_size].size(); }
-
+    int getNetCountOfDegree(int degree) { return mmv_nets_by_degree[degree].size(); }
     Box<position_type> &getDieArea() { return m_die_area; }
 
     // Parse functions
@@ -80,7 +79,10 @@ public:
     double computeTotalWirelength();
     double computeTotalComponentArea();
     double getTotalOverflow();
-    void prepareCtrlPacket(float * ctrl_data, int net_size);
+
+    // Packet loading/unloading
+    bool hasMorePacketsToSend(int net_size) { return mm_input_index[net_size] < mmv_nets_by_degree[net_size].size(); }
+    void prepareCtrlPacket(float * ctrl_data, int net_size, int num_packets);
     void prepareNextPacketGroup(float * input_data, int net_size);
     void storePacket(float * output_data, int net_size);
 
