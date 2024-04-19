@@ -54,6 +54,7 @@ private:
 public:
 
     Terms terms;
+    Terms terms_aie;
 
     // Constructors
     Node() : m_name("") {}
@@ -76,6 +77,7 @@ public:
     {
         mv_bin_overlaps.clear();
         terms.clear();
+        terms_aie.clear();
     }
 
     void addNet(Net* net_p) { mv_nets.push_back(net_p); }

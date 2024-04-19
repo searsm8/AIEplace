@@ -23,8 +23,13 @@ using std::min;
 // Compilation flags
 #define USE_AIE_ACCELERATION
 #define CREATE_VISUALIZATION
-#define DATA_XFER_SIZE 8*8 // number of floats transferred to AIE kernels per run
-#define PARTIALS_GRAPH_COUNT 3 // number of compute units on AIE for partials acceleration
+#define PACKET_SIZE 8 // number of floats transferred to AIE kernels at a time. DO NOT TOUCH
+
+// PARTIALS_GRAPH_COUNT is the number of compute units on AIE for partials acceleration.
+// This is used when building the AIE graphs, and determines how many MM2S and S2MM data movers are required
+// and of course it is also used by the host code.
+// Therefore, changing this value requires a complete rebuild of the entire project
+#define PARTIALS_GRAPH_COUNT 4
 
 // ePlace hyperparameters
 #define INITIAL_LAMBDA 0.002

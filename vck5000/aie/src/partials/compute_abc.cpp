@@ -22,11 +22,14 @@ void fast_exp(aie::vector<float, 8>& data, aie::vector<float, 8>& factor, aie::v
 // Stream bc_out: NET_SIZE, NET_COUNT, b+, c+, b-, c-
 void compute_abc(input_stream<float> * __restrict x_in, output_stream<float> * __restrict xa_out, output_stream<float> * __restrict bc_out)
 {
-  // Read control data (using vector because single floats mess up data streams for some reason)
-	aie::vector<float, 4> ctrl = readincr_v4(x_in);
+  // Read control data
+	aie::vector<float, 8> ctrl;
+  ctrl.insert(0,readincr_v<4>(x_in));
+  ctrl.insert(1,readincr_v<4>(x_in));
+
   int32 net_size  = ctrl.get(0);
-  int32 net_count = ctrl.get(1); // will not always be multiple of 8
-  // ignore ctrl(2) and ctrl(3)
+  int32 packet_groups= ctrl.get(1);
+  // ignore ctrl(2) thru ctrl(7)
 
   // Push control data onto output stream for use by partials kernel
   writeincr(bc_out, ctrl);
@@ -40,7 +43,7 @@ void compute_abc(input_stream<float> * __restrict x_in, output_stream<float> * _
 	aie::vector<float, 8> ones   = aie::broadcast<float, 8>( 1.0 );
 	aie::vector<float, 8> data, x_vals;
 
-  for (int net_idx = 0; net_idx < net_count/8; net_idx++) {
+  for (int net_idx = 0; net_idx < packet_groups; net_idx++) {
     max_vals = readincr_v<8>(x_in); // first 8 vals are always the max for these nets(pre-sorted)
 
     // **************

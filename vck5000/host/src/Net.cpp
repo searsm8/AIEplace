@@ -55,15 +55,11 @@ void Net::sortPositionsByY()
  */
 void Net::sortPositionsMaxMinX()
 {
-    // Find the max X position, and place it first
-    int max_index = std::max_element(mv_nodes.begin(), mv_nodes.end(), Xlesser()) - mv_nodes.begin();
-    std::swap(mv_nodes.at(0), mv_nodes.at(max_index));
+    sortPositionsByX();
+    // Put the min value in 2nd position
+    std::swap(mv_nodes.at(1), mv_nodes.back());
 
-    // Find the min X position, and place it second
-    int min_index = std::min_element(mv_nodes.begin(), mv_nodes.end(), Xlesser()) - mv_nodes.begin();
-    std::swap(mv_nodes.at(1), mv_nodes.at(min_index));
-
-    // For AIE kernels, we only require 1st element being max and 2nd element being min
+    // For AIE kernels, data format requires 1st element being max and 2nd element being min
     // other coordinates for nodes on the net can be in any order
 }
 
@@ -73,15 +69,11 @@ void Net::sortPositionsMaxMinX()
  */
 void Net::sortPositionsMaxMinY()
 {
-    // Find the max Y position, and place it first
-    int max_index = std::max_element(mv_nodes.begin(), mv_nodes.end(), Ylesser()) - mv_nodes.begin();
-    std::swap(mv_nodes.at(0), mv_nodes.at(max_index));
+    sortPositionsByY();
+    // Put the min value in 2nd position
+    std::swap(mv_nodes.at(1), mv_nodes.back());
 
-    // Find the min Y position, and place it second
-    int min_index = std::min_element(mv_nodes.begin(), mv_nodes.end(), Ylesser()) - mv_nodes.begin();
-    std::swap(mv_nodes.at(1), mv_nodes.at(min_index));
-
-    // For AIE kernels, we only require 1st element being max and 2nd element being min
+    // For AIE kernels, data format requires 1st element being max and 2nd element being min
     // other coordinates for nodes on the net can be in any order
 }
 

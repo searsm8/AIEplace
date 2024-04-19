@@ -28,7 +28,6 @@ public:
 
     xrt::run run_device_mm2s;
     xrt::run run_device_s2mm;
-    float * input_data, output_data;
 
     // Debugging flag
     bool print = true;
@@ -38,9 +37,10 @@ public:
     // Constructor
     PartialsGraphDriver();
     void init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id);
+    void setBufferSize(int size);
 
-    void send_input(float *input_data);
-    float receive_output(float * output_data);
+    void send_packet(float * input_data);
+    float receive_packet(float * output_data);
 
     void print_info();
 

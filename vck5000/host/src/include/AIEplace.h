@@ -7,6 +7,7 @@
 #include "GraphDriver.h"
 
 #define DEVICE_ID 0
+#define MAX_AIE_NET_SIZE 8
 
 #ifdef CREATE_VISUALIZATION
     #include "Visualizer.h"

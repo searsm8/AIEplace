@@ -11,16 +11,19 @@
 void compute_partials( input_stream<float> * __restrict xa_in, input_stream<float> * __restrict bc_in, output_stream<float> * __restrict partials_out)
 {
 	// Read control data
-	aie::vector<float, 4> ctrl = readincr_v4(bc_in);
+	aie::vector<float, 8> ctrl;
+	ctrl.insert(0,readincr_v<4>(bc_in));
+	ctrl.insert(1,readincr_v<4>(bc_in));
 	float net_size  = ctrl.get(0);
-	float net_count = ctrl.get(1); // will always be multiple of 8?
+	float packet_groups = ctrl.get(1);
+	// ignore ctrl(2) thru ctrl(7)
 
 	aie::vector<float, 8> a_plus, b_plus, c_plus, a_minus, b_minus, c_minus, x_vals;
 	aie::vector<float, 8> ones   = aie::broadcast<float, 8>( 1.0 );
 	aie::vector<float, 8> c_over_gamma, b_squared_inv; // intermediate results
 	aie::accum<accfloat, 8> plus_term, minus_term;
 
-	for(int i = 0; i < net_count/8; i++) { // will always be multiple of 8?
+	for(int i = 0; i < packet_groups; i++) {
 
 		// read in bc stream for a vector of 8 nets
 		b_plus = readincr_v<8>(bc_in);

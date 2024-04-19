@@ -46,7 +46,7 @@ void Placer::run()
     while( !converged )
     {
         performIteration();
-        if (iteration++ == 1) // TODO: only runs one iteration!
+        if (iteration++ == 11) // TODO: only runs one iteration!
             converged = true;
     }
 }
@@ -60,7 +60,7 @@ void Placer::performIteration()
     // Compute terms for HPWL partials
     // TODO: compare output of these two functions to ensure correctness
     // DONE: preliminary comparison is correct!
-    //computeAllPartials_CPU();
+    computeAllPartials_CPU();
     computeAllPartials_AIE();
 
     // Compute Electric Fields in each bin
@@ -126,44 +126,71 @@ void Placer::computeAllPartials_AIE()
     //    else large_net_count += nets.second.size();
     //}
     //    cout << "Number of nets with size > 10: " << large_net_count << endl;
-
-
     //cout << "input_data:" << endl;
-    //for(int i = 0; i < DATA_XFER_SIZE+4; i++) {
+    //for(int i = 0; i < PACKET_SIZE+4; i++) {
     //    cout << "input_data[" << i << "]" <<input_data[i] << endl;
     //    if((i+1)%4 == 0) cout << endl;
     //}
 
+    // Use AIE graph_driver to send data to AIE accelerater
+    for(int net_size = 2; net_size <= MAX_AIE_NET_SIZE; net_size++) {
+        while(db.hasMorePackets(net_size)) {
+            for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
+                // Send control data packet
+                float * ctrl_packet = new float[PACKET_SIZE]; 
+                db.prepareCtrlPacket(ctrl_packet, net_size);
+                drivers[kernel_index].send_packet(ctrl_packet);
 
-    // Call AIE graph_driver to accelerate computation
-    int net_size = 8;
-    int kernel_count = 0;
-    auto m_nets = db.getNetsByDegree();
-    auto nets = m_nets[net_size];
-    cout << "### Running partials graphs on " << nets.size() << " nets of size " << net_size << endl;
-    while(db.hasMoreData(net_size)) {
-        for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
-            // Gather input data to send to AIE graph
-            float * input_data = new float[DATA_XFER_SIZE + 4]; // Need 4 additional Bytes for control data
-            db.prepareXdata(input_data, net_size);
-            // Send data to AIE graph
-            cout << "Sending data to kernel " << kernel_count++ << endl;
-            drivers[kernel_index].send_input(input_data);
-        }
+                // Send coordinate data packet
+                float * input_data = new float[net_size*PACKET_SIZE]; 
+                // Gather input data to send to AIE graph
+                db.prepareNextPacketGroup(input_data, net_size);
+                for(int n = 0; n < net_size; n++) {
+                    // Send the packet of 8 floats to AIE graph
+                    drivers[kernel_index].send_packet(input_data + n*PACKET_SIZE);
+                }
+            }
 
-        // Retrieve the result from the AIE kernels
-        for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
-            float * output_data = new float[DATA_XFER_SIZE];
-            drivers[kernel_index].receive_output(output_data);
-            drivers[kernel_index].print_info();
-            // print output data
-            //cout << "output data: " << endl;
-            //for(int i = 0; i < DATA_XFER_SIZE; i++)
-            //    cout << "output_data[" << i << "]" << result_data[i] << endl;
+            // Retrieve the result from the AIE kernels
+            for(int kernel_index = 0; kernel_index < PARTIALS_GRAPH_COUNT; kernel_index++) {
+                float * output_data = new float[net_size*PACKET_SIZE];
+                for(int n = 0; n < net_size; n++) {
+                    drivers[kernel_index].receive_packet(output_data + n*PACKET_SIZE);
+                    drivers[kernel_index].print_info();
+                }
+                // Store results in node terms.partials
+                db.storePacket(output_data, net_size);
+            }
         }
     }
 
-
+    // DEBUG: Compare results with CPU version:
+    //float max_diff = 0;
+    //float total_diff = 0;
+    //int nonzero_count = 0;
+    //cout << endl << "*&*&*&*&   RESULTS COMPARISON   *&*&*&*&" << endl;
+    //auto m_nets = db.getNetsByDegree();
+    ////for(int net_size = 2; net_size <= MAX_NET_SIZE; net_size++) {
+    ////for(std::vector<Net *> nets : db.getNetsByDegree()[net_size]) {
+    //for(auto item : db.getNetsByDegree()) {
+    //    for(Net * net : item.second) {
+    //        cout << "NET: " << net->getName() << endl;
+    //        for(Node * np : net->getNodes()) {
+    //            cout << "Node " << np->getName();
+    //            cout << "\tCPU result: " << np->terms.partials.x;
+    //            cout << "\tAIE result: " << np->terms_aie.partials.x;
+    //            cout << endl;
+    //            float diff = np->terms.partials.x - np->terms_aie.partials.x;
+    //            total_diff += abs(diff);
+    //            if(abs(diff) > abs(max_diff)) max_diff = diff;
+    //            if(diff != 0 && np->terms.partials.x != 0 && np->terms_aie.partials.x != 0)
+    //                nonzero_count++;
+    //        }
+    //    }
+    //}
+    //float avg_diff = total_diff / nonzero_count;
+    //cout << "Avg diff: " << avg_diff << endl;
+    //cout << "Max diff: " << max_diff << endl;
 }
 
 /*
@@ -258,6 +285,9 @@ void Placer::compute_bc_terms_CPU(Net* net_p)
  */
 void Placer::computeNetPartials_CPU(Net* net_p)
 {
+    // DEBUG: stop at max net size for comparison to AIE computation
+    if(net_p->getDegree() > MAX_AIE_NET_SIZE) return;
+
     compute_bc_terms_CPU(net_p);
     for (Node* node_p : net_p->mv_nodes) {
         float partial_x = (( 1 + node_p->getX()/gamma) * net_p->terms.b.plus.x - (net_p->terms.c.plus.x / gamma)) 
@@ -454,6 +484,7 @@ void Placer::nudgeAllNodes()
 {
     for (auto item : db.getComponents())
         nudgeNode(item.second);
+    // Pins are set in place and cannot be moved!
     //for (auto item : db.getPins())
     //    nudgeNode(item.second);
 
