@@ -68,11 +68,19 @@ void Visualizer::drawPlacement(DataBase db, int iteration)
     cairo_set_source_rgb (cr, 0.0, 1.0, 0.0); // green
     cairo_fill(cr);
 
-    string filename = "images/placement_";
+
+    // export image
+    fs::path image_path = "images";
+    image_path.append(db.getBenchmarkName()); // put in a directory with the name of the benchmark
+    fs::create_directories(image_path); // make sure this subdirectory exists
+
+    // index the image based on iteration
+    string filename = "placement_";
     filename.append(std::to_string(iteration));
     filename.append(".png");
-    cout << "PNG output to " << filename << endl;
-    cairo_surface_write_to_png (surface, filename.c_str());
+    image_path.append(filename);
+    cout << "VISUALIZER: PNG output to " << image_path << endl;
+    cairo_surface_write_to_png (surface, image_path.c_str());
 }
 
 AIEPLACE_NAMESPACE_END

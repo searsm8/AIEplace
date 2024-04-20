@@ -6,6 +6,7 @@
 #ifdef CREATE_VISUALIZATION
 #include <cairo/cairo.h>
 #include "DataBase.h"
+#include <chrono> // for naming output directories by the minute
 
 AIEPLACE_NAMESPACE_BEGIN 
 

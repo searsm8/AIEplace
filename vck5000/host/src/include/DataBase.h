@@ -61,6 +61,7 @@ public:
     const map<int, std::vector<Net *>> &getNetsByDegree() { return mmv_nets_by_degree; }
     int getNetCountOfDegree(int degree) { return mmv_nets_by_degree[degree].size(); }
     Box<position_type> &getDieArea() { return m_die_area; }
+    string getBenchmarkName() { return m_input_dir.parent_path().filename(); }
 
     // Parse functions
     std::vector<fs::path> findExtensions(fs::path, string);
