@@ -166,7 +166,8 @@ void DataBase::prepareCtrlPacket(float * ctrl_data, int net_size, int num_packet
     ctrl_data[5] = 0;
     ctrl_data[6] = 0;
     ctrl_data[7] = 0;
-    cout << "Control data: " << net_size << ", " << num_packets << endl;
+    //DEBUG:
+    //cout << "Control data: " << net_size << ", " << num_packets << endl;
 }
 
 /*
@@ -175,46 +176,61 @@ void DataBase::prepareCtrlPacket(float * ctrl_data, int net_size, int num_packet
 **/
 void DataBase::prepareNextPacketGroup(float * input_data, int net_size)
 {
-    int offset = mm_input_index[net_size]; // offset keeps track of where data should be taken from
-    cout << "Prepare data @offset = " << offset << "\tnet_size = " << net_size << endl;
+    bool func_debug = false; // Set true if you want to print what this function is doing!
 
-    for(int net_idx = 0; net_idx < PACKET_SIZE; net_idx++) { // prepare data for 8 nets at a time
+    int offset = mm_input_index[net_size]; // offset keeps track of where the next data should be taken from
+    if(func_debug) cout << "Prepare data @offset = " << offset << "\tnet_size = " << net_size << endl;
+
+    for(int net_idx = 0; net_idx < 4; net_idx++) { // prepare XY data for 5 nets at a time
         // check if we have reached the end of nets with this degree
         if(net_idx + offset >= mmv_nets_by_degree[net_size].size()) {
             // prep data with trailing zeroes
-            cout << "Zeroes at index: " << net_idx + offset << endl; 
-            for(int j = 0; j < net_size; j++)
-                input_data[net_idx + j*8] = 0;
+            //cout << "Zeroes at index: " << net_idx + offset << endl; 
+            for(int j = 0; j < net_size; j++) {
+                input_data[2*net_idx + j*8] = 0;
+                input_data[2*net_idx + j*8 + 1] = 0;
+            }
             continue;
         }
 
         // otherwise, prep X coordinate data
         auto net = mmv_nets_by_degree[net_size][offset + net_idx ];
-        net->sortPositionsMaxMinX(); // X or Y
-        auto nodes = net->getNodes();
+
+        auto &nodes = net->getNodes();
+        net->sortPositionsMaxMinX(); // This sort might be redundant? 
         for(int j = 0; j < net_size; j++) {
-            input_data[net_idx + j*8] = nodes[j]->getX(); // X or Y
+            input_data[2*net_idx + j*8] = nodes[j]->getX();
+        }
+
+        net->sortPositionsMaxMinY();
+        //nodes = net->getNodes();
+        for(int j = 0; j < net_size; j++) {
+            input_data[2*net_idx + j*8 + 1] = nodes[j]->getY();
         }
     }
 
-    //// DEBUG: print the prepared data!
-    cout << "Prepared X data:";
+    // DEBUG: print the prepared data!
+    if(func_debug) {
+    cout << "Prepared XY data:";
     for(int i = 0; i < PACKET_SIZE*net_size; i++) {
         if(i%8 == 0) cout << endl;
         cout << input_data[i] << " ";
     }
     cout << endl;
+    }
 
     // Move mm_input_index to the next unsent data
-    mm_input_index[net_size] += 8;
+    mm_input_index[net_size] += 4;
 }
 
 void DataBase::storePacket(float * output_data, int net_size)
 {
-    int offset = mm_output_index[net_size]; // offset tracks which nets partials should be added to
-    //cout << "storePartials @offset = " << offset << endl;
+    bool func_debug = false; // Set true if you want to print what this function is doing!
 
-    for(int net_idx = 0; net_idx < PACKET_SIZE; net_idx++) { 
+    int offset = mm_output_index[net_size]; // offset tracks which nets partials should be added to
+    if(func_debug) cout << "storePartials @offset = " << offset << endl;
+
+    for(int net_idx = 0; net_idx < 4; net_idx ++) { // prepare XY data for 4 nets at a time
         // check if we have reached the end of nets with this degree
         if(net_idx + offset >= mmv_nets_by_degree[net_size].size()) {
             // No store needed
@@ -224,19 +240,32 @@ void DataBase::storePacket(float * output_data, int net_size)
 
         // otherwise, store partials results in node.terms.partials
         auto net = mmv_nets_by_degree[net_size][offset + net_idx ];
-        net->sortPositionsMaxMinX(); // X or Y
-        auto nodes = net->getNodes();
+        auto &nodes = net->getNodes(); // needs to be a reference, to avoid being a copy!
 
+        // nodes are already sorted by Y coords, so store them first
         for(int n = 0; n < net_size; n++) {
-            nodes[n]->terms_aie.partials.x += output_data[net_idx + n*8];
-            // DEBUG: extra terms_aie for comparison
-            //cout << nodes[n]->terms_aie.partials.x << "\t";
+            nodes[n]->terms_aie.partials.y += output_data[2*net_idx + n*8 + 1];
         }
-        //cout << endl;
+
+        net->sortPositionsMaxMinX(); // X or Y
+        //nodes = net->getNodes();
+        for(int n = 0; n < net_size; n++) {
+            nodes[n]->terms_aie.partials.x += output_data[2*net_idx + n*8];
+        }
+    }
+
+    // DEBUG: print the prepared data!
+    if(func_debug) { 
+        cout << "Received XY data:";
+        for(int i = 0; i < PACKET_SIZE*net_size; i++) {
+            if(i%8 == 0) cout << endl;
+            cout << output_data[i] << " ";
+        }
+        cout << endl;
     }
 
     // Move mm_output_index to the next data
-    mm_output_index[net_size] += 8;
+    mm_output_index[net_size] += 4;
 }
 
         /// parser callback functions 
