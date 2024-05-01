@@ -26,7 +26,9 @@ using namespace adf;
     void idxst_signs(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);
 #endif
 
-// This transpose() function should probably be implemented in a PL kernel
+// This transpose() function should probably be implemented in a PL kernel since AIE cores
+// have insufficient memory to hold 1024x1024 float array
+// FUTURE WORK: it would be very beneficial to be able to do this transpose in AIEs! 
 //void transpose(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out);
 
 #endif

@@ -20,7 +20,8 @@ class Placer
 public:
     DataBase db;
     Grid grid;
-    PartialsGraphDriver drivers[PARTIALS_GRAPH_COUNT];
+    PartialsGraphDriver partials_drivers[PARTIALS_GRAPH_COUNT];
+    DensityGraphDriver density_driver;
 
     float gamma = 4.0; // smoothness factor for estimations; 
                        // larger means less smooth but more accurate
@@ -37,7 +38,7 @@ public:
     static void printVersionInfo();
 
     // Pre-run preparation
-    void initialPlacement(Position<position_type> target_pos, int min_dist, int max_dist);
+    void initializePlacement(Position<position_type> target_pos, int min_dist, int max_dist);
     void iterationReset();
 
     // Functions which may be accelerated on AIEs

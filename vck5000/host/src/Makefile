@@ -26,8 +26,8 @@ COMPILE_FLAGS += -O0 -g -L$(XILINX_XRT)/lib/ -lpthread -lrt -lstdc++
 #COMPILE_FLAGS += -Wall
 
 COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
-#COMPILE_FLAGS += -DCREATE_VISUALIZATION# Comment this out if no visualization is wanted.
-#COMPILE_FLAGS += -DUSE_AIE_ACCELERATION# Comment this out if no visualization is wanted.
+#COMPILE_FLAGS += -DCREATE_VISUALIZATION
+#COMPILE_FLAGS += -DUSE_AIE_ACCELERATION
 
 .PHONY: all exe objs
 

@@ -30,12 +30,12 @@ private:
     map<string, Pin *> mm_pins;
     map<string, Net *> mm_nets;
     map<int, std::vector<Net *>> mmv_nets_by_degree;
+    map<int, int> mm_input_index; // Used to track what data has been sent as input to AIEs
     map<int, int> mm_output_index; // Used to track what data has been received as output from AIEs
 
     Box<position_type> m_die_area;
 
 public:
-    map<int, int> mm_input_index; // Used to track what data has been sent as input to AIEs
     /// Default Constructor
     DataBase() {}
     DataBase(fs::path input_dir) : m_input_dir(input_dir)
@@ -84,7 +84,7 @@ public:
     // Packet loading/unloading
     bool hasMorePacketsToSend(int net_size) { return mm_input_index[net_size] < mmv_nets_by_degree[net_size].size(); }
     void prepareCtrlPacket(float * ctrl_data, int net_size, int num_packets);
-    void prepareNextPacketGroup(float * input_data, int net_size);
+    void prepareNextPartialsPacket(float * input_data, int net_size);
     void storePacket(float * output_data, int net_size);
 
 

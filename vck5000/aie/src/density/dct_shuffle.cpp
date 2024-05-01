@@ -19,30 +19,20 @@ void shuffle_vectorized(input_stream<FFT_DATA_TYPE> * in, output_stream<FFT_DATA
 #ifdef USE_STREAM_IO
 void dct_shuffle(input_stream<FFT_DATA_TYPE> * in, output_stream<FFT_DATA_TYPE> * out) {
 
-    FFT_DATA_TYPE data;
-    for(int i = 0; i < POINT_SIZE; i++){
-        data = readincr(in);
-        writeincr(out, data);
+    FFT_DATA_TYPE data_even;
+    FFT_DATA_TYPE data_odd [POINT_SIZE/2];
+
+    // first half: choose even inputs, increasing
+    for(int i = 0; i < POINT_SIZE/2; i++){
+        data_even = readincr(in);
+        writeincr(out, data_even);
+        data_odd[i] = readincr(in);
     }
-    
-    //FFT_DATA_TYPE data_even;
-    //FFT_DATA_TYPE data_odd [POINT_SIZE/2];
 
-    //// first half: choose every other input, increasing
-    //for(int i = 0; i < POINT_SIZE/2; i++){
-    //    data_even = readincr(in);
-    //    writeincr(out, data_even);
-    //    data_odd [i] = readincr(in);
-    //}
-
-    //// latter half: choose every other input, decreasing
-    //cfloat x;
-    //x.real = 3;
-    //x.imag = 1;
-    //for(int i = POINT_SIZE/2 - 1; i >= 0; i--){
-    //    writeincr(out, x);
-    //    //writeincr(out, data_odd[i]);
-    //}
+    // latter half: choose odd inputs, decreasing
+    for(int i = POINT_SIZE/2 - 1; i >= 0; i--){
+        writeincr(out, data_odd[i]);
+    }
 }
 
 #else

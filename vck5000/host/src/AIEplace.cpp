@@ -22,9 +22,12 @@ Placer::Placer(fs::path input_dir, std::string xclbin_file) :
 
             // Create drivers which handle buffer IO
             for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
-                drivers[i].init(device, xclbin_uuid, i);
+                partials_drivers[i].init(device, xclbin_uuid, i);
+
+            density_driver.init(device, xclbin_uuid);
             #endif
         }
+
 void Placer::printVersionInfo()
 {
     cout << endl << "AIEplace v0.0.1" << ": Pre-release" << endl;
@@ -39,8 +42,8 @@ void Placer::run()
     Position<position_type> target =
                 Position<position_type>(grid.getDieWidth()/2, grid.getDieHeight()/2);
 
-    initialPlacement(target, 0, 500); // Close placement for testing purposes
-    //initialPlacement(target, 0, (int)grid.getDieHeight()/4);
+    initializePlacement(target, 0, 500); // Close placement for testing purposes
+    //initializePlacement(target, 0, (int)grid.getDieHeight()/4);
 
     bool converged = false;
     while( !converged )
@@ -60,16 +63,17 @@ void Placer::performIteration()
     // Compute terms for HPWL partials
     // TODO: compare output of these two functions to ensure correctness
     // DONE: preliminary comparison is correct!
-    computeAllPartials_CPU();
-    computeAllPartials_AIE();
+    //computeAllPartials_CPU();
+    //computeAllPartials_AIE();
 
     // Compute Electric Fields in each bin
-    computeOverlaps();
+    //computeOverlaps();
     //placer.db.printOverlaps();
     //placer.grid.printOverflows();
 
     //computeElectricFields_CPU();
     computeElectricFields_DCT();
+    computeElectricFields_AIE();
     //placer.grid.printElectricFields();
 
     // Perform iteration node movement
@@ -91,15 +95,15 @@ void Placer::iterationReset()
  * @param: min_dist: minimum distance from target_pos a node can appear
  * @param: max_dist: maximum distance from target_pos a node can appear
 */
-void Placer::initialPlacement(Position<position_type> target_pos, int min_dist, int max_dist)
+void Placer::initializePlacement(Position<position_type> target_pos, int min_dist, int max_dist)
 {
-    cout << "initialPlacement(" << target_pos.to_string() << ", " << min_dist << ", " << max_dist << ");\n";
+    cout << "initializePlacement(" << target_pos.to_string() << ", " << min_dist << ", " << max_dist << ");\n";
     // For each component that isn't fixed
     for (auto item : db.getComponents()) {
         // Choose a random position based on parameters
-        int x_offset = 10000 + rand()%(max_dist-min_dist);
-        int y_offset = 50000 + rand()%(max_dist-min_dist);
-        item.second->setPosition(/*target_pos +*/ Position<position_type>(x_offset, y_offset));
+        int x_offset = min_dist + rand()%(max_dist-min_dist);
+        int y_offset = min_dist + rand()%(max_dist-min_dist);
+        item.second->setPosition(target_pos + Position<position_type>(x_offset, y_offset));
     }
 
     printIterationResults();
@@ -144,26 +148,26 @@ void Placer::computeAllPartials_AIE()
                 // Send control data packet
                 float * ctrl_packet = new float[PACKET_SIZE]; 
                 db.prepareCtrlPacket(ctrl_packet, net_size, packets_per_graph);
-                drivers[graph_index].send_packet(ctrl_packet);
+                partials_drivers[graph_index].send_packet(ctrl_packet);
 
                 // Send all data packets for this Partials graph compute unit
                 float * input_data  = new float[net_size*PACKET_SIZE]; 
                 float * output_data = new float[net_size*PACKET_SIZE];
                 for(int net_index = 0; net_index < packets_per_graph; net_index++) {
                     // Gather input data to send to AIE graph
-                    db.prepareNextPacketGroup(input_data, net_size);
+                    db.prepareNextPartialsPacket(input_data, net_size);
                 // Send coordinate data packet for this net
                     cout << "Sending packets for graph: " << graph_index << "\tNet: " << net_index << endl;
                     for(int n = 0; n < net_size; n++) {
                         // Send the packet of 8 floats to AIE graph
-                        drivers[graph_index].send_packet(input_data + n*PACKET_SIZE);
+                        partials_drivers[graph_index].send_packet(input_data + n*PACKET_SIZE);
                     }
 
                     // Retrieve the result from the AIE kernels
                     //cout << "Receiving packets for graph: " << graph_index << "\tNet: " << net_index << endl;
                     for(int n = 0; n < net_size; n++) {
-                        drivers[graph_index].receive_packet(output_data + n*PACKET_SIZE);
-                        //drivers[graph_index].print_info();
+                        partials_drivers[graph_index].receive_packet(output_data + n*PACKET_SIZE);
+                        //partials_drivers[graph_index].print_info();
                     }
                     //cout << "Done receiving!" << endl;
                     // Store results in node terms.partials
@@ -174,38 +178,38 @@ void Placer::computeAllPartials_AIE()
     }
 
 // DEBUG: Compare results with CPU version:
-    float max_diff = 0;
-    float total_diff = 0;
-    int nonzero_count = 0;
-    cout << endl << "*&*&*&*&   RESULTS COMPARISON   *&*&*&*&" << endl;
-    auto m_nets = db.getNetsByDegree();
-    //for(int net_size = 2; net_size <= MAX_NET_SIZE; net_size++) {
-    //for(std::vector<Net *> nets : db.getNetsByDegree()[net_size]) {
-    for(auto item : db.getNetsByDegree()) {
-        cout << "PRINTING RESULTS FOR NET_SIZE = " << item.first << endl;
-        if(item.first <= MAX_AIE_NET_SIZE)
-        for(Net * net : item.second) {
-            cout << "NET: " << net->getName() << endl;
-            for(Node * np : net->getNodes()) {
-                cout << "Node " << np->getName();
-                cout << "\tCPU result (X, Y): " << np->terms.partials.x << ", " << np->terms.partials.y;
-                cout << "\tAIE result (X, Y): " << np->terms_aie.partials.x << ", " << np->terms_aie.partials.y;
-                cout << endl;
-                float diff = np->terms.partials.x - np->terms_aie.partials.x;
-                total_diff += abs(diff);
-                //if(abs(diff) > abs(max_diff)) max_diff = diff;
-                if(abs(diff) > abs(max_diff)) {max_diff = diff; cout << "NEW MAX DIFF X: " << diff << endl; }
-                if(diff != 0 && np->terms.partials.x != 0 && np->terms_aie.partials.x != 0)
-                    nonzero_count++;
-                diff = np->terms.partials.y - np->terms_aie.partials.y;
-                total_diff += abs(diff);
-                if(abs(diff) > abs(max_diff)) {max_diff = diff; cout << "NEW MAX DIFF Y: " << diff << endl; }
-            }
-        }
-    }
-    float avg_diff = total_diff / nonzero_count;
-    cout << "Avg diff: " << avg_diff << endl;
-    cout << "Max diff: " << max_diff << endl;
+    //float max_diff = 0;
+    //float total_diff = 0;
+    //int nonzero_count = 0;
+    //cout << endl << "*&*&*&*&   RESULTS COMPARISON   *&*&*&*&" << endl;
+    //auto m_nets = db.getNetsByDegree();
+    ////for(int net_size = 2; net_size <= MAX_NET_SIZE; net_size++) {
+    ////for(std::vector<Net *> nets : db.getNetsByDegree()[net_size]) {
+    //for(auto item : db.getNetsByDegree()) {
+    //    cout << "PRINTING RESULTS FOR NET_SIZE = " << item.first << endl;
+    //    if(item.first <= MAX_AIE_NET_SIZE)
+    //    for(Net * net : item.second) {
+    //        cout << "NET: " << net->getName() << endl;
+    //        for(Node * np : net->getNodes()) {
+    //            cout << "Node " << np->getName();
+    //            cout << "\tCPU result (X, Y): " << np->terms.partials.x << ", " << np->terms.partials.y;
+    //            cout << "\tAIE result (X, Y): " << np->terms_aie.partials.x << ", " << np->terms_aie.partials.y;
+    //            cout << endl;
+    //            float diff = np->terms.partials.x - np->terms_aie.partials.x;
+    //            total_diff += abs(diff);
+    //            //if(abs(diff) > abs(max_diff)) max_diff = diff;
+    //            if(abs(diff) > abs(max_diff)) {max_diff = diff; cout << "NEW MAX DIFF X: " << diff << endl; }
+    //            if(diff != 0 && np->terms.partials.x != 0 && np->terms_aie.partials.x != 0)
+    //                nonzero_count++;
+    //            diff = np->terms.partials.y - np->terms_aie.partials.y;
+    //            total_diff += abs(diff);
+    //            if(abs(diff) > abs(max_diff)) {max_diff = diff; cout << "NEW MAX DIFF Y: " << diff << endl; }
+    //        }
+    //    }
+    //}
+    //float avg_diff = total_diff / nonzero_count;
+    //cout << "Avg diff: " << avg_diff << endl;
+    //cout << "Max diff: " << max_diff << endl;
 }
 
 /*
@@ -215,6 +219,21 @@ void Placer::computeAllPartials_AIE()
 void Placer::computeElectricFields_AIE()
 {
     // Call AIE graph_driver to accelerate computation
+    std::vector< std::vector<float> > rho = grid.getRho();
+
+    float * input_data  = new float[BINS_PER_ROW]; 
+    float * output_data = new float[BINS_PER_ROW];
+    for(int i = 0; i < BINS_PER_ROW; i++)
+        input_data[i] = rho[0][i];
+    density_driver.send_packet(input_data);
+    density_driver.receive_packet(output_data);
+
+    // DEBUG: Print output data received
+    cout << "DCT result: ";
+    for(int i = 0; i < BINS_PER_ROW; i++)
+        cout << output_data[i] << ", ";
+    cout << endl;
+
 }
 
 

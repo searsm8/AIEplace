@@ -21,9 +21,10 @@ using std::max;
 using std::min;
 
 // Compilation flags
-#define USE_AIE_ACCELERATION
-#define CREATE_VISUALIZATION
-#define PACKET_SIZE 8 // number of floats transferred to AIE kernels at a time. DO NOT TOUCH
+#define USE_AIE_ACCELERATION // if this is defined, the application will use VCK5000 acceleration
+                    // (To configure AIE and PL, the .xclbin must be specified as a command line parameter)
+#define CREATE_VISUALIZATION // if this is defined, a Visualizer class using Cairo will export images
+#define PACKET_SIZE 8 // DO NOT TOUCH. This is the number of floats transferred to AIE kernels at a time.
 
 // PARTIALS_GRAPH_COUNT is the number of compute units on AIE for partials acceleration.
 // This is used when building the AIE graphs, and determines how many MM2S and S2MM data movers are required
@@ -39,8 +40,6 @@ using std::min;
 #define BINS_PER_ROW 128 // Should be scaled up to 512 or 1024 for final application
 #define BINS_PER_COL 128
 
-
-
 #define AIEPLACE_NAMESPACE_BEGIN namespace AIEplace {
 #define AIEPLACE_NAMESPACE_END }
 
@@ -50,8 +49,8 @@ typedef float position_type;
 
 struct XY
 {
-    double x;
-    double y;
+    float x;
+    float y;
     void clear() { x = 0; y = 0;}
 };
 

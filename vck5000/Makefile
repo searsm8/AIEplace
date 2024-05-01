@@ -2,7 +2,7 @@
 
 # Modify these parameters to determine what is built
 TARGET ?= hw_emu# choose: hw, hw_emu, or sw_emu
-AIE_GRAPH = partials# choose: aie, partials, or density
+AIE_GRAPH = aie# choose: aie, partials, or density
 
 .PHONY: help all aie partials density pl repackage host clean
 

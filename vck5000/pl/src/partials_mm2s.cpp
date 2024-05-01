@@ -2,10 +2,8 @@
 #include <hls_stream.h>
 #include <ap_axi_sdata.h>
 
-//void sent_ctrl_data(int, float, hls::stream<qdma_axis<32,0,0,0> >&);
-
 extern "C" {
-void pl_kernel_mm2s(ap_int<128> * input, int size, hls::stream<qdma_axis<128,0,0,0> >& stream_pl2aie) {
+void partials_mm2s(ap_int<128> * input, int size, hls::stream<qdma_axis<128,0,0,0> >& stream_pl2aie) {
 
     #pragma HLS INTERFACE m_axi port=input offset=slave
     #pragma HLS INTERFACE m_axis port=stream_pl2aie

@@ -10,7 +10,7 @@ namespace transform = xf::dsp::aie::fft;
 #define TP_CASC_LEN 1 // increase this to improve throughput using more kernels (max casc_len = log2(POINT_SIZE))
 #define TP_DYN_PT_SIZE 0
 #define TP_WINDOW_VSIZE POINT_SIZE
-#define API_IO 0 // 0 for window, 1 for streams (must use streams if using PARALLEL_POWER)
+#define API_IO 1 // 0 for window, 1 for streams (must use streams if using PARALLEL_POWER)
 #define PARALLEL_POWER 0 // trade-off to use more cores for improved performance
 
 class IDXSTGraph : public adf::graph {

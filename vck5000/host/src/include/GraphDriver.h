@@ -54,8 +54,8 @@ class DensityGraphDriver
 public:
     // Member data
     long start_time, xfer_on_time, xfer_off_time, kernel_exec_time;
-    xrt::kernel device_mm2s;
-    xrt::kernel device_s2mm;
+    xrt::kernel density_mm2s;
+    xrt::kernel density_s2mm;
 
     xrtMemoryGroup bank_input;
     xrtMemoryGroup bank_result;
@@ -74,7 +74,7 @@ public:
 
     // Constructor
     DensityGraphDriver();
-    void init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id);
+    void init(xrt::device device, xrt::uuid & xclbin_uuid);
     void setBufferSize(int size);
 
     void send_packet(float * input_data);

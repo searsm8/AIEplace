@@ -12,8 +12,8 @@ template<typename T>
 class Box 
 {
 private:
-    Position<T> m_a;
-    Position<T> m_b;
+    Position<T> m_a; // Bottom left corner of Box
+    Position<T> m_b; // Top right corner of Box
 
 public:
     // Constructors
@@ -46,7 +46,7 @@ struct Bin
     float a_uv;
     XY eField; // Computed eField in this Bin
     std::vector<Node*> overlapping_nodes; // list of nodes overlapping this bin
-    float lambda; // Weight of density constraint for this bin. 
+    float lambda; // Local Weight parameter for density in this bin. 
                     // Bigger lambda means the eField will push harder in this bin.
 
     Bin(float xl, float yl, float xh, float yh) : bb(xl, yl, xh, yh) {}

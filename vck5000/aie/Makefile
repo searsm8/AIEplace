@@ -38,13 +38,13 @@ AIE_FLAGS += --verbose
 #AIE_FLAGS += --platform=$(PLATFORM) # platform not needed for VCK5000?
 AIE_FLAGS += --kernel-linting
 
-TARGET := hw#choose: hw_emu, hw, sw_emu
+TARGET := hw# choose hw or x86sim
 
 # Compile a full graph for AIEplace application, including multiple partials graphs and density graph
 libadf.a: src/*
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	@echo "INFO: Running aiecompiler for all AIEplace graphs and kernels..."
-	@rm -rf Work libadf.a
+	@rm -rf Work
 	@mkdir -p Work
 	aiecompiler --target=${TARGET} ${AIE_FLAGS} --workdir=./Work src/TopGraph.cpp
 
@@ -52,7 +52,7 @@ libadf.a: src/*
 partials: src/partials/*
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	@echo "INFO: Running aiecompiler for partials..."
-	@rm -rf Work libadf.a
+	@rm -rf Work
 	@mkdir -p Work
 	aiecompiler --target=${TARGET} ${AIE_FLAGS} --workdir=./Work src/partials/PartialsGraph.cpp
 
@@ -60,7 +60,7 @@ partials: src/partials/*
 density: src/density/*
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	@echo "INFO: Running aiecompiler for density..."
-	@rm -rf Work libadf.a
+	@rm -rf Work
 	@mkdir -p Work
 	aiecompiler --target=${TARGET} ${AIE_FLAGS} --workdir=./Work src/density/DCTGraph.cpp
 

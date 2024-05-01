@@ -174,7 +174,7 @@ void DataBase::prepareCtrlPacket(float * ctrl_data, int net_size, int num_packet
  * @brief Prepare data in correct format to be sent to PL and then AIE input streams
  *
 **/
-void DataBase::prepareNextPacketGroup(float * input_data, int net_size)
+void DataBase::prepareNextPartialsPacket(float * input_data, int net_size)
 {
     bool func_debug = false; // Set true if you want to print what this function is doing!
 
