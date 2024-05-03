@@ -19,7 +19,10 @@ COMPILE_FLAGS += -llefparseradapt
 COMPILE_FLAGS += -ldefparseradapt 
 #COMPILE_FLAGS += -lverilogparser
 #COMPILE_FLAGS += -lbookshelfparser
-COMPILE_FLAGS += -lcairo
+
+# Cairo is used for generating images, but disabled now because it causes compile errors:
+# warning: libnvidia-tls.so.430.50, needed by //usr/lib64/libGL.so.1, not found
+#COMPILE_FLAGS += -lcairo
 COMPILE_FLAGS += -lstdc++fs
 COMPILE_FLAGS += -lxrt_coreutil -lxilinxopencl
 COMPILE_FLAGS += -O0 -g -L$(XILINX_XRT)/lib/ -lpthread -lrt -lstdc++

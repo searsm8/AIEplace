@@ -23,7 +23,9 @@ using std::min;
 // Compilation flags
 #define USE_AIE_ACCELERATION // if this is defined, the application will use VCK5000 acceleration
                     // (To configure AIE and PL, the .xclbin must be specified as a command line parameter)
+
 #define CREATE_VISUALIZATION // if this is defined, a Visualizer class using Cairo will export images
+
 #define PACKET_SIZE 8 // DO NOT TOUCH. This is the number of floats transferred to AIE kernels at a time.
 
 // PARTIALS_GRAPH_COUNT is the number of compute units on AIE for partials acceleration.
@@ -37,8 +39,8 @@ using std::min;
 #define WIRELENGTH_COMPUTE_METHOD "HPWL"
 
 // other parameters
-#define BINS_PER_ROW 128 // Should be scaled up to 512 or 1024 for final application
-#define BINS_PER_COL 128
+#define BINS_PER_ROW 32 // Should be scaled up to 512 or 1024 for final application
+#define BINS_PER_COL BINS_PER_ROW // Unless otherwise noted, grid of bins is square.
 
 #define AIEPLACE_NAMESPACE_BEGIN namespace AIEplace {
 #define AIEPLACE_NAMESPACE_END }
