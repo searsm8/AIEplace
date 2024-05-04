@@ -41,3 +41,10 @@ clean:
 	$(MAKE) -C aie clean
 	$(MAKE) -C pl clean
 	$(MAKE) -C host clean
+
+# Scripts to run AIEplace application
+runhw:
+	source emu_run.sh
+
+runemu:
+	source hw_run.sh

@@ -22,15 +22,16 @@ COMPILE_FLAGS += -ldefparseradapt
 
 # Cairo is used for generating images, but disabled now because it causes compile errors:
 # warning: libnvidia-tls.so.430.50, needed by //usr/lib64/libGL.so.1, not found
-#COMPILE_FLAGS += -lcairo
+COMPILE_FLAGS += -lcairo
+#COMPILE_FLAGS += -l:libcairo.so.2# Specific library for use on nextgenio-amd02 node
 COMPILE_FLAGS += -lstdc++fs
 COMPILE_FLAGS += -lxrt_coreutil -lxilinxopencl
 COMPILE_FLAGS += -O0 -g -L$(XILINX_XRT)/lib/ -lpthread -lrt -lstdc++
 #COMPILE_FLAGS += -Wall
 
 COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
-#COMPILE_FLAGS += -DCREATE_VISUALIZATION
-#COMPILE_FLAGS += -DUSE_AIE_ACCELERATION
+#COMPILE_FLAGS += -DCREATE_VISUALIZATION# Comment this out if no visualization is wanted.
+#COMPILE_FLAGS += -DUSE_AIE_ACCELERATION# Comment this out if no visualization is wanted.
 
 .PHONY: all exe objs
 

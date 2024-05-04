@@ -10,8 +10,8 @@ void PartialsGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int 
     
     // Create kernel objects
     // Be extra sure the names are correct, there might not be an error message!
-    device_mm2s = xrt::kernel(device, xclbin_uuid, "pl_kernel_mm2s:{pl_kernel_mm2s_"+std::to_string(kernel_id)+"}");
-    device_s2mm = xrt::kernel(device, xclbin_uuid, "pl_kernel_s2mm:{pl_kernel_s2mm_"+std::to_string(kernel_id)+"}");
+    device_mm2s = xrt::kernel(device, xclbin_uuid, "partials_mm2s:{partials_mm2s_"+std::to_string(kernel_id)+"}");
+    device_s2mm = xrt::kernel(device, xclbin_uuid, "partials_s2mm:{partials_s2mm_"+std::to_string(kernel_id)+"}");
 
     // Get memory bank groups for device buffers
     bank_input  = device_mm2s.group_id(0);
@@ -133,15 +133,15 @@ void DensityGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid)
     run_device_s2mm = xrt::run(density_s2mm);
 
     // For density DCT computation, we transfer one row's worth of floats to compute DCT
-    input_buffer  = xrt::bo(device, BINS_PER_ROW*sizeof(float), /*xrt::bo::flags::normal,*/ density_mm2s.group_id(0));
-    result_buffer = xrt::bo(device, BINS_PER_ROW*sizeof(float), /*xrt::bo::flags::normal,*/ density_s2mm.group_id(0));
+    input_buffer  = xrt::bo(device, 2*BINS_PER_ROW*sizeof(float), /*xrt::bo::flags::normal,*/ density_mm2s.group_id(0));
+    result_buffer = xrt::bo(device, 2*BINS_PER_ROW*sizeof(float), /*xrt::bo::flags::normal,*/ density_s2mm.group_id(0));
 
     // set kernel arguments
     run_device_mm2s.set_arg(0, input_buffer);
-    run_device_mm2s.set_arg(1, BINS_PER_ROW);
+    run_device_mm2s.set_arg(1, 2*BINS_PER_ROW);
 
     run_device_s2mm.set_arg(0, result_buffer);
-    run_device_s2mm.set_arg(1, BINS_PER_ROW);
+    run_device_s2mm.set_arg(1, 2*BINS_PER_ROW);
 }
 
 /*

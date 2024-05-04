@@ -6,7 +6,7 @@
 #include "aie_api/aie_adf.hpp"
 #include <aie_api/utils.hpp>
 
-#define POINT_SIZE 64// Must be a power of two for FFT (min 16)
+#define POINT_SIZE 32// Must be a power of two for FFT (min 16)
 #define FFT_DATA_TYPE cfloat // cfloat, cint32, or cint16
 #define TWIDDLE_TYPE cfloat // cfloat, or cint16
 #define NUM_ITER POINT_SIZE

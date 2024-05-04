@@ -21,8 +21,8 @@ Placer::Placer(fs::path input_dir, std::string xclbin_file) :
             xrt::uuid xclbin_uuid = device.load_xclbin(xclbin_file);
 
             // Create drivers which handle buffer IO
-            for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
-                partials_drivers[i].init(device, xclbin_uuid, i);
+            //for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
+            //    partials_drivers[i].init(device, xclbin_uuid, i);
 
             density_driver.init(device, xclbin_uuid);
             #endif
@@ -67,12 +67,12 @@ void Placer::performIteration()
     //computeAllPartials_AIE();
 
     // Compute Electric Fields in each bin
-    //computeOverlaps();
-    //placer.db.printOverlaps();
-    //placer.grid.printOverflows();
+    computeOverlaps();
+    db.printOverlaps();
+    //grid.printOverflows();
 
     //computeElectricFields_CPU();
-    computeElectricFields_DCT();
+    computeElectricFields_DCT(); // on CPU also
     computeElectricFields_AIE();
     //placer.grid.printElectricFields();
 
@@ -101,9 +101,13 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
     // For each component that isn't fixed
     for (auto item : db.getComponents()) {
         // Choose a random position based on parameters
-        int x_offset = min_dist + rand()%(max_dist-min_dist);
-        int y_offset = min_dist + rand()%(max_dist-min_dist);
-        item.second->setPosition(target_pos + Position<position_type>(x_offset, y_offset));
+        //int x_offset = min_dist + rand()%(max_dist-min_dist);
+        //int y_offset = min_dist + rand()%(max_dist-min_dist);
+        int x_offset = rand()%(grid.getDieWidth()) - grid.getDieWidth()/2;
+        int y_offset = rand()%(grid.getDieWidth()) - grid.getDieWidth()/2;
+        Position<position_type> init_pos = target_pos + Position<position_type>(x_offset, y_offset);
+        //cout << "Initial pos of " << item.second->getName() << ": " << init_pos.to_string() << "\tcomp#"<<component_count++<< endl;
+        item.second->setPosition(init_pos);
     }
 
     printIterationResults();
@@ -221,17 +225,30 @@ void Placer::computeElectricFields_AIE()
     // Call AIE graph_driver to accelerate computation
     std::vector< std::vector<float> > rho = grid.getRho();
 
-    float * input_data  = new float[BINS_PER_ROW]; 
-    float * output_data = new float[BINS_PER_ROW];
-    for(int i = 0; i < BINS_PER_ROW; i++)
-        input_data[i] = rho[0][i];
+    float * input_data  = new float[2*BINS_PER_ROW]; 
+    float * output_data = new float[2*BINS_PER_ROW];
+    for(int i = 0; i < BINS_PER_ROW; i++) {
+        input_data[2*i] = rho[0][i];
+        input_data[2*i+1] = 0;
+    }
+
+    // DEBUG: Print input data received
+    cout << endl << "AIE DCT input: " << endl;
+    for(int i = 0; i < BINS_PER_ROW; i++) {
+        cout << input_data[2*i] << "\t";
+        if((i+1)%16 == 0) cout << endl;
+    }
+    cout << endl;
+
     density_driver.send_packet(input_data);
     density_driver.receive_packet(output_data);
 
     // DEBUG: Print output data received
-    cout << "DCT result: ";
-    for(int i = 0; i < BINS_PER_ROW; i++)
-        cout << output_data[i] << ", ";
+    cout << endl << "AIE compute DCT result: " << endl;
+    for(int i = 0; i < BINS_PER_ROW; i++) {
+        cout << output_data[2*i] << "\t";
+        if((i+1)%16 == 0) cout << endl;
+    }
     cout << endl;
 
 }
@@ -420,11 +437,25 @@ void Placer::compute_a_uv_DCT()
     for (int row_index = 0; row_index < grid.getBinsPerCol(); row_index++)
         temp.push_back(DCT_naive(rho[row_index]));
 
+    // DEBUG: Print 1D DCT input and result
+    cout << endl << "CPU rho input to 1D-DCT:" << endl;
+    for (int i = 0; i < grid.getBinsPerRow(); i++) {
+        cout << rho[0][i] << "\t";
+        if((i+1)%16 == 0) cout << endl;
+    }
+    cout << endl;
+    cout << endl << "CPU compute 1D-DCT output:" << endl;
+    for (int i = 0; i < grid.getBinsPerRow(); i++) {
+        cout << temp[0][i] << "\t";
+        if((i+1)%16 == 0) cout << endl;
+    }
+    cout << endl;
+
     temp = transpose(temp);
 
     // Perform 1-D DCT on transposed matrix
-    for (int row_index = 0; row_index < grid.getBinsPerCol(); row_index++)
-        a_uv.push_back(DCT_naive(temp[row_index]));
+    for (int col_index = 0; col_index < grid.getBinsPerRow(); col_index++)
+        a_uv.push_back(DCT_naive(temp[col_index]));
     
     a_uv = transpose(a_uv);
 
