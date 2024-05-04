@@ -1,0 +1,2 @@
+/usr/bin/ar qc libebeamparser.a  CMakeFiles/ebeamparser.dir/EbeamDriver.cc.o CMakeFiles/ebeamparser.dir/EbeamParser.cc.o CMakeFiles/ebeamparser.dir/EbeamScanner.cc.o
+/usr/bin/ranlib libebeamparser.a

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libdlx.a  CMakeFiles/dlx.dir/src/AlgorithmDLX.cpp.o CMakeFiles/dlx.dir/src/ExactCoverProblem.cpp.o CMakeFiles/dlx.dir/src/LinkedMatrix.cpp.o
+/usr/bin/ranlib libdlx.a

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libbookshelfparser.a  CMakeFiles/bookshelfparser.dir/BookshelfDataBase.cc.o CMakeFiles/bookshelfparser.dir/BookshelfDriver.cc.o CMakeFiles/bookshelfparser.dir/BookshelfParser.cc.o CMakeFiles/bookshelfparser.dir/BookshelfScanner.cc.o
+/usr/bin/ranlib libbookshelfparser.a

@@ -1,0 +1,30 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/msears/AIEplace/cpp/Limbo/limbo/thirdparty/CThreadPool/thpool.c
+unistd.h
+-
+signal.h
+-
+stdio.h
+-
+stdlib.h
+-
+pthread.h
+-
+errno.h
+-
+time.h
+-
+sys/prctl.h
+-
+thpool.h
+/home/msears/AIEplace/cpp/Limbo/limbo/thirdparty/CThreadPool/thpool.h
+
+/home/msears/AIEplace/cpp/Limbo/limbo/thirdparty/CThreadPool/thpool.h
+

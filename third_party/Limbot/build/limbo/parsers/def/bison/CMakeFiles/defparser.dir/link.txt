@@ -1,0 +1,2 @@
+/usr/bin/ar qc libdefparser.a  CMakeFiles/defparser.dir/DefDataBase.cc.o CMakeFiles/defparser.dir/DefDriver.cc.o CMakeFiles/defparser.dir/DefParser.cc.o CMakeFiles/defparser.dir/DefScanner.cc.o
+/usr/bin/ranlib libdefparser.a

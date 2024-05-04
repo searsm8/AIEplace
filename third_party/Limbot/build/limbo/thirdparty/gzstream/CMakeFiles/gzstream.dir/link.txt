@@ -1,0 +1,2 @@
+/usr/bin/ar qc libgzstream.a  CMakeFiles/gzstream.dir/gzstream.C.o
+/usr/bin/ranlib libgzstream.a

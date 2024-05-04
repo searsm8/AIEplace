@@ -1,0 +1,10 @@
+prefix=/home/msears/AIEplace/cpp/Limbo
+exec_prefix=/home/msears/AIEplace/cpp/Limbo/bin
+libdir=/home/msears/AIEplace/cpp/Limbo/lib
+includedir=/home/msears/AIEplace/cpp/Limbo/include
+
+Name: LEMON
+Description: Library for Efficient Modeling and Optimization in Networks
+Version: 1.3.1
+Libs: -L${libdir} -lemon     
+Cflags: -I${includedir}

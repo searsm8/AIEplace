@@ -1,0 +1,2 @@
+/usr/bin/ar qc libverilogparser.a  CMakeFiles/verilogparser.dir/VerilogDataBase.cc.o CMakeFiles/verilogparser.dir/VerilogDriver.cc.o CMakeFiles/verilogparser.dir/VerilogParser.cc.o CMakeFiles/verilogparser.dir/VerilogScanner.cc.o
+/usr/bin/ranlib libverilogparser.a

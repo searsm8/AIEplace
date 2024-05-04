@@ -1,0 +1,24 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+../limbo/thirdparty/gzstream/gzstream.h
+iostream
+-
+fstream
+-
+zlib.h
+-
+
+/home/msears/AIEplace/cpp/Limbo/limbo/thirdparty/gzstream/gzstream.C
+gzstream.h
+-
+iostream
+-
+string.h
+-
+

@@ -1,0 +1,43 @@
+file(REMOVE_RECURSE
+  "CMakeFiles/def_objlib.dir/def.tab.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/def_keywords.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiAlias.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiAssertion.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiBlockage.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiComponent.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiDebug.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiFPC.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiFill.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiGroup.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiIOTiming.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiMisc.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiNet.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiNonDefault.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiPartition.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiPath.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiPinCap.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiPinProp.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiProp.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiPropType.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiRegion.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiRowTrack.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiScanchain.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiSite.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiSlot.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiTimingDisable.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiUtil.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defiVia.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defrCallbacks.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defrData.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defrReader.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defrSettings.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defwWriter.cpp.o"
+  "CMakeFiles/def_objlib.dir/def/defwWriterCalls.cpp.o"
+  "def.tab.cpp"
+  "def.tab.h"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang CXX)
+  include(CMakeFiles/def_objlib.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

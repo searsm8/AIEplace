@@ -1,0 +1,1 @@
+/usr/bin/c++  -O3 -DNDEBUG  -rdynamic CMakeFiles/lefwrite.dir/lefwrite/lefwrite.cpp.o  -o bin/lefwrite  liblef.a -lz 

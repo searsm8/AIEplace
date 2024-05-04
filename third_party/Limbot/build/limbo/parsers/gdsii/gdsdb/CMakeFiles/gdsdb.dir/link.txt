@@ -1,0 +1,2 @@
+/usr/bin/ar qc libgdsdb.a  CMakeFiles/gdsdb.dir/GdsIO.cpp.o CMakeFiles/gdsdb.dir/GdsObjects.cpp.o
+/usr/bin/ranlib libgdsdb.a

@@ -1,0 +1,38 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+../limbo/thirdparty/lefdef/5.8/def/cdef/defiTypedefs.h
+
+../limbo/thirdparty/lefdef/5.8/def/cdef/defrReader.h
+stdio.h
+-
+defiTypedefs.h
+../limbo/thirdparty/lefdef/5.8/def/cdef/defiTypedefs.h
+
+/home/msears/AIEplace/cpp/Limbo/limbo/thirdparty/lefdef/5.8/def/cdefzlib/cdefzlib.c
+stdio.h
+-
+stdlib.h
+-
+string.h
+-
+limits.h
+-
+sys/types.h
+-
+sys/stat.h
+-
+zlib.h
+/home/msears/AIEplace/cpp/Limbo/limbo/thirdparty/lefdef/5.8/def/cdefzlib/zlib.h
+defzlib.h
+/home/msears/AIEplace/cpp/Limbo/limbo/thirdparty/lefdef/5.8/def/cdefzlib/defzlib.h
+defrReader.h
+/home/msears/AIEplace/cpp/Limbo/limbo/thirdparty/lefdef/5.8/def/cdefzlib/defrReader.h
+
+/home/msears/AIEplace/cpp/Limbo/limbo/thirdparty/lefdef/5.8/def/cdefzlib/defzlib.h
+

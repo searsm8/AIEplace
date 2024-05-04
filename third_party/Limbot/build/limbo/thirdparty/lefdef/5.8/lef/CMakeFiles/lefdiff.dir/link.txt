@@ -1,0 +1,1 @@
+/usr/bin/c++  -O3 -DNDEBUG  -rdynamic CMakeFiles/lefdiff.dir/lefdiff/diffLefRW.cpp.o CMakeFiles/lefdiff.dir/lefdiff/differLef.cpp.o  -o bin/lefdiff  liblef.a -lz 

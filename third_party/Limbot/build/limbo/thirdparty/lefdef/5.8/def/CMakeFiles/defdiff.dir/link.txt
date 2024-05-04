@@ -1,0 +1,1 @@
+/usr/bin/c++  -O3 -DNDEBUG  -rdynamic CMakeFiles/defdiff.dir/defdiff/diffDefRW.cpp.o CMakeFiles/defdiff.dir/defdiff/differDef.cpp.o  -o bin/defdiff  libdef.a -lz 

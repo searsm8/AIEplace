@@ -1,0 +1,2 @@
+/usr/bin/ar qc libcdefzlib.a  CMakeFiles/cdefzlib.dir/cdefzlib/cdefzlib.c.o
+/usr/bin/ranlib libcdefzlib.a

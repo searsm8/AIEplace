@@ -1,0 +1,1 @@
+/usr/bin/cc -O3 -DNDEBUG  -rdynamic CMakeFiles/CThreadPool_example.dir/example.c.o  -o CThreadPool_example  libCThreadPool_thpool.a -lpthread 

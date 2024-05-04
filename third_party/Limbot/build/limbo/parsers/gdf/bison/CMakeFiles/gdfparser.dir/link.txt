@@ -1,0 +1,2 @@
+/usr/bin/ar qc libgdfparser.a  CMakeFiles/gdfparser.dir/GdfDriver.cc.o CMakeFiles/gdfparser.dir/GdfParser.cc.o CMakeFiles/gdfparser.dir/GdfScanner.cc.o
+/usr/bin/ranlib libgdfparser.a

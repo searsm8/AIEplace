@@ -1,0 +1,1 @@
+/usr/bin/c++  -O3 -DNDEBUG  -rdynamic CMakeFiles/defrw.dir/defrw/defrw.cpp.o  -o bin/defrw  libdef.a -lz 

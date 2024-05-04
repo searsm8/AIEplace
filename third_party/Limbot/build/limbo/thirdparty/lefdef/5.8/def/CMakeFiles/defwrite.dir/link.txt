@@ -1,0 +1,1 @@
+/usr/bin/c++  -O3 -DNDEBUG  -rdynamic CMakeFiles/defwrite.dir/defwrite/defwrite.cpp.o  -o bin/defwrite  libdef.a -lz 
