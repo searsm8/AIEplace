@@ -1,3 +1,6 @@
+# File: generate_link_cfg.py
+# Builds the config file link.cfg which specifies connections between PL and AIE
+# reads from "Common.h" the number of Partials Graphs exist in the design
 import re
 
 def read_partials_graph_count(header_file):
@@ -42,20 +45,24 @@ def generate_link_cfg(file_path):
         
         
         f.write("\n### Density Kernel connections ###\n")
-        f.write("nk=density_mm2s:1:density_mm2s_0\n")
-        f.write("nk=density_s2mm:1:density_s2mm_0\n\n")
+        f.write("nk=density_mm2s:3:density_mm2s_0.density_mm2s_1.density_mm2s_2\n")
+        f.write("nk=density_s2mm:3:density_s2mm_0.density_s2mm_1.density_s2mm_2\n\n")
         
         f.write("stream_connect = density_mm2s_0.stream_pl2aie:ai_engine_0.DCT_in\n")
-        f.write("stream_connect = ai_engine_0.DCT_out:density_s2mm_0.stream_aie2pl\n\n")
+        f.write("stream_connect = ai_engine_0.DCT_out:density_s2mm_0.stream_aie2pl\n")
+        f.write("stream_connect = density_mm2s_1.stream_pl2aie:ai_engine_0.IDCT_in\n")
+        f.write("stream_connect = ai_engine_0.IDCT_out:density_s2mm_1.stream_aie2pl\n")
+        f.write("stream_connect = density_mm2s_2.stream_pl2aie:ai_engine_0.IDXST_in\n")
+        f.write("stream_connect = ai_engine_0.IDXST_out:density_s2mm_2.stream_aie2pl\n\n")
         
         f.write("[vivado]\n")
         f.write("# use following line to improve the hw_emu running speed affected by platform\n")
         f.write("prop=fileset.sim_1.xsim.elaborate.xelab.more_options={-override_timeprecision -timescale=1ns/1ps}\n\n")
         
-        f.write("[profile]\n")
-        f.write("# enable hardware trace\n")
-        f.write("data=all:all:all\n")
-        f.write("#xrt.init?\n")
+        #f.write("[profile]\n")
+        #f.write("# enable hardware trace\n")
+        #f.write("data=all:all:all\n")
+        #f.write("xrt.init\n")
 
         print(f"Generated file: {file_path}")
 

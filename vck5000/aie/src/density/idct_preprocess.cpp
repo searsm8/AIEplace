@@ -1,6 +1,6 @@
 #include "density_kernels.h"
 
-void idct_preprocess(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out) {
+void idct_preprocess(input_stream<FFT_DATA_TYPE> * in, output_stream<FFT_DATA_TYPE> * out) {
   /* EXPECTED INPUT
    * 
    */
@@ -21,13 +21,13 @@ void idct_preprocess(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TY
 	for(int n = 0; n < POINT_SIZE/8; n++) {
 		alpha = aie::mul(alpha_base, k);
 		adjust_factor = aie::sincos_complex(alpha); // Equivalent to e^(i*alpha)
-		data = aie::mul(window_readincr_v<8>(in), adjust_factor);
+		data = aie::mul(readincr_v<8>(in), adjust_factor);
 
         // Divide the first output by 2
         if(n == 0)
             data[0] = data[0] * 0.5;
 
-		window_writeincr(out, data);
+		writeincr(out, data);
 		k = aie::add(k, eights);
 	}
 }

@@ -1,19 +1,17 @@
 #include "density_kernels.h"
 
-void idxst_shuffle(input_window<FFT_DATA_TYPE> * in, output_window<FFT_DATA_TYPE> * out) {
+void idxst_shuffle(input_stream<FFT_DATA_TYPE> * in, output_stream<FFT_DATA_TYPE> * out) {
     /* Flip order, but preserve first element
-    *  Input: a b c d e f g h
-    * Output: a h g f e d c b
+    *  Input: x0 x1 x2 x3 x4 x5 x6 x7
+    * Output: x0 x7 x6 x5 x4 x3 x2 x1
     */
-
-    FFT_DATA_TYPE data;
+    FFT_DATA_TYPE data [POINT_SIZE];
     
-	data = window_read(in);
-	window_writeincr(out, data);
-	window_incr(in, POINT_SIZE-1);
+    for(int i = 0; i < POINT_SIZE; i++)
+        data[i] = readincr(in);
+
+	writeincr(out, data[0]);
     for(int i = 1; i < POINT_SIZE; i++) {
-        data = window_read(in);
-        window_decr(in, 1);
-        window_writeincr(out, data);
+        writeincr(out, data[POINT_SIZE-i]);
 	}
 }

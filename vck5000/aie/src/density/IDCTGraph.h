@@ -43,13 +43,11 @@ public:
     IDCT_pre_kernel = kernel::create(idct_preprocess);
     IDCT_unshuffle_kernel= kernel::create(idct_unshuffle);
 
-    // Window sizes are 4*2*POINT_SIZE 
-    // 4 bytes per float, 2 floats per cfloat
     // TODO: Possibly reduce communication overhead by using floats for real-only values
-    connect< window<4*2*POINT_SIZE> > net_in      (IDCT_in.out[0], IDCT_pre_kernel.in[0]);
-    connect< window<4*2*POINT_SIZE> > net_pre     (IDCT_pre_kernel.out[0], FFT_subgraph.in[0]);
-    connect< window<4*2*POINT_SIZE> > net_fft     (FFT_subgraph.out[0], IDCT_unshuffle_kernel.in[0]);
-    connect< window<4*2*POINT_SIZE> > net_idct_out(IDCT_unshuffle_kernel.out[0], IDCT_out.in[0]);
+    connect<stream> net_in      (IDCT_in.out[0], IDCT_pre_kernel.in[0]);
+    connect<stream> net_pre     (IDCT_pre_kernel.out[0], FFT_subgraph.in[0]);
+    connect<stream> net_fft     (FFT_subgraph.out[0], IDCT_unshuffle_kernel.in[0]);
+    connect<stream> net_idct_out(IDCT_unshuffle_kernel.out[0], IDCT_out.in[0]);
 
     // Associate kernels with Source files and set runtime ratio
     source(IDCT_pre_kernel) = "idct_preprocess.cpp";

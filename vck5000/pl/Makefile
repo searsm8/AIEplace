@@ -18,8 +18,8 @@ XO := aieplace.$(TARGET).xo
 XSA_OBJ := aieplace.$(TARGET).xsa
 XCLBIN := aieplace.$(TARGET).xclbin
 
-KERNEL_XO := density_mm2s.xo density_s2mm.xo
-#KERNEL_XO += partials_mm2s.xo partials_s2mm.xo
+KERNEL_XO := partials_mm2s.xo partials_s2mm.xo
+KERNEL_XO += density_mm2s.xo density_s2mm.xo
 
 #KERNEL_NAME := sum_kernel
 
@@ -32,7 +32,7 @@ KRNL_LINK_OPTS := -t $(TARGET) --config ../link.cfg -j 26 -g --save-temps
 .PHONY: pl
 .ONESHELL:
 
-pl: mkrefdir $(XO) $(XCLBIN)
+pl: mkrefdir config $(XO) $(XCLBIN)
 	cp reference_files_$(TARGET)/$(XCLBIN) ../bin/.
 
 mkrefdir:
@@ -53,6 +53,11 @@ $(XSA_OBJ): $(KERNEL_XO)
 .PHONY: $(XCLBIN)
 $(XCLBIN): $(XSA_OBJ)
 	cd reference_files_$(TARGET) ; v++ -p -t $(TARGET) -f $(PLATFORM) $^ $(AIE_OBJ) -o $@ --package.boot_mode=ospi
+
+# Generates the link.cfg file which specifies connections between PL and AIE
+.PHONY: config
+config:
+	python3 generate_link_cfg.py
 
 .PHONY: repackage
 repackage:

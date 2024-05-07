@@ -47,15 +47,13 @@ public:
     IDCT_unshuffle_kernel= kernel::create(idct_unshuffle);
     IDXST_signs_kernel = kernel::create(idxst_signs);
 
-    // Window sizes are 4*2*POINT_SIZE 
-    // 4 bytes per float, 2 floats per cfloat
     // TODO: Possibly reduce communication overhead by using floats for real-only values
-    connect< window<4*2*POINT_SIZE> > net_in      (IDXST_in.out[0], IDXST_shuffle_kernel.in[0]);
-    connect< window<4*2*POINT_SIZE> > net_shuf    (IDXST_shuffle_kernel.out[0], IDCT_pre_kernel.in[0]);
-    connect< window<4*2*POINT_SIZE> > net_pre     (IDCT_pre_kernel.out[0], FFT_subgraph.in[0]);
-    connect< window<4*2*POINT_SIZE> > net_fft     (FFT_subgraph.out[0], IDCT_unshuffle_kernel.in[0]);
-    connect< window<4*2*POINT_SIZE> > net_idct_out(IDCT_unshuffle_kernel.out[0], IDXST_signs_kernel.in[0]);
-    connect< window<4*2*POINT_SIZE> > net_idxst_out(IDXST_signs_kernel.out[0], IDXST_out.in[0]);
+    connect<stream> net_in      (IDXST_in.out[0], IDXST_shuffle_kernel.in[0]);
+    connect<stream> net_shuf    (IDXST_shuffle_kernel.out[0], IDCT_pre_kernel.in[0]);
+    connect<stream> net_pre     (IDCT_pre_kernel.out[0], FFT_subgraph.in[0]);
+    connect<stream> net_fft     (FFT_subgraph.out[0], IDCT_unshuffle_kernel.in[0]);
+    connect<stream> net_idct_out(IDCT_unshuffle_kernel.out[0], IDXST_signs_kernel.in[0]);
+    connect<stream> net_idxst_out(IDXST_signs_kernel.out[0], IDXST_out.in[0]);
 
     // Associate kernels with Source files and set runtime ratio
     source(IDXST_shuffle_kernel) = "idxst_shuffle.cpp";
@@ -63,9 +61,9 @@ public:
     source(IDCT_unshuffle_kernel) = "idct_unshuffle.cpp";
     source(IDXST_signs_kernel) = "idxst_signs.cpp";
 
-    runtime<ratio>(IDXST_shuffle_kernel) = 0.5;
-    runtime<ratio>(IDCT_pre_kernel) = 0.5;
-    runtime<ratio>(IDCT_unshuffle_kernel) = 0.5;
-    runtime<ratio>(IDXST_signs_kernel) = 0.5;
+    runtime<ratio>(IDXST_shuffle_kernel) = 1;
+    runtime<ratio>(IDCT_pre_kernel) = 1;
+    runtime<ratio>(IDCT_unshuffle_kernel) = 1;
+    runtime<ratio>(IDXST_signs_kernel) = 1;
   }
 };
