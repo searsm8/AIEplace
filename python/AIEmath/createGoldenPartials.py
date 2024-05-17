@@ -14,7 +14,7 @@ MAX_COORD = 10000
 WINDOW_BASED = False # window (True) or stream based (False) communication
 
 home_dir = os.path.expanduser('~')
-golden_dir = home_dir + "/AIEplace/Vitis/vck5000/aie/golden_data/partials"
+golden_dir = home_dir + "/AIEplace/vck5000/aie/golden_data/partials"
 
 def cleanFiles(filepath):
     shutil.rmtree(filepath)
@@ -136,7 +136,7 @@ if __name__ == "__main__":
 
     cleanFiles(golden_dir)
     #Create benchmarks for wirelength
-    num_benchmarks = 1
+    num_benchmarks = 4
     for i in range(num_benchmarks):
         createGoldenHPWL(golden_dir , netsize=2, N=8, bench_num=i)
     #createGoldenHPWL(golden_dir , netsize=2, N=8*4)

@@ -10,8 +10,8 @@ import customDCT
 
 # Directory names
 home_dir = os.path.expanduser('~')
-golden_dir    = home_dir + "/AIEplace/Vitis/vck5000/aie/golden_data/density/" # golden data
-AIE_input_dir = home_dir + "/AIEplace/Vitis/data/" # This generates a .h header file which gives the data as a C array
+golden_dir    = home_dir + "/AIEplace/vck5000/aie/golden_data/density/" # golden data
+AIE_input_dir = home_dir + "/AIEplace/test/data/" # This generates a .h header file which gives the data as a C array
 fft_size = 16
 input_len = fft_size*fft_size*2
 alpha = -1*cmath.pi/2/fft_size # constant term used in fast DCT computation
