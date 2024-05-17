@@ -54,7 +54,7 @@ private:
 public:
 
     Terms terms;
-    Terms terms_aie;
+    Terms terms_aie; // DEBUG: used to compare AIE with CPU results
 
     // Constructors
     Node() : m_name("") {}

@@ -5,8 +5,10 @@
 #include "DataBase.h"
 #include "Grid.h"
 #include "GraphDriver.h"
+#include <sys/time.h>
+#include <thread>
 
-#define DEVICE_ID 0
+#define DEVICE_ID 0 // Device ID to find VCK5000
 #define MAX_AIE_NET_SIZE 8
 
 #ifdef CREATE_VISUALIZATION
@@ -26,7 +28,7 @@ public:
     float gamma = 4.0; // smoothness factor for estimations; 
                        // larger means less smooth but more accurate
     int iteration = 0;
-    float learning_rate = 300;
+    float learning_rate = .01;
 
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;
@@ -44,6 +46,7 @@ public:
     // Functions which may be accelerated on AIEs
     void prepareInputDataPacket(float * input_data, int net_size);
     void computeAllPartials_AIE ();
+    void computePartials(int graph_index, int net_size, int packets_per_graph); 
     void computeElectricFields_AIE ();
 
     // Functions implemented on CPU
@@ -72,6 +75,10 @@ public:
 
     // Post run analysis
     void computeStatistics();
+
+    // Timing and print functions
+    long getTime();
+    double getInterval(long start_time, long end_time);
     void printRunResults();
 };
 

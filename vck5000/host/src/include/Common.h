@@ -30,7 +30,7 @@ using std::min;
 
 // PARTIALS_GRAPH_COUNT is the number of compute units on AIE for partials acceleration.
 // This is used when building the AIE graphs, and determines how many MM2S and S2MM data movers are required
-// and of course it is also used by the host code.
+// and it is also used by the host code to know how many compute units to send data to.
 // Therefore, changing this value requires a complete rebuild of the entire project
 #define PARTIALS_GRAPH_COUNT 4
 

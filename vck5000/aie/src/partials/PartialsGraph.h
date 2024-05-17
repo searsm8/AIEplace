@@ -25,18 +25,20 @@ public:
       outplio_partials[i] = adf::output_plio::create("outplio_partials_"+std::to_string(i), adf::plio_128_bits, "simdata/partials"+std::to_string(i)+".dat");
 
       // Input connections for abc_kernel
-      adf::connect<adf::stream>(x_in[i].out[0], abc_kernel[i].in[0]); // x-coords
+      adf::connect<adf::stream> net_in(x_in[i].out[0], abc_kernel[i].in[0]); // x-coords
+      adf::fifo_depth(net_in) = 800; // This FIFO allows the host to send data for many nets in bursts
 
       // Input connections for partials_kernel
       adf::connect<adf::stream> net_xa(abc_kernel[i].out[0], partials_kernel[i].in[0]);
       adf::connect<adf::stream> net_bc(abc_kernel[i].out[1], partials_kernel[i].in[1]);
-      adf::fifo_depth(net_xa) = 140; // 140 is large enough to handle nets of size 8 without stalls
+      adf::fifo_depth(net_xa) = 800; // 140 is large enough to handle nets of size 8 without stalls
                                     // or nets of size 9 (with minor stalls)
                                     // add or subtract 24 to the buffer size to increase net size 
                                     // nets larger than 8 should be handled by the host code
-      //adf::fifo_depth(net_bc) = 96*2; // this one doesn't need a fifo
+      adf::fifo_depth(net_bc) = 800; // this one doesn't need a fifo
 
-      adf::connect<adf::stream>(partials_kernel[i].out[0], outplio_partials[i].in[0]);
+      adf::connect<adf::stream> net_out(partials_kernel[i].out[0], outplio_partials[i].in[0]);
+      adf::fifo_depth(net_out) = 800; // this one doesn't need a fifo
 
   #ifdef DEBUG_OUTPUT
       // Optional outputs for debugging intermediate terms

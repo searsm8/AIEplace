@@ -16,7 +16,7 @@ cleansim:
 #Compile AIE code
 aie: libadf.a
 
-TOP := partials/hpwlGraph
+TOP := TopGraph
 GRAPH_TOP := src/${TOP}.cpp
 
 
@@ -38,7 +38,7 @@ AIE_FLAGS += --verbose
 #AIE_FLAGS += --platform=$(PLATFORM) # platform not needed for VCK5000?
 AIE_FLAGS += --kernel-linting
 
-TARGET := hw# choose hw or x86sim
+TARGET ?= hw# choose hw or x86sim
 
 # Compile a full graph for AIEplace application, including multiple partials graphs and density graph
 libadf.a: src/*
@@ -96,7 +96,7 @@ system.wdb:
 	vcdanalyze --vcd=AIEplace.vcd -wdb
 
 analyze: #system.wdb
-	vitis_analyzer aiesimulator_output/default.aierun_summary
-#vitis_analyzer ./Work/$(TOP).aiecompile_summary ./system.wdb
+	vitis_analyzer ./Work/$(TOP).aiecompile_summary
+#vitis_analyzer aiesimulator_output/default.aierun_summary
 
 

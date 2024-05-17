@@ -1,7 +1,7 @@
 # Top level Makefile which calls subdirectory Makefiles
 
 # Modify these parameters to determine what is built
-TARGET ?= hw_emu# choose: hw, hw_emu, or sw_emu
+TARGET ?= hw# choose: hw, hw_emu, or sw_emu
 AIE_GRAPH = aie# choose: aie, partials, or density
 
 .PHONY: help all aie partials density pl repackage host clean
@@ -43,12 +43,18 @@ clean:
 	$(MAKE) -C host clean
 
 # Scripts to run AIEplace application
+BENCHMARK_DIR = host/benchmarks/
+BENCHMARK = ispd2015/mgc_fft_2/
+#BENCHMARK = ispd2015/mgc_superblue11_a/
+#BENCHMARK = ispd2015/mgc_superblue12/
+#BENCHMARK = ispd2015/mgc_superblue16_a/
+
 runhw:
 	@unset XCL_EMULATION_MODE
 	@clear
-	bin/AIEplace.exe host/benchmarks/ispd2015/mgc_fft_2/ bin/aieplace.hw.xclbin
+	@echo "runhw: BENCHMARK = " ${BENCHMARK}
+	bin/AIEplace.exe ${BENCHMARK_DIR}/${BENCHMARK} bin/aieplace.hw.xclbin
 
 runemu:
-	@export XCL_EMULATION_MODE=hw_emu
 	@clear
-	bin/AIEplace.exe host/benchmarks/ispd2015/mgc_fft_2/ bin/aieplace.hw_emu.xclbin
+	export XCL_EMULATION_MODE=hw_emu; bin/AIEplace.exe ${BENCHMARK_DIR}/${BENCHMARK} bin/aieplace.hw_emu.xclbin

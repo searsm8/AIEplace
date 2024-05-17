@@ -10,12 +10,14 @@
 #include <sys/time.h>
 
 AIEPLACE_NAMESPACE_BEGIN
+#define TEST_NET_SIZE 7
 
 class PartialsGraphDriver
 {
 public:
     // Member data
-    long start_time, xfer_on_time, xfer_off_time, kernel_exec_time;
+    long start_time;
+    double xfer_on_time, xfer_off_time, kernel_exec_time;
     xrt::kernel device_mm2s;
     xrt::kernel device_s2mm;
 

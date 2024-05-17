@@ -99,7 +99,7 @@ void DataBase::iterationReset()
     for(auto &item : mm_input_index) // Need to use & so that it is a reference to the actual object, not a copy
         item.second = 0;
     
-    for(auto item : mm_output_index)
+    for(auto &item : mm_output_index) // Need to use & so that it is a reference to the actual object, not a copy
         item.second = 0;
 }
 
@@ -167,21 +167,17 @@ void DataBase::prepareCtrlPacket(float * ctrl_data, int net_size, int num_packet
     ctrl_data[6] = 0;
     ctrl_data[7] = 0;
     //DEBUG:
-    //cout << "Control data: " << net_size << ", " << num_packets << endl;
 }
 
 /*
  * @brief Prepare data in correct format to be sent to PL and then AIE input streams
  *
 **/
-void DataBase::prepareNextPartialsPacket(float * input_data, int net_size)
+void DataBase::prepareNextPartialsPacket(float * input_data, int net_size, int offset)
 {
-    bool func_debug = false; // Set true if you want to print what this function is doing!
+    offset = mm_input_index[net_size]; // offset keeps track of where the next data should be taken from
 
-    int offset = mm_input_index[net_size]; // offset keeps track of where the next data should be taken from
-    if(func_debug) cout << "Prepare data @offset = " << offset << "\tnet_size = " << net_size << endl;
-
-    for(int net_idx = 0; net_idx < 4; net_idx++) { // prepare XY data for 5 nets at a time
+    for(int net_idx = 0; net_idx < 4; net_idx++) { // prepare XY data for 4 nets at a time
         // check if we have reached the end of nets with this degree
         if(net_idx + offset >= mmv_nets_by_degree[net_size].size()) {
             // prep data with trailing zeroes
@@ -196,39 +192,33 @@ void DataBase::prepareNextPartialsPacket(float * input_data, int net_size)
         // otherwise, prep X coordinate data
         auto net = mmv_nets_by_degree[net_size][offset + net_idx ];
 
-        auto &nodes = net->getNodes();
+        auto &nodes = net->getNodes(); // reference to avoid copy
         net->sortPositionsMaxMinX(); // This sort might be redundant? 
         for(int j = 0; j < net_size; j++) {
             input_data[2*net_idx + j*8] = nodes[j]->getX();
         }
 
+        // prep y data
         net->sortPositionsMaxMinY();
-        //nodes = net->getNodes();
         for(int j = 0; j < net_size; j++) {
             input_data[2*net_idx + j*8 + 1] = nodes[j]->getY();
         }
     }
 
     // DEBUG: print the prepared data!
-    if(func_debug) {
-    cout << "Prepared XY data:";
-    for(int i = 0; i < PACKET_SIZE*net_size; i++) {
-        if(i%8 == 0) cout << endl;
-        cout << input_data[i] << " ";
-    }
-    cout << endl;
-    }
+    //cout << "Prepared XY data @offset = " << offset << endl;
+    //for(int i = 0; i < PACKET_SIZE*net_size; i++) {
+    //    if(i%8 == 0) cout << endl;
+    //    cout << input_data[i] << " ";
+    //}
 
     // Move mm_input_index to the next unsent data
-    mm_input_index[net_size] += 4;
+   mm_input_index[net_size] += 4;
 }
 
 void DataBase::storePacket(float * output_data, int net_size)
 {
-    bool func_debug = false; // Set true if you want to print what this function is doing!
-
     int offset = mm_output_index[net_size]; // offset tracks which nets partials should be added to
-    if(func_debug) cout << "storePartials @offset = " << offset << endl;
 
     for(int net_idx = 0; net_idx < 4; net_idx ++) { // prepare XY data for 4 nets at a time
         // check if we have reached the end of nets with this degree
@@ -255,14 +245,12 @@ void DataBase::storePacket(float * output_data, int net_size)
     }
 
     // DEBUG: print the prepared data!
-    if(func_debug) { 
-        cout << "Received XY data:";
-        for(int i = 0; i < PACKET_SIZE*net_size; i++) {
-            if(i%8 == 0) cout << endl;
-            cout << output_data[i] << " ";
-        }
-        cout << endl;
-    }
+    //cout << "\tStored XY data @offset = " << offset << endl;
+    //for(int i = 0; i < PACKET_SIZE*net_size; i++) {
+    //    if(i%8 == 0) cout << endl;
+    //    cout << output_data[i] << " ";
+    //}
+    //cout << endl;
 
     // Move mm_output_index to the next data
     mm_output_index[net_size] += 4;
@@ -441,6 +429,7 @@ void DataBase::printNetsByDegree()
 
 void DataBase::printInfo()
 {
+    cout << endl;
     cout << "---###--- DataBase info ---###---" << endl;
     cout << std::scientific;
     cout << "Die Area: " << m_die_area.getArea() << "\t" << m_die_area.to_string() <<  endl;
@@ -449,6 +438,7 @@ void DataBase::printInfo()
     cout << mm_pins.size() << " pins" << endl;
     cout << mm_components.size() << " components" << endl;
     cout << mm_nets.size() << " nets" << endl;
+    cout << endl;
 }
 
 
@@ -460,12 +450,9 @@ void DataBase::printOverlaps()
         // print overlaps
         string name = item.first;
         Node* node_p = item.second;
-        if (node_p->getBinOverlaps().size() < 2) continue;
         cout << "Bin Overlaps for " << name << node_p->getPosition().to_string() << "\tarea = " << node_p->getArea() << endl;
         for (BinOverlap b : node_p->getBinOverlaps())
-        {
             cout << "\t" << b.overlap << " in bin " << b.bin->bb.getPos().to_string() << endl;
-        }
 
     }
 

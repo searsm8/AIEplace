@@ -91,11 +91,6 @@ void PartialsGraphDriver::print_info()
         xfer_on_time,
         kernel_exec_time,
         xfer_off_time);
-
-    //// Debugging
-    //printf("Results:\n");
-    //for (int i=0; i < PACKET_SIZE; i++) {
-    //    printf("Output %d: %f\n", i, result_data[i]);
 }
 
 long PartialsGraphDriver::getEpoch() {
@@ -105,7 +100,7 @@ long PartialsGraphDriver::getEpoch() {
 }
 
 double PartialsGraphDriver::getTiming(long end_time, long start_time) {
-  return (end_time - start_time) / 1.0e6 ;
+  return (end_time - start_time) / 1.0e6;
 }
 
 

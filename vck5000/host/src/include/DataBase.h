@@ -61,7 +61,7 @@ public:
     const map<int, std::vector<Net *>> &getNetsByDegree() { return mmv_nets_by_degree; }
     int getNetCountOfDegree(int degree) { return mmv_nets_by_degree[degree].size(); }
     Box<position_type> &getDieArea() { return m_die_area; }
-    string getBenchmarkName() { return m_input_dir.parent_path().filename(); }
+    string getBenchmarkName() { return m_input_dir.filename(); }
 
     // Parse functions
     std::vector<fs::path> findExtensions(fs::path, string);
@@ -84,7 +84,7 @@ public:
     // Packet loading/unloading
     bool hasMorePacketsToSend(int net_size) { return mm_input_index[net_size] < mmv_nets_by_degree[net_size].size(); }
     void prepareCtrlPacket(float * ctrl_data, int net_size, int num_packets);
-    void prepareNextPartialsPacket(float * input_data, int net_size);
+    void prepareNextPartialsPacket(float * input_data, int net_size, int offset);
     void storePacket(float * output_data, int net_size);
 
 
