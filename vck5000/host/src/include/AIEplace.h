@@ -9,7 +9,6 @@
 #include <thread>
 
 #define DEVICE_ID 0 // Device ID to find VCK5000
-#define MAX_AIE_NET_SIZE 8
 
 #ifdef CREATE_VISUALIZATION
     #include "Visualizer.h"
@@ -46,7 +45,8 @@ public:
     // Functions which may be accelerated on AIEs
     void prepareInputDataPacket(float * input_data, int net_size);
     void computeAllPartials_AIE ();
-    void computePartials(int graph_index, int net_size, int packets_per_graph); 
+    void computePartials(Packet* p); 
+    void receivePartials(Packet* p);
     void computeElectricFields_AIE ();
 
     // Functions implemented on CPU

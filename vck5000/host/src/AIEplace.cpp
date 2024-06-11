@@ -39,12 +39,12 @@ void Placer::printVersionInfo()
 */
 void Placer::run()
 {
+    // Set the center point of die area as initial placement target
     Position<position_type> target =
                 Position<position_type>(grid.getDieWidth()/2, grid.getDieHeight()/2);
 
-    initializePlacement(target, 0, grid.getDieWidth()/4);
+    initializePlacement(target, 0, grid.getDieWidth()/4); // even spread around center
     //initializePlacement(target, 0, 500); // Close placement for testing purposes
-    //initializePlacement(target, 0, (int)grid.getDieHeight()/4);
 
     bool converged = false;
     while( !converged )
@@ -121,207 +121,330 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
  * AIE acceleration functions
 ****************/
 
+double prepare_compute_time = 0;
+double prepare_actual_time = 0, receive_time= 0;
 /*
  * @brief On AIEs, compute partial derivatives
  *
 **/
-#define NETS_PER_PACKET 4
-#define GROUP_SIZE 8 // Size of the group of nets sent before waiting to receive results
+#define GROUP_SIZE 1 // Size of the group of nets sent before waiting to receive results
 void Placer::computeAllPartials_AIE()
 {
-    // PRINT NUMBER OF NETS BY SIZE
-    //int large_net_count = 0;
-    //for(auto nets : nets_by_degree) {
-    //    if(nets.first <= 10)
-    //        cout << "Number of nets with size " << nets.first << ": " << nets.second.size() << endl;
-    //    else large_net_count += nets.second.size();
-    //}
-    //    cout << "Number of nets with size > 10: " << large_net_count << endl;
-    //cout << "input_data:" << endl;
-    //for(int i = 0; i < PACKET_SIZE+4; i++) {
-    //    cout << "input_data[" << i << "]" <<input_data[i] << endl;
-    //    if((i+1)%4 == 0) cout << endl;
-    //}
+    // Start timer
+    long start_partials = getTime();
 
-
-    // Use AIE graph_driver to send data to AIE accelerater
-    cout << "Time for AIEs to compute all partials on " << PARTIALS_GRAPH_COUNT << " compute units:" << endl;
-    cout << "GROUP_SIZE: " << GROUP_SIZE << endl;
-    //for(int net_size = TEST_NET_SIZE; net_size <= TEST_NET_SIZE; net_size++) {
-    for(int net_size = 2; net_size <= MAX_AIE_NET_SIZE; net_size++) {
-        // Start timer
-        long start_partials = getTime();
-        int num_nets = db.getNetCountOfDegree(net_size);
-        int nets_per_graph = ceil(float(num_nets) / PARTIALS_GRAPH_COUNT);
-        int net_groups_per_graph = ceil(float(nets_per_graph) / (NETS_PER_PACKET * GROUP_SIZE) ); // We send 4 nets of data in each net group 
-        // DEBUG: Info on nets and packets
-        //cout << endl;
-        //cout << "net_size: " << net_size << endl;
-        //cout << "num_nets: " << num_nets << endl;
-        //cout << "nets_per_graph: " << nets_per_graph << endl;
-        //cout << "net_groups_per_graph: " << net_groups_per_graph << endl;
-
-
-        // Send control data to all graphs
-        for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
-            float * ctrl_packet = new float[PACKET_SIZE]; 
-            db.prepareCtrlPacket(ctrl_packet, net_size, net_groups_per_graph*GROUP_SIZE); // added *GROUP_SIZE, this was WRONG!!@!@!
-            partials_drivers[graph_index].send_packet(ctrl_packet);
-        }
-
-        float * input_data  = new float[net_size*PACKET_SIZE]; 
-        float * output_data = new float[net_size*PACKET_SIZE];
-
-        // Send GROUP_SIZE net groups of data to each partials graph
-        //for(int packet_index = 0; packet_index < GROUP_SIZE; packet_index++) {
-        //    for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
-        //        int offset = NETS_PER_PACKET*(graph_index*net_groups_per_graph + packet_index);
-        //        db.prepareNextPartialsPacket(input_data, net_size, offset);
-
-        //        // Send packets of 8 floats from AIE graph until the net group is complete
-        //        for(int n = 0; n < net_size; n++)
-        //            partials_drivers[graph_index].send_packet(input_data + n*PACKET_SIZE);
-        //    }
-        //}
-
-        // Repeat send two net groups, receive two packets until all data has been sent
-        for(int packet_index = GROUP_SIZE; packet_index < net_groups_per_graph; packet_index++) {
-            for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
-                for(int g = 0; g < GROUP_SIZE; g++) {
-                    int offset = 0;//NETS_PER_PACKET*(graph_index*net_groups_per_graph + packet_index);
-                    db.prepareNextPartialsPacket(input_data, net_size, offset);
-
-                    // Send packets of 8 floats from AIE graph until the net group is complete
-                    for(int n = 0; n < net_size; n++)
-                        partials_drivers[graph_index].send_packet(input_data + n*PACKET_SIZE);
-
-
-                    // Send packet of 8 nets of size net_size
-                    //partials_drivers[graph_index].send_packet(input_data);
-                }
-            }
-
-            for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
-                for(int g = 0; g < GROUP_SIZE; g++) {
-                    // Receive packets of 8 floats from AIE graph until the net group is complete
-                    for(int n = 0; n < net_size; n++) {
-                        partials_drivers[graph_index].receive_packet(output_data + n*PACKET_SIZE);
-                        //cout << "received packet @ " << output_data + n*PACKET_SIZE << endl;
-                    }
-
-                    //partials_drivers[graph_index].receive_packet(output_data);
-                    db.storePacket(output_data, net_size);
-                }
-            }
-        }
-
-        // Receive final two net groups form each partials graph
-        //for(int packet_index = 0; packet_index < GROUP_SIZE; packet_index++) {
-        //    for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
-        //        for(int n = 0; n < net_size; n++) {
-        //            partials_drivers[graph_index].receive_packet(output_data + n*PACKET_SIZE);
-        //        }
-        //        db.storePacket(output_data, net_size);
-        //    }
-        //}
-
-/*
-        //packets_per_graph = 10;
-        // Start threads to handle each AIE PartialsGraph
+    // for each packet specified in DataBase
+    int packet_index = 0;
+    while(packet_index < db.getPacketCount()) {
+        int graphs_active = 0;
+        // send a packet to each AIE graph
+        long start_prep = getTime();
         std::thread partials_threads[PARTIALS_GRAPH_COUNT];
         for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
-            // Need to tell each thread starting offset, and packets_per_graph to know how far to go
-            partials_threads[graph_index] = std::thread([this, graph_index, net_size, packets_per_graph]() {
-                this->computePartials(graph_index, net_size, packets_per_graph);
-            });
-        }
+            //cout << "packet_index: " << packet_index << "\t < " << db.mv_packet[graph_index].size() << endl;
+            if(packet_index < db.mv_packet[graph_index].size()) {
+                //cout << "computePartials on graph " << db.mv_packet[graph_index][packet_index]->graph_index
+                //    << "\t" << db.mv_packet[graph_index][packet_index]->contents[0].to_string();
+                computePartials(db.mv_packet[graph_index][packet_index]);
 
-        for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
-            cout << "Joining thread: " << graph_index << endl;
-            partials_threads[graph_index].join();
-        }
-*/
-
-        //if(db.hasMorePacketsToSend(net_size))
-        //    cout << "WARNING: Unsent packets detected for net_size = " << net_size << endl;
-        //// End timer and print
-        double partials_compute_time = getInterval(start_partials, getTime());
-        cout << "net_size = " << net_size << ": " << partials_compute_time << " sec" << endl;
-        cout << "DONE with net_size = " << net_size << endl;
-    }
-// DEBUG: Compare results with CPU version:
-    float max_diff = 0;
-    float total_diff = 0;
-    int nonzero_count = 0;
-    //cout << endl << "*&*&*&*&   AIE vs CPU RESULTS COMPARISON   *&*&*&*&" << endl;
-    auto m_nets = db.getNetsByDegree();
-    for(auto item : db.getNetsByDegree()) {
-        //cout << "RESULTS FOR NET_SIZE = " << item.first << endl;
-        if(item.first <= MAX_AIE_NET_SIZE)
-        for(Net * net : item.second) {
-            //cout << "NET: " << net->getName() << endl;
-            if(net->getDegree() <= 1 || net->getDegree() > MAX_AIE_NET_SIZE) continue;
-            for(Node * np : net->getNodes()) {
-                //cout << "Node " << np->getName();
-                //cout << "\tCPU result (X, Y): " << np->terms.partials.x << ", " << np->terms.partials.y;
-                //cout << "\tAIE result (X, Y): " << np->terms_aie.partials.x << ", " << np->terms_aie.partials.y;
-                //cout << endl;
-                float diff = np->terms.partials.x - np->terms_aie.partials.x;
-                total_diff += abs(diff);
-                //if(abs(diff) > abs(max_diff)) max_diff = diff;
-                if(abs(diff) > abs(max_diff)) {max_diff = diff; }
-                if(diff != 0 && np->terms.partials.x != 0 && np->terms_aie.partials.x != 0)
-                    nonzero_count++;
-                diff = np->terms.partials.y - np->terms_aie.partials.y;
-                total_diff += abs(diff);
-                if(abs(diff) > abs(max_diff)) {max_diff = diff; }
+                // Need to tell each thread starting offset, and packets_per_graph to know how far to go
+                //partials_threads[graph_index] = std::thread([this, graph_index, packet_index]() {
+                //    this->computePartials(db.mv_packet[graph_index][packet_index]);
+                //});
+                graphs_active++;
             }
         }
+
+        // Join threads
+        //for(int graph_index = 0; graph_index < graphs_active; graph_index++) {
+        //    partials_threads[graph_index].join();
+        //}
+
+     prepare_actual_time += getInterval(start_prep, getTime());
+     long start_receive = getTime();
+
+        // receive output from each AIE graph
+        for(int graph_index = 0; graph_index < graphs_active; graph_index++) {
+            if(packet_index < db.mv_packet[graph_index].size()) {
+                //receivePartials(db.mv_packet[graph_index][packet_index]);
+                partials_threads[graph_index] = std::thread([this, graph_index, packet_index]() {
+                    this->receivePartials(db.mv_packet[graph_index][packet_index]);
+                });
+            }
+        }
+
+        // Join threads
+        for(int graph_index = 0; graph_index < graphs_active; graph_index++) {
+            //cout << "Joining thread: " << graph_index << endl;
+            partials_threads[graph_index].join();
+        }
+     receive_time += getInterval(start_receive, getTime());
+
+        packet_index++;
     }
-    float avg_diff = total_diff / nonzero_count;
-    cout << "Avg diff: " << avg_diff << endl;
-    cout << "Max diff: " << max_diff << endl;
-// END DEBUG
+//        for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
+//            cout << "Joining thread: " << graph_index << endl;
+//            partials_threads[graph_index].join();
+//        }
+
+    // End timer and print
+    cout << "Prepare packet Total Thread compute time: " << prepare_compute_time << endl;
+    cout << "Prepare packet actual compute time: " << prepare_actual_time << endl;
+    cout << "Receive packet actual compute time: " << receive_time << endl;
+    double partials_compute_time = getInterval(start_partials, getTime());
+    cout << "Total time for AIE partials compute time: " << partials_compute_time << " sec (" << PARTIALS_GRAPH_COUNT  << " AIE cores used)" << endl;
 }
+
+void Placer::computePartials(Packet* p)
+{
+
+    float * input_packet = new float[INPUT_PACKET_SIZE]; // extra size for ctrl data
+
+    // set ctrl data for the packet
+    int index = 0;
+    for(PacketIndex pind : p->contents) {
+        input_packet[index++] = pind.net_size;
+        input_packet[index++] = pind.group_count;
+    }
+    while(index < 8)
+        input_packet[index++] = 0;
+
+    
+    long start = getTime();
+    for(PacketIndex pind : p->contents) {
+        // fetch the current packet's postion data into a float* array (with ctrl data)
+        //cout << "Preparing net groups: " << pind.group_start << " thru " << pind.group_start + pind.group_count << endl;
+        for(int group_index = pind.group_start; group_index < pind.group_start + pind.group_count; ++group_index) {
+            db.prepareNetGroup(input_packet, pind.net_size, group_index*NETS_PER_GROUP );
+        }
+    }
+    prepare_compute_time += getInterval(start, getTime());
+
+    // send the data packet to PL (maybe as a thread?)
+    partials_drivers[p->graph_index].send_packet(input_packet);
+
+}
+
+void Placer::receivePartials(Packet* p)
+{
+    //cout << "*receivePartials on graph " << p->graph_index  << "\t" << p->contents[0].to_string();
+
+    // receive the result data packet from PL
+    float * output_packet = new float[OUTPUT_PACKET_SIZE];
+    partials_drivers[p->graph_index].receive_packet(output_packet);
+
+    // DEBUG: print output packet
+    //cout << "output_packet:" << endl;
+    //for( int i = 0; i < LCM_BUFFSIZE*VEC_SIZE; i++) {
+    //    if(i%8 == 0) cout << endl;
+    //    //if(i%8*TEST_NET_SIZE == 0) cout << endl;
+    //    cout << output_packet[i] << " ";
+    //}
+
+    // store it into database, updating node partials
+    for(PacketIndex pind : p->contents) {
+        for(int group_index = pind.group_start; group_index < pind.group_start + pind.group_count; ++group_index) {
+            db.storeNetGroup(output_packet, pind.net_size, group_index*NETS_PER_GROUP);
+        }
+    }
+}
+
+//void Placer::computeAllPartials_AIE_old()
+//{
+//    // PRINT NUMBER OF NETS BY SIZE
+//    //int large_net_count = 0;
+//    //for(auto nets : nets_by_degree) {
+//    //    if(nets.first <= 10)
+//    //        cout << "Number of nets with size " << nets.first << ": " << nets.second.size() << endl;
+//    //    else large_net_count += nets.second.size();
+//    //}
+//    //    cout << "Number of nets with size > 10: " << large_net_count << endl;
+//    //cout << "input_data:" << endl;
+//    //for(int i = 0; i < VEC_SIZE+4; i++) {
+//    //    cout << "input_data[" << i << "]" <<input_data[i] << endl;
+//    //    if((i+1)%4 == 0) cout << endl;
+//    //}
+//
+//    // Use AIE graph_driver to send data to AIE accelerater
+//    cout << "Time for AIEs to compute all partials on " << PARTIALS_GRAPH_COUNT << " compute units:" << endl;
+//    cout << "GROUP_SIZE: " << GROUP_SIZE << endl;
+//    for(int net_size = TEST_NET_SIZE; net_size <= TEST_NET_SIZE; net_size++) {
+//    //for(int net_size = 2; net_size <= MAX_AIE_NET_SIZE; net_size++) {
+//        // Start timer
+//        long start_partials = getTime();
+//        int num_nets = db.getNetCountOfDegree(net_size);
+//        int nets_per_graph = ceil(float(num_nets) / PARTIALS_GRAPH_COUNT);
+//        int net_groups_per_graph = ceil(float(nets_per_graph) / (NETS_PER_GROUP * GROUP_SIZE) ); // We send 4 nets of data in each net group 
+//        // DEBUG: Info on nets and packets
+//        cout << endl;
+//        cout << "net_size: " << net_size << endl;
+//        cout << "num_nets: " << num_nets << endl;
+//        cout << "nets_per_graph: " << nets_per_graph << endl;
+//        cout << "net_groups_per_graph: " << net_groups_per_graph << endl;
+//
+//
+//        float * input_packet = new float[(LCM_BUFFSIZE+1)*VEC_SIZE]; // extra size for ctrl data
+//        float * output_packet = new float[LCM_BUFFSIZE*VEC_SIZE];
+//
+//        // Prepare control data for packets to all graphs
+//        for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
+//            float * ctrl_packet = new float[VEC_SIZE]; 
+//            db.prepareCtrlPacket(input_packet, net_size, net_groups_per_graph*GROUP_SIZE); // added *GROUP_SIZE, this was WRONG!!@!@!
+//        }
+//
+//
+//        // Send GROUP_SIZE net groups of data to each partials graph
+//        //for(int packet_index = 0; packet_index < GROUP_SIZE; packet_index++) {
+//        //    for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
+//        //        int offset = NETS_PER_GROUP*(graph_index*net_groups_per_graph + packet_index);
+//        //        db.prepareNextPartialsPacket(input_data, net_size, offset);
+//
+//        //        // Send packets of 8 floats from AIE graph until the net group is complete
+//        //        for(int n = 0; n < net_size; n++)
+//        //            partials_drivers[graph_index].send_packet(input_data + n*VEC_SIZE);
+//        //    }
+//        //}
+//        
+//        // Repeat send two net groups, receive two packets until all data has been sent
+//        for(int packet_index = 0; packet_index < net_groups_per_graph; packet_index++) {
+//            for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
+//                // Prepare net groups to fill up a packet of LCM_BUFFSIZE = 840
+//                for(int g = 0; g < GROUP_SIZE; g++) {
+//                    int offset = 0;//NETS_PER_GROUP*(graph_index*net_groups_per_graph + packet_index);
+//                    db.prepareNetGroup(input_packet, net_size, offset);
+//
+//                    // Send packets of 8 floats from AIE graph until the net group is complete
+//                    //for(int n = 0; n < net_size; n++)
+//                    //    partials_drivers[graph_index].send_packet(input_data + n*VEC_SIZE);
+//
+//
+//                    // Send packet of 840 nets of size net_size
+//                    partials_drivers[graph_index].send_packet(input_packet);
+//                }
+//            }
+//
+//            for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
+//                for(int g = 0; g < GROUP_SIZE; g++) {
+//                    // Receive packets of 8 floats from AIE graph until the net group is complete
+//                    //for(int n = 0; n < net_size; n++) {
+//                    //    partials_drivers[graph_index].receive_packet(output_data + n*VEC_SIZE);
+//                    //    //cout << "received packet @ " << output_data + n*VEC_SIZE << endl;
+//                    //}
+//
+//                    // Receive packet of 8 nets of size net_size
+//                    partials_drivers[graph_index].receive_packet(output_packet);
+//                    db.storeNetGroup(output_packet, net_size);
+//                }
+//            }
+//        }
+//
+//        // Receive final two net groups form each partials graph
+//        //for(int packet_index = 0; packet_index < GROUP_SIZE; packet_index++) {
+//        //    for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
+//        //        for(int n = 0; n < net_size; n++) {
+//        //            partials_drivers[graph_index].receive_packet(output_data + n*VEC_SIZE);
+//        //        }
+//        //        db.storePacket(output_data, net_size);
+//        //    }
+//        //}
+//
+///*
+//        //packets_per_graph = 10;
+//        // Start threads to handle each AIE PartialsGraph
+//        std::thread partials_threads[PARTIALS_GRAPH_COUNT];
+//        for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
+//            // Need to tell each thread starting offset, and packets_per_graph to know how far to go
+//            partials_threads[graph_index] = std::thread([this, graph_index, net_size, packets_per_graph]() {
+//                this->computePartials(graph_index, net_size, packets_per_graph);
+//            });
+//        }
+//
+//        for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
+//            cout << "Joining thread: " << graph_index << endl;
+//            partials_threads[graph_index].join();
+//        }
+//*/
+//
+//        //if(db.hasMorePacketsToSend(net_size))
+//        //    cout << "WARNING: Unsent packets detected for net_size = " << net_size << endl;
+//        //// End timer and print
+//        double partials_compute_time = getInterval(start_partials, getTime());
+//        cout << "net_size = " << net_size << ": " << partials_compute_time << " sec" << endl;
+//        cout << "DONE with net_size = " << net_size << endl;
+//    }
+//// DEBUG: Compare results with CPU version:
+//    float max_diff = 0;
+//    float total_diff = 0;
+//    int nonzero_count = 0;
+//    //cout << endl << "*&*&*&*&   AIE vs CPU RESULTS COMPARISON   *&*&*&*&" << endl;
+//    auto m_nets = db.getNetsByDegree();
+//    for(auto item : db.getNetsByDegree()) {
+//        //cout << "RESULTS FOR NET_SIZE = " << item.first << endl;
+//        if(item.first <= MAX_AIE_NET_SIZE)
+//        for(Net * net : item.second) {
+//            //cout << "NET: " << net->getName() << endl;
+//            if(net->getDegree() <= 1 || net->getDegree() > MAX_AIE_NET_SIZE) continue;
+//            for(Node * np : net->getNodes()) {
+//                //cout << "Node " << np->getName();
+//                //cout << "\tCPU result (X, Y): " << np->terms.partials.x << ", " << np->terms.partials.y;
+//                //cout << "\tAIE result (X, Y): " << np->terms_aie.partials.x << ", " << np->terms_aie.partials.y;
+//                //cout << endl;
+//                float diff = np->terms.partials.x - np->terms_aie.partials.x;
+//                total_diff += abs(diff);
+//                //if(abs(diff) > abs(max_diff)) max_diff = diff;
+//                if(abs(diff) > abs(max_diff)) {max_diff = diff; }
+//                if(diff != 0 && np->terms.partials.x != 0 && np->terms_aie.partials.x != 0)
+//                    nonzero_count++;
+//                diff = np->terms.partials.y - np->terms_aie.partials.y;
+//                total_diff += abs(diff);
+//                if(abs(diff) > abs(max_diff)) {max_diff = diff; }
+//            }
+//        }
+//    }
+//    float avg_diff = total_diff / nonzero_count;
+//    cout << "Avg diff: " << avg_diff << endl;
+//    cout << "Max diff: " << max_diff << endl;
+//// END DEBUG
+//}
 
 /*@brief: Compute some partials 
 * @param graph_index: which driver to use to send and receive data
 * @param net_size: The size of nets we are computing partials for
 * @param packets_per_graph: The number of packets we send to this graph
 */
-void Placer::computePartials(int graph_index, int net_size, int packets_per_graph) {
-    bool debug = true;
-    if(debug) cout << "### Th" << graph_index << ": START ### net_size = " << net_size << endl;
-    // Send control data packet
-    float * ctrl_packet = new float[PACKET_SIZE]; 
-    db.prepareCtrlPacket(ctrl_packet, net_size, packets_per_graph);
-    partials_drivers[graph_index].send_packet(ctrl_packet);
-
-    // Send all data packets for this Partials graph compute unit
-    float * input_data  = new float[net_size*PACKET_SIZE]; 
-    for(int packet_index = 0; packet_index < packets_per_graph; packet_index++) {
-        if(debug) cout << "Th" << graph_index << ": packet_index = " << packet_index << endl;
-        // Gather input data to send to AIE graph
-        int offset = NETS_PER_PACKET*(graph_index*packets_per_graph + packet_index);
-        db.prepareNextPartialsPacket(input_data, net_size, offset); // make sure order is right!!
-        // Send coordinate data packet for this net
-        for(int n = 0; n < net_size; n++) {
-            // Send the packet of 8 floats to AIE graph
-            partials_drivers[graph_index].send_packet(input_data + n*PACKET_SIZE);
-        }
-
-        // Retrieve the result from the AIE kernels
-        float * output_data = new float[net_size*PACKET_SIZE];
-        for(int n = 0; n < net_size; n++) {
-            partials_drivers[graph_index].receive_packet(output_data + n*PACKET_SIZE);
-            //partials_drivers[graph_index].print_info(); // INACCURATE!!!
-        }
-
-        // Store results in node terms.partials
-        db.storePacket(output_data, net_size);
-    }
-        if(debug) cout << "Th" << graph_index << ": Function end" << endl;
-}
+//void Placer::computePartials(int graph_index, int net_size, int packets_per_graph) {
+//    bool debug = true;
+//    if(debug) cout << "### Th" << graph_index << ": START ### net_size = " << net_size << endl;
+//    // Send control data packet
+//    float * ctrl_packet = new float[VEC_SIZE]; 
+//    db.prepareCtrlPacket(ctrl_packet, net_size, packets_per_graph);
+//    partials_drivers[graph_index].send_packet(ctrl_packet);
+//
+//    // Send all data packets for this Partials graph compute unit
+//    float * input_data  = new float[net_size*VEC_SIZE]; 
+//    for(int packet_index = 0; packet_index < packets_per_graph; packet_index++) {
+//        if(debug) cout << "Th" << graph_index << ": packet_index = " << packet_index << endl;
+//        // Gather input data to send to AIE graph
+//        int offset = NETS_PER_GROUP*(graph_index*packets_per_graph + packet_index);
+//        db.prepareNextPartialsPacket(input_data, net_size, offset); // make sure order is right!!
+//        // Send coordinate data packet for this net
+//        for(int n = 0; n < net_size; n++) {
+//            // Send the packet of 8 floats to AIE graph
+//            partials_drivers[graph_index].send_packet(input_data + n*VEC_SIZE);
+//        }
+//
+//        // Retrieve the result from the AIE kernels
+//        float * output_data = new float[net_size*VEC_SIZE];
+//        for(int n = 0; n < net_size; n++) {
+//            partials_drivers[graph_index].receive_packet(output_data + n*VEC_SIZE);
+//            //partials_drivers[graph_index].print_info(); // INACCURATE!!!
+//        }
+//
+//        // Store results in node terms.partials
+//        db.storePacket(output_data, net_size);
+//    }
+//        if(debug) cout << "Th" << graph_index << ": Function end" << endl;
+//}
 
 
 
@@ -383,17 +506,16 @@ void Placer::computeAllPartials_CPU()
     //    nets[8][i]->printTerms();
     //}
 
-    cout << "Time for CPU to compute all partials:" << endl;
+    long start_partials = getTime();
     for (auto item : db.getNetsByDegree()) {
-        long start_partials = getTime();
-        if(item.first < 2 || item.first > MAX_AIE_NET_SIZE) continue;
+        if(item.first < MIN_AIE_NET_SIZE || item.first > MAX_AIE_NET_SIZE) continue;
         for (Net* net_p : item.second) {
             computeNetPartials_CPU(net_p);
         }
 
-        double partials_compute_time = getInterval(start_partials, getTime());
-        cout << "net_size = " << item.first << ": " << partials_compute_time << " sec" << endl;
     }
+    double partials_compute_time = getInterval(start_partials, getTime());
+    cout << endl << "Total time for CPU partials compute time: " << partials_compute_time << " sec" << endl;
 
     // DEBUG: Print partials results
     //

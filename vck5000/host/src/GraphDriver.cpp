@@ -22,15 +22,17 @@ void PartialsGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int 
     run_device_mm2s = xrt::run(device_mm2s);
     run_device_s2mm = xrt::run(device_s2mm);
 
-    input_buffer  = xrt::bo(device, PACKET_SIZE*sizeof(float), /*xrt::bo::flags::normal,*/ device_mm2s.group_id(0));
-    result_buffer = xrt::bo(device, PACKET_SIZE*sizeof(float), /*xrt::bo::flags::normal,*/ device_s2mm.group_id(0));
+    // Set buffer size to 840 (+1 for packet ctrl data) VECTORS of floats
+    // 840 is the Least Common Multiple (LCM) of netsizes 2 thru 8
+    input_buffer  = xrt::bo(device, INPUT_PACKET_SIZE*sizeof(float), /*xrt::bo::flags::normal,*/ device_mm2s.group_id(0));
+    result_buffer = xrt::bo(device, OUTPUT_PACKET_SIZE*sizeof(float), /*xrt::bo::flags::normal,*/ device_s2mm.group_id(0));
 
     // set kernel arguments
     run_device_mm2s.set_arg(0, input_buffer);
-    run_device_mm2s.set_arg(1, PACKET_SIZE);
+    run_device_mm2s.set_arg(1, INPUT_PACKET_SIZE); // extra size for ctrl data
 
     run_device_s2mm.set_arg(0, result_buffer);
-    run_device_s2mm.set_arg(1, PACKET_SIZE);
+    run_device_s2mm.set_arg(1, OUTPUT_PACKET_SIZE);
 }
 
 /*
@@ -42,46 +44,44 @@ void PartialsGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int 
 void PartialsGraphDriver::send_packet(float * packet)
 {
     // DEBUG:
-    //cout << "Versal Driver sending packet to kernel:" << endl;
-    //for(int j = 0; j < PACKET_SIZE; j++)
+    //cout << endl << "Versal Driver send_packet to kernel:" << endl;;
+    //cout << "Number of floats being sent: " << INPUT_PACKET_SIZE;
+    //for(int j = 0; j < INPUT_PACKET_SIZE; j++) {
+    //    if(j%8 == 0) cout << endl << j/8 << ": ";
     //    cout << packet[j] << " ";
+    //}
     //cout << endl;
-    //if(print) std::cout << "Transfer input data to device... ";
 
     start_time = getEpoch();
     input_buffer.write(packet);
     input_buffer.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     xfer_on_time = getTiming(getEpoch(), start_time);
-    //if(print) std::cout << "Done" << std::endl;
-    //if(print) std::cout << "Run kernels... " ;
     start_time = getEpoch();
 
     run_device_mm2s.start();
-    run_device_mm2s.wait();
+    run_device_s2mm.start();
 }
 
 float PartialsGraphDriver::receive_packet(float * output_data)
 {
-    run_device_s2mm.start();
+    run_device_mm2s.wait();
     run_device_s2mm.wait();
     kernel_exec_time = getTiming(getEpoch(), start_time);
-    //if(print) std::cout << "Finished running graph." << std::endl;
-
-    //if(print) std::cout << "Transfer results to host... ";
     start_time = getEpoch();
     result_buffer.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-    //result_buffer.read(output_data); // TODO use output_data from VersalGraph
     result_buffer.read(output_data);
 
     // DEBUG:
     //cout << endl;
-    //cout << "output_data: ";
-    //for(int i = 0; i < PACKET_SIZE; i++)
+    //cout << endl << "Versal Driver receiving packet to kernel:" << endl;;
+    //cout << "Number of floats being received: " << OUTPUT_PACKET_SIZE;
+    //for(int i = 0; i < OUTPUT_PACKET_SIZE; i++) {
+    //    if(i%8 == 0) cout << endl;
     //    cout << output_data[i] << " ";
+    //}
     //cout << endl;
 
     xfer_off_time=getTiming(getEpoch(), start_time);
-    //if(print) std::cout << "Done!" << std::endl;
 }
 
 void PartialsGraphDriver::print_info()
@@ -149,7 +149,7 @@ void DensityGraphDriver::send_packet(float * packet)
 {
     // DEBUG:
     //cout << "Versal Driver sending packet to kernel:" << endl;
-    //for(int j = 0; j < PACKET_SIZE; j++)
+    //for(int j = 0; j < VEC_SIZE; j++)
     //    cout << packet[j] << " ";
     //cout << endl;
     //if(print) std::cout << "Transfer input data to device... ";
@@ -182,7 +182,7 @@ float DensityGraphDriver::receive_packet(float * output_data)
     // DEBUG:
     //cout << endl;
     //cout << "output_data: ";
-    //for(int i = 0; i < PACKET_SIZE; i++)
+    //for(int i = 0; i < VEC_SIZE; i++)
     //    cout << output_data[i] << " ";
     //cout << endl;
 
@@ -200,7 +200,7 @@ void DensityGraphDriver::print_info()
 
     //// Debugging
     //printf("Results:\n");
-    //for (int i=0; i < PACKET_SIZE; i++) {
+    //for (int i=0; i < VEC_SIZE; i++) {
     //    printf("Output %d: %f\n", i, result_data[i]);
 }
 

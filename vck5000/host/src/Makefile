@@ -35,13 +35,15 @@ COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 #COMPILE_FLAGS += -DCREATE_VISUALIZATION# Comment this out if no visualization is wanted.
 #COMPILE_FLAGS += -DUSE_AIE_ACCELERATION# Comment this out if no visualization is wanted.
 
+PROFILE_FLAG := -pg# flag for profiling with perf
+
 .PHONY: all exe objs
 
 all: ${EXE}
 
 ${EXE}: ${MAIN} ${OBJS}
 	@mkdir -p ${TOP_DIR}/bin
-	${GCC} -o ${EXE} ${MAIN} ${OBJS} ${INCLUDES} ${COMPILE_FLAGS}
+	${GCC} ${PROFILE_FLAG} -o ${EXE} ${MAIN} ${OBJS} ${INCLUDES} ${COMPILE_FLAGS}
 
 objs: ${OBJS}
 

@@ -44,7 +44,8 @@ clean:
 
 # Scripts to run AIEplace application
 BENCHMARK_DIR = host/benchmarks/
-BENCHMARK = ispd2015/mgc_fft_2/
+BENCHMARK = ispd2015/mgc_fft_1/
+#BENCHMARK = ispd2015/mgc_matrix_mult_1/
 #BENCHMARK = ispd2015/mgc_superblue11_a/
 #BENCHMARK = ispd2015/mgc_superblue12/
 #BENCHMARK = ispd2015/mgc_superblue16_a/
@@ -53,7 +54,7 @@ runhw:
 	@unset XCL_EMULATION_MODE
 	@clear
 	@echo "runhw: BENCHMARK = " ${BENCHMARK}
-	bin/AIEplace.exe ${BENCHMARK_DIR}/${BENCHMARK} bin/aieplace.hw.xclbin
+	perf record bin/AIEplace.exe ${BENCHMARK_DIR}/${BENCHMARK} bin/aieplace.hw.xclbin
 
 runemu:
 	@clear

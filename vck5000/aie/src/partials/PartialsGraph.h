@@ -5,6 +5,7 @@
 #include "Common.h"
 
 #define DEBUG_OUTPUT // output files for a+, a-, b+, b-, c+, c-
+#define FIFO_SIZE 7000
 
 class PartialsGraph : public adf::graph {
 private:
@@ -26,19 +27,19 @@ public:
 
       // Input connections for abc_kernel
       adf::connect<adf::stream> net_in(x_in[i].out[0], abc_kernel[i].in[0]); // x-coords
-      adf::fifo_depth(net_in) = 800; // This FIFO allows the host to send data for many nets in bursts
+      adf::fifo_depth(net_in) = FIFO_SIZE; // This FIFO allows the host to send data for many nets in bursts
 
       // Input connections for partials_kernel
       adf::connect<adf::stream> net_xa(abc_kernel[i].out[0], partials_kernel[i].in[0]);
       adf::connect<adf::stream> net_bc(abc_kernel[i].out[1], partials_kernel[i].in[1]);
-      adf::fifo_depth(net_xa) = 800; // 140 is large enough to handle nets of size 8 without stalls
-                                    // or nets of size 9 (with minor stalls)
-                                    // add or subtract 24 to the buffer size to increase net size 
-                                    // nets larger than 8 should be handled by the host code
-      adf::fifo_depth(net_bc) = 800; // this one doesn't need a fifo
+      adf::fifo_depth(net_xa) = FIFO_SIZE; // 140 is large enough to handle nets of size 8 without stalls
+                                          //  or nets of size 9 (with minor stalls)
+                                         //   add or subtract 24 to the buffer size to increase net size 
+                                        //    nets larger than 8 should be handled by the host code
+      //adf::fifo_depth(net_bc) = FIFO_SIZE; // this one doesn't need a fifo
 
       adf::connect<adf::stream> net_out(partials_kernel[i].out[0], outplio_partials[i].in[0]);
-      adf::fifo_depth(net_out) = 800; // this one doesn't need a fifo
+      adf::fifo_depth(net_out) = FIFO_SIZE; // this one doesn't need a fifo
 
   #ifdef DEBUG_OUTPUT
       // Optional outputs for debugging intermediate terms
@@ -54,10 +55,10 @@ public:
 
 
       adf::source(abc_kernel[i]) = "compute_abc.cpp";
-      adf::runtime<ratio>(abc_kernel[i]) = 1;
+      adf::runtime<adf::ratio>(abc_kernel[i]) = 0.5;
 
       adf::source(partials_kernel[i]) = "compute_partials.cpp";
-      adf::runtime<ratio>(partials_kernel[i]) = 1;
+      adf::runtime<adf::ratio>(partials_kernel[i]) = 0.5;
     }
   }
 };

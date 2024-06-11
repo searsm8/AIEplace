@@ -96,11 +96,11 @@ void DataBase::iterationReset()
         item.second->iterationReset();
 
     // Reset mm_input_index to all zeroes
-    for(auto &item : mm_input_index) // Need to use & so that it is a reference to the actual object, not a copy
-        item.second = 0;
+    //for(auto &item : mm_input_index) // Need to use & so that it is a reference to the actual object, not a copy
+    //    item.second = 0;
     
-    for(auto &item : mm_output_index) // Need to use & so that it is a reference to the actual object, not a copy
-        item.second = 0;
+    //for(auto &item : mm_output_index) // Need to use & so that it is a reference to the actual object, not a copy
+    //    item.second = 0;
 }
 
 
@@ -154,37 +154,68 @@ double DataBase::computeTotalComponentArea()
     return total_area;
 }
 
-void DataBase::prepareCtrlPacket(float * ctrl_data, int net_size, int num_packets) 
+/* @brief: Set up the Packet Contents structure
+*/
+void DataBase::initializePacketContents()
 {
-    // Compute how many Packet Groups of this net_size will be needed
-    // Each Packet Group contains the data for 8 nets (or 4 if doing X and Y data)
-    ctrl_data[0] = net_size;
-    ctrl_data[1] = num_packets; // number of Packet Groups to follow
-    ctrl_data[2] = 0;
-    ctrl_data[3] = 0;
-    ctrl_data[4] = 0;
-    ctrl_data[5] = 0;
-    ctrl_data[6] = 0;
-    ctrl_data[7] = 0;
-    //DEBUG:
+    bool debug = true;
+    if(debug) cout << "\n### BEGIN initializePacketContents()" << endl;
+    int graph_index = 0;
+    m_packet_count = 0;
+    for(int net_size = MIN_AIE_NET_SIZE; net_size <= MAX_AIE_NET_SIZE; net_size++) {
+    //for(int net_size = TEST_NET_SIZE; net_size <= TEST_NET_SIZE; net_size++) {
+        if(debug) cout << endl << "net_size = " << net_size << endl;
+        int groups_per_packet = LCM_BUFFSIZE/net_size; // for netsize 2 thru 8, this will be an exact integer
+        if(debug) cout << "groups_per_packet = " << groups_per_packet << endl;
+        if(debug) cout << "nets_per_packet = " << groups_per_packet*NETS_PER_GROUP << endl;
+        int num_nets = mmv_nets_by_degree[net_size].size();
+        if(debug) cout << "num_nets = " << num_nets << endl;
+
+        int packet_start = 0;
+        //int nets_per_graph = num_nets / PARTIALS_GRAPH_COUNT;
+        //int net_groups_per_graph = nets_per_graph / NETS_PER_GROUP; // We send 4 nets of data in each net group 
+
+        // Fill packets with data ranges
+        // TODO: This is oversimplified and leads to a lot of zeroes being sent!
+        while(packet_start*NETS_PER_GROUP < num_nets) {
+            Packet* p = new Packet();
+            p->graph_index = graph_index;
+            // For now only a single PacketIndex in each packet for simplicity
+            // This could lead to many zeroes (empty packets) being sent and could be improved.
+            p->contents.push_back(PacketIndex(net_size, packet_start, groups_per_packet));
+            cout << "graph_index: " << graph_index  << "\t" << p->contents[0].to_string();
+            mv_packet[graph_index].push_back(p);
+
+            //move start/stop for next packet
+            packet_start += groups_per_packet;
+
+            if(graph_index == 0) m_packet_count++;
+            graph_index = (graph_index+1) % PARTIALS_GRAPH_COUNT;
+        }
+
+
+    }
+    if(debug) cout << "\n### END initializePacketContents()" << endl;
 }
 
 /*
  * @brief Prepare data in correct format to be sent to PL and then AIE input streams
  *
 **/
-void DataBase::prepareNextPartialsPacket(float * input_data, int net_size, int offset)
+void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
 {
-    offset = mm_input_index[net_size]; // offset keeps track of where the next data should be taken from
+    //offset = mm_input_index[net_size]; // offset keeps track of where the next data should be taken from
+    //cout << "data_offset: " << offset*net_size << endl;
+    int base_addr = VEC_SIZE + (2*offset*net_size)%(LCM_BUFFSIZE*VEC_SIZE); // TODO: This needs an explanation
 
-    for(int net_idx = 0; net_idx < 4; net_idx++) { // prepare XY data for 4 nets at a time
+    for(int net_idx = 0; net_idx < NETS_PER_GROUP; net_idx++) { // prepare XY data for 4 nets at a time
         // check if we have reached the end of nets with this degree
         if(net_idx + offset >= mmv_nets_by_degree[net_size].size()) {
             // prep data with trailing zeroes
             //cout << "Zeroes at index: " << net_idx + offset << endl; 
             for(int j = 0; j < net_size; j++) {
-                input_data[2*net_idx + j*8] = 0;
-                input_data[2*net_idx + j*8 + 1] = 0;
+                input_data[base_addr + 2*net_idx + j*8] = 0;
+                input_data[base_addr + 2*net_idx + j*8 + 1] = 0;
             }
             continue;
         }
@@ -195,30 +226,34 @@ void DataBase::prepareNextPartialsPacket(float * input_data, int net_size, int o
         auto &nodes = net->getNodes(); // reference to avoid copy
         net->sortPositionsMaxMinX(); // This sort might be redundant? 
         for(int j = 0; j < net_size; j++) {
-            input_data[2*net_idx + j*8] = nodes[j]->getX();
+            input_data[base_addr + 2*net_idx + j*8] = nodes[j]->getX();
         }
 
         // prep y data
         net->sortPositionsMaxMinY();
         for(int j = 0; j < net_size; j++) {
-            input_data[2*net_idx + j*8 + 1] = nodes[j]->getY();
+            input_data[base_addr + 2*net_idx + j*8 + 1] = nodes[j]->getY();
         }
     }
 
     // DEBUG: print the prepared data!
-    //cout << "Prepared XY data @offset = " << offset << endl;
-    //for(int i = 0; i < PACKET_SIZE*net_size; i++) {
-    //    if(i%8 == 0) cout << endl;
+    //cout << endl << "Prepared XY data @offset = " << offset;
+    //cout << setprecision(2);
+    //for(int i = base_addr; i < base_addr + VEC_SIZE*net_size; i++) {
+    //    if((i-base_addr)%8 == 0) cout << endl;
     //    cout << input_data[i] << " ";
     //}
+    //cout << endl;
 
     // Move mm_input_index to the next unsent data
-   mm_input_index[net_size] += 4;
+   //mm_input_index[net_size] += 4;
 }
 
-void DataBase::storePacket(float * output_data, int net_size)
+void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
 {
-    int offset = mm_output_index[net_size]; // offset tracks which nets partials should be added to
+    //int offset = mm_output_index[net_size]; // offset tracks which nets partials should be added to
+    //int offset = 0;
+    int base_addr = (2*offset*net_size)%(LCM_BUFFSIZE*VEC_SIZE); // TODO: This needs an explanation
 
     for(int net_idx = 0; net_idx < 4; net_idx ++) { // prepare XY data for 4 nets at a time
         // check if we have reached the end of nets with this degree
@@ -234,18 +269,18 @@ void DataBase::storePacket(float * output_data, int net_size)
 
         // nodes are already sorted by Y coords, so store them first
         for(int n = 0; n < net_size; n++) {
-            nodes[n]->terms_aie.partials.y += output_data[2*net_idx + n*8 + 1];
+            nodes[n]->terms_aie.partials.y += output_data[base_addr + 2*net_idx + n*8 + 1];
         }
 
         net->sortPositionsMaxMinX(); // X or Y
         //nodes = net->getNodes();
         for(int n = 0; n < net_size; n++) {
-            nodes[n]->terms_aie.partials.x += output_data[2*net_idx + n*8];
+            nodes[n]->terms_aie.partials.x += output_data[base_addr + 2*net_idx + n*8];
         }
     }
 
-    // DEBUG: print the prepared data!
-    //cout << "\tStored XY data @offset = " << offset << endl;
+    // DEBUG: print the stored data!
+    //cout << "\nStored XY data @offset = " << offset;
     //for(int i = 0; i < PACKET_SIZE*net_size; i++) {
     //    if(i%8 == 0) cout << endl;
     //    cout << output_data[i] << " ";
@@ -253,7 +288,7 @@ void DataBase::storePacket(float * output_data, int net_size)
     //cout << endl;
 
     // Move mm_output_index to the next data
-    mm_output_index[net_size] += 4;
+    //mm_output_index[net_size] += 4;
 }
 
         /// parser callback functions 
@@ -351,8 +386,8 @@ void DataBase::storePacket(float * output_data, int net_size)
             int degree = new_net->getDegree();
             if (mmv_nets_by_degree.count(degree) == 0) {
                 mmv_nets_by_degree.emplace(std::make_pair(degree, std::vector<Net*>()));
-                mm_input_index.emplace(std::make_pair(degree, 0));
-                mm_output_index.emplace(std::make_pair(degree, 0));
+                //mm_input_index.emplace(std::make_pair(degree, 0));
+                //mm_output_index.emplace(std::make_pair(degree, 0));
             }
             mmv_nets_by_degree[degree].push_back(new_net);
         }

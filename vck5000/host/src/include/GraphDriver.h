@@ -10,7 +10,6 @@
 #include <sys/time.h>
 
 AIEPLACE_NAMESPACE_BEGIN
-#define TEST_NET_SIZE 7
 
 class PartialsGraphDriver
 {

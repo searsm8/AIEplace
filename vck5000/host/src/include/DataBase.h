@@ -17,6 +17,53 @@
 #include <limbo/parsers/gdsii/stream/GdsWriter.h>          // GDSII writer
 
 AIEPLACE_NAMESPACE_BEGIN
+#define MIN_AIE_NET_SIZE 2 // should be 2 by default
+#define MAX_AIE_NET_SIZE 8 // should be 8 by default
+
+struct PacketIndex
+{
+    int net_size;
+    int group_start; // node index to begin this packet
+    int group_count; // how many nodes of this net_size are to be in this packet
+
+    PacketIndex(int size, int gs, int gc) { set(size, gs, gc); } // default constructor
+
+    void set(int size, int gs, int gc)
+    {
+        net_size = size;
+        group_start = gs;
+        group_count = gc;
+    }
+
+    string to_string() 
+    {
+        string str = "PacketIndex: ";
+        str += "\tnetsize = " + std::to_string(net_size);
+        str += "\tgroup_start = "   + std::to_string(group_start);
+        str += "\tgroup_count = "   + std::to_string(group_count);
+        str += "\n";
+        return str;
+    }
+
+};
+
+struct Packet
+{
+    int graph_index;   // The AIE partials graph which this packet should be sent to.
+    int id;
+    
+    vector<PacketIndex> contents;
+
+    int ctrl_data[8]; //  first 8 floats of the packet are control data which dictate
+                     //   the netsize and quantity of coordinate data to expect.
+
+    // ALTERNATE APPROACH
+    float ** content = new float* [LCM_BUFFSIZE*VEC_SIZE]; // array of float pointers in the order expected by AIE kernels
+
+    // Default constructor
+    Packet() {}
+};
+
 
 class DataBase : public DefParser::DefDataBase, public LefParser::LefDataBase
 {
@@ -30,12 +77,17 @@ private:
     map<string, Pin *> mm_pins;
     map<string, Net *> mm_nets;
     map<int, std::vector<Net *>> mmv_nets_by_degree;
-    map<int, int> mm_input_index; // Used to track what data has been sent as input to AIEs
-    map<int, int> mm_output_index; // Used to track what data has been received as output from AIEs
+    //map<int, int> mm_input_index; // Used to track what data has been sent as input to AIEs
+    //map<int, int> mm_output_index; // Used to track what data has been received as output from AIEs
 
     Box<position_type> m_die_area;
+    int m_packet_count;
 
 public:
+    // each compute graph has a vector of PacketIndex which records what data has been sent
+    vector<Packet*> mv_packet[PARTIALS_GRAPH_COUNT];
+
+
     /// Default Constructor
     DataBase() {}
     DataBase(fs::path input_dir) : m_input_dir(input_dir)
@@ -47,6 +99,7 @@ public:
             std::cerr << "Design could not be read. Exiting..." << endl;
             exit(1);
         }
+        initializePacketContents();
     }
 
     /// Destructor
@@ -71,6 +124,7 @@ public:
     // bool readVerilog();
     // bool readBookshelf();
 
+
     void iterationReset();
     void sortPositionsByX();
     void sortPositionsByY();
@@ -82,10 +136,10 @@ public:
     double getTotalOverflow();
 
     // Packet loading/unloading
-    bool hasMorePacketsToSend(int net_size) { return mm_input_index[net_size] < mmv_nets_by_degree[net_size].size(); }
-    void prepareCtrlPacket(float * ctrl_data, int net_size, int num_packets);
-    void prepareNextPartialsPacket(float * input_data, int net_size, int offset);
-    void storePacket(float * output_data, int net_size);
+    void initializePacketContents();
+    void prepareNetGroup(float * input_data, int net_size, int offset);
+    void storeNetGroup(float * output_data, int net_size, int offset);
+    int  getPacketCount() { return m_packet_count; }
 
 
     /// parser callback functions
