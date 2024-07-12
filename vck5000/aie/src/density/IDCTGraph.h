@@ -44,16 +44,16 @@ public:
     IDCT_unshuffle_kernel= kernel::create(idct_unshuffle);
 
     // TODO: Possibly reduce communication overhead by using floats for real-only values
-    connect<stream> net_in      (IDCT_in.out[0], IDCT_pre_kernel.in[0]);
-    connect<stream> net_pre     (IDCT_pre_kernel.out[0], FFT_subgraph.in[0]);
-    connect<stream> net_fft     (FFT_subgraph.out[0], IDCT_unshuffle_kernel.in[0]);
-    connect<stream> net_idct_out(IDCT_unshuffle_kernel.out[0], IDCT_out.in[0]);
+    connect<adf::stream> net_in      (IDCT_in.out[0], IDCT_pre_kernel.in[0]);
+    connect<adf::stream> net_pre     (IDCT_pre_kernel.out[0], FFT_subgraph.in[0]);
+    connect<adf::stream> net_fft     (FFT_subgraph.out[0], IDCT_unshuffle_kernel.in[0]);
+    connect<adf::stream> net_idct_out(IDCT_unshuffle_kernel.out[0], IDCT_out.in[0]);
 
     // Associate kernels with Source files and set runtime ratio
     source(IDCT_pre_kernel) = "idct_preprocess.cpp";
     source(IDCT_unshuffle_kernel) = "idct_unshuffle.cpp";
 
-    runtime<ratio>(IDCT_pre_kernel) = 1;
-    runtime<ratio>(IDCT_unshuffle_kernel) = 1;
+    runtime<adf::ratio>(IDCT_pre_kernel) = 1;
+    runtime<adf::ratio>(IDCT_unshuffle_kernel) = 1;
   }
 };

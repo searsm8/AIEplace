@@ -45,16 +45,16 @@ public:
     DCT_post_kernel = kernel::create(dct_postprocess);
 
     // TODO: Possibly reduce communication overhead by using floats for real-only values
-    connect <stream> net_in      (DCT_in.out[0], DCT_shuffle_kernel.in[0]);
-    connect <stream> net_shuffled(DCT_shuffle_kernel.out[0], FFT_subgraph.in[0]);
-    connect <stream> net_fft     (FFT_subgraph.out[0], DCT_post_kernel.in[0]);
-    connect <stream> net_dct_out (DCT_post_kernel.out[0], DCT_out.in[0]);
+    connect<adf::stream> net_in      (DCT_in.out[0], DCT_shuffle_kernel.in[0]);
+    connect<adf::stream> net_shuffled(DCT_shuffle_kernel.out[0], FFT_subgraph.in[0]);
+    connect<adf::stream> net_fft     (FFT_subgraph.out[0], DCT_post_kernel.in[0]);
+    connect<adf::stream> net_dct_out (DCT_post_kernel.out[0], DCT_out.in[0]);
 
     // Associate kernels with Source files and set runtime ratio
     source(DCT_shuffle_kernel) = "dct_shuffle.cpp";
     source(DCT_post_kernel) = "dct_postprocess.cpp";
 
-    runtime<ratio>(DCT_shuffle_kernel) = 1;
-    runtime<ratio>(DCT_post_kernel) = 1;
+    runtime<adf::ratio>(DCT_shuffle_kernel) = 1;
+    runtime<adf::ratio>(DCT_post_kernel) = 1;
   }
 };

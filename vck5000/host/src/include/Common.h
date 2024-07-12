@@ -12,7 +12,13 @@
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
 
-using namespace std;
+using std::cout;
+using std::endl;
+using std::string;
+using std::vector;
+using std::map;
+using std::max;
+using std::min;
 
 // Compilation flags
 #define USE_AIE_ACCELERATION // if this is defined, the application will use VCK5000 acceleration
