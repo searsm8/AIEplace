@@ -44,6 +44,7 @@ clean:
 
 # Scripts to run AIEplace application
 BENCHMARK_DIR = host/benchmarks/
+
 BENCHMARK = ispd2015/mgc_fft_1/
 #BENCHMARK = ispd2015/mgc_matrix_mult_1/
 #BENCHMARK = ispd2015/mgc_superblue11_a/
@@ -54,8 +55,18 @@ runhw:
 	@unset XCL_EMULATION_MODE
 	@clear
 	@echo "runhw: BENCHMARK = " ${BENCHMARK}
-	perf record bin/AIEplace.exe ${BENCHMARK_DIR}/${BENCHMARK} bin/aieplace.hw.xclbin
+#perf record #use this for perf profiler
+	bin/AIEplace.exe ${BENCHMARK_DIR}/${BENCHMARK} bin/aieplace.hw.xclbin
 
 runemu:
 	@clear
 	export XCL_EMULATION_MODE=hw_emu; bin/AIEplace.exe ${BENCHMARK_DIR}/${BENCHMARK} bin/aieplace.hw_emu.xclbin
+
+profile:
+	clear;
+#	gprof -qcomputeAllPartials_AIE bin/AIEplace.exe gmon.out 
+#	gprof -b -qPlacer::computeAllPartials_AIE bin/AIEplace.exe
+#	gprof --graph bin/AIEplace.exe
+#	gprof --annotated-source bin/AIEplace.exe > annotation.txt
+# Visualization
+	gprof bin/AIEplace.exe | gprof2dot -s -w | dot -Tpng -o profile.png

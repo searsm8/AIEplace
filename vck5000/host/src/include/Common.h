@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cassert>
 #include <math.h>
+#include "Logger.h"
 
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;

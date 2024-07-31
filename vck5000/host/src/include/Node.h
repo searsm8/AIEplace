@@ -64,7 +64,7 @@ public:
     // Getters
     const string& getName() { return m_name; }
     const PlacementStatus& getStatus() { return m_status; }
-    Position<position_type> getPosition() { return m_pos; }
+    Position<position_type>& getPosition() { return m_pos; } // return a reference to avoid copying
     void translate(double move_x, double move_y) { m_pos.translate(move_x, move_y); }
     const position_type& getX() { return m_pos.getX(); }
     const position_type& getY() { return m_pos.getY(); }

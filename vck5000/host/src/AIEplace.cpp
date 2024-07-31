@@ -2,6 +2,11 @@
 #include "DCT.h"
 #include <cmath>
 
+#define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_INFO // All DEBUG/TRACE statements will be removed by the pre-processor
+#include "spdlog/spdlog.h"
+#include "spdlog/stopwatch.h"
+
+
 AIEPLACE_NAMESPACE_BEGIN
 Placer::Placer(fs::path input_dir, std::string xclbin_file) : 
         db(DataBase(input_dir)), // TODO: Database initialization should be multithreaded?
@@ -12,26 +17,25 @@ Placer::Placer(fs::path input_dir, std::string xclbin_file) :
         { 
             #ifdef USE_AIE_ACCELERATION
             // Open Xilinx Device
-            std::cout << "Loading xclbin: " << xclbin_file << std::endl;
+            SPDLOG_INFO("Loading xclbin: {}", xclbin_file);
             xrt::device device = xrt::device(DEVICE_ID);
-            std::cout << "Device ID " << DEVICE_ID << " found!" << std::endl;
+            SPDLOG_INFO("Device ID {} found!", DEVICE_ID );
 
             // Load xclbin which includes PL and AIE graph
-            std::cout << "Loading XCL bin..." << endl;
+            SPDLOG_INFO("Loading XCL bin...");
             xrt::uuid xclbin_uuid = device.load_xclbin(xclbin_file);
 
             // Create drivers which handle buffer IO
             for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
                 partials_drivers[i].init(device, xclbin_uuid, i);
 
-            //density_driver.init(device, xclbin_uuid);
+            //density_driver.init(device, xc6yhlbin_uuid);
             #endif
         }
 
 void Placer::printVersionInfo()
 {
-    cout << endl << "AIEplace v0.0.1" << ": Pre-release" << endl;
-    cout << "****************************" << endl;
+    log_info("AIEplace v0.0.1: Pre-release");
 }
 
 /* @brief: Run the ePlace algorithm.
