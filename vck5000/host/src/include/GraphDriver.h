@@ -8,6 +8,7 @@
 #include "experimental/xrt_aie.h" // for Graph APIs
 #include "experimental/xrt_uuid.h"
 #include <sys/time.h>
+#include "Logger.h"
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -29,9 +30,6 @@ public:
 
     xrt::run run_device_mm2s;
     xrt::run run_device_s2mm;
-
-    // Debugging flag
-    bool print = true;
 
     //xrt::uuid m_xclbin_uuid; // making this a member data causes compile errors for unknown reason
 
@@ -67,9 +65,6 @@ public:
 
     xrt::run run_device_mm2s;
     xrt::run run_device_s2mm;
-
-    // Debugging flag
-    bool print = true;
 
     //xrt::uuid m_xclbin_uuid; // making this a member data causes compile errors for unknown reason
 

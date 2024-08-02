@@ -9,6 +9,7 @@
 #include "Node.h"
 #include "Net.h"
 #include "Bin.h"
+#include "Logger.h"
 
 #include <limbo/parsers/lef/adapt/LefDriver.h>             // LEF parser
 #include <limbo/parsers/def/adapt/DefDriver.h>             // DEF parser
@@ -38,13 +39,12 @@ struct PacketIndex
     string to_string() 
     {
         string str = "PacketIndex: ";
-        str += "\tnetsize = " + std::to_string(net_size);
-        str += "\tgroup_start = "   + std::to_string(group_start);
-        str += "\tgroup_count = "   + std::to_string(group_count);
+        str += "\tnetsize = "       + stringify(net_size);
+        str += "\tgroup_start = "   + stringify(group_start);
+        str += "\tgroup_count = "   + stringify(group_count);
         str += "\n";
         return str;
     }
-
 };
 
 struct Packet
@@ -114,7 +114,7 @@ public:
     const map<int, std::vector<Net *>> &getNetsByDegree() { return mmv_nets_by_degree; }
     int getNetCountOfDegree(int degree) { return mmv_nets_by_degree[degree].size(); }
     Box<position_type> &getDieArea() { return m_die_area; }
-    string getBenchmarkName() { return m_input_dir.filename(); }
+    string getBenchmarkName() { return m_input_dir.filename().string(); }
 
     // Parse functions
     std::vector<fs::path> findExtensions(fs::path, string);

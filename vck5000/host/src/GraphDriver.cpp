@@ -6,7 +6,7 @@ PartialsGraphDriver::PartialsGraphDriver() {}
 
 void PartialsGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id)
 {
-    if(print) std::cout << "PartialsGraphDriver creating PL kernels..." << std::endl;
+    log_info("PartialsGraphDriver creating PL kernels...");
     
     // Create kernel objects
     // Be extra sure the names are correct, there might not be an error message!
@@ -111,7 +111,7 @@ DensityGraphDriver::DensityGraphDriver() {}
 
 void DensityGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid)
 {
-    if(print) std::cout << "DensityGraphDriver creating PL kernels..." << std::endl;
+    log_info("DensityGraphDriver creating PL kernels...");
     
     // Create kernel objects
     // Be extra sure the names are correct, there might not be an error message!
@@ -152,14 +152,11 @@ void DensityGraphDriver::send_packet(float * packet)
     //for(int j = 0; j < VEC_SIZE; j++)
     //    cout << packet[j] << " ";
     //cout << endl;
-    //if(print) std::cout << "Transfer input data to device... ";
 
     start_time = getEpoch();
     input_buffer.write(packet);
     input_buffer.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     xfer_on_time = getTiming(getEpoch(), start_time);
-    //if(print) std::cout << "Done" << std::endl;
-    //if(print) std::cout << "Run kernels... " ;
     start_time = getEpoch();
 
     run_device_mm2s.start();
@@ -171,9 +168,7 @@ float DensityGraphDriver::receive_packet(float * output_data)
     run_device_s2mm.start();
     run_device_s2mm.wait();
     kernel_exec_time = getTiming(getEpoch(), start_time);
-    //if(print) std::cout << "Finished running graph." << std::endl;
 
-    //if(print) std::cout << "Transfer results to host... ";
     start_time = getEpoch();
     result_buffer.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     //result_buffer.read(output_data); // TODO use output_data from VersalGraph
@@ -187,7 +182,6 @@ float DensityGraphDriver::receive_packet(float * output_data)
     //cout << endl;
 
     xfer_off_time=getTiming(getEpoch(), start_time);
-    //if(print) std::cout << "Done!" << std::endl;
 }
 
 void DensityGraphDriver::print_info()

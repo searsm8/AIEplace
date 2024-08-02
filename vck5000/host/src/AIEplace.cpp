@@ -2,11 +2,6 @@
 #include "DCT.h"
 #include <cmath>
 
-#define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_INFO // All DEBUG/TRACE statements will be removed by the pre-processor
-#include "spdlog/spdlog.h"
-#include "spdlog/stopwatch.h"
-
-
 AIEPLACE_NAMESPACE_BEGIN
 Placer::Placer(fs::path input_dir, std::string xclbin_file) : 
         db(DataBase(input_dir)), // TODO: Database initialization should be multithreaded?
@@ -17,13 +12,13 @@ Placer::Placer(fs::path input_dir, std::string xclbin_file) :
         { 
             #ifdef USE_AIE_ACCELERATION
             // Open Xilinx Device
-            SPDLOG_INFO("Loading xclbin: {}", xclbin_file);
             xrt::device device = xrt::device(DEVICE_ID);
-            SPDLOG_INFO("Device ID {} found!", DEVICE_ID );
+            log_info("Device ID found: " + std::to_string(DEVICE_ID));
 
             // Load xclbin which includes PL and AIE graph
-            SPDLOG_INFO("Loading XCL bin...");
+            log_info("Loading xclbin: \"" + xclbin_file + "\"");
             xrt::uuid xclbin_uuid = device.load_xclbin(xclbin_file);
+            log_info("Success!");
 
             // Create drivers which handle buffer IO
             for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
@@ -33,9 +28,36 @@ Placer::Placer(fs::path input_dir, std::string xclbin_file) :
             #endif
         }
 
-void Placer::printVersionInfo()
+void Placer::printWelcomeBanner()
 {
-    log_info("AIEplace v0.0.1: Pre-release");
+    // Raw string logo
+    string logo = R"(
+╔══════════════════════════════════════════════════════╗
+║    _____   ___               __                      ║
+║   /  _  \ │   │ _____ _____ │  │_____   ____   ____  ║
+║  /  /_\  \│   ││  __/|     \│  │\__  \ / ___\ / __ \ ║
+║ /         \   ││  _/ |  ──  │  │_/ __ \\ \___/  ___/ ║
+║ \____│____/___││____\|   __/│____\_____/\____/\____/ ║
+╠══════════════════════|  /════════════════════════════╣
+╚══════════════════════|_/═════════════════════════════╝ )";
+
+    Table banner;
+    banner.add_row({logo});
+
+    Table info;
+    info.add_row({"Version:", AIEPLACE_VERSION});
+    info.format().hide_border();
+    banner.add_row({info});
+    banner.add_row({"VLSI global placement algorithm accelerated on AI Engines"});
+    banner.add_row({}); // This line intentionally left blank
+
+banner.format()
+    .width(59)
+    .hide_border()
+    .font_color(Color::white)
+    .font_align(FontAlign::left);
+    
+    banner.print(cout);
 }
 
 /* @brief: Run the ePlace algorithm.
@@ -54,9 +76,10 @@ void Placer::run()
     while( !converged )
     {
         performIteration();
-        if (iteration++ == 1)
+        if (iteration++ == 2)
             converged = true;
     }
+    printFinalResults();
 }
 
 /* @brief: perform an entire iteration of the ePlace algorithm.
@@ -100,11 +123,20 @@ void Placer::iterationReset()
 */
 void Placer::initializePlacement(Position<position_type> target_pos, int min_dist, int max_dist)
 {
-    cout << "initializePlacement(" << target_pos.to_string() << ", " << min_dist << ", " << max_dist << ");\n";
+    Table top;
+    top.add_row(RowStream{} << "Initial Placement");
+    Table data;
+    data.add_row(RowStream{} << "Center" << target_pos.getX() << target_pos.getY());
+    data.add_row(RowStream{} << "Min dist" << min_dist);
+    data.add_row(RowStream{} << "Max dist" << max_dist); 
+    top.add_row({data});
+    top.format().font_align(FontAlign::center);
+    log("INFO", top);
+
     // For each component that isn't fixed
     for (auto item : db.getComponents()) {
         // Choose a random position based on parameters
-        // Different initial position "shapes" could help with performance?
+        // TODO: Different initial position "shapes" could help with performance?
         // e.g. maybe a donut shape would be good.
         int x_offset = min_dist + rand()%(max_dist-min_dist); // clustered around target
         if(rand()%2 == 1) x_offset *= -1; // 50% chance to negate
@@ -192,11 +224,13 @@ void Placer::computeAllPartials_AIE()
 //        }
 
     // End timer and print
-    cout << "Prepare packet Total Thread compute time: " << prepare_compute_time << endl;
-    cout << "Prepare packet actual compute time: " << prepare_actual_time << endl;
-    cout << "Receive packet actual compute time: " << receive_time << endl;
     double partials_compute_time = getInterval(start_partials, getTime());
-    cout << "Total time for AIE partials compute time: " << partials_compute_time << " sec (" << PARTIALS_GRAPH_COUNT  << " AIE cores used)" << endl;
+    Table top;
+    top.add_row(RowStream{} << "Prepare packet Total Thread compute time: " << prepare_compute_time);
+    top.add_row(RowStream{} << "Prepare packet actual compute time: " << prepare_actual_time);
+    top.add_row(RowStream{} << "Receive packet actual compute time: " << receive_time);
+    top.add_row(RowStream{} << "Total time for AIE partials compute time: " << partials_compute_time << " sec (" << PARTIALS_GRAPH_COUNT  << " AIE cores used)");
+    log("comms", top);
 }
 
 void Placer::computePartials(Packet* p)
@@ -318,10 +352,12 @@ void Placer::computeAllPartials_CPU()
         for (Net* net_p : item.second) {
             computeNetPartials_CPU(net_p);
         }
-
     }
+
     double partials_compute_time = getInterval(start_partials, getTime());
-    cout << endl << "Total time for CPU partials compute time: " << partials_compute_time << " sec" << endl;
+    Table top;
+    top.add_row(RowStream{} << "Total time for CPU partials compute time: " << partials_compute_time << " sec");
+    log("comms", top);
 
     // DEBUG: Print partials results
     //
@@ -632,10 +668,15 @@ void Placer::nudgeNode(Node* node_p)
 
 void Placer::printIterationResults()
 {
-    cout << "Iteration " << iteration << ":";
-    cout << "\t" << "Total HPWL: " << db.computeTotalWirelength();
-    cout << "\t\t" << "total overflow: " << grid.computeTotalOverflow();
-    cout << endl;
+    //cout << std::setprecision(2) << std::fixed;
+    Table top;
+    top.add_row(RowStream{} << "Iteration" << iteration);
+    top.add_row(RowStream{} << "HPWL" << db.computeTotalWirelength());
+    top.add_row(RowStream{} << "Overflow" << grid.computeTotalOverflow());
+    top.column(0).format().font_align(FontAlign::right);
+    top.column(1).format().font_align(FontAlign::left);
+    log("DATA", top);
+
 
     #ifdef CREATE_VISUALIZATION
         if (iteration % 10 == 0)
@@ -658,18 +699,33 @@ double Placer::getInterval(long start_time, long end_time) {
   return (end_time - start_time) / 1.0e6;
 }
 
-void Placer::printRunResults()
+void Placer::printFinalResults()
 {
-    cout << std::setprecision(2) << std::fixed;
-    cout << "Completed ePlace algorithm." << endl;
-    cout << "***RUN STATISTICS***" << endl;
-    cout << "CPU runtime: " << /*CPU_runtime << */endl;
-    cout << "AIE runtime: " << /*AIE_runtime << */endl;
-    cout << "Final Wirelength: " << /*final_wirelength << */endl;
-    cout << "Wirelength reduction ratio: " << /*final_wirelength / initial_wirelength << */ endl;
-    cout << "Total Node Area: " << /*total_node_area <<*/endl;
-    cout << "Total Overflow Area: " << /*total_overflow_area <<*/endl;
+    log_space();
+    log_info("AIEplace algorithm complete.");
+    Table top;
+    top.add_row({"AIEplace Run Statistics"});
 
+    Table results;
+    results.add_row({"Benchmark name", db.getBenchmarkName()});
+    results.add_row(RowStream{} << "Iterations" << iteration);
+    results.add_row(RowStream{} << "CPU runtime" << "0123"/*CPU_runtime*/);
+    results.add_row(RowStream{} << "AIE runtime" << "12"/*AIE_runtime*/);
+    results.add_row(RowStream{} << "Final HPWL" << "23123"/*final_hpwl*/);
+    results.add_row(RowStream{} << "Final Overflow" << "3.1415926"/*final_ovfl*/);
+    results.column(0).format().font_align(FontAlign::right);
+    results.column(1).format().font_align(FontAlign::left);
 
+    Table hyperparams;
+    hyperparams.add_row(RowStream{} << "gamma" << gamma);
+    hyperparams.add_row(RowStream{} << "learning rate" << learning_rate );
+    hyperparams.column(0).format().font_align(FontAlign::right);
+    hyperparams.column(1).format().font_align(FontAlign::left);
+
+    top.format().font_align(FontAlign::center);
+    top.add_row({results});
+    top.add_row({hyperparams});
+    log("DATA", top);
+    export_markdown(top);
 }
 AIEPLACE_NAMESPACE_END

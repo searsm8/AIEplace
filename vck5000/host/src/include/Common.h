@@ -3,12 +3,12 @@
 
 #include <iostream>
 #include <iomanip>
+#include <fstream>
 #include <vector>
 #include <map>
 #include <algorithm>
 #include <cassert>
 #include <math.h>
-#include "Logger.h"
 
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
@@ -52,6 +52,9 @@ using std::min;
 
 #define AIEPLACE_NAMESPACE_BEGIN namespace AIEplace {
 #define AIEPLACE_NAMESPACE_END }
+
+#define AIEPLACE_VERSION "v0.0.1"
+#define stringify std::to_string
 
 AIEPLACE_NAMESPACE_BEGIN 
 

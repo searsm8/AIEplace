@@ -10,19 +10,38 @@ void setup_logging()
     string_colors["DEBUG"] = Color::magenta;
     string_colors["WARNING"] = Color::yellow;
     string_colors["ERROR"] = Color::red;
+    string_colors["DATA"] = Color::blue;
 
+    // Default logging keys
     activate_logging_key("INFO");
     activate_logging_key("DEBUG");
     activate_logging_key("WARNING");
     activate_logging_key("ERROR");
+    activate_logging_key("DATA");
+
+    // Custom logging keys
+    activate_logging_key("packets"); // Used in DataBase.cpp for packet initialization
+    activate_logging_key("dbinfo");
+    activate_logging_key("comms");
 }
 
-void inline activate_logging_key(std::string key)
-{ logging_keys.insert(key); }
-
-void inline deactivate_logging_key(std::string key)
-{ logging_keys.erase(key); }
-
+bool log(std::string key, Table t)
+{
+    // if the key is in the active key set, print it
+    if(logging_keys.find(key) == logging_keys.end())
+        return false;
+    else {
+        Table top;
+        top.add_row({"["+key+"]", t});
+        top.format().hide_border().font_align(FontAlign::center);
+        top.column(0).format()
+            .width(12)
+            .font_style({FontStyle::bold, FontStyle::italic})
+            .font_align(FontAlign::right)
+            .font_color(getColor(key));
+        top.print(std::cout);
+    }
+}
 bool log(std::string key, std::string msg)
 {
     // if the key is in the active key set, print it
@@ -30,20 +49,15 @@ bool log(std::string key, std::string msg)
         return false;
     else {
         Table table;
-        table.add_row({key, msg});
+        table.add_row({"["+key+"]", msg});
 
-        table.format()
-            .border_top(" ")
-            .border_bottom(" ")
-            .border_left("")
-            .border_right("")
-            .corner("");
+        table.format().hide_border();
 
         table.column(0).format()
-            .width(10)
+            .width(12)
             .font_style({FontStyle::bold, FontStyle::italic})
             .font_align(FontAlign::right)
-            .font_color(string_colors[key]);
+            .font_color(getColor(key));
 
         table.column(1).format()
             .border_left(":");
@@ -61,67 +75,47 @@ bool log_warning(std::string msg)
 { return log("WARNING", msg); }
 bool log_error(std::string msg)
 { return log("ERROR", msg); }
+bool log_data(std::string msg)
+{ return log("DATA", msg); }
 
-// Function to test and play around with tabulate Tables...
-void log_table()
+void log_space()
 {
-    Table universal_constants;
-
-    universal_constants.add_row({"Quantity", "Value"});
-    universal_constants.add_row({"Characteristic impedance of vacuum", "376.730 313 461... Ω"});
-    universal_constants.add_row({"Electric constant\n(permittivity of free space)", "8.854 187 817... × 10⁻¹²F·m⁻¹"});
-    universal_constants.add_row({"Magnetic constant\n(permeability of free space)", "4π × 10⁻⁷ N·A⁻² = 1.2566 370 614... × 10⁻⁶ N·A⁻²"});
-    universal_constants.add_row({"Gravitational constant (Newtonian constant of gravitation)", "6.6742(10) × 10⁻¹¹m³·kg⁻¹·s⁻²"});
-    universal_constants.add_row({"Planck's constant", "6.626 0693(11) × 10⁻³⁴ J·s"});
-    universal_constants.add_row({"Dirac's constant", "1.054 571 68(18) × 10⁻³⁴ J·s"});
-    universal_constants.add_row({"Speed of light in vacuum", "299 792 458 m·s⁻¹"});
-
-// format the whole table
-  universal_constants.format()
-    .width(50)
-    .font_style({FontStyle::bold})
-    .border_top(" ")
-    .border_bottom(" ")
-    .border_left(" ")
-    .border_right(" ")
-    .corner(" ");
-
-// format the first row
-  universal_constants[0].format()
-    .padding_top(1)
-    .padding_bottom(1)
-    .font_align(FontAlign::center)
-    .font_style({FontStyle::underline})
-    .font_background_color(Color::red);
-
-// format the right column
-  universal_constants.column(1).format()
-    .font_color(Color::blue);
-
-  universal_constants.column(1)[3].format()
-    .font_color(Color::red);
-
-    std::cout << universal_constants << std::endl;
-    exit(0);
+    std::cout << std::endl;
 }
 
-void log_iteration_report()
+Color getColor(std::string key)
 {
+        if ( string_colors.find(key) == string_colors.end() )
+            return Color::white;
+        else return string_colors[key];
 
 }
 
-void log_placement_report()
+void export_markdown(Table t)
 {
+    // Use exporter
+    MarkdownExporter exporter;
+    auto markdown = exporter.dump(t);
 
+    // Write to file
+    std::ofstream out_file;
+    out_file.open(get_filename());
+    out_file << markdown;
+    out_file.close();
 }
 
-//void log_test()
-//{
-//    log_info("This is some info.")
-//    log_debug("This is a debug msg.");
-//    log_warning("This is a warning.");
-//    log_error("THIS IS AN ERROR.");
-//    exit(0);
-//}
+std::string get_filename()
+{
+    fs::path filepath = "results";
+    fs::create_directories(filepath); // make sure this subdirectory exists
+
+    std::time_t time = std::time(0);   // get time now
+    std::tm* now = std::localtime(&time);
+
+    std::stringstream stream;
+    stream << "results/" << now->tm_hour << ":" << now->tm_min << "_" << now->tm_yday
+            << "_" << std::to_string(now->tm_year+1900) << ".md";
+    return stream.str();
+}
 
 }

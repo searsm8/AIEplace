@@ -19,7 +19,7 @@ std::vector<fs::path> DataBase::findExtensions(fs::path dir_path, string extensi
         if (file_extension == extension_match)
         {
             matches.push_back(entry.path());
-            cout << "### " << extension_match << " file found: \"" << entry.path().string() << "\"" <<endl;
+            log_info(extension_match + " file found: \"" + entry.path().string() + "\"");
         }
     }
 
@@ -31,7 +31,7 @@ bool DataBase::readLEF()
     std::vector<fs::path> lef_files = findExtensions(m_input_dir, ".lef");
     if (lef_files.size() == 0) 
     {
-        cout << "No LEF files found." << endl;
+        log_error("No .lef files found.");
         return false;
     }
 
@@ -40,9 +40,9 @@ bool DataBase::readLEF()
     {
         bool flag = LefParser::read(*this, file.string());
         if (flag) {
-            cout << "### LEF file parsing successful: " << file.c_str() << endl;
+            log_info(".lef file parsing successful: " + file.string());
         } else {
-            cout << "### LEF file parsing FAILED: " << file.c_str() << endl;
+            log_error(".lef file parsing FAILED: " + file.string());
             success = false;
         }
     }
@@ -54,7 +54,7 @@ bool DataBase::readDEF()
     std::vector<fs::path> def_files = findExtensions(m_input_dir, ".def");
     if (def_files.size() == 0) 
     {
-        cout << "No DEF files found." << endl;
+        log_error("No .def files found.");
         return false;
     }
 
@@ -74,10 +74,10 @@ bool DataBase::readDEF()
     }
     bool flag = DefParser::read(*this, def_file);
     if (flag) {
-        cout << "### DEF file parsing successful: " << def_file.string() << endl;
+        log_info(".def file parsing successful: " + def_file.string());
         return true;
     } else {
-        cout << "### DEF file parsing FAILED: " << def_file.string() << endl;
+        log_error(".def file parsing FAILED: " + def_file.string());
         return false;
     }
 }
@@ -150,7 +150,6 @@ double DataBase::computeTotalComponentArea()
         Component* comp_p = item.second;
         total_area += comp_p->getArea();
     }
-    cout << "Total component area: " << total_area << endl;
     return total_area;
 }
 
@@ -158,18 +157,17 @@ double DataBase::computeTotalComponentArea()
 */
 void DataBase::initializePacketContents()
 {
-    bool debug = true;
-    if(debug) cout << "\n### BEGIN initializePacketContents()" << endl;
+    log("packets", "BEGIN initializePacketContents()");
     int graph_index = 0;
     m_packet_count = 0;
     for(int net_size = MIN_AIE_NET_SIZE; net_size <= MAX_AIE_NET_SIZE; net_size++) {
     //for(int net_size = TEST_NET_SIZE; net_size <= TEST_NET_SIZE; net_size++) {
-        if(debug) cout << endl << "net_size = " << net_size << endl;
+        log("packets", "net_size = " + stringify(net_size));
         int groups_per_packet = LCM_BUFFSIZE/net_size; // for netsize 2 thru 8, this will be an exact integer
-        if(debug) cout << "groups_per_packet = " << groups_per_packet << endl;
-        if(debug) cout << "nets_per_packet = " << groups_per_packet*NETS_PER_GROUP << endl;
+        log("packets", "groups_per_packet = " + stringify(groups_per_packet));
+        log("packets", "nets_per_packet = " + stringify(groups_per_packet*NETS_PER_GROUP));
         int num_nets = mmv_nets_by_degree[net_size].size();
-        if(debug) cout << "num_nets = " << num_nets << endl;
+        log("packets", "num_nets = " + stringify(num_nets));
 
         int packet_start = 0;
         //int nets_per_graph = num_nets / PARTIALS_GRAPH_COUNT;
@@ -177,14 +175,20 @@ void DataBase::initializePacketContents()
 
         // Fill packets with data ranges
         // TODO: This is oversimplified and leads to a lot of zeroes being sent!
+        Table table;
+        table.add_row({ "graph_index", "net_size", "group_start", "group_count" });
         while(packet_start*NETS_PER_GROUP < num_nets) {
             Packet* p = new Packet();
             p->graph_index = graph_index;
             // For now only a single PacketIndex in each packet for simplicity
             // This could lead to many zeroes (empty packets) being sent and could be improved.
             p->contents.push_back(PacketIndex(net_size, packet_start, groups_per_packet));
-            cout << "graph_index: " << graph_index  << "\t" << p->contents[0].to_string();
             mv_packet[graph_index].push_back(p);
+
+            PacketIndex* pi = &p->contents[0];
+            //cout << "graph_index: " << graph_index  << "\t" << p->contents[0].to_string();
+            table.add_row({ stringify(graph_index), stringify(pi->net_size), 
+                            stringify(pi->group_start), stringify(pi->group_count) });
 
             //move start/stop for next packet
             packet_start += groups_per_packet;
@@ -192,10 +196,10 @@ void DataBase::initializePacketContents()
             if(graph_index == 0) m_packet_count++;
             graph_index = (graph_index+1) % PARTIALS_GRAPH_COUNT;
         }
-
-
+        table.format().font_align(FontAlign::center);
+        log("packets", table);
     }
-    if(debug) cout << "\n### END initializePacketContents()" << endl;
+    log("packets", "END initializePacketContents()");
 }
 
 /*
@@ -464,16 +468,20 @@ void DataBase::printNetsByDegree()
 
 void DataBase::printInfo()
 {
-    cout << endl;
-    cout << "---###--- DataBase info ---###---" << endl;
-    cout << std::scientific;
-    cout << "Die Area: " << m_die_area.getArea() << "\t" << m_die_area.to_string() <<  endl;
-    cout << std::fixed;
-    cout << mm_macros.size() << " macro classes" << endl;
-    cout << mm_pins.size() << " pins" << endl;
-    cout << mm_components.size() << " components" << endl;
-    cout << mm_nets.size() << " nets" << endl;
-    cout << endl;
+    Table top;
+    top.add_row({"DataBase info"});
+
+    Table data;
+    data.add_row(RowStream{} << "Macros" << mm_macros.size());
+    data.add_row(RowStream{} << "Pins" << mm_pins.size());
+    data.add_row(RowStream{} << "Components" << mm_components.size());
+    data.add_row(RowStream{} << "Nets" << mm_nets.size());
+    data.add_row(RowStream{} << "Die Area" << m_die_area.getArea());
+    data.add_row(RowStream{} << "Component area: " << computeTotalComponentArea());
+
+    top.add_row({data});
+    top.format().font_align(FontAlign::center);
+    log("DATA", top);
 }
 
 

@@ -1,22 +1,25 @@
 GCC := g++#${CXX} # For CPU only build, set to g++
 TOP_DIR := ../..
 MAIN = main.cpp
-ITEMS := AIEplace DataBase Grid Net DCT GraphDriver
+ITEMS := AIEplace DataBase Grid Net DCT GraphDriver Logger
 ITEMS += Visualizer
 
 OBJS := $(addprefix objs/, $(addsuffix .o, ${ITEMS}))
 EXE := ${TOP_DIR}/bin/AIEplace.exe
 
-LIMBO_DIR := ${HOME}/AIEplace/third_party/Limbo
+THIRD_PARTY := ${HOME}/AIEplace/third_party
+LIMBO_DIR := ${THIRD_PARTY}/Limbo
+TABLE_DIR := ${THIRD_PARTY}/tabulate/include
 
 INCLUDES := -I ./include
-INCLUDES += -I ${LIMBO_DIR}
+INCLUDES += -I${LIMBO_DIR} -I${TABLE_DIR}
 INCLUDES += -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/ -I/lustre/home/nx08/shared/fpga/xilinx/include/ 
 
 COMPILE_FLAGS := -std=c++17
 COMPILE_FLAGS += -g #see the proper names of variables and functions in your stack frames, 
 				    #and get line numbers and see the source as you step around in the executable
-COMPILE_FLAGS += -L${LIMBO_DIR}/lib 
+#COMPILE_FLAGS += -L${LIMBO_DIR}/lib 
+COMPILE_FLAGS += -Llib 
 COMPILE_FLAGS += -llefparseradapt 
 COMPILE_FLAGS += -ldefparseradapt 
 #COMPILE_FLAGS += -lverilogparser
@@ -35,9 +38,12 @@ COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 #COMPILE_FLAGS += -DCREATE_VISUALIZATION# Comment this out if no visualization is wanted.
 #COMPILE_FLAGS += -DUSE_AIE_ACCELERATION# Comment this out if no visualization is wanted.
 
-PROFILE_FLAG := -pg# flag for profiling with perf
+PROFILE_FLAG := -pg# flag for profiling with gprof
+#PROFILE_FLAG += -g# flag for code annotation
 
-.PHONY: all exe objs
+OPT_FLAG := -O0# no optimizations
+
+.PHONY: all exe objs ${EXE}
 
 all: ${EXE}
 
@@ -49,7 +55,7 @@ objs: ${OBJS}
 
 objs/%.o: ./%.cpp ./include/%.h ./include/Common.h
 	@mkdir -p objs
-	${GCC} -c $< ${INCLUDES} ${COMPILE_FLAGS} -o $@
+	${GCC} -c ${PROFILE_FLAG}  $< ${INCLUDES} ${COMPILE_FLAGS} -o $@
 
 clean:
 	rm -rf objs ${EXE} 
