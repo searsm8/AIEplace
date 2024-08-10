@@ -5,6 +5,7 @@
 #include "Common.h"
 #include "Position.h"
 #include "MacroClass.h"
+#include "Logger.h"
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -53,8 +54,8 @@ private:
 
 public:
 
-    Terms terms;
-    Terms terms_aie; // DEBUG: used to compare AIE with CPU results
+    XY partials_aie; // Computed on AIE by default 
+    Terms terms_cpu; // DEBUG: used to compare AIE with CPU results
 
     // Constructors
     Node() : m_name("") {}
@@ -76,8 +77,8 @@ public:
     void iterationReset()
     {
         mv_bin_overlaps.clear();
-        terms.clear();
-        terms_aie.clear();
+        terms_cpu.clear();
+        partials_aie.clear();
     }
 
     void addNet(Net* net_p) { mv_nets.push_back(net_p); }
@@ -110,19 +111,32 @@ public:
     virtual double getYsize() { return 0.0; }
     virtual double getArea()  { return 0.0; }
 
+// TODO: remove unused function?
     void printTerms() {
         cout << "Node " << m_name << ":";
-        cout << "\ta+x: " << terms.a.plus.x;
-        cout << "\ta-x: " << terms.a.minus.x;
-        cout << "\ta+y: " << terms.a.plus.y;
-        cout << "\ta-y: " << terms.a.minus.y;
-        cout << "\tpartial_x: " << terms.partials.x;
-        cout << "\tpartial_y: " << terms.partials.y;
+        cout << "\ta+x: " << terms_cpu.a.plus.x;
+        cout << "\ta-x: " << terms_cpu.a.minus.x;
+        cout << "\ta+y: " << terms_cpu.a.plus.y;
+        cout << "\ta-y: " << terms_cpu.a.minus.y;
+        cout << "\tpartial_x: " << terms_cpu.partials.x;
+        cout << "\tpartial_y: " << terms_cpu.partials.y;
         cout << endl;
-
     }
 
+    void printPartials() {
+        Table t;
+        t.add_row({RowStream{} << " Partials" << "X" << "Y"});
+        t.add_row({RowStream{} << "CPU result" << terms_cpu.partials.x << terms_cpu.partials.y});
+        t.add_row({RowStream{} << "AIE result" << partials_aie.x << partials_aie.y});
+
+        Table top;
+        top.add_row({"Node " + m_name});
+        top.add_row({t});
+        log("DATA", top);
+
+    }
 }; // End of class Node
+
 
 
 AIEPLACE_NAMESPACE_END

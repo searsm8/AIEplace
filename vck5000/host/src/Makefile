@@ -18,7 +18,6 @@ INCLUDES += -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/ -I/lustre/home/
 COMPILE_FLAGS := -std=c++17
 COMPILE_FLAGS += -g #see the proper names of variables and functions in your stack frames, 
 				    #and get line numbers and see the source as you step around in the executable
-#COMPILE_FLAGS += -L${LIMBO_DIR}/lib 
 COMPILE_FLAGS += -Llib 
 COMPILE_FLAGS += -llefparseradapt 
 COMPILE_FLAGS += -ldefparseradapt 

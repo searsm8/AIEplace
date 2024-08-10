@@ -12,30 +12,31 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-class PartialsGraphDriver
+// Base class
+class GraphDriver
 {
 public:
     // Member data
-    long start_time;
-    double xfer_on_time, xfer_off_time, kernel_exec_time;
+    long start_time, xfer_on_time, xfer_off_time, kernel_exec_time;
     xrt::kernel device_mm2s;
     xrt::kernel device_s2mm;
 
     xrtMemoryGroup bank_input;
     xrtMemoryGroup bank_result;
 
-    // buffer objects which hold inputs and outputs
+    // buffer objects to hold inputs and outputs
     xrt::bo input_buffer;
     xrt::bo result_buffer;
 
     xrt::run run_device_mm2s;
     xrt::run run_device_s2mm;
 
-    //xrt::uuid m_xclbin_uuid; // making this a member data causes compile errors for unknown reason
+    //xrt::uuid m_xclbin_uuid;
+    // making this a member data causes compile errors for unknown reason
+    // instead, this object is only used in init()
 
-    // Constructor
-    PartialsGraphDriver();
-    void init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id);
+    GraphDriver() {}
+    void init(xrt::device device, xrt::uuid & xclbin_uuid);
     void setBufferSize(int size);
 
     void send_packet(float * input_data);
@@ -47,39 +48,19 @@ public:
     double getTiming(long end_time, long start_time);
 };
 
-
-class DensityGraphDriver
+class PartialsGraphDriver : public GraphDriver
 {
 public:
-    // Member data
-    long start_time, xfer_on_time, xfer_off_time, kernel_exec_time;
-    xrt::kernel density_mm2s;
-    xrt::kernel density_s2mm;
+    PartialsGraphDriver() {}
+    void init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id);
+};
 
-    xrtMemoryGroup bank_input;
-    xrtMemoryGroup bank_result;
 
-    // buffer objects which hold inputs and outputs
-    xrt::bo input_buffer;
-    xrt::bo result_buffer;
-
-    xrt::run run_device_mm2s;
-    xrt::run run_device_s2mm;
-
-    //xrt::uuid m_xclbin_uuid; // making this a member data causes compile errors for unknown reason
-
-    // Constructor
-    DensityGraphDriver();
+class DensityGraphDriver : public GraphDriver
+{
+public:
+    DensityGraphDriver() {}
     void init(xrt::device device, xrt::uuid & xclbin_uuid);
-    void setBufferSize(int size);
-
-    void send_packet(float * input_data);
-    float receive_packet(float * output_data);
-
-    void print_info();
-
-    long getEpoch();
-    double getTiming(long end_time, long start_time);
 };
 
 AIEPLACE_NAMESPACE_END

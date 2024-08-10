@@ -66,6 +66,19 @@ struct XY
     float x;
     float y;
     void clear() { x = 0; y = 0;}
+
+    #define MIN_TOL 0.01
+    bool isClose(XY other)
+    {
+        bool close = true;
+        float diff_x = abs(x - other.x);
+        if(!((diff_x < MIN_TOL) || (diff_x / x < MIN_TOL)))
+            close = false;
+        float diff_y = abs(y - other.y);
+        if(!((diff_y < MIN_TOL) || (diff_y / y < MIN_TOL)))
+            close = false;
+        return close;
+    }
 };
 
 AIEPLACE_NAMESPACE_END 

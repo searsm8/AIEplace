@@ -40,7 +40,7 @@ public:
         void clear() { b.clear(); c.clear(); }
     };
 
-    Terms terms;
+    Terms terms_cpu;
 
     // Constructors
     Net() : m_degree(0) {}
@@ -56,7 +56,7 @@ public:
     // Setters
     void iterationReset()
     {
-        terms.clear();
+        terms_cpu.clear();
     }
 
     void addNode(Node* n) 
@@ -73,7 +73,6 @@ public:
     position_type computeWirelength_HPWL(); // Simple Half-Perimeter Wirelength
     position_type computeWirelength_RSMT(); // Rectilinear Steiner Minimum Spanning Tree
     
-
     // Debugging
     string to_string();
     void printTerms();

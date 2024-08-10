@@ -89,8 +89,9 @@ void Placer::performIteration()
     iterationReset();
 
     // Compute terms for HPWL partials
-    computeAllPartials_CPU();
     computeAllPartials_AIE();
+    computeAllPartials_CPU();
+    comparePartialResults();
 
     // Compute Electric Fields in each bin
     computeOverlaps();
@@ -364,8 +365,8 @@ void Placer::computeAllPartials_CPU()
     //for ( auto item :  db.getComponents() )
     //{
     //    Node* node_p = item.second;
-    //    cout << node_p->getName() << "\tsum_of_partials_x: " << node_p->terms.partials.x << endl;
-    //    cout << node_p->getName() << "\tsum_of_partials_y: " << node_p->terms.partials.y << endl;
+    //    cout << node_p->getName() << "\tsum_of_partials_x: " << node_p->terms_cpu.partials.x << endl;
+    //    cout << node_p->getName() << "\tsum_of_partials_y: " << node_p->terms_cpu.partials.y << endl;
 
     //    for ( Net* net_p : node_p->getNets())
     //        cout << net_p->to_string();
@@ -380,16 +381,16 @@ void Placer::compute_a_terms_CPU(Net* net_p)
     net_p->sortPositionsByX();
     std::vector<Node*> nodes = net_p->getNodes();
     for (Node* node_p : nodes) {
-        node_p->terms.a.plus.x  = exp( (node_p->getX() - nodes.front()->getX()) / gamma);
-        node_p->terms.a.minus.x = exp( (nodes.back()->getX() - node_p->getX()) / gamma);
+        node_p->terms_cpu.a.plus.x  = exp( (node_p->getX() - nodes.front()->getX()) / gamma);
+        node_p->terms_cpu.a.minus.x = exp( (nodes.back()->getX() - node_p->getX()) / gamma);
     }
 
     // Y positions
     net_p->sortPositionsByY();
     nodes = net_p->getNodes();
     for (Node* node_p : nodes) {
-        node_p->terms.a.plus.y  = exp( (node_p->getY() - nodes.front()->getY()) / gamma);
-        node_p->terms.a.minus.y = exp( (nodes.back()->getY() - node_p->getY()) / gamma);
+        node_p->terms_cpu.a.plus.y  = exp( (node_p->getY() - nodes.front()->getY()) / gamma);
+        node_p->terms_cpu.a.minus.y = exp( (nodes.back()->getY() - node_p->getY()) / gamma);
     }
 }
 
@@ -398,16 +399,16 @@ void Placer::compute_bc_terms_CPU(Net* net_p)
     compute_a_terms_CPU(net_p);
     for (Node* node_p : net_p->getNodes()) {
         // compute b terms
-        net_p->terms.b.plus.x  += node_p->terms.a.plus.x;
-        net_p->terms.b.minus.x += node_p->terms.a.minus.x;
-        net_p->terms.b.plus.y  += node_p->terms.a.plus.y;
-        net_p->terms.b.minus.y += node_p->terms.a.minus.y;
+        net_p->terms_cpu.b.plus.x  += node_p->terms_cpu.a.plus.x;
+        net_p->terms_cpu.b.minus.x += node_p->terms_cpu.a.minus.x;
+        net_p->terms_cpu.b.plus.y  += node_p->terms_cpu.a.plus.y;
+        net_p->terms_cpu.b.minus.y += node_p->terms_cpu.a.minus.y;
 
         // compute c terms
-        net_p->terms.c.plus.x  += node_p->terms.a.plus.x  * node_p->getX();
-        net_p->terms.c.minus.x += node_p->terms.a.minus.x * node_p->getX();
-        net_p->terms.c.plus.y  += node_p->terms.a.plus.y  * node_p->getY();
-        net_p->terms.c.minus.y += node_p->terms.a.minus.y * node_p->getY();
+        net_p->terms_cpu.c.plus.x  += node_p->terms_cpu.a.plus.x  * node_p->getX();
+        net_p->terms_cpu.c.minus.x += node_p->terms_cpu.a.minus.x * node_p->getX();
+        net_p->terms_cpu.c.plus.y  += node_p->terms_cpu.a.plus.y  * node_p->getY();
+        net_p->terms_cpu.c.minus.y += node_p->terms_cpu.a.minus.y * node_p->getY();
     }
 }
 
@@ -422,18 +423,18 @@ void Placer::computeNetPartials_CPU(Net* net_p)
 
     compute_bc_terms_CPU(net_p);
     for (Node* node_p : net_p->mv_nodes) {
-        float partial_x = (( 1 + node_p->getX()/gamma) * net_p->terms.b.plus.x - (net_p->terms.c.plus.x / gamma)) 
-                                    * (node_p->terms.a.plus.x / (net_p->terms.b.plus.x * net_p->terms.b.plus.x))
-                         - (( 1 - node_p->getX()/gamma) * net_p->terms.b.minus.x + (net_p->terms.c.minus.x / gamma)) 
-                                    * (node_p->terms.a.minus.x / (net_p->terms.b.minus.x * net_p->terms.b.minus.x));
+        float partial_x = (( 1 + node_p->getX()/gamma) * net_p->terms_cpu.b.plus.x - (net_p->terms_cpu.c.plus.x / gamma)) 
+                                    * (node_p->terms_cpu.a.plus.x / (net_p->terms_cpu.b.plus.x * net_p->terms_cpu.b.plus.x))
+                         - (( 1 - node_p->getX()/gamma) * net_p->terms_cpu.b.minus.x + (net_p->terms_cpu.c.minus.x / gamma)) 
+                                    * (node_p->terms_cpu.a.minus.x / (net_p->terms_cpu.b.minus.x * net_p->terms_cpu.b.minus.x));
 
-        float partial_y = (( 1 + node_p->getY()/gamma) * net_p->terms.b.plus.y - (net_p->terms.c.plus.y / gamma)) 
-                                    * (node_p->terms.a.plus.y / (net_p->terms.b.plus.y * net_p->terms.b.plus.y))
-                         - (( 1 - node_p->getY()/gamma) * net_p->terms.b.minus.y + (net_p->terms.c.minus.y / gamma)) 
-                                    * (node_p->terms.a.minus.y / (net_p->terms.b.minus.y * net_p->terms.b.minus.y));
+        float partial_y = (( 1 + node_p->getY()/gamma) * net_p->terms_cpu.b.plus.y - (net_p->terms_cpu.c.plus.y / gamma)) 
+                                    * (node_p->terms_cpu.a.plus.y / (net_p->terms_cpu.b.plus.y * net_p->terms_cpu.b.plus.y))
+                         - (( 1 - node_p->getY()/gamma) * net_p->terms_cpu.b.minus.y + (net_p->terms_cpu.c.minus.y / gamma)) 
+                                    * (node_p->terms_cpu.a.minus.y / (net_p->terms_cpu.b.minus.y * net_p->terms_cpu.b.minus.y));
 
-        node_p->terms.partials.x += partial_x;
-        node_p->terms.partials.y += partial_y;
+        node_p->terms_cpu.partials.x += partial_x;
+        node_p->terms_cpu.partials.y += partial_y;
     }
 }
 
@@ -625,6 +626,29 @@ void Placer::computeOverlaps()
     //cout << "total_overlap: " << total_overlap << endl;
 }
 
+/* To confirm that the AIE has performed a correct computaiton, this function
+ * compares the results to the CPU computation result
+ */
+void Placer::comparePartialResults()
+{
+    int print_count = 0;
+    log_info("Comparing Partial Results.");
+    auto nodes_map = db.getComponents();
+    for (auto const& item: nodes_map) {
+        Node* np = item.second;
+        if(np->terms_cpu.partials.isClose(np->partials_aie))
+            continue;
+        else {
+            log_warning("Terms do not match for node: " + np->getName());
+            np->printPartials();
+            if(print_count++ > 50) return;
+        }
+    }
+}
+
+void Placer::compareDensityResults()
+{
+}
 
 void Placer::nudgeAllNodes()
 {
@@ -638,7 +662,6 @@ void Placer::nudgeAllNodes()
 
 void Placer::nudgeNode(Node* node_p)
 {
-    XY wirelen_gradient = node_p->terms.partials;
     XY electro_force;
     electro_force.clear();
 
@@ -654,8 +677,8 @@ void Placer::nudgeNode(Node* node_p)
 
     XY move;
     float electro_weight = 0; // Ignore electro force
-    move.x = learning_rate*grid.getDieWidth()  * (-wirelen_gradient.x + electro_weight*electro_force.x);
-    move.y = learning_rate*grid.getDieHeight() * (-wirelen_gradient.y + electro_weight*electro_force.y);
+    move.x = learning_rate*grid.getDieWidth()  * (electro_weight*electro_force.x - node_p->partials_aie.x );
+    move.y = learning_rate*grid.getDieHeight() * (electro_weight*electro_force.y - node_p->partials_aie.y );
 
     // Update the position of this node
     node_p->translate(move.x, move.y);

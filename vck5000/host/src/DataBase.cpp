@@ -203,8 +203,10 @@ void DataBase::initializePacketContents()
 }
 
 /*
- * @brief Prepare data in correct format to be sent to PL and then AIE input streams
- *
+ * @brief: Prepare data in correct format to be sent to PL and then AIE input streams
+ * A net group is four (NETS_PER_GROUP) of size (net_size).
+ * Group will have a size of (2 x NETS_PER_GROUP x net_size)
+ * The 2x is because X and Y coord are grouped together
 **/
 void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
 {
@@ -273,13 +275,13 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
 
         // nodes are already sorted by Y coords, so store them first
         for(int n = 0; n < net_size; n++) {
-            nodes[n]->terms_aie.partials.y += output_data[base_addr + 2*net_idx + n*8 + 1];
+            nodes[n]->partials_aie.y += output_data[base_addr + 2*net_idx + n*8 + 1];
         }
 
         net->sortPositionsMaxMinX(); // X or Y
         //nodes = net->getNodes();
         for(int n = 0; n < net_size; n++) {
-            nodes[n]->terms_aie.partials.x += output_data[base_addr + 2*net_idx + n*8];
+            nodes[n]->partials_aie.x += output_data[base_addr + 2*net_idx + n*8];
         }
     }
 

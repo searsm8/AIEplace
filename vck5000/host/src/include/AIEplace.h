@@ -7,6 +7,7 @@
 #include "GraphDriver.h"
 #include <sys/time.h>
 #include <thread>
+#include "Logger.h"
 
 #define DEVICE_ID 0 // Device ID to find VCK5000
 
@@ -36,7 +37,7 @@ public:
     // Constructor
     Placer(fs::path input_dir, std::string xclbin_file);
 
-    static void printVersionInfo();
+    static void printWelcomeBanner();
 
     // Pre-run preparation
     void initializePlacement(Position<position_type> target_pos, int min_dist, int max_dist);
@@ -66,6 +67,10 @@ public:
 
     void computeOverlaps();
 
+    // Comparison functions for verification
+    void comparePartialResults();
+    void compareDensityResults();
+
     // Run functions
     void nudgeAllNodes();
     void nudgeNode(Node*);
@@ -79,7 +84,7 @@ public:
     // Timing and print functions
     long getTime();
     double getInterval(long start_time, long end_time);
-    void printRunResults();
+    void printFinalResults();
 };
 
 AIEPLACE_NAMESPACE_END
