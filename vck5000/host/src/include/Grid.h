@@ -1,6 +1,7 @@
 #include "Common.h"
 #include "Bin.h"
 #include "Node.h"
+#include "Logger.h"
 
 AIEPLACE_NAMESPACE_BEGIN
 

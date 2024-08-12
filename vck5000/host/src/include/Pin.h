@@ -19,9 +19,9 @@ public:
 
     // Member Functions
     // Getters
-    double getXsize() { return m_bounding_box.getXsize(); }
-    double getYsize() { return m_bounding_box.getYsize(); }
-    double getArea()  { return m_bounding_box.getArea();  }
+    float getXsize() { return m_bounding_box.getXsize(); }
+    float getYsize() { return m_bounding_box.getYsize(); }
+    float getArea()  { return m_bounding_box.getArea();  }
 
     // Setters
     void setBoundingBox(position_type xl, position_type xh, position_type yl, position_type yh)

@@ -1,4 +1,5 @@
 #include "Visualizer.h"
+#include "Logger.h"
 
 #ifdef CREATE_VISUALIZATION
 
@@ -79,7 +80,9 @@ void Visualizer::drawPlacement(DataBase db, int iteration)
     filename.append(std::to_string(iteration));
     filename.append(".png");
     image_path.append(filename);
-    cout << "VISUALIZER: PNG output to " << image_path << endl;
+    Table t;
+    t.add_row(RowStream{} << "VISUALIZER: PNG output to " << image_path);
+    log("INFO", t);
     cairo_surface_write_to_png (surface, image_path.c_str());
 }
 

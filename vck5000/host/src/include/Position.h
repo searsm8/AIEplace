@@ -4,6 +4,7 @@
 #define AIEPLACE_POSITION_H
 
 #include "Common.h"
+#include <sstream>
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -33,7 +34,12 @@ public:
     void setPosition(T new_x, T new_y) { m_x = new_x; m_y = new_y;}
     void setPosition(Position pos) { m_x = pos.getX(); m_y = pos.getY(); }
 
-    string to_string() { return " @(" + std::to_string(m_x) + ", " + std::to_string(m_y) + ")"; }
+    string to_string() {
+        std::stringstream s;
+        s << std::setprecision(2) << std::fixed;
+        s << "@(" << m_x << ", " << m_y << ")";
+        return s.str();
+    }
 
     void translate(T move_x, T move_y)
     {

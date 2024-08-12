@@ -107,9 +107,9 @@ public:
             m_status = UNKNOWN;
     }
 
-    virtual double getXsize() { return 0.0; }
-    virtual double getYsize() { return 0.0; }
-    virtual double getArea()  { return 0.0; }
+    virtual float getXsize() { return 0.0; }
+    virtual float getYsize() { return 0.0; }
+    virtual float getArea()  { return 0.0; }
 
 // TODO: remove unused function?
     void printTerms() {

@@ -22,7 +22,8 @@ void setup_logging()
     // Custom logging keys
     activate_logging_key("packets"); // Used in DataBase.cpp for packet initialization
     activate_logging_key("dbinfo");
-    activate_logging_key("comms");
+    //activate_logging_key("comms");
+    //activate_logging_key("bins");
 }
 
 bool log(std::string key, Table t)
@@ -77,6 +78,17 @@ bool log_error(std::string msg)
 { return log("ERROR", msg); }
 bool log_data(std::string msg)
 { return log("DATA", msg); }
+
+bool log_info(Table t)
+{ return log("INFO", t); }
+bool log_debug(Table t)
+{ return log("DEBUG", t); }
+bool log_warning(Table t)
+{ return log("WARNING", t); }
+bool log_error(Table t)
+{ return log("ERROR", t); }
+bool log_data(Table t)
+{ return log("DATA", t); }
 
 void log_space()
 {

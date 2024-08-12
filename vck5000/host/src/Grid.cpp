@@ -1,4 +1,5 @@
 #include "Grid.h"
+#include "Logger.h"
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -121,19 +122,24 @@ float Grid::computeTotalOverflow()
 *****************/
 void Grid::printOverflows()
 {
+    Table overflows;
+    overflows.add_row(RowStream{} << "loc index" << "area" << "overlap" << "overflow");
     for( int x_index = 0; x_index < m_bins_per_row; x_index++)
     {
         for( int y_index = 0; y_index < m_bins_per_col; y_index++)
         {
-            Bin b = m_bins[x_index][y_index];
-            float overflow = b.computeOverflow();
-            float overlap= b.overlap;
-            if (overlap > 10)
-                cout << "Bin["<<x_index<<"]["<<y_index<<"] area: " << b.bb.getArea()
-                    << "\toverlap: " << overlap 
-                    << "\toverflow: "<< overflow<< endl;
+            Bin bin = m_bins[x_index][y_index];
+            float overflow = bin.computeOverflow();
+            float overlap= bin.overlap;
+            if (overlap > 10) 
+            //if (overflow > 0)
+            {
+                overflows.add_row(RowStream{} << std::to_string(x_index) + ", " + std::to_string(y_index)
+                        << bin.bb.getArea() << overlap << overflow);
+            }
         }
     }
+    log_info(overflows);
 }
 
 void Grid::printElectricFields()

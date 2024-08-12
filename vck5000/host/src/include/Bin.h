@@ -5,6 +5,7 @@
 #include "Common.h"
 #include "Position.h"
 #include "Node.h"
+#include <sstream>
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -30,7 +31,12 @@ public:
     T getYsize() { return abs(m_a.getY() - m_b.getY()); }
     T getArea()  { return getXsize() * getYsize(); }
 
-    string to_string() { return "Box" + m_a.to_string() + m_b.to_string(); }
+    string to_string() {
+        std::stringstream s;
+        s << std::setprecision(2) << std::fixed;
+        s << "Box@(" << m_a.to_string() << ", " << m_b.to_string() << ")";
+        return s.str();
+    }
 
     // Setters
 
@@ -65,11 +71,11 @@ struct Bin
     void computeOverlap(Node* node_p)
     {
         float overlap_width = 
-            min(bb.getPosTopRight().getX(), (float)(node_p->getPosition().getX() + node_p->getXsize()))
-            - max(bb.getPosBottomLeft().getX(), (float)node_p->getPosition().getX()) ;
+            min((double)bb.getPosTopRight().getX(), ((double)node_p->getPosition().getX() + (double)node_p->getXsize()))
+            - max(bb.getPosBottomLeft().getX(), node_p->getPosition().getX()) ;
         float overlap_height = 
-            min(bb.getPosTopRight().getY(), (float)(node_p->getPosition().getY() + node_p->getYsize()))
-            - max(bb.getPosBottomLeft().getY(), (float)node_p->getPosition().getY());
+            min((double)bb.getPosTopRight().getY(), ((double)node_p->getPosition().getY() + (double)node_p->getYsize()))
+            - max(bb.getPosBottomLeft().getY(), node_p->getPosition().getY());
 
         //cout << "overlap_width: " << overlap_width << "\n";
         //cout << "bb.getPosTopRight().getY() = " << (float)bb.getPosTopRight().getY() << endl;
@@ -87,6 +93,10 @@ struct Bin
             overlapping_nodes.push_back(node_p);
             node_p->addBinOverlap(this, node_overlap);
         }
+        Table t;
+        t.add_row(RowStream{} << "name" << "area" << "width" << "height" << "overlap" << "width" << "height");
+        t.add_row(RowStream{} << node_p->getName() << node_p->getArea() << node_p->getXsize() << node_p->getYsize() << node_overlap << overlap_width << overlap_height);
+        log("bins", t);
     }
 
     float computeOverflow()
@@ -94,7 +104,6 @@ struct Bin
         return max<float>(0, overlap - bb.getArea());
     }
 };
-
 
 AIEPLACE_NAMESPACE_END
 

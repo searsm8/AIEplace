@@ -30,6 +30,11 @@ bool log_debug(string msg);
 bool log_warning(string msg);
 bool log_error(string msg);
 bool log_data(string msg);
+bool log_info(Table t);
+bool log_debug(Table t);
+bool log_warning(Table t);
+bool log_error(Table t);
+bool log_data(Table t);
 void log_space();
 Color getColor(string key);
 

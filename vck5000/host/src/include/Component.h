@@ -21,9 +21,9 @@ public:
     // Member Functions
     // Getters
     MacroClass* getMacro() { return m_macro_class; }
-    double getXsize() { return m_macro_class->getXsize(); }
-    double getYsize() { return m_macro_class->getYsize(); }
-    double getArea() { return m_macro_class->getArea(); }
+    float getXsize() { return m_macro_class->getXsize(); }
+    float getYsize() { return m_macro_class->getYsize(); }
+    float getArea() { return m_macro_class->getArea(); }
 
     // Setters
     void setMacroClass(MacroClass* macro) { m_macro_class = macro; }

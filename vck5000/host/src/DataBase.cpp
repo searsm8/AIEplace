@@ -1,5 +1,6 @@
 
 #include "DataBase.h"
+#include "Logger.h"
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -490,17 +491,32 @@ void DataBase::printInfo()
 void DataBase::printOverlaps()
 {
     // for each node in db
+    int count = 0;
     for (auto item : getComponents())
     {
+        if(count++ > 100) return;
         // print overlaps
         string name = item.first;
         Node* node_p = item.second;
-        cout << "Bin Overlaps for " << name << node_p->getPosition().to_string() << "\tarea = " << node_p->getArea() << endl;
+        Table header;
+        header.add_row(RowStream{} << std::setprecision(2) << "Bin Overlaps for " << name);
+        header.add_row(RowStream{} << "Position" << node_p->getPosition().to_string());
+        header.add_row(RowStream{} << "Area" << node_p->getArea());
+        header.column(0).format().font_align(FontAlign::right);
+
+        Table overlaps;
+        overlaps.add_row(RowStream{} << "bin" << "overlap");
         for (BinOverlap b : node_p->getBinOverlaps())
-            cout << "\t" << b.overlap << " in bin " << b.bin->bb.getPos().to_string() << endl;
+            overlaps.add_row(RowStream{} << b.bin->bb.getPos().to_string() << b.overlap);
+        overlaps.format().font_align(FontAlign::center);
 
+        Table top;
+        top.add_row({header});
+        top.add_row({overlaps});
+        top.format().font_align(FontAlign::center);
+        
+        log_info(top);
     }
-
 }
 
 

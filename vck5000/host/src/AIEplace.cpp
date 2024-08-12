@@ -96,7 +96,7 @@ void Placer::performIteration()
     // Compute Electric Fields in each bin
     computeOverlaps();
     //db.printOverlaps();
-    //grid.printOverflows();
+    grid.printOverflows();
 
     //computeElectricFields_CPU(); // naive compute
     //computeElectricFields_DCT(); // on CPU also
@@ -639,7 +639,7 @@ void Placer::comparePartialResults()
         if(np->terms_cpu.partials.isClose(np->partials_aie))
             continue;
         else {
-            log_warning("Terms do not match for node: " + np->getName());
+            log_error("Terms do not match for node: " + np->getName());
             np->printPartials();
             if(print_count++ > 50) return;
         }
@@ -700,7 +700,10 @@ void Placer::printIterationResults()
     top.column(1).format().font_align(FontAlign::left);
     log("DATA", top);
 
+    // every 10 iterations, export a table in markdown
+    if (iteration % 10 == 0)
 
+    // every 10 iterations, export an image
     #ifdef CREATE_VISUALIZATION
         if (iteration % 10 == 0)
             viz.drawPlacement(db, iteration);
