@@ -37,7 +37,7 @@ COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 #COMPILE_FLAGS += -DCREATE_VISUALIZATION# Comment this out if no visualization is wanted.
 #COMPILE_FLAGS += -DUSE_AIE_ACCELERATION# Comment this out if no visualization is wanted.
 
-PROFILE_FLAG := -pg# flag for profiling with gprof
+#PROFILE_FLAG := -pg# flag for profiling with gprof
 #PROFILE_FLAG += -g# flag for code annotation
 
 OPT_FLAG := -O0# no optimizations

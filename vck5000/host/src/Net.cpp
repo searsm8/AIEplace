@@ -137,8 +137,11 @@ position_type Net::computeWirelength_HPWL()
 {
     sortPositionsByX();
     position_type width = mv_nodes.front()->getX() - mv_nodes.back ()->getX();
+    //cout << "front: " << mv_nodes.front()->getX() << "\tback: " << mv_nodes.back()->getX() << endl;
     sortPositionsByY();
     position_type height = mv_nodes.front()->getY() - mv_nodes.back ()->getY();
+    //cout << "front: " << mv_nodes.front()->getY() << "\tback: " << mv_nodes.back()->getY() << endl;
+    //cout << "Height: " << height << "\tWidth: " << width << "\tHPWL: " << height+width << endl;
     return width + height;
 }
 

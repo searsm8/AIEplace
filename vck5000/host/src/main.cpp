@@ -16,11 +16,12 @@ int main(int argc, char *argv[])
     fs::path design_input_dir{argv[1]};
     std::string xclbin_file{argv[2]};
 
+    // Instantiate the placer
     AIEplace::Placer placer(design_input_dir, xclbin_file);
 
     // Print DataBase info
     placer.db.printInfo(); 
-    placer.db.computeTotalComponentArea();
+    //placer.db.computeTotalComponentArea();
     //placer.db.printNodes();
     //placer.db.printNets();
     //placer.db.printNetsByDegree();

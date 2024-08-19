@@ -56,7 +56,7 @@ runhw:
 	@clear
 	@echo "runhw: BENCHMARK =" ${BENCHMARK}
 #perf record #use this for perf profiler
-	bin/AIEplace.exe ${BENCHMARK_DIR}/${BENCHMARK} bin/aieplace.hw.xclbin
+	time bin/AIEplace.exe ${BENCHMARK_DIR}/${BENCHMARK} bin/aieplace.hw.xclbin
 
 runemu:
 	@clear

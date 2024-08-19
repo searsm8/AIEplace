@@ -81,14 +81,17 @@ void PartialsGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int 
 }
 
 
-void DensityGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid)
+void DensityGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id)
 {
-    log_info("DensityGraphDriver creating PL kernels...");
+    log_info("DensityGraphDriver creating PL kernel. Kernel ID: " + std::to_string(kernel_id));
+    // kernel_id = 0 -> DCT
+    // kernel_id = 1 -> IDCT
+    // kernel_id = 2 -> IDXST
     
     // Create kernel objects
     // Be extra sure the names are correct, there might not be an error message!
-    device_mm2s = xrt::kernel(device, xclbin_uuid, "density_mm2s");
-    device_s2mm = xrt::kernel(device, xclbin_uuid, "density_s2mm");
+    device_mm2s = xrt::kernel(device, xclbin_uuid, "density_mm2s:{density_mm2s_"+std::to_string(kernel_id)+"}");
+    device_s2mm = xrt::kernel(device, xclbin_uuid, "density_s2mm:{density_s2mm_"+std::to_string(kernel_id)+"}");
 
     // Get memory bank groups for device buffers
     bank_input  = device_mm2s.group_id(0);

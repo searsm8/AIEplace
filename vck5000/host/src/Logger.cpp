@@ -20,10 +20,12 @@ void setup_logging()
     activate_logging_key("DATA");
 
     // Custom logging keys
-    activate_logging_key("packets"); // Used in DataBase.cpp for packet initialization
+    //activate_logging_key("packets"); // Used in DataBase.cpp for packet initialization
     activate_logging_key("dbinfo");
     //activate_logging_key("comms");
     //activate_logging_key("bins");
+    activate_logging_key("overlap");
+    activate_logging_key("function"); // Used to log when important functions are called
 }
 
 bool log(std::string key, Table t)

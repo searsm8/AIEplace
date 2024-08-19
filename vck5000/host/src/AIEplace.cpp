@@ -3,6 +3,66 @@
 #include <cmath>
 
 AIEPLACE_NAMESPACE_BEGIN
+
+/* @brief: perform an entire iteration of the ePlace algorithm.
+*/
+void Placer::performIteration()
+{
+    iterationReset();
+
+    // launch threads from this function?
+
+    // Compute terms for HPWL partials
+    computeAllPartials_AIE();
+    //computeAllPartials_CPU();
+    //comparePartialResults();
+
+    // Compute Electric Fields in each bin
+    computeOverlaps(); // Density Map computation
+    //db.printOverlaps();
+    //grid.printOverflows();
+
+    //computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
+    computeElectricFields_AIE(); // Accelerated compute on AIEs
+    //computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
+    //placer.grid.printElectricFields();
+
+    // Perform iteration node movement
+    nudgeAllNodes();
+    printIterationResults();
+}
+
+/* @brief: Run the ePlace algorithm.
+*          Perform iterations until the convergence condition is met.
+*/
+void Placer::run()
+{
+    // Set the center point of die area as initial placement target
+    Position<position_type> target =
+                Position<position_type>(grid.getDieWidth()/2, grid.getDieHeight()/2);
+
+    initializePlacement(target, 0, grid.getDieWidth()/4); // even spread around center
+    //initializePlacement(target, 0, 500); // Close placement for testing purposes
+
+    bool converged = false;
+    while( !converged )
+    {
+        performIteration();
+        if (iteration++ == 100)
+            converged = true;
+    }
+    printFinalResults();
+}
+
+/* @brief: Reset all nodes and nets in preparation for the next iteration.
+*/
+void Placer::iterationReset()
+{
+    grid.iterationReset();
+    db.iterationReset();
+}
+
+// Constructor
 Placer::Placer(fs::path input_dir, std::string xclbin_file) : 
         db(DataBase(input_dir)), // TODO: Database initialization should be multithreaded?
         #ifdef CREATE_VISUALIZATION
@@ -24,7 +84,9 @@ Placer::Placer(fs::path input_dir, std::string xclbin_file) :
             for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
                 partials_drivers[i].init(device, xclbin_uuid, i);
 
-            //density_driver.init(device, xc6yhlbin_uuid);
+            density_driver[0].init(device, xclbin_uuid, 0); // DCT graph
+            density_driver[1].init(device, xclbin_uuid, 1); // IDCT graph
+            density_driver[2].init(device, xclbin_uuid, 2); // IDXST graph
             #endif
         }
 
@@ -60,60 +122,13 @@ banner.format()
     banner.print(cout);
 }
 
-/* @brief: Run the ePlace algorithm.
-*          Perform iterations until the convergence condition is met.
-*/
-void Placer::run()
+#define MIN_TOL 0.01
+bool isClose(float a, float b)
 {
-    // Set the center point of die area as initial placement target
-    Position<position_type> target =
-                Position<position_type>(grid.getDieWidth()/2, grid.getDieHeight()/2);
-
-    initializePlacement(target, 0, grid.getDieWidth()/4); // even spread around center
-    //initializePlacement(target, 0, 500); // Close placement for testing purposes
-
-    bool converged = false;
-    while( !converged )
-    {
-        performIteration();
-        if (iteration++ == 2)
-            converged = true;
-    }
-    printFinalResults();
-}
-
-/* @brief: perform an entire iteration of the ePlace algorithm.
-*/
-void Placer::performIteration()
-{
-    iterationReset();
-
-    // Compute terms for HPWL partials
-    computeAllPartials_AIE();
-    computeAllPartials_CPU();
-    comparePartialResults();
-
-    // Compute Electric Fields in each bin
-    computeOverlaps();
-    //db.printOverlaps();
-    grid.printOverflows();
-
-    //computeElectricFields_CPU(); // naive compute
-    //computeElectricFields_DCT(); // on CPU also
-    //computeElectricFields_AIE();
-    //placer.grid.printElectricFields();
-
-    // Perform iteration node movement
-    nudgeAllNodes();
-    printIterationResults();
-}
-
-/* @brief: Reset all nodes and nets in preparation for the next iteration.
-*/
-void Placer::iterationReset()
-{
-    grid.iterationReset();
-    db.iterationReset();
+    float diff = abs(abs(a) - abs(b));
+    if((diff < MIN_TOL) || ((diff / abs(a)) < MIN_TOL))
+        return true;
+    return false;
 }
 
 /* @brief: initialize placement of all moveable nodes randomly,
@@ -124,6 +139,7 @@ void Placer::iterationReset()
 */
 void Placer::initializePlacement(Position<position_type> target_pos, int min_dist, int max_dist)
 {
+    log("function", "Begin initializePlacement()");
     Table top;
     top.add_row(RowStream{} << "Initial Placement");
     Table data;
@@ -150,7 +166,7 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
         item.second->setPosition(init_pos);
     }
 
-    printIterationResults();
+    printIterationResults(); // Prints "iteration 0" starting statistics
     iteration = 1;
 }
 
@@ -167,6 +183,7 @@ double prepare_actual_time = 0, receive_time= 0;
 #define GROUP_SIZE 1 // Size of the group of nets sent before waiting to receive results
 void Placer::computeAllPartials_AIE()
 {
+    log("function", "Begin computeAllPartials_AIE()");
     // Start timer
     long start_partials = getTime();
 
@@ -295,35 +312,197 @@ void Placer::receivePartials(Packet* p)
 **/
 void Placer::computeElectricFields_AIE()
 {
+    log("function", "Begin computeElectricFields_AIE()");
     // Call AIE graph_driver to accelerate computation
     std::vector< std::vector<float> > rho = grid.getRho();
+    std::vector< std::vector<float> > temp;
+
+    //DEBUGGING: print out the rho matrix
+    //for( int x_index = 0; x_index < BINS_PER_ROW; x_index++)
+    //{
+    //    for( int y_index = 0; y_index < BINS_PER_COL; y_index++)
+    //    {
+    //        cout << rho[x_index][y_index] << " ";
+    //    }
+    //    cout << endl;
+    //}
+    //cout << endl;
 
     float * input_data  = new float[2*BINS_PER_ROW]; 
     float * output_data = new float[2*BINS_PER_ROW];
-    for(int i = 0; i < BINS_PER_ROW; i++) {
-        input_data[2*i] = rho[0][i];
-        input_data[2*i+1] = 0;
-    }
+
+    // Send the rho matrix into the AIE, one row at a time, for 1D-DCTs
+
+    for(int row = 0; row < BINS_PER_COL; row++) {
+        for(int col = 0; col < BINS_PER_ROW; col++) {
+        input_data[2*col] = rho[row][col];
+        input_data[2*col+1] = 0;
+        }
 
     // DEBUG: Print input data received
-    //cout << endl << "AIE DCT input: " << endl;
+    //Table t;
+    //t.add_row({"AIE DCT input"});
+    //std::stringstream s;
     //for(int i = 0; i < BINS_PER_ROW; i++) {
-    //    cout << input_data[2*i] << "\t";
-    //    if((i+1)%16 == 0) cout << endl;
+    //    s << input_data[2*i] << "\t";
     //}
-    //cout << endl;
+    //t.add_row({s.str()});
+    //log_data(t);
 
-    density_driver.send_packet(input_data);
-    density_driver.receive_packet(output_data);
+    density_driver[0].send_packet(input_data);
+    density_driver[0].receive_packet(output_data);
+
+    std::vector<float> res;
+    for(int col = 0; col < BINS_PER_ROW; col++) 
+        res.push_back(output_data[2*col]);
+    temp.push_back(res);
 
     // DEBUG: Print output data received
-    //cout << endl << "AIE compute DCT result: " << endl;
+    //Table r;
+    //r.add_row({"AIE compute DCT result"});
+    //std::stringstream ss;
+    //ss << std::setprecision(2);
     //for(int i = 0; i < BINS_PER_ROW; i++) {
-    //    cout << output_data[2*i] << "\t";
-    //    if((i+1)%16 == 0) cout << endl;
+    //    ss << output_data[2*i] << "\t";
     //}
-    //cout << endl;
+    //r.add_row({ss.str()});
+    //log_data(r);
+    
+    //std::vector<float> test_output = DCT_naive(test_data);
+    //for(int i = 0; i < BINS_PER_ROW; i++) {
+    //    cout << test_output[i] << " ";
+    //} cout << endl;
 
+    } 
+
+    // Send the rho matrix into the AIE, one column at a time, to complete 2D-DCT
+    //cout << "Input" << std::setprecision(2) << endl;
+    for(int col = 0; col < BINS_PER_ROW; col++) {
+        for(int row = 0; row < BINS_PER_COL; row++) { // looping order performs DCT on columns
+        input_data[2*row] = temp[row][col];
+        input_data[2*row+1] = 0;
+        }
+
+        // Send data to DCT graph
+        density_driver[0].send_packet(input_data);
+        density_driver[0].receive_packet(output_data);
+
+        //cout << endl << "DCT output:" << endl << std::setprecision(2);
+        // Store the result a_uv transposed (for comparison)
+        for(int row = 0; row < BINS_PER_COL; row++) {
+            grid.getBin(row, col).a_uv = output_data[2*row];
+            //cout << output_data[2*row] << " "; 
+        }
+        //cout << endl;
+
+    }
+
+    // Compute Ex
+    temp.clear();
+    // Setup input for IDCT
+    double w_u, w_v, denom_inv;
+    for(int row = 0; row < BINS_PER_COL; row++) { //looping params implement transpose!
+        //cout << endl << "IDCT input to AIE:" << endl << std::setprecision(2);
+        for(int col = 0; col < BINS_PER_ROW; col++) {
+            if(row == 0 && col == 0) 
+                { w_u = 0; w_v = 0; denom_inv = 0;} // for 0, 0 we avoid division by 0
+            else {
+                w_u = 2*M_PI*row / BINS_PER_COL;
+                w_v = 2*M_PI*col / BINS_PER_ROW;
+                denom_inv = 1 / (w_u*w_u + w_v*w_v);
+            }
+            input_data[2*col] = grid.getBin(row, col).a_uv * w_u * denom_inv;
+            input_data[2*col+1] = 0;
+            //cout << input_data[2*col] << " "; 
+        }
+        //cout << endl;
+
+
+        // Send data to IDCT graph
+        density_driver[1].send_packet(input_data);
+        density_driver[1].receive_packet(output_data);
+
+        //cout << endl << "IDCT output from AIE:" << endl << std::setprecision(2);
+        std::vector<float> res;
+        for(int col = 0; col < BINS_PER_ROW; col++) {
+            res.push_back(output_data[2*col]);
+            //cout << output_data[2*col] << " "; 
+        }
+        //cout << endl;
+        temp.push_back(res);
+    }
+
+    for(int col = 0; col < BINS_PER_ROW; col++) {
+        for(int row = 0; row < BINS_PER_COL; row++) { // looping order performs IDXST on columns
+            input_data[2*row] = temp[row][col];
+            input_data[2*row+1] = 0;
+        }
+
+        // Send data to IDXST graph
+        density_driver[2].send_packet(input_data);
+        density_driver[2].receive_packet(output_data);
+
+        //cout << endl << "IDXST output:" << endl << std::setprecision(2);
+        // Store the result Ex transposed (for comparison)
+        for(int row = 0; row < BINS_PER_COL; row++) {
+            grid.getBin(row, col).eField.x = output_data[2*row];
+            //cout << output_data[2*row] << " "; 
+        }
+        //cout << endl;
+    }
+
+    // Compute Ey
+    temp.clear();
+    // Setup input for IDXST
+    for(int row = 0; row < BINS_PER_COL; row++) { //looping params implement transpose!
+        //cout << endl << "IDXST input to AIE:" << endl << std::setprecision(2);
+        for(int col = 0; col < BINS_PER_ROW; col++) {
+            if(row == 0 && col == 0) 
+                { w_u = 0; w_v = 0; denom_inv = 0;} // for 0, 0 we avoid division by 0
+            else {
+                w_u = 2*M_PI*row / BINS_PER_COL;
+                w_v = 2*M_PI*col / BINS_PER_ROW;
+                denom_inv = 1 / (w_u*w_u + w_v*w_v);
+            }
+            input_data[2*col] = grid.getBin(row, col).a_uv * w_v * denom_inv;
+            input_data[2*col+1] = 0;
+            //cout << input_data[2*col] << " "; 
+        }
+        //cout << endl;
+
+
+        // Send data to IDXST graph
+        density_driver[2].send_packet(input_data);
+        density_driver[2].receive_packet(output_data);
+
+        //cout << endl << "IDXST output from AIE:" << endl << std::setprecision(2);
+        std::vector<float> res;
+        for(int col = 0; col < BINS_PER_ROW; col++) {
+            res.push_back(output_data[2*col]);
+            //cout << output_data[2*col] << " "; 
+        }
+        //cout << endl;
+        temp.push_back(res);
+    }
+
+    for(int col = 0; col < BINS_PER_ROW; col++) {
+        for(int row = 0; row < BINS_PER_COL; row++) { // looping order performs IDCT on columns
+            input_data[2*row] = temp[row][col];
+            input_data[2*row+1] = 0;
+        }
+
+        // Send data to IDCT graph
+        density_driver[1].send_packet(input_data);
+        density_driver[1].receive_packet(output_data);
+
+        //cout << endl << "IDCT output:" << endl << std::setprecision(2);
+        // Store the result Ex transposed (for comparison)
+        for(int row = 0; row < BINS_PER_COL; row++) {
+            grid.getBin(row, col).eField.y = output_data[2*row];
+            //cout << output_data[2*row] << " "; 
+        }
+        //cout << endl;
+    }
 }
 
 
@@ -459,10 +638,13 @@ void Placer::computeElectricFields_DCT()
 // Implements DREAMplace Eq 3a
 void Placer::compute_a_uv_naive()
 {
+    std::vector< std::vector<float> > rho = grid.getRho();
     for (int u = 0; u < grid.getBinsPerRow(); u++) {
 // cout << "Computing intermediate a at u = " << u << endl;
         for (int v = 0; v < grid.getBinsPerCol(); v++) {
 // cout << "v = " << v << endl;
+            //float w_u = 1 * M_PI * u / grid.getBinsPerRow();
+            //float w_v = 1 * M_PI * v / grid.getBinsPerCol();
             float w_u = 2 * M_PI * u / grid.getBinsPerRow();
             float w_v = 2 * M_PI * v / grid.getBinsPerCol();
 
@@ -470,11 +652,14 @@ void Placer::compute_a_uv_naive()
             float a_uv = 0;
             for (int x = 0; x < grid.getBinsPerRow(); x++) {
                 for (int y = 0; y < grid.getBinsPerCol(); y++) {
-                    a_uv += grid.getBin(x, y).overlap * cos(w_u*x) * cos(w_v*y);
+                    a_uv += rho[x][y] * cos(w_u*x) * cos(w_v*y); // is this in radians? or degrees?
+                    //cout << "rho: " << rho[x][y] << "\toverlap/bb.area: " << (grid.getBin(x, y).overlap / grid.getBin(x, y).bb.getArea()) << endl;
+                    //a_uv += (grid.getBin(x, y).overlap / grid.getBin(x, y).bb.getArea()) * cos(w_u*x) * cos(w_v*y);
                 }
             }
+            //a_uv /= 2 * grid.getBinsPerRow(); // 1 / 2n
             a_uv /= grid.getBinsPerCol() * grid.getBinsPerRow(); // 1 / M^2
-            grid.getBin(u, v).a_uv= a_uv;
+            grid.getBin(u, v).a_uv = a_uv;
         }
     }
 }
@@ -521,14 +706,16 @@ void Placer::compute_a_uv_DCT()
 
     // DEBUG: Print 1D DCT input and result
     //cout << endl << "CPU rho input to 1D-DCT:" << endl;
+    //for (int j = 0; j < grid.getBinsPerRow(); j++) 
     //for (int i = 0; i < grid.getBinsPerRow(); i++) {
-    //    cout << rho[0][i] << "\t";
+    //    cout << rho[j][i] << "\t";
     //    if((i+1)%16 == 0) cout << endl;
     //}
     //cout << endl;
     //cout << endl << "CPU compute 1D-DCT output:" << endl;
+    //for (int j = 0; j < grid.getBinsPerRow(); j++) 
     //for (int i = 0; i < grid.getBinsPerRow(); i++) {
-    //    cout << temp[0][i] << "\t";
+    //    cout << temp[j][i] << "\t";
     //    if((i+1)%16 == 0) cout << endl;
     //}
     //cout << endl;
@@ -541,10 +728,37 @@ void Placer::compute_a_uv_DCT()
     
     a_uv = transpose(a_uv);
 
-    // add the computed intermediate term a_uv to all bins
+    //cout << endl << "CPU compute a_uv output:" << endl;
+    //for (int j = 0; j < grid.getBinsPerRow(); j++) 
+    //for (int i = 0; i < grid.getBinsPerRow(); i++) {
+    //    cout << a_uv[j][i] << "\t";
+    //    if((i+1)%16 == 0) cout << endl;
+    //}
+    //cout << endl;
+
+    // compare to computed result from other methods
+    bool mismatch = false;
+    Table mismatches;
+    mismatches.add_row({"u", "v", "DCT result", "AIE result", "isClose"});
     for (int u = 0; u < grid.getBinsPerRow(); u++)
         for (int v = 0; v < grid.getBinsPerCol(); v++) {
-            grid.getBin(u, v).a_uv = a_uv[u][v];
+            //if(!isClose(a_uv[u][v], grid.getBin(u, v).a_uv))
+            {
+                mismatch = true;
+                bool close = isClose(a_uv[u][v], grid.getBin(u, v).a_uv);
+                mismatches.add_row(RowStream{} << std::setprecision(2) << u << v << a_uv[u][v] << grid.getBin(u, v).a_uv << close);
+            }
+        }
+    if(mismatch) {
+        Table top;
+        top.add_row(RowStream{} << "a_uv mismatch");
+        top.add_row({mismatches});
+        log_error(top);
+    } else log_info("Density DCT computation: all a_uv terms match!");
+
+    for (int u = 0; u < grid.getBinsPerRow(); u++)
+        for (int v = 0; v < grid.getBinsPerCol(); v++) {
+           grid.getBin(u, v).a_uv = a_uv[u][v];
         }
 }
 
@@ -574,9 +788,16 @@ void Placer::compute_eField_DCT()
 
     // compute IDCT on all rows of Ex, and IDXST on all rows of Ey
     for (int row_index = 0; row_index < num_rows; row_index++) {
+        cout << endl << "IDCT input from CPU:" << endl << std::setprecision(2);
+        for (int col_index = 0; col_index < num_rows; col_index++)
+            cout << Ex[row_index][col_index] << " ";
         Ex[row_index] = IDCT_naive (Ex[row_index]);
+        cout << endl << "IDCT output from CPU:" << endl << std::setprecision(2);
+        for (int col_index = 0; col_index < num_rows; col_index++)
+            cout << Ex[row_index][col_index] << " ";
         Ey[row_index] = IDXST_naive(Ey[row_index]);
     }
+    cout << endl;
 
     Ex = transpose(Ex);
     Ey = transpose(Ey);
@@ -590,6 +811,64 @@ void Placer::compute_eField_DCT()
     Ex = transpose(Ex);
     Ey = transpose(Ey);
 
+    // compare to computed result from other methods
+    bool mismatch = false;
+    Table mismatches;
+    mismatches.add_row({"u", "v", "DCT result", "CPU result", "isClose"});
+    for (int u = 0; u < grid.getBinsPerRow(); u++)
+        for (int v = 0; v < grid.getBinsPerCol(); v++) {
+            //grid.getBin(u, v).a_uv = a_uv[u][v];
+            //if(!isClose(Ex[u][v], grid.getBin(u, v).eField.x))
+            {
+                mismatch = true;
+                bool close = isClose(Ex[u][v], grid.getBin(u, v).eField.x);
+                mismatches.add_row(RowStream{} <<std::setprecision(2) <<  u << v << Ex[u][v] << grid.getBin(u, v).eField.x << close);
+            }
+        }
+    if(mismatch) {
+        Table top;
+        top.add_row(RowStream{} << "eField.y mismatch");
+        top.add_row({mismatches});
+        log_error(top);
+    } else log_info("Density DCT computation: all eField.x terms match!");
+
+    Table mismatch_y;
+    mismatch = false;
+    mismatch_y.add_row({"u", "v", "DCT result", "CPU result", "isClose"});
+    for (int u = 0; u < grid.getBinsPerRow(); u++)
+        for (int v = 0; v < grid.getBinsPerCol(); v++) {
+            //grid.getBin(u, v).a_uv = a_uv[u][v];
+            //if(!isClose(Ex[u][v], grid.getBin(u, v).eField.x))
+            {
+                mismatch = true;
+                bool close = isClose(Ey[u][v], grid.getBin(u, v).eField.y);
+                mismatch_y.add_row(RowStream{} <<std::setprecision(2) <<  u << v << Ey[u][v] << grid.getBin(u, v).eField.y << close);
+            }
+        }
+    if(mismatch) {
+        Table top;
+        top.add_row(RowStream{} << "eField.y mismatch");
+        top.add_row({mismatch_y});
+        log_error(top);
+    } else log_info("Density DCT computation: all eField.y terms match!");
+    //std::stringstream stream_x;
+    //std::stringstream stream_y;
+    //stream_x << "eField.x" << endl;
+    //stream_y << "eField.y" << endl;
+    //for (int y = 0; y < num_rows; y++) {
+    //    stream_x << std::setprecision(2) << std::fixed;
+    //    stream_y << std::setprecision(2) << std::fixed;
+    //    for (int x = 0; x < num_cols; x++) {
+    //        stream_x << Ex[x][y] << "  ";
+    //        stream_y << Ey[x][y] << "  ";
+    //    }
+    //    stream_x << endl;
+    //    stream_y << endl;
+    //}
+
+    //cout << stream_x.str();
+    //cout << stream_y.str();
+    
     // Put results in the grid bins
     for (int x = 0; x < num_cols; x++) {
         for (int y = 0; y < num_rows; y++) {
@@ -602,6 +881,7 @@ void Placer::compute_eField_DCT()
 
 void Placer::computeOverlaps()
 {
+    log("function", "Begin computeOverlaps()");
     for (auto item : db.getComponents())
         grid.computeBinOverlaps(item.second);
 
@@ -609,21 +889,24 @@ void Placer::computeOverlaps()
     //    grid.computeBinOverlaps(item.second);
 
     // DEBUGGING
-    //float total_overlap = 0;
-    //for (int col = 0; col < grid.getBinsPerRow(); col++) {
-    //    for (int row = 0; row < grid.getBinsPerCol(); row++) {
-    //        total_overlap += grid.getBin(col, row).overlap;
-    //    }
-    //}
+    double total_overlap = 0;
+    for (int col = 0; col < grid.getBinsPerRow(); col++) {
+        for (int row = 0; row < grid.getBinsPerCol(); row++) {
+            total_overlap += grid.getBin(col, row).overlap;
+        }
+    }
 
-    //float total_node_area = 0;
-    //for (auto item : db.getComponents())
-    //    total_node_area += item.second->getArea();
+    double total_node_area = 0;
+    for (auto item : db.getComponents())
+        total_node_area += item.second->getArea();
     //for (auto item : db.getPins())
     //    total_node_area += item.second->getArea();
 
-    //cout << "total_node_area: " << total_node_area  << endl;
-    //cout << "total_overlap: " << total_overlap << endl;
+    Table t;
+    t.add_row(RowStream{} << "total_node_area" << total_node_area<< ""<<"");
+    t.add_row(RowStream{} << "total_overlap" << total_overlap);
+    t.add_row(RowStream{} << "single bin area" << grid.getBin(0,0).bb.getArea() << grid.getBin(7,8).bb.getArea() );
+    log("overlap", t);
 }
 
 /* To confirm that the AIE has performed a correct computaiton, this function
@@ -652,6 +935,7 @@ void Placer::compareDensityResults()
 
 void Placer::nudgeAllNodes()
 {
+    log("function", "Begin nudgeAllNodes()");
     for (auto item : db.getComponents())
         nudgeNode(item.second);
     // Pins are set in place and cannot be moved!
@@ -668,17 +952,24 @@ void Placer::nudgeNode(Node* node_p)
     // for each bin that this node overlaps
     for (BinOverlap b : node_p->getBinOverlaps()) {
         Bin* bin = b.bin;
-        float overlap = b.overlap;
         // add electric force
         // What does ePlace do for this step?
-        electro_force.x += bin->lambda * overlap/bin->bb.getArea() * bin->eField.x;
-        electro_force.y += bin->lambda * overlap/bin->bb.getArea() * bin->eField.y;
+        electro_force.x += bin->lambda * b.overlap/bin->bb.getArea() * bin->eField.x;
+        electro_force.y += bin->lambda * b.overlap/bin->bb.getArea() * bin->eField.y;
     }
 
+
     XY move;
-    float electro_weight = 0; // Ignore electro force
-    move.x = learning_rate*grid.getDieWidth()  * (electro_weight*electro_force.x - node_p->partials_aie.x );
-    move.y = learning_rate*grid.getDieHeight() * (electro_weight*electro_force.y - node_p->partials_aie.y );
+    // coeff is the learning rate scaled by the size of the die
+    // learning rate should be dynamic for each node?
+    double coeff = learning_rate*min(grid.getDieWidth(), grid.getDieHeight());
+    move.x = coeff * (electro_force.x - node_p->partials_aie.x );
+    move.y = coeff * (electro_force.y - node_p->partials_aie.y );
+
+    //cout << "learning_rate: " << learning_rate << "\tcoeff: " <<coeff<< endl;
+    //cout << "electro_force.x: " << electro_force.x <<"\telectro_force.y: " << electro_force.y << endl;
+    //cout << "move.x: " << move.x <<"\tmove.y: " << move.y << endl << endl;
+    
 
     // Update the position of this node
     node_p->translate(move.x, move.y);
@@ -691,17 +982,20 @@ void Placer::nudgeNode(Node* node_p)
 
 void Placer::printIterationResults()
 {
-    //cout << std::setprecision(2) << std::fixed;
-    Table top;
-    top.add_row(RowStream{} << "Iteration" << iteration);
-    top.add_row(RowStream{} << "HPWL" << db.computeTotalWirelength());
-    top.add_row(RowStream{} << "Overflow" << grid.computeTotalOverflow());
-    top.column(0).format().font_align(FontAlign::right);
-    top.column(1).format().font_align(FontAlign::left);
-    log("DATA", top);
+    if (iteration % 1 == 0)
+    {
+        Table top;
+        top.add_row(RowStream{} << "Iteration" << iteration);
+        top.add_row(RowStream{} << "HPWL" << db.computeTotalWirelength());
+        top.add_row(RowStream{} << "Overflow" << grid.computeTotalOverflow());
+        top.column(0).format().font_align(FontAlign::right);
+        top.column(1).format().font_align(FontAlign::left);
+        log("DATA", top);
+    }
 
     // every 10 iterations, export a table in markdown
     if (iteration % 10 == 0)
+        ;
 
     // every 10 iterations, export an image
     #ifdef CREATE_VISUALIZATION
@@ -753,5 +1047,12 @@ void Placer::printFinalResults()
     top.add_row({hyperparams});
     log("DATA", top);
     export_markdown(top);
+    
+    // generate image of final placement
+    #ifdef CREATE_VISUALIZATION
+        viz.drawPlacement(db, iteration);
+    #endif
 }
+
+
 AIEPLACE_NAMESPACE_END

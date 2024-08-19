@@ -27,11 +27,13 @@ std::vector<float> DCT_naive   (std::vector<float> input)
     std::vector<float> result(N);
     for (int k = 0; k < N; k++)
     {
-        float sum = 0;
+        double sum = 0;
         for (int n = 0; n < N; n++)
         {
            sum += input[n] * cos(M_PI/N * (n + .5) * k);
         }
+        //if(k == 0) sum *= 1 / sqrt(N); // scale factor
+        //else sum *= sqrt(2.0/N);
         result[k] = sum;
     }
     return result;
@@ -70,7 +72,13 @@ std::vector<float> IDXST_naive (std::vector<float> input)
     for (int n = 1; n < N; n++)
         temp[n] = input[N-n];
 
-    return IDCT_naive(temp);
+    // mult by (-1)^k
+
+    temp = IDCT_naive(temp);
+    for (int n = 1; n < N; n+=2)
+        temp[n] *= -1;
+    
+    return temp;
 }
 
 /* @brief: perform Discrete Cosine transform using fft as a subroutine

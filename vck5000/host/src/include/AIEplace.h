@@ -23,12 +23,12 @@ public:
     DataBase db;
     Grid grid;
     PartialsGraphDriver partials_drivers[PARTIALS_GRAPH_COUNT];
-    DensityGraphDriver density_driver;
+    DensityGraphDriver density_driver[3];
 
     float gamma = 4.0; // smoothness factor for estimations; 
                        // larger means less smooth but more accurate
     int iteration = 0;
-    float learning_rate = .01; // was .01
+    float learning_rate = 0.02; // was .01
 
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;

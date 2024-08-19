@@ -43,10 +43,10 @@ using std::min;
 #define PARTIALS_GRAPH_COUNT 8
 
 // ePlace hyperparameters
-#define INITIAL_LAMBDA 0.002
+#define INITIAL_LAMBDA .05 // inital lambda for each bin
 #define WIRELENGTH_COMPUTE_METHOD "HPWL"
 
-// other parameters
+// granularity of bin grid
 #define BINS_PER_ROW 32 // Should be scaled up to 512 or 1024 for final application
 #define BINS_PER_COL BINS_PER_ROW // Unless otherwise noted, grid of bins is square.
 

@@ -65,14 +65,7 @@ void Grid::computeBinOverlaps(Node* node_p)
         for (int y_index = y_index_start; y_index <= y_index_final; y_index++)
         {
             m_bins[x_index][y_index].computeOverlap(node_p);
-            // DEBUGGING
-            //float percent = 100 * m_bins[x_index][y_index].overlap / node_p->getArea() ;
-            //if (percent < 99)
-            //    cout << "Bingo!\n";
-            //cout << percent << "% is in m_bins["<<x_index<<"]["<<y_index<<"].overlap: " << m_bins[x_index][y_index].overlap << endl;
         }
-
-
     // TODO: Verify that overlap totals equals the area of all nodes!~
 
 
@@ -87,6 +80,8 @@ std::vector< std::vector<float> > Grid::getRho()
         rho.push_back(std::vector<float>(m_bins_per_col));
         for (int row = 0; row < m_bins_per_col; row++)
         {
+            // Do I need to divide by area?
+            //rho[col][row] = m_bins[col][row].overlap / m_bins[col][row].bb.getArea();
             rho[col][row] = m_bins[col][row].overlap;
         }
     }
@@ -145,12 +140,10 @@ void Grid::printOverflows()
 void Grid::printElectricFields()
 {
     for( int x_index = 0; x_index < m_bins_per_row; x_index++)
-    {
         for( int y_index = 0; y_index < m_bins_per_col; y_index++)
         {
             Bin b = m_bins[x_index][y_index];
             cout << "Bin["<<x_index<<"]["<<y_index<<"]\tEx: " << b.eField.x << "\tEy: " << b.eField.y << endl;
         }
-    }
 }
 AIEPLACE_NAMESPACE_END

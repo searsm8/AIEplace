@@ -44,16 +44,15 @@ def generate_link_cfg(file_path):
         #    f.write(f"sp = partials_s2mm_{i}.m_axi_gmem:MC_NOC0\n")
         
         
-        #f.write("\n### Density Kernel connections ###\n")
-        #f.write("nk=density_mm2s:3:density_mm2s_0.density_mm2s_1.density_mm2s_2\n")
-        #f.write("nk=density_s2mm:3:density_s2mm_0.density_s2mm_1.density_s2mm_2\n\n")
-        
-        #f.write("stream_connect = density_mm2s_0.stream_pl2aie:ai_engine_0.DCT_in\n")
-        #f.write("stream_connect = ai_engine_0.DCT_out:density_s2mm_0.stream_aie2pl\n")
-        #f.write("stream_connect = density_mm2s_1.stream_pl2aie:ai_engine_0.IDCT_in\n")
-        #f.write("stream_connect = ai_engine_0.IDCT_out:density_s2mm_1.stream_aie2pl\n")
-        #f.write("stream_connect = density_mm2s_2.stream_pl2aie:ai_engine_0.IDXST_in\n")
-        #f.write("stream_connect = ai_engine_0.IDXST_out:density_s2mm_2.stream_aie2pl\n\n")
+        f.write("\n### Density Kernel connections ###\n")
+        f.write("nk=density_mm2s:3:density_mm2s_0.density_mm2s_1.density_mm2s_2\n")
+        f.write("nk=density_s2mm:3:density_s2mm_0.density_s2mm_1.density_s2mm_2\n\n")
+        f.write("stream_connect = density_mm2s_0.stream_pl2aie:ai_engine_0.DCT_in\n")
+        f.write("stream_connect = ai_engine_0.DCT_out:density_s2mm_0.stream_aie2pl\n")
+        f.write("stream_connect = density_mm2s_1.stream_pl2aie:ai_engine_0.IDCT_in\n")
+        f.write("stream_connect = ai_engine_0.IDCT_out:density_s2mm_1.stream_aie2pl\n")
+        f.write("stream_connect = density_mm2s_2.stream_pl2aie:ai_engine_0.IDXST_in\n")
+        f.write("stream_connect = ai_engine_0.IDXST_out:density_s2mm_2.stream_aie2pl\n\n")
         
         f.write("[vivado]\n")
         f.write("# use following line to improve the hw_emu running speed affected by platform\n")
