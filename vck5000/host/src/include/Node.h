@@ -49,6 +49,7 @@ private:
     string m_name;
     Position<position_type> m_pos;
     PlacementStatus m_status;
+    bool m_is_large; // True if the area of the node is at least 1/16th the area of a bin
     std::vector<Net*> mv_nets; // List of all nets this node is on
     std::vector<BinOverlap> mv_bin_overlaps; // List of bins this node is currently overlapping
 
@@ -90,6 +91,14 @@ public:
         b.overlap = node_overlap;
         mv_bin_overlaps.push_back(b);
     }
+
+    bool checkIfLarge(float threshold)
+    {
+        m_is_large = this->getArea() > threshold;
+        return m_is_large;
+    }
+
+    bool isLarge() { return m_is_large; }
 
     void setPosition(Position<position_type> pos) { m_pos = pos; }
     void setPlacementStatus(PlacementStatus status) { m_status = status; }

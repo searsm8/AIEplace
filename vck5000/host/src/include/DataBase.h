@@ -90,17 +90,7 @@ public:
 
     /// Default Constructor
     DataBase() {}
-    DataBase(fs::path input_dir) : m_input_dir(input_dir)
-    {
-        bool LEF_success = readLEF();
-        bool DEF_success = readDEF();
-        if (!LEF_success || !DEF_success)
-        {
-            std::cerr << "Design could not be read. Exiting..." << endl;
-            exit(1);
-        }
-        initializePacketContents();
-    }
+    DataBase(fs::path input_dir);
 
     /// Destructor
     virtual ~DataBase() {}

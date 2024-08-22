@@ -48,7 +48,7 @@ void Placer::run()
     while( !converged )
     {
         performIteration();
-        if (iteration++ == 100)
+        if (++iteration == 1000)
             converged = true;
     }
     printFinalResults();
@@ -150,6 +150,7 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
     top.format().font_align(FontAlign::center);
     log("INFO", top);
 
+    float bin_area_16th = grid.getBinWidth() * grid.getBinHeight() / 16;
     // For each component that isn't fixed
     for (auto item : db.getComponents()) {
         // Choose a random position based on parameters
@@ -164,6 +165,10 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
         Position<position_type> init_pos = target_pos + Position<position_type>(x_offset, y_offset);
         //cout << "Initial pos of " << item.second->getName() << ": " << init_pos.to_string() << "\tcomp#"<<component_count++<< endl;
         item.second->setPosition(init_pos);
+
+        // if this component is bigger than 1/16th of bin area, set member bool
+        item.second->checkIfLarge(bin_area_16th);
+
     }
 
     printIterationResults(); // Prints "iteration 0" starting statistics
@@ -339,16 +344,6 @@ void Placer::computeElectricFields_AIE()
         input_data[2*col+1] = 0;
         }
 
-    // DEBUG: Print input data received
-    //Table t;
-    //t.add_row({"AIE DCT input"});
-    //std::stringstream s;
-    //for(int i = 0; i < BINS_PER_ROW; i++) {
-    //    s << input_data[2*i] << "\t";
-    //}
-    //t.add_row({s.str()});
-    //log_data(t);
-
     density_driver[0].send_packet(input_data);
     density_driver[0].receive_packet(output_data);
 
@@ -357,17 +352,6 @@ void Placer::computeElectricFields_AIE()
         res.push_back(output_data[2*col]);
     temp.push_back(res);
 
-    // DEBUG: Print output data received
-    //Table r;
-    //r.add_row({"AIE compute DCT result"});
-    //std::stringstream ss;
-    //ss << std::setprecision(2);
-    //for(int i = 0; i < BINS_PER_ROW; i++) {
-    //    ss << output_data[2*i] << "\t";
-    //}
-    //r.add_row({ss.str()});
-    //log_data(r);
-    
     //std::vector<float> test_output = DCT_naive(test_data);
     //for(int i = 0; i < BINS_PER_ROW; i++) {
     //    cout << test_output[i] << " ";
@@ -882,11 +866,20 @@ void Placer::compute_eField_DCT()
 void Placer::computeOverlaps()
 {
     log("function", "Begin computeOverlaps()");
-    for (auto item : db.getComponents())
-        grid.computeBinOverlaps(item.second);
 
     //for (auto item : db.getPins())
     //    grid.computeBinOverlaps(item.second);
+
+
+    // DEBUG
+    double total_node_area = 0;
+    for (auto item : db.getComponents())
+        total_node_area += item.second->getArea();
+    //for (auto item : db.getPins())
+    //    total_node_area += item.second->getArea();
+
+    for (auto item : db.getComponents())
+        grid.computeBinOverlaps(item.second);
 
     // DEBUGGING
     double total_overlap = 0;
@@ -895,12 +888,6 @@ void Placer::computeOverlaps()
             total_overlap += grid.getBin(col, row).overlap;
         }
     }
-
-    double total_node_area = 0;
-    for (auto item : db.getComponents())
-        total_node_area += item.second->getArea();
-    //for (auto item : db.getPins())
-    //    total_node_area += item.second->getArea();
 
     Table t;
     t.add_row(RowStream{} << "total_node_area" << total_node_area<< ""<<"");
@@ -947,7 +934,7 @@ void Placer::nudgeAllNodes()
 void Placer::nudgeNode(Node* node_p)
 {
     XY electro_force;
-    electro_force.clear();
+    electro_force.clear(); // set XY to 0
 
     // for each bin that this node overlaps
     for (BinOverlap b : node_p->getBinOverlaps()) {

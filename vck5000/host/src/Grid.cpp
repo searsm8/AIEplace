@@ -5,16 +5,16 @@ AIEPLACE_NAMESPACE_BEGIN
 
 void Grid::init()
 {
-    float bin_width  = m_die_area.getXsize() / (float)m_bins_per_row;
-    float bin_height = m_die_area.getYsize() / (float)m_bins_per_col;
+    m_bin_width  = m_die_area.getXsize() / (float)m_bins_per_row;
+    m_bin_height = m_die_area.getYsize() / (float)m_bins_per_col;
 
     for( int x_index = 0; x_index < m_bins_per_row; x_index++)
     {
         m_bins.push_back(std::vector<Bin>());
         for( int y_index = 0; y_index < m_bins_per_col; y_index++)
         {
-            Bin b = Bin(x_index*bin_width, y_index*bin_height, 
-                   (x_index+1)*bin_width, (y_index+1)*bin_height);
+            Bin b = Bin(x_index*m_bin_width, y_index*m_bin_height, 
+                   (x_index+1)*m_bin_width, (y_index+1)*m_bin_height);
             b.lambda = INITIAL_LAMBDA;
             m_bins[x_index].push_back(b);
         }
@@ -37,15 +37,32 @@ void Grid::iterationReset()
  */
 void Grid::computeBinOverlaps(Node* node_p)
 {
-    float bin_height = m_die_area.getYsize() / (float)m_bins_per_col;
-    float bin_width  = m_die_area.getXsize() / (float)m_bins_per_row;
+    // Let's simplfy
+    // Instead of overlaps, let's just assume a node is entirely within a single bin
+    // If the node is a large macro on the same order as bin size, perhaps treat it differently
+    // But small nodes should be simpilified!!!!
+
+    //If node is small compared to bin size, we assume the entire node is inside the bin
+    if(!node_p->isLarge()) {
+        int col_index = node_p->getPosition().getX() / m_bin_width;
+        if(col_index < 0 || col_index > m_bins_per_row-1) return;
+        int row_index = node_p->getPosition().getY() / m_bin_height; 
+        if(row_index < 0 || row_index > m_bins_per_col-1) return;
+
+        float overlap = node_p->getArea();
+        m_bins[col_index][row_index].overlap += overlap;
+        m_bins[col_index][row_index].overlapping_nodes.push_back(node_p);
+        node_p->addBinOverlap(&m_bins[col_index][row_index], overlap);
+        return;
+    }
+    else log_error("Large node found: " + node_p->getName());
 
     // find indices in m_bins that this node overlaps
-    int y_index_start = std::max(0, std::min<int>(m_bins_per_col-1, node_p->getPosition().getY() / bin_height)); 
-    int x_index_start = std::max(0, std::min<int>(m_bins_per_row-1, node_p->getPosition().getX() / bin_width));
+    int col_index_start = node_p->getPosition().getX() / m_bin_width;
+    int col_index_final = std::min<int>(m_bins_per_row-1, (node_p->getPosition().getX() + node_p->getXsize()) / m_bin_width);
 
-    int y_index_final = std::max(0, std::min<int>(m_bins_per_col-1, (node_p->getPosition().getY() + node_p->getYsize()) / bin_height)); 
-    int x_index_final = std::max(0, std::min<int>(m_bins_per_row-1, (node_p->getPosition().getX() + node_p->getXsize()) / bin_width));
+    int row_index_start = node_p->getPosition().getY() / m_bin_height; 
+    int row_index_final = std::min<int>(m_bins_per_col-1, (node_p->getPosition().getY() + node_p->getYsize()) / m_bin_height); 
 
     // DEBUGGING
     //cout << "\ncomputeBinOverlaps() for Node " << node_p->getName() << node_p->getPosition().to_string() << " : " << node_p->getXsize() << ", " << node_p->getYsize() << endl;
@@ -55,16 +72,37 @@ void Grid::computeBinOverlaps(Node* node_p)
     //cout << "y_index_final: " <<y_index_final<< endl;
     //cout << "x_index_start: " <<x_index_start<< "\t";
     //cout << "x_index_final: " <<x_index_final<< endl;
-    assert(y_index_start < m_bins_per_col && "y_index_start exceeds number of bins per column!");
-    assert(x_index_start < m_bins_per_row && "x_index_start exceeds number of bins per row!");
-    assert(y_index_final < m_bins_per_col && "y_index_final exceeds number of bins per column!");
-    assert(x_index_final < m_bins_per_row && "x_index_final exceeds number of bins per row!");
+    //assert(row_index_start < m_bins_per_col && "y_index_start exceeds number of bins per column!");
+    //assert(row_index_final < m_bins_per_col && "y_index_final exceeds number of bins per column!");
+    //assert(col_index_start < m_bins_per_row && "x_index_start exceeds number of bins per row!");
+    //assert(col_index_final < m_bins_per_row && "x_index_final exceeds number of bins per row!");
+
+    // check for out of bounds nodes
+    if (col_index_start < 0 || row_index_start < 0) return;
 
     // compute overlap for the bins between start and final indices
-    for (int x_index = x_index_start; x_index <= x_index_final; x_index++)
-        for (int y_index = y_index_start; y_index <= y_index_final; y_index++)
+    for (int col_index = col_index_start; col_index <= col_index_final; col_index++)
+        for (int row_index = row_index_start; row_index <= row_index_final; row_index++)
         {
-            m_bins[x_index][y_index].computeOverlap(node_p);
+            //m_bins[row_index][col_index].computeOverlap(node_p);
+            float old_overlap = m_bins[col_index][row_index].overlap;
+            m_bins[col_index][row_index].computeOverlap(node_p); // dangerous, relies on indices being correct
+
+            //DEBUG
+            float delta_overlap = m_bins[col_index][row_index].overlap - old_overlap;
+            if (delta_overlap < 0) {
+                cout << "Negative overlap:\tcol_index: " << col_index<< "\trow_index: " << row_index << endl;
+                cout << "col_index_start: " << col_index_start << "\tcol_index_final: " << col_index_final << endl;
+                cout << "row_index_start: " << row_index_start << "\trow_index_final: " << row_index_final << endl;
+
+                cout << "Overlap for node " << node_p->getName() << ": " << endl;
+                for (auto bo : node_p->getBinOverlaps())
+                {
+                    cout << "Bin: Bot Left: " << bo.bin->bb.getPosBottomLeft().to_string() << " Top Right: " << bo.bin->bb.getPosTopRight().to_string() << " " << bo.overlap << endl;
+                }
+            }
+
+
         }
     // TODO: Verify that overlap totals equals the area of all nodes!~
 

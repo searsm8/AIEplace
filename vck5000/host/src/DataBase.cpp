@@ -4,6 +4,17 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
+DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
+    bool LEF_success = readLEF();
+    bool DEF_success = readDEF();
+    if (!LEF_success || !DEF_success)
+    {
+        std::cerr << "Design could not be read. Exiting..." << endl;
+        exit(1);
+    }
+    initializePacketContents();
+}
+
 /**
  * Search the specified directory path for files with the specified extension.
  * 

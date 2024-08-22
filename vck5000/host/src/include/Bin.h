@@ -70,10 +70,10 @@ struct Bin
         */
     void computeOverlap(Node* node_p)
     {
-        float overlap_width = 
+        double overlap_width = 
             min((double)bb.getPosTopRight().getX(), ((double)node_p->getPosition().getX() + (double)node_p->getXsize()))
             - max(bb.getPosBottomLeft().getX(), node_p->getPosition().getX()) ;
-        float overlap_height = 
+        double overlap_height = 
             min((double)bb.getPosTopRight().getY(), ((double)node_p->getPosition().getY() + (double)node_p->getYsize()))
             - max(bb.getPosBottomLeft().getY(), node_p->getPosition().getY());
 
@@ -83,8 +83,11 @@ struct Bin
         //cout << "bb.getPosBottomLeft().getY() =" << (float)bb.getPosBottomLeft().getY() << endl;
         //cout << "node bottom left Y = " << (float)node_p->getPosition().getY()<< endl;
         //cout << "overlap_height: " << overlap_height<< "\n";
+
+        //assert(abs(overlap_width)  > node_p->getXsize() && "abs(overlap) exceeds node width!");
+        //assert(abs(overlap_height) > node_p->getYsize() && "abs(overlap) exceeds node height!");
         
-        float node_overlap = overlap_width * overlap_height;
+        double node_overlap = overlap_width * overlap_height;
         overlap += node_overlap;
 
         // If this node has a non-zero overlap with in this bin, add to list
@@ -92,11 +95,22 @@ struct Bin
         {
             overlapping_nodes.push_back(node_p);
             node_p->addBinOverlap(this, node_overlap);
+        } else if (node_overlap < 0) {
+            overlapping_nodes.push_back(node_p);
+            node_p->addBinOverlap(this, node_overlap);
+            Table top;
+            top.add_row(RowStream{} << "Negative overlap detected for bin" << "");
+            top.add_row(RowStream{} << "Bottom Left" << "Top Right");
+            top.add_row(RowStream{} << bb.getPosBottomLeft().to_string()<< bb.getPosTopRight().to_string());
+            Table t;
+            t.add_row(RowStream{} << "name" << "X" << "Y" << "area" << "width" << "height" << "overlap" << "width" << "height");
+            t.add_row(RowStream{} << node_p->getName() << node_p->getX() << node_p->getY() << node_p->getArea() << node_p->getXsize() << node_p->getYsize() << node_overlap << overlap_width << overlap_height);
+            top.add_row({t});
+            log("WARNING", top);
         }
-        Table t;
-        t.add_row(RowStream{} << "name" << "area" << "width" << "height" << "overlap" << "width" << "height");
-        t.add_row(RowStream{} << node_p->getName() << node_p->getArea() << node_p->getXsize() << node_p->getYsize() << node_overlap << overlap_width << overlap_height);
-        log("bins", t);
+
+
+
     }
 
     float computeOverflow()

@@ -28,7 +28,7 @@ public:
     float gamma = 4.0; // smoothness factor for estimations; 
                        // larger means less smooth but more accurate
     int iteration = 0;
-    float learning_rate = 0.02; // was .01
+    float learning_rate = 0.01; // was .01
 
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;

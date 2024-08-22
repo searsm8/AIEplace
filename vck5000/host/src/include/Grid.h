@@ -12,6 +12,7 @@ private:
     Box<position_type> m_die_area;
     int m_bins_per_row;
     int m_bins_per_col;
+    float m_bin_width, m_bin_height;
     std::vector<std::vector<Bin> > m_bins; // 2D grid of bins to compute eField
 
 public:
@@ -26,12 +27,14 @@ public:
     void init();
 
     // How to quickly find the Bin that a Node is in?
-    Bin& getBin(int col, int row) { return m_bins[col][row]; }
+    Bin& getBin(int row, int col) { return m_bins[row][col]; }
 
     int getBinsPerRow() { return m_bins_per_row; }
     int getBinsPerCol() { return m_bins_per_col; }
     int getDieWidth() { return m_die_area.getXsize(); }
     int getDieHeight() { return m_die_area.getYsize(); }
+    float getBinWidth() { return m_bin_width; }
+    float getBinHeight() { return m_bin_height; }
 
     void iterationReset();
 
