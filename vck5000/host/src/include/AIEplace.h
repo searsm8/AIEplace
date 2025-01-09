@@ -28,7 +28,8 @@ public:
     float gamma = 4.0; // smoothness factor for estimations; 
                        // larger means less smooth but more accurate
     int iteration = 0;
-    float learning_rate = 0.01; // was .01
+    float learning_rate = 0.02; // was .01
+    float global_lambda = 0.00;
 
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;
@@ -85,6 +86,7 @@ public:
     long getTime();
     double getInterval(long start_time, long end_time);
     void printFinalResults();
+    fs::path getOutputPath();
 };
 
 AIEPLACE_NAMESPACE_END

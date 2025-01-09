@@ -33,7 +33,7 @@ class Visualizer
     void drawComponent(Component* c);
     void drawPin(Pin* p);
     void highlightNet(Net* net);
-    void drawPlacement(DataBase, int);
+    void drawPlacement(DataBase, fs::path, int);
 };
 
 AIEPLACE_NAMESPACE_END

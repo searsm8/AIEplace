@@ -14,6 +14,7 @@ TABLE_DIR := ${THIRD_PARTY}/tabulate/include
 INCLUDES := -I ./include
 INCLUDES += -I${LIMBO_DIR} -I${TABLE_DIR}
 INCLUDES += -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/ -I/lustre/home/nx08/shared/fpga/xilinx/include/ 
+INCLUDES += -I${HOME}/local/boost_1_82_0/
 
 COMPILE_FLAGS := -std=c++17
 COMPILE_FLAGS += -g #see the proper names of variables and functions in your stack frames, 

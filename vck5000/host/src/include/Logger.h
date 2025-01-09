@@ -38,8 +38,7 @@ bool log_data(Table t);
 void log_space();
 Color getColor(string key);
 
-void export_markdown(Table t);
-std::string get_filename();
+void export_markdown(Table t, fs::path dir);
 }
 
 #endif

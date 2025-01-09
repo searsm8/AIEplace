@@ -5,6 +5,7 @@
 AIEPLACE_NAMESPACE_BEGIN
 
 DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
+    cout << "INPUT DIR: " << m_input_dir << endl;
     bool LEF_success = readLEF();
     bool DEF_success = readDEF();
     if (!LEF_success || !DEF_success)
@@ -106,13 +107,6 @@ void DataBase::iterationReset()
 
     for (auto item : mm_nets)
         item.second->iterationReset();
-
-    // Reset mm_input_index to all zeroes
-    //for(auto &item : mm_input_index) // Need to use & so that it is a reference to the actual object, not a copy
-    //    item.second = 0;
-    
-    //for(auto &item : mm_output_index) // Need to use & so that it is a reference to the actual object, not a copy
-    //    item.second = 0;
 }
 
 
@@ -222,9 +216,9 @@ void DataBase::initializePacketContents()
 **/
 void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
 {
-    //offset = mm_input_index[net_size]; // offset keeps track of where the next data should be taken from
-    //cout << "data_offset: " << offset*net_size << endl;
+    // Base address starts at VEC_SIZE to leave room for control data
     int base_addr = VEC_SIZE + (2*offset*net_size)%(LCM_BUFFSIZE*VEC_SIZE); // TODO: This needs an explanation
+    bool nan = false;
 
     for(int net_idx = 0; net_idx < NETS_PER_GROUP; net_idx++) { // prepare XY data for 4 nets at a time
         // check if we have reached the end of nets with this degree
@@ -245,26 +239,37 @@ void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
         net->sortPositionsMaxMinX(); // This sort might be redundant? 
         for(int j = 0; j < net_size; j++) {
             input_data[base_addr + 2*net_idx + j*8] = nodes[j]->getX();
+            if(nodes[j]->getX() != nodes[j]->getX()) // check for nan
+            {
+                cout << "nan detected:\n" << net->to_string() << endl;
+                nan = true;
+            }
         }
 
         // prep y data
         net->sortPositionsMaxMinY();
         for(int j = 0; j < net_size; j++) {
             input_data[base_addr + 2*net_idx + j*8 + 1] = nodes[j]->getY();
+            if(nodes[j]->getY() != nodes[j]->getY()) // check for nan
+            {
+                cout << "nan detected:\n" << net->to_string() << endl;
+                nan = true;
+            }
         }
     }
 
     // DEBUG: print the prepared data!
-    //cout << endl << "Prepared XY data @offset = " << offset;
-    //cout << setprecision(2);
-    //for(int i = base_addr; i < base_addr + VEC_SIZE*net_size; i++) {
-    //    if((i-base_addr)%8 == 0) cout << endl;
-    //    cout << input_data[i] << " ";
+    //if(nan)
+    //if(net_size == 5)
+    //{
+    //    cout << endl << "Prepared XY data @offset = " << offset << std::setprecision(3);
+    //    for(int i = base_addr; i < base_addr + VEC_SIZE*net_size; i++) {
+    //        if((i-base_addr)%8 == 0) cout << endl;
+    //        cout << input_data[i] << " ";
+    //    }
+    //    cout << endl;
     //}
-    //cout << endl;
 
-    // Move mm_input_index to the next unsent data
-   //mm_input_index[net_size] += 4;
 }
 
 void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
@@ -273,7 +278,7 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
     //int offset = 0;
     int base_addr = (2*offset*net_size)%(LCM_BUFFSIZE*VEC_SIZE); // TODO: This needs an explanation
 
-    for(int net_idx = 0; net_idx < 4; net_idx ++) { // prepare XY data for 4 nets at a time
+    for(int net_idx = 0; net_idx < NETS_PER_GROUP; net_idx ++) { // prepare XY data for 4 nets at a time
         // check if we have reached the end of nets with this degree
         if(net_idx + offset >= mmv_nets_by_degree[net_size].size()) {
             // No store needed
@@ -298,15 +303,16 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
     }
 
     // DEBUG: print the stored data!
-    //cout << "\nStored XY data @offset = " << offset;
-    //for(int i = 0; i < PACKET_SIZE*net_size; i++) {
-    //    if(i%8 == 0) cout << endl;
-    //    cout << output_data[i] << " ";
+    //if(net_size == 5)
+    //{
+    //    cout << "\nStored XY data @offset = " << offset;
+    //    for(int i = 0; i < 2*NETS_PER_GROUP*net_size; i++) {
+    //        if(i%8 == 0) cout << endl;
+    //        cout << output_data[base_addr + i] << " ";
+    //    }
+    //    cout << endl;
     //}
-    //cout << endl;
 
-    // Move mm_output_index to the next data
-    //mm_output_index[net_size] += 4;
 }
 
         /// parser callback functions 
@@ -404,8 +410,6 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             int degree = new_net->getDegree();
             if (mmv_nets_by_degree.count(degree) == 0) {
                 mmv_nets_by_degree.emplace(std::make_pair(degree, std::vector<Net*>()));
-                //mm_input_index.emplace(std::make_pair(degree, 0));
-                //mm_output_index.emplace(std::make_pair(degree, 0));
             }
             mmv_nets_by_degree[degree].push_back(new_net);
         }

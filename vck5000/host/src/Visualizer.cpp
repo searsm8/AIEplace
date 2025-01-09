@@ -43,7 +43,7 @@ void Visualizer::highlightNet(Net* net)
 
 }
 
-void Visualizer::drawPlacement(DataBase db, int iteration)
+void Visualizer::drawPlacement(DataBase db, fs::path dir, int iteration)
 {
     // Start with a white background
     cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);
@@ -71,19 +71,15 @@ void Visualizer::drawPlacement(DataBase db, int iteration)
 
 
     // export image
-    fs::path image_path = "images";
-    image_path.append(db.getBenchmarkName()); // put in a directory with the name of the benchmark
-    fs::create_directories(image_path); // make sure this subdirectory exists
-
     // index the image based on iteration
     string filename = "placement_";
     filename.append(std::to_string(iteration));
     filename.append(".png");
-    image_path.append(filename);
+    dir.append(filename);
     Table t;
-    t.add_row(RowStream{} << "VISUALIZER: PNG output to " << image_path);
+    t.add_row(RowStream{} << "VISUALIZER: PNG output to " << dir);
     log("INFO", t);
-    cairo_surface_write_to_png (surface, image_path.c_str());
+    cairo_surface_write_to_png (surface, dir.c_str());
 }
 
 AIEPLACE_NAMESPACE_END

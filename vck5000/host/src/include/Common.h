@@ -43,7 +43,7 @@ using std::min;
 #define PARTIALS_GRAPH_COUNT 8
 
 // ePlace hyperparameters
-#define INITIAL_LAMBDA .02 // inital lambda for each bin
+#define INITIAL_LAMBDA 1 // inital lambda for each bin
 #define WIRELENGTH_COMPUTE_METHOD "HPWL"
 
 // granularity of bin grid

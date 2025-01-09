@@ -18,6 +18,8 @@
 #include <limbo/parsers/gdsii/stream/GdsWriter.h>          // GDSII writer
 
 AIEPLACE_NAMESPACE_BEGIN
+// On AIEs, we process only nets of size 2 thru 8. This covers the great majority of all nets
+// other nets above size 8 will be processed on the host.
 #define MIN_AIE_NET_SIZE 2 // should be 2 by default
 #define MAX_AIE_NET_SIZE 8 // should be 8 by default
 

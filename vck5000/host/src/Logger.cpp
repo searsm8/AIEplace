@@ -12,14 +12,14 @@ void setup_logging()
     string_colors["ERROR"] = Color::red;
     string_colors["DATA"] = Color::blue;
 
-    // Default logging keys
+    // DEFAULT LOGGING KEYS
     activate_logging_key("INFO");
     activate_logging_key("DEBUG");
     activate_logging_key("WARNING");
     activate_logging_key("ERROR");
     activate_logging_key("DATA");
 
-    // Custom logging keys
+    // CUSTOM LOGGING KEYS
     //activate_logging_key("packets"); // Used in DataBase.cpp for packet initialization
     activate_logging_key("dbinfo");
     //activate_logging_key("comms");
@@ -105,7 +105,7 @@ Color getColor(std::string key)
 
 }
 
-void export_markdown(Table t)
+void export_markdown(Table t, fs::path dir)
 {
     // Use exporter
     MarkdownExporter exporter;
@@ -113,23 +113,9 @@ void export_markdown(Table t)
 
     // Write to file
     std::ofstream out_file;
-    out_file.open(get_filename());
+    out_file.open(dir);
     out_file << markdown;
     out_file.close();
-}
-
-std::string get_filename()
-{
-    fs::path filepath = "results";
-    fs::create_directories(filepath); // make sure this subdirectory exists
-
-    std::time_t time = std::time(0);   // get time now
-    std::tm* now = std::localtime(&time);
-
-    std::stringstream stream;
-    stream << "results/" << now->tm_hour << ":" << now->tm_min << "_" << now->tm_yday
-            << "_" << std::to_string(now->tm_year+1900) << ".md";
-    return stream.str();
 }
 
 }

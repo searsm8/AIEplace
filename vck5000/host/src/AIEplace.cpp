@@ -22,8 +22,8 @@ void Placer::performIteration()
     //db.printOverlaps();
     //grid.printOverflows();
 
+    //computeElectricFields_AIE(); // Accelerated compute on AIEs
     //computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
-    computeElectricFields_AIE(); // Accelerated compute on AIEs
     //computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
     //placer.grid.printElectricFields();
 
@@ -43,13 +43,27 @@ void Placer::run()
 
     initializePlacement(target, 0, grid.getDieWidth()/4); // even spread around center
     //initializePlacement(target, 0, 500); // Close placement for testing purposes
+    //return;
 
     bool converged = false;
     while( !converged )
     {
+
+        // Update hyperparameters for new iteration
+        // every 100 iterations, slow learning rate
+        if(iteration % 100 == 0)
+            learning_rate *= 0.8;
+
+        // every 10 iterations, bump up lambda (density weighting)
+        if(iteration % 10 == 0)
+            global_lambda *= 1.01;
+
         performIteration();
-        if (++iteration == 1000)
+        
+        // check for convergence
+        if (iteration == 100) // should make MAX_ITERATIONS a global var read in by run args
             converged = true;
+        else iteration++;
     }
     printFinalResults();
 }
@@ -84,9 +98,9 @@ Placer::Placer(fs::path input_dir, std::string xclbin_file) :
             for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
                 partials_drivers[i].init(device, xclbin_uuid, i);
 
-            density_driver[0].init(device, xclbin_uuid, 0); // DCT graph
-            density_driver[1].init(device, xclbin_uuid, 1); // IDCT graph
-            density_driver[2].init(device, xclbin_uuid, 2); // IDXST graph
+            //density_driver[0].init(device, xclbin_uuid, 0); // DCT graph
+            //density_driver[1].init(device, xclbin_uuid, 1); // IDCT graph
+            //density_driver[2].init(device, xclbin_uuid, 2); // IDXST graph
             #endif
         }
 
@@ -163,13 +177,33 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
         //int x_offset = rand()%(grid.getDieWidth()) - grid.getDieWidth()/2; // Even Spread
         //int y_offset = rand()%(grid.getDieWidth()) - grid.getDieWidth()/2; // Even Spread
         Position<position_type> init_pos = target_pos + Position<position_type>(x_offset, y_offset);
-        //cout << "Initial pos of " << item.second->getName() << ": " << init_pos.to_string() << "\tcomp#"<<component_count++<< endl;
         item.second->setPosition(init_pos);
 
         // if this component is bigger than 1/16th of bin area, set member bool
         item.second->checkIfLarge(bin_area_16th);
 
     }
+
+    // Add additional large "phantom" macros for experimentation
+    // Observe what affect they have,
+    // They could be made to have a repulsive affect on the real nodes or macros
+    // These macros won't be on any nets, but they will add to the density computation
+    // and could be created en masse at hotspot areas to gently push other nodes away.
+
+    // First, we create the phantom Macroclass with large size
+
+   // MacroClass* new_macro = new MacroClass(m.name(), m.sizeX(), m.sizeY());
+   // mm_macros.emplace(std::make_pair(m.name(), new_macro));
+
+   // // Next, the components with "large" dimensions, such as 1/2 bin size
+   // Component* new_comp = new Component("phantom");
+   // new_comp->setMacroClass(mm_macros[c.macro_name]);
+   // new_comp->setPlacementStatus(c.status);
+   // new_comp->setPosition(Position((position_type)c.origin[0], (position_type)c.origin[1]));
+   // mm_components.emplace(std::make_pair(new_comp->getName(), new_co
+
+   // // Finally, we scatter these extra macros around the die layout
+
 
     printIterationResults(); // Prints "iteration 0" starting statistics
     iteration = 1;
@@ -225,18 +259,19 @@ void Placer::computeAllPartials_AIE()
         // receive output from each AIE graph
         for(int graph_index = 0; graph_index < graphs_active; graph_index++) {
             if(packet_index < db.mv_packet[graph_index].size()) {
-                //receivePartials(db.mv_packet[graph_index][packet_index]);
-                partials_threads[graph_index] = std::thread([this, graph_index, packet_index]() {
-                    this->receivePartials(db.mv_packet[graph_index][packet_index]);
-                });
+                //cout << endl << "Receiving partials for graph " << graph_index << endl;
+                receivePartials(db.mv_packet[graph_index][packet_index]);
+                //partials_threads[graph_index] = std::thread([this, graph_index, packet_index]() {
+                //    this->receivePartials(db.mv_packet[graph_index][packet_index]);
+                //});
             }
         }
 
         // Join threads
-        for(int graph_index = 0; graph_index < graphs_active; graph_index++) {
-            //cout << "Joining thread: " << graph_index << endl;
-            partials_threads[graph_index].join();
-        }
+        //for(int graph_index = 0; graph_index < graphs_active; graph_index++) {
+        //    //cout << "Joining thread: " << graph_index << endl;
+        //    partials_threads[graph_index].join();
+        //}
      receive_time += getInterval(start_receive, getTime());
 
         packet_index++;
@@ -256,6 +291,7 @@ void Placer::computeAllPartials_AIE()
     log("comms", top);
 }
 
+// Send a packet of coordinate data to the AIE partials computation graph
 void Placer::computePartials(Packet* p)
 {
 
@@ -286,6 +322,7 @@ void Placer::computePartials(Packet* p)
 
 }
 
+// Receive the result and place it into the database appropriately
 void Placer::receivePartials(Packet* p)
 {
     //cout << "*receivePartials on graph " << p->graph_index  << "\t" << p->contents[0].to_string();
@@ -318,6 +355,7 @@ void Placer::receivePartials(Packet* p)
 void Placer::computeElectricFields_AIE()
 {
     log("function", "Begin computeElectricFields_AIE()");
+
     // Call AIE graph_driver to accelerate computation
     std::vector< std::vector<float> > rho = grid.getRho();
     std::vector< std::vector<float> > temp;
@@ -442,7 +480,7 @@ void Placer::computeElectricFields_AIE()
         //cout << endl << "IDXST input to AIE:" << endl << std::setprecision(2);
         for(int col = 0; col < BINS_PER_ROW; col++) {
             if(row == 0 && col == 0) 
-                { w_u = 0; w_v = 0; denom_inv = 0;} // for 0, 0 we avoid division by 0
+                { w_u = 0; w_v = 0; denom_inv = 0;} // for a(0, 0) we avoid division by 0 (remove dc component)
             else {
                 w_u = 2*M_PI*row / BINS_PER_COL;
                 w_v = 2*M_PI*col / BINS_PER_ROW;
@@ -941,22 +979,30 @@ void Placer::nudgeNode(Node* node_p)
         Bin* bin = b.bin;
         // add electric force
         // What does ePlace do for this step?
-        electro_force.x += bin->lambda * b.overlap/bin->bb.getArea() * bin->eField.x;
-        electro_force.y += bin->lambda * b.overlap/bin->bb.getArea() * bin->eField.y;
+        float coeff = global_lambda * bin->lambda * b.overlap/bin->bb.getArea();
+        electro_force.x += coeff * bin->eField.x;
+        electro_force.y += coeff * bin->eField.y;
     }
 
 
     XY move;
     // coeff is the learning rate scaled by the size of the die
     // learning rate should be dynamic for each node?
-    double coeff = learning_rate*min(grid.getDieWidth(), grid.getDieHeight());
+    float die_size = min( grid.getDieWidth(), grid.getDieHeight() );
+    float coeff = learning_rate * die_size;
     move.x = coeff * (electro_force.x - node_p->partials_aie.x );
     move.y = coeff * (electro_force.y - node_p->partials_aie.y );
 
     //cout << "learning_rate: " << learning_rate << "\tcoeff: " <<coeff<< endl;
     //cout << "electro_force.x: " << electro_force.x <<"\telectro_force.y: " << electro_force.y << endl;
-    //cout << "move.x: " << move.x <<"\tmove.y: " << move.y << endl << endl;
-    
+    //if(move.x != move.x) // check if nan
+    //{
+    //    cout << "move.x: " << move.x << endl;
+    //    node_p->printXY();
+    //    cout << "coeff: " << coeff << endl;
+    //    cout << "electro_force: " << electro_force.x << " : " << electro_force.y << endl;
+    //    cout << "partials: " << node_p->partials_aie.x << " : " << node_p->partials_aie.y << endl;
+    //}
 
     // Update the position of this node
     node_p->translate(move.x, move.y);
@@ -987,7 +1033,7 @@ void Placer::printIterationResults()
     // every 10 iterations, export an image
     #ifdef CREATE_VISUALIZATION
         if (iteration % 10 == 0)
-            viz.drawPlacement(db, iteration);
+            viz.drawPlacement(db, getOutputPath(), iteration);
     #endif
 }
 
@@ -1016,10 +1062,10 @@ void Placer::printFinalResults()
     Table results;
     results.add_row({"Benchmark name", db.getBenchmarkName()});
     results.add_row(RowStream{} << "Iterations" << iteration);
-    results.add_row(RowStream{} << "CPU runtime" << "0123"/*CPU_runtime*/);
-    results.add_row(RowStream{} << "AIE runtime" << "12"/*AIE_runtime*/);
-    results.add_row(RowStream{} << "Final HPWL" << "23123"/*final_hpwl*/);
-    results.add_row(RowStream{} << "Final Overflow" << "3.1415926"/*final_ovfl*/);
+    results.add_row(RowStream{} << "CPU runtime" << "####"/*CPU_runtime*/);
+    results.add_row(RowStream{} << "AIE runtime" << "####"/*AIE_runtime*/);
+    results.add_row(RowStream{} << "Final HPWL" << db.computeTotalWirelength());
+    results.add_row(RowStream{} << "Final Overflow" << grid.computeTotalOverflow());
     results.column(0).format().font_align(FontAlign::right);
     results.column(1).format().font_align(FontAlign::left);
 
@@ -1033,12 +1079,30 @@ void Placer::printFinalResults()
     top.add_row({results});
     top.add_row({hyperparams});
     log("DATA", top);
-    export_markdown(top);
+    export_markdown(top, getOutputPath().append("statistics.md"));
+    // TODO: export final image to same place as markdown results
     
     // generate image of final placement
     #ifdef CREATE_VISUALIZATION
-        viz.drawPlacement(db, iteration);
+        viz.drawPlacement(db, getOutputPath(), iteration);
     #endif
+}
+
+fs::path Placer::getOutputPath()
+{
+    std::time_t time = std::time(0);   // get time now
+    std::tm* now = std::localtime(&time);
+
+    std::stringstream timestream;
+    timestream << "run_" << now->tm_hour << ":" << now->tm_min << "_" << now->tm_yday
+            << "_" << std::to_string(now->tm_year+1900);
+
+    fs::path dir = "results";
+    dir.append(db.getBenchmarkName());
+    dir.append(timestream.str());
+    fs::create_directories(dir); // ensure this directory exists
+
+    return dir;
 }
 
 

@@ -35,6 +35,15 @@ void GraphDriver::send_packet(float * packet)
     xfer_on_time = getTiming(getEpoch(), start_time);
     start_time = getEpoch();
 
+    //DEBUG
+    //print input_data
+    //cout << "send_packet input:";
+    //for(int i = 0; i < OUTPUT_PACKET_SIZE; i++){
+    //    if(i%8 == 0) cout << endl;
+    //    cout << packet[i] << " ";
+    //}
+    //cout << endl;
+
     run_device_mm2s.start();
     run_device_s2mm.start();
 }
@@ -47,6 +56,15 @@ float GraphDriver::receive_packet(float * output_data)
     start_time = getEpoch();
     result_buffer.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     result_buffer.read(output_data);
+
+    //DEBUG
+    //print output_data
+    //cout << "receive_packet output:";
+    //for(int i = 0; i < OUTPUT_PACKET_SIZE; i++){
+    //    if(i%8 == 0) cout << endl;
+    //    cout << output_data[i] << " ";
+    //}
+    //cout << endl;
 
     xfer_off_time=getTiming(getEpoch(), start_time);
 }

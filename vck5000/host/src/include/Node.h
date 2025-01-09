@@ -121,6 +121,11 @@ public:
     virtual float getArea()  { return 0.0; }
 
 // TODO: remove unused function?
+    void printXY() {
+        cout << "Node " << m_name << ": (" << m_pos.getX() << ", " << m_pos.getY() << ")" << endl;
+
+    }
+
     void printTerms() {
         cout << "Node " << m_name << ":";
         cout << "\ta+x: " << terms_cpu.a.plus.x;

@@ -38,6 +38,7 @@ host:
 	$(MAKE) -C host
 
 clean:
+	rm -rf core.*
 	$(MAKE) -C aie clean
 	$(MAKE) -C pl clean
 	$(MAKE) -C host clean
@@ -46,10 +47,10 @@ clean:
 BENCHMARK_DIR = host/benchmarks
 
 BENCHMARK = ispd2015/mgc_fft_1
-#BENCHMARK = ispd2015/mgc_matrix_mult_1/
-#BENCHMARK = ispd2015/mgc_superblue11_a/
-#BENCHMARK = ispd2015/mgc_superblue12/
-#BENCHMARK = ispd2015/mgc_superblue16_a/
+#BENCHMARK = ispd2015/mgc_matrix_mult_1
+#BENCHMARK = ispd2015/mgc_superblue11_a
+#BENCHMARK = ispd2015/mgc_superblue12
+#BENCHMARK = ispd2015/mgc_superblue16_a
 
 runhw:
 	@unset XCL_EMULATION_MODE
@@ -70,3 +71,7 @@ profile:
 #	gprof --annotated-source bin/AIEplace.exe > annotation.txt
 # Visualization
 	gprof bin/AIEplace.exe | gprof2dot -s -w | dot -Tpng -o profile.png
+
+
+cpplines:
+	git ls-files | grep '\.cpp' | xargs wc -l

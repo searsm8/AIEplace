@@ -136,12 +136,21 @@ position_type Net::computeWirelength()
 position_type Net::computeWirelength_HPWL()
 {
     sortPositionsByX();
-    position_type width = mv_nodes.front()->getX() - mv_nodes.back ()->getX();
+    position_type width = mv_nodes.front()->getX() - mv_nodes.back()->getX();
     //cout << "front: " << mv_nodes.front()->getX() << "\tback: " << mv_nodes.back()->getX() << endl;
     sortPositionsByY();
-    position_type height = mv_nodes.front()->getY() - mv_nodes.back ()->getY();
-    //cout << "front: " << mv_nodes.front()->getY() << "\tback: " << mv_nodes.back()->getY() << endl;
-    //cout << "Height: " << height << "\tWidth: " << width << "\tHPWL: " << height+width << endl;
+    position_type height = mv_nodes.front()->getY() - mv_nodes.back()->getY();
+    // check if nan
+    //if(width != width || height != height)
+    //{
+    //    cout << endl << "Net: " << m_name << endl;
+    //    cout << "front: " << mv_nodes.front()->getX() << " : " << mv_nodes.front()->getY() << endl;
+    //    cout << "back: " << mv_nodes.back()->getX() << " : " << mv_nodes.back()->getY() << endl;
+    //    cout << "Height: " << height << "\tWidth: " << width << "\tHPWL: " << height+width << endl;
+    //    cout << "nodes sorted by Y: " << endl; 
+    //    for(auto np : mv_nodes)
+    //        np->printXY();
+    //}
     return width + height;
 }
 
