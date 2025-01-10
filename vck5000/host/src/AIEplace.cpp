@@ -13,8 +13,11 @@ void Placer::performIteration()
     // launch threads from this function?
 
     // Compute terms for HPWL partials
-    computeAllPartials_AIE();
-    //computeAllPartials_CPU();
+    if(params["use_aie"]) {
+        computeAllPartials_AIE();
+    } else {
+        computeAllPartials_CPU();
+    }
     //comparePartialResults();
 
     // Compute Electric Fields in each bin
@@ -22,8 +25,11 @@ void Placer::performIteration()
     //db.printOverlaps();
     //grid.printOverflows();
 
-    //computeElectricFields_AIE(); // Accelerated compute on AIEs
-    //computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
+    if(params["use_aie"]) {
+        computeElectricFields_AIE(); // Accelerated compute on AIEs
+    } else {
+        computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
+    }
     //computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
     //placer.grid.printElectricFields();
 
@@ -61,7 +67,8 @@ void Placer::run()
         performIteration();
         
         // check for convergence
-        if (iteration == 100) // should make MAX_ITERATIONS a global var read in by run args
+        // TODO: need to actually check for convergence instead of running to max iterations
+        if (iteration >= params["max_iterations"])
             converged = true;
         else iteration++;
     }
@@ -84,24 +91,36 @@ Placer::Placer(fs::path input_dir, std::string xclbin_file) :
         #endif
         grid(Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_COL)) 
         { 
-            #ifdef USE_AIE_ACCELERATION
-            // Open Xilinx Device
-            xrt::device device = xrt::device(DEVICE_ID);
-            log_info("Device ID found: " + std::to_string(DEVICE_ID));
+            // Read configuration JSON file
+            string config_filepath = "host/config_aieplace.json";
+            std::ifstream config_file(config_filepath);
+            json config = json::parse(config_file);
+            params = config["params"];
 
-            // Load xclbin which includes PL and AIE graph
-            log_info("Loading xclbin: \"" + xclbin_file + "\"");
-            xrt::uuid xclbin_uuid = device.load_xclbin(xclbin_file);
-            log_info("Success!");
+            //initialize values from JSON
+            gamma = params["gamma"];
+            learning_rate = params["init_learning_rate"];
+            global_lambda = params["init_global_lambda"];
 
-            // Create drivers which handle buffer IO
-            for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
-                partials_drivers[i].init(device, xclbin_uuid, i);
+            if(params["use_aie"]) {
+                // Open Xilinx Device
+                xrt::device device = xrt::device(DEVICE_ID);
+                log_info("Device ID found: " + std::to_string(DEVICE_ID));
 
-            //density_driver[0].init(device, xclbin_uuid, 0); // DCT graph
-            //density_driver[1].init(device, xclbin_uuid, 1); // IDCT graph
-            //density_driver[2].init(device, xclbin_uuid, 2); // IDXST graph
-            #endif
+                // Load xclbin which includes PL and AIE graph
+                log_info("Loading xclbin: \"" + xclbin_file + "\"");
+                xrt::uuid xclbin_uuid = device.load_xclbin(xclbin_file);
+                log_info("Success!");
+
+                // Create drivers which handle buffer IO
+                for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
+                    partials_drivers[i].init(device, xclbin_uuid, i);
+
+                density_driver[0].init(device, xclbin_uuid, 0); // DCT graph
+                density_driver[1].init(device, xclbin_uuid, 1); // IDCT graph
+                density_driver[2].init(device, xclbin_uuid, 2); // IDXST graph
+                
+            }
         }
 
 void Placer::printWelcomeBanner()
@@ -434,7 +453,7 @@ void Placer::computeElectricFields_AIE()
                 denom_inv = 1 / (w_u*w_u + w_v*w_v);
             }
             input_data[2*col] = grid.getBin(row, col).a_uv * w_u * denom_inv;
-            input_data[2*col+1] = 0;
+            input_data[2*col+1] = 0; // imaginary part is expected for FFT input
             //cout << input_data[2*col] << " "; 
         }
         //cout << endl;
@@ -1019,7 +1038,7 @@ void Placer::printIterationResults()
     {
         Table top;
         top.add_row(RowStream{} << "Iteration" << iteration);
-        top.add_row(RowStream{} << "HPWL" << db.computeTotalWirelength());
+        top.add_row(RowStream{} << "HPWL" << db.computeTotalWirelength(params["wirelength_method"]));
         top.add_row(RowStream{} << "Overflow" << grid.computeTotalOverflow());
         top.column(0).format().font_align(FontAlign::right);
         top.column(1).format().font_align(FontAlign::left);
@@ -1064,7 +1083,7 @@ void Placer::printFinalResults()
     results.add_row(RowStream{} << "Iterations" << iteration);
     results.add_row(RowStream{} << "CPU runtime" << "####"/*CPU_runtime*/);
     results.add_row(RowStream{} << "AIE runtime" << "####"/*AIE_runtime*/);
-    results.add_row(RowStream{} << "Final HPWL" << db.computeTotalWirelength());
+    results.add_row(RowStream{} << "Final HPWL" << db.computeTotalWirelength(params["wirelength_method"]));
     results.add_row(RowStream{} << "Final Overflow" << grid.computeTotalOverflow());
     results.column(0).format().font_align(FontAlign::right);
     results.column(1).format().font_align(FontAlign::left);

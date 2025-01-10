@@ -8,6 +8,9 @@
 #include <sys/time.h>
 #include <thread>
 #include "Logger.h"
+#include "json.h"
+// for convenience
+using json = nlohmann::json;
 
 #define DEVICE_ID 0 // Device ID to find VCK5000
 
@@ -25,12 +28,15 @@ public:
     PartialsGraphDriver partials_drivers[PARTIALS_GRAPH_COUNT];
     DensityGraphDriver density_driver[3];
 
-    float gamma = 4.0; // smoothness factor for estimations; 
-                       // larger means less smooth but more accurate
-    int iteration = 0;
-    float learning_rate = 0.02; // was .01
-    float global_lambda = 0.00;
+    // Configuration object
+    json params;
 
+    float gamma;// = 4.0; // smoothness factor for estimations; 
+                       // larger means less smooth but more accurate
+    float learning_rate;// = 0.02; // was .01
+    float global_lambda;// = 0.00;
+
+    int iteration = 0;
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;
 #endif

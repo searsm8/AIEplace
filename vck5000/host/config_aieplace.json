@@ -1,0 +1,11 @@
+{
+  "params": {
+    "use_aie": true,
+    "wirelength_method": "HPWL",
+
+    "gamma": 4,
+    "max_iterations": 10,
+    "init_learning_rate": 0.02,
+    "init_global_lambda": 0.00
+  }
+}

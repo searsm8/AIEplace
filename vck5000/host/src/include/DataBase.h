@@ -123,7 +123,7 @@ public:
     void sortPositionsMaxMinX();
     void sortPositionsMaxMinY();
 
-    double computeTotalWirelength();
+    double computeTotalWirelength(string);
     double computeTotalComponentArea();
     double getTotalOverflow();
 

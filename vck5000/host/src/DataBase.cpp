@@ -140,11 +140,11 @@ void DataBase::sortPositionsMaxMinY()
         item.second->sortPositionsMaxMinY();
 }
 
-double DataBase::computeTotalWirelength()
+double DataBase::computeTotalWirelength(string method)
 {
     double total = 0;
     for (auto item : mm_nets)
-        total += item.second->computeWirelength();
+        total += item.second->computeWirelength(method);
     return total;
 }
 

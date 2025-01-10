@@ -114,16 +114,16 @@ void Net::printTerms()
  * 
  * @return: The wirelength of the net.
  */
-position_type Net::computeWirelength()
+position_type Net::computeWirelength(string method)
 {
-    if (WIRELENGTH_COMPUTE_METHOD == "HPWL")
+    if (method == "HPWL")
         return computeWirelength_HPWL();
-    else if (WIRELENGTH_COMPUTE_METHOD == "RSMT")
+    else if (method == "RSMT")
         return computeWirelength_RSMT();
     else
     {
         // Invalid, emit error
-        cout << "ERROR: no wirelength method named " << WIRELENGTH_COMPUTE_METHOD << endl;
+        cout << "ERROR: no wirelength method named " << method << endl;
         exit(1);
     }
 }

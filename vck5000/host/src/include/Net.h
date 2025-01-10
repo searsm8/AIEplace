@@ -69,7 +69,7 @@ public:
     void sortPositionsMaxMinY();
 
     // Metrics
-    position_type computeWirelength(); // method must be "HPWL" or "RSMT"
+    position_type computeWirelength(string method); // method must be "HPWL" or "RSMT"
     position_type computeWirelength_HPWL(); // Simple Half-Perimeter Wirelength
     position_type computeWirelength_RSMT(); // Rectilinear Steiner Minimum Spanning Tree
     

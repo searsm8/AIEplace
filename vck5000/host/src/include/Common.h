@@ -22,7 +22,7 @@ using std::max;
 using std::min;
 
 // Compilation flags
-#define USE_AIE_ACCELERATION // if this is defined, the application will use VCK5000 acceleration
+//#define USE_AIE_ACCELERATION // if this is defined, the application will use VCK5000 acceleration
                     // (To configure AIE and PL, the .xclbin must be specified as a command line parameter)
 
 #define CREATE_VISUALIZATION // if this is defined, a Visualizer class using Cairo will export images
@@ -44,7 +44,7 @@ using std::min;
 
 // ePlace hyperparameters
 #define INITIAL_LAMBDA 1 // inital lambda for each bin
-#define WIRELENGTH_COMPUTE_METHOD "HPWL"
+//#define WIRELENGTH_COMPUTE_METHOD "HPWL"
 
 // granularity of bin grid
 #define BINS_PER_ROW 32 // Should be scaled up to 512 or 1024 for final application
@@ -54,7 +54,7 @@ using std::min;
 #define AIEPLACE_NAMESPACE_END }
 
 #define AIEPLACE_VERSION "v0.0.1"
-#define stringify std::to_string
+#define stringify std::to_string // alias
 
 AIEPLACE_NAMESPACE_BEGIN 
 
