@@ -6,6 +6,7 @@ namespace AIEplace {
 
 void setup_logging()
 {
+    string_colors["DETAIL"] = Color::cyan;
     string_colors["INFO"] = Color::green;
     string_colors["DEBUG"] = Color::magenta;
     string_colors["WARNING"] = Color::yellow;
@@ -13,12 +14,12 @@ void setup_logging()
     string_colors["DATA"] = Color::blue;
 
     // DEFAULT LOGGING KEYS
-    activate_logging_key("DETAIL");
-    activate_logging_key("INFO");
-    activate_logging_key("DEBUG");
-    activate_logging_key("WARNING");
-    activate_logging_key("ERROR");
-    activate_logging_key("DATA");
+    activate_logging_key("DETAIL"); // Used to give detail on things that most people won't care about. Usually off.
+    activate_logging_key("INFO");   // Used to give info on things that some people might care about. Usually on.
+    activate_logging_key("DATA");   // Used to give data on things that most people will care about. Always on.
+    activate_logging_key("DEBUG");  // Used only by developers for debugging!
+    activate_logging_key("WARNING");// Something bad has happened!
+    activate_logging_key("ERROR");  // Something VERY bad has happened!
 
     // CUSTOM LOGGING KEYS
     //activate_logging_key("packets"); // Used in DataBase.cpp for packet initialization
