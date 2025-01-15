@@ -32,7 +32,7 @@ std::vector<fs::path> DataBase::findExtensions(fs::path dir_path, string extensi
         if (file_extension == extension_match)
         {
             matches.push_back(entry.path());
-            log_info(extension_match + " file found: \"" + entry.path().string() + "\"");
+            log_detail(extension_match + " file found: \"" + entry.path().string() + "\"");
         }
     }
 
@@ -560,7 +560,7 @@ bool DataBase::writeDEF(const std::string& output_path) const
     string output_filename = output_path + "/" + m_design_name + ".def";
     std::ofstream out(output_filename);
     if (!out.is_open()) {
-        log_error("DEF write: invalid output filename.");
+        log_error("DEF write: invalid output filename: " + output_filename);
         return false;
     }
     out.imbue(std::locale::classic()); // set to standard output

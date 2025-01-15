@@ -25,11 +25,14 @@ inline void deactivate_logging_key(string key)
 void setup_logging();
 bool log(string key, Table t);
 bool log(string key, string msg);
+bool log_detail(string msg);
 bool log_info(string msg);
 bool log_debug(string msg);
 bool log_warning(string msg);
 bool log_error(string msg);
 bool log_data(string msg);
+
+bool log_detail(Table t);
 bool log_info(Table t);
 bool log_debug(Table t);
 bool log_warning(Table t);

@@ -13,6 +13,7 @@ void setup_logging()
     string_colors["DATA"] = Color::blue;
 
     // DEFAULT LOGGING KEYS
+    activate_logging_key("DETAIL");
     activate_logging_key("INFO");
     activate_logging_key("DEBUG");
     activate_logging_key("WARNING");
@@ -24,8 +25,8 @@ void setup_logging()
     activate_logging_key("dbinfo");
     //activate_logging_key("comms");
     //activate_logging_key("bins");
-    activate_logging_key("overlap");
-    activate_logging_key("function"); // Used to log when important functions are called
+    //activate_logging_key("overlap");
+    //activate_logging_key("function"); // Used to log when important functions are called
 }
 
 bool log(std::string key, Table t)
@@ -70,6 +71,8 @@ bool log(std::string key, std::string msg)
     }
 }
 
+bool log_detail(std::string msg)
+{ return log("DETAIL", msg); }
 bool log_info(std::string msg)
 { return log("INFO", msg); }
 bool log_debug(std::string msg)
@@ -81,6 +84,8 @@ bool log_error(std::string msg)
 bool log_data(std::string msg)
 { return log("DATA", msg); }
 
+bool log_detail(Table t)
+{ return log("DETAIL", t); }
 bool log_info(Table t)
 { return log("INFO", t); }
 bool log_debug(Table t)
@@ -113,7 +118,7 @@ void export_markdown(Table t, fs::path dir)
 
     // Write to file
     std::ofstream out_file;
-    out_file.open(dir);
+    out_file.open(dir.append("statistics.md"));
     out_file << markdown;
     out_file.close();
 }

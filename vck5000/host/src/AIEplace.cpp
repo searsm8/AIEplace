@@ -107,6 +107,7 @@ Placer::Placer(std::string xclbin_file)
             global_lambda = params["init_global_lambda"];
             bins_per_row = params["bins_per_row"];
             input_dir = fs::path(params["input_filepath"]);
+            output_dir = getOutputPath();
 
             // Initialize database by reading LEF and DEF design files
             db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
@@ -995,7 +996,7 @@ void Placer::nudgeAllNodes()
     log("function", "Begin nudgeAllNodes()");
     for (auto item : db.getComponents())
         nudgeNode(item.second);
-    // Assume Primary IO Pins are set in place and should not be moved!
+    // Assume primary IO Pins are set in place and should not be moved!
     //for (auto item : db.getPins())
     //    nudgeNode(item.second);
 
@@ -1047,7 +1048,7 @@ void Placer::nudgeNode(Node* node_p)
 
 void Placer::printIterationResults()
 {
-    if (iteration % 1 == 0)
+    if (iteration % 10 == 0)
     {
         Table top;
         top.add_row(RowStream{} << "Iteration" << iteration);
@@ -1065,7 +1066,7 @@ void Placer::printIterationResults()
     // every 10 iterations, export an image
     #ifdef CREATE_VISUALIZATION
         if (iteration % 10 == 0)
-            viz.drawPlacement(db, getOutputPath(), iteration);
+            viz.drawPlacement(db, output_dir, iteration);
     #endif
 }
 
@@ -1111,16 +1112,16 @@ void Placer::printFinalResults()
     top.add_row({results});
     top.add_row({hyperparams});
     log("DATA", top);
-    export_markdown(top, getOutputPath().append("statistics.md"));
-    // TODO: export final image to same place as markdown results
-    
+
+    export_markdown(top, output_dir);
+
     // generate image of final placement
     #ifdef CREATE_VISUALIZATION
-        viz.drawPlacement(db, getOutputPath(), iteration);
+        viz.drawPlacement(db, output_dir, iteration);
     #endif
 
-    // write design to DEF
-    db.writeDEF(getOutputPath());
+    // write placed design to DEF
+    db.writeDEF(output_dir);
 }
 
 fs::path Placer::getOutputPath()
@@ -1128,13 +1129,12 @@ fs::path Placer::getOutputPath()
     std::time_t time = std::time(0);   // get time now
     std::tm* now = std::localtime(&time);
 
-    std::stringstream timestream;
-    timestream << "run_" << now->tm_hour << ":" << now->tm_min << "_" << now->tm_yday
-            << "_" << std::to_string(now->tm_year+1900);
+    std::stringstream ss;
+    ss << "run_" <<  now->tm_yday << "_" << now->tm_hour << ":" << now->tm_min;
 
     fs::path dir = "results";
     dir.append(db.getBenchmarkName());
-    dir.append(timestream.str());
+    dir.append(ss.str());
     fs::create_directories(dir); // ensure this directory exists
 
     return dir;

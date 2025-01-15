@@ -29,8 +29,8 @@ public:
     // Configuration object
     json params;
 
-    // ### parameters loaded from json config file
-    fs::path input_dir;
+    fs::path input_dir; // parameter loaded from json config file
+    fs::path output_dir;
 
     // hyper parameters
     float gamma; // smoothness factor for estimations; 
