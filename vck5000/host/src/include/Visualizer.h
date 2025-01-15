@@ -28,8 +28,9 @@ class Visualizer
     public:
 
     // Constructor
-    Visualizer(Box<position_type> die_area);
-
+    Visualizer() {};
+    
+    void init(Box<position_type> die_area);
     void drawComponent(Component* c);
     void drawPin(Pin* p);
     void highlightNet(Net* net);

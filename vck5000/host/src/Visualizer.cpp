@@ -5,7 +5,7 @@
 
 AIEPLACE_NAMESPACE_BEGIN 
 
-Visualizer::Visualizer(Box<position_type> die_area)
+void Visualizer::init(Box<position_type> die_area)
 {
     m_die_area = die_area;
     m_die_width = die_area.getXsize();

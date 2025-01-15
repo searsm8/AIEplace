@@ -5,11 +5,9 @@
 #include "DataBase.h"
 #include "Grid.h"
 #include "GraphDriver.h"
-#include <sys/time.h>
 #include <thread>
 #include "Logger.h"
 #include "json.h"
-// for convenience
 using json = nlohmann::json;
 
 #define DEVICE_ID 0 // Device ID to find VCK5000
@@ -31,10 +29,15 @@ public:
     // Configuration object
     json params;
 
-    float gamma;// = 4.0; // smoothness factor for estimations; 
+    // ### parameters loaded from json config file
+    fs::path input_dir;
+
+    // hyper parameters
+    float gamma; // smoothness factor for estimations; 
                        // larger means less smooth but more accurate
-    float learning_rate;// = 0.02; // was .01
-    float global_lambda;// = 0.00;
+    float learning_rate;
+    float global_lambda;
+    int bins_per_row; // grid size
 
     int iteration = 0;
 #ifdef CREATE_VISUALIZATION
@@ -42,7 +45,7 @@ public:
 #endif
 
     // Constructor
-    Placer(fs::path input_dir, std::string xclbin_file);
+    Placer(std::string xclbin_file);
 
     static void printWelcomeBanner();
 

@@ -13,28 +13,35 @@ template<typename T>
 class Box 
 {
 private:
-    Position<T> m_a; // Bottom left corner of Box
-    Position<T> m_b; // Top right corner of Box
+    Position<T> m_ll; // Lower left corner of Box
+    Position<T> m_ur; // Upper right corner of Box
 
 public:
     // Constructors
     Box() {}
-    Box(Position<T> a, Position<T> b) : m_a(a), m_b(b) {}
-    Box(T xl, T yl, T xh, T yh) : m_a(Position<T>(xl, yl)), m_b(Position<T>(xh, yh)) {}
+    Box(Position<T> a, Position<T> b) : m_ll(a), m_ur(b) {}
+    Box(T xl, T yl, T xh, T yh) : m_ll(Position<T>(xl, yl)), m_ur(Position<T>(xh, yh)) {}
 
     // Member Functions
     // Getters
-    Position<T> getPos() { return m_a; }
-    Position<T> getPosBottomLeft() { return m_a; }
-    Position<T> getPosTopRight() { return m_b; }
-    T getXsize() { return abs(m_a.getX() - m_b.getX()); }
-    T getYsize() { return abs(m_a.getY() - m_b.getY()); }
+    Position<T> getPos() { return m_ll; }
+    Position<T> getPosBottomLeft() const { return m_ll; }
+    Position<T> getPosTopRight() const { return m_ur; }
+    T getXsize() { return abs(m_ll.getX() - m_ur.getX()); }
+    T getYsize() { return abs(m_ll.getY() - m_ur.getY()); }
     T getArea()  { return getXsize() * getYsize(); }
 
     string to_string() {
         std::stringstream s;
         s << std::setprecision(2) << std::fixed;
-        s << "Box@(" << m_a.to_string() << ", " << m_b.to_string() << ")";
+        s << "Box@(" << m_ll.to_string() << ", " << m_ur.to_string() << ")";
+        return s.str();
+    }
+
+    string getDEFstring() {
+        std::stringstream s;
+        s << " ( " << m_ll.getX() << " " << m_ll.getY() << " ) ( " 
+          << m_ur.getX() << " " << m_ur.getY() << " ) ";
         return s.str();
     }
 

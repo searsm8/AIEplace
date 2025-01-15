@@ -60,7 +60,7 @@ class DensityGraphDriver : public GraphDriver
 {
 public:
     DensityGraphDriver() {}
-    void init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id);
+    void init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id, int bins_per_row);
 };
 
 AIEPLACE_NAMESPACE_END

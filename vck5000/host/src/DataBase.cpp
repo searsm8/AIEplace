@@ -345,8 +345,8 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         void DataBase::set_def_busbitchars(std::string const&) {}
         void DataBase::set_def_dividerchar(std::string const&) {}
         void DataBase::set_def_version(std::string const& v) {}
-        void DataBase::set_def_unit(int u) {}
-        void DataBase::set_def_design(std::string const& d) {}
+        void DataBase::set_def_unit(int u) { m_units_per_micron = u; }
+        void DataBase::set_def_design(std::string const& d) { m_design_name = d; }
 
         void DataBase::set_def_diearea(int xl, int yl, int xh, int yh)
         {
@@ -376,7 +376,7 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             new_pin->setBoundingBox(bb[0], bb[1], bb[2], bb[3]);
             new_pin->setPlacementStatus(p.status);
             new_pin->setPosition(Position((position_type)p.origin[0], (position_type)p.origin[1]));
-
+            new_pin->setDirection(p.direct); // primary input or output
             // TODO: assert pin is created correctly
 
             mm_pins.emplace(std::make_pair(new_pin->getName(), new_pin));
@@ -402,6 +402,7 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                     Component* comp_p = mm_components[net_pin.first];
                     assert(comp_p != nullptr && "COMPONENT name points to nullptr while reading .DEF\n");
                     new_net->addNode(comp_p);
+                    new_net->addNetPin(comp_p, net_pin.second);
                     comp_p->addNet(new_net);
                 }
             }
@@ -423,13 +424,13 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         void DataBase::end_def_design() {}
         
 // Print info functions
-void DataBase::printNodes()
+void DataBase::printNodes() const
 {
     printComponents();
     printPins();
 }
 
-void DataBase::printPins()
+void DataBase::printPins() const
 {
     for(auto item : mm_pins)
     {
@@ -439,7 +440,7 @@ void DataBase::printPins()
     }
 }
 
-void DataBase::printComponents()
+void DataBase::printComponents() const
 {
     for(auto item : mm_components)
     {
@@ -474,7 +475,7 @@ void DataBase::printNets()
     }
 }
 
-void DataBase::printNetsByDegree()
+void DataBase::printNetsByDegree() const
 {
     cout << "&&& Nets by degree:" << endl;
 
@@ -533,6 +534,125 @@ void DataBase::printOverlaps()
         log_info(top);
     }
 }
+
+bool DataBase::writeDEF(const std::string& output_path) const
+{
+    string output_filename = output_path + "/" + m_design_name + ".def";
+    std::ofstream out(output_filename);
+    if (!out.is_open()) {
+        log_error("DEF write: invalid output filename.");
+        return false;
+    }
+    out.imbue(std::locale::classic()); // set to standard output
+    writeHeader(out);
+    writeDieArea(out);
+    writeComponents(out);
+    writePins(out);
+    writeNets(out);
+    writeFooter(out);
+
+    return true;
+}
+
+
+void DataBase::writeHeader(std::ofstream& out) const {
+    // Metadata
+    out << "# Design after global placement\n"
+        << "# Produced by AIEplace " << AIEPLACE_VERSION << endl;
+    // Begin DEF format
+    out << "VERSION 5.8 ;\n"
+        << "DIVIDERCHAR \"/\" ;\n"
+        << "BUSBITCHARS \"[]\" ;\n"
+        << "DESIGN " << m_design_name << " ;\n"
+        << "UNITS DISTANCE MICRONS " << m_units_per_micron << " ;\n\n";
+}
+
+void DataBase::writeDieArea(std::ofstream& out) const {
+    out << "DIEAREA ( "
+        << m_die_area.getPosBottomLeft().getX() << " " << m_die_area.getPosBottomLeft().getY() << " ) ( "
+        << m_die_area.getPosTopRight().getX() << " " << m_die_area.getPosTopRight().getY() << " ) ;\n\n";
+}
+
+void DataBase::writeComponents(std::ofstream& out) const {
+    out << "COMPONENTS " << mm_components.size() << " ;\n";
+    for (const auto& item : mm_components) {
+        auto comp = item.second;
+        out << "    - " << comp->getName() << " " << comp->getMacro()->getName() << "\n"
+            << "      + " << "PLACED"/*comp->getStatus()*/ << " ( " << comp->getX() << " " << comp->getY() << " ) "
+            << comp->getOrientation() << " ;\n";
+    }
+    out << "END COMPONENTS\n\n";
+}
+
+void DataBase::writePins(std::ofstream& out) const {
+    out << "PINS " << mm_pins.size() << " ;\n";
+    for (const auto& item : mm_pins) {
+        Pin* pin = item.second;
+        out << "    - " << pin->getName() << " + NET " << pin->getName()
+            << "\n      + DIRECTION " << pin->getDirection()
+            //<< " + USE " << pin.use 
+            << "\n";
+        if (pin->isPlaced()) {
+            out << "      + PLACED "
+                << " ( " << pin->getX() << " " << pin->getY() << " ) "
+                << pin->getOrientation() << "\n";
+        }
+        out << "      + LAYER " << pin->getLayer()
+            << pin->getBoundingBox().getDEFstring()
+            << " ;\n";
+    }
+    out << "END PINS\n\n";
+}
+
+void DataBase::writeNets(std::ofstream& out) const {
+    // NOT HANDLING SPECIAL NETS
+    // Write special nets if any exist
+    //auto special_nets = std::count_if(nets.begin(), nets.end(),
+    //                                [](const Net& net) { return net.isSpecial; });
+    //if (special_nets > 0) {
+    //    out << "SPECIALNETS " << special_nets << " ;\n";
+    //    for (const auto& net : nets) {
+    //        if (net.isSpecial) {
+    //            out << "    - " << net.name << "\n";
+    //            for (const auto& conn : net.connections) {
+    //                out << "      ( " << conn.first << " " << conn.second << " )\n";
+    //            }
+    //            out << "      ;\n";
+    //        }
+    //    }
+    //    out << "END SPECIALNETS\n\n";
+    //}
+    
+    // Write regular nets
+    out << "NETS " << mm_nets.size() << " ;\n";
+    for (const auto& item : mm_nets) {
+        Net* net = item.second;
+        out << "    - " << net->getName();
+        int count = 0;
+        for (const auto& node : net->mv_nodes) {
+            try {
+                Pin& pin = dynamic_cast<Pin&>(*node);
+                // node is a primary IO pin
+                out << " ( PIN " << pin.getName() << " )";
+
+            } catch(const std::bad_cast&) {
+                // else node is a component
+                out << " ( " << node->getName() << " " << net->mm_net_pins[node] << " )";
+            }
+            if(++count == 4) { // print 4 nodes, then newline
+                out << endl;
+                count = 0;
+            }
+        }
+        out << " ;\n";
+    }
+    out << "END NETS\n\n";
+}
+
+void DataBase::writeFooter(std::ofstream& out) const {
+    out << "END DESIGN\n";
+}
+
 
 
 AIEPLACE_NAMESPACE_END

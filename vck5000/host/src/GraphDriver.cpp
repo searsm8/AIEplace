@@ -99,7 +99,7 @@ void PartialsGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int 
 }
 
 
-void DensityGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id)
+void DensityGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id, int bins_per_row)
 {
     log_info("DensityGraphDriver creating PL kernel. Kernel ID: " + std::to_string(kernel_id));
     // kernel_id = 0 -> DCT
@@ -121,15 +121,15 @@ void DensityGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int k
     run_device_s2mm = xrt::run(device_s2mm);
 
     // For density DCT computation, we transfer one row's worth of floats to compute DCT
-    input_buffer  = xrt::bo(device, 2*BINS_PER_ROW*sizeof(float), /*xrt::bo::flags::normal,*/ device_mm2s.group_id(0));
-    result_buffer = xrt::bo(device, 2*BINS_PER_ROW*sizeof(float), /*xrt::bo::flags::normal,*/ device_s2mm.group_id(0));
+    input_buffer  = xrt::bo(device, 2*bins_per_row*sizeof(float), /*xrt::bo::flags::normal,*/ device_mm2s.group_id(0));
+    result_buffer = xrt::bo(device, 2*bins_per_row*sizeof(float), /*xrt::bo::flags::normal,*/ device_s2mm.group_id(0));
 
     // set kernel arguments
     run_device_mm2s.set_arg(0, input_buffer);
-    run_device_mm2s.set_arg(1, 2*BINS_PER_ROW);
+    run_device_mm2s.set_arg(1, 2*bins_per_row);
 
     run_device_s2mm.set_arg(0, result_buffer);
-    run_device_s2mm.set_arg(1, 2*BINS_PER_ROW);
+    run_device_s2mm.set_arg(1, 2*bins_per_row);
 }
 
 AIEPLACE_NAMESPACE_END

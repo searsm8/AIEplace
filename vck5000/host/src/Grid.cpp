@@ -55,7 +55,7 @@ void Grid::computeBinOverlaps(Node* node_p)
         node_p->addBinOverlap(&m_bins[col_index][row_index], overlap);
         return;
     }
-    else log_error("Large node found: " + node_p->getName());
+    else log_error("Large node found: " + node_p->getName()); //TODO: handle large nodes!
 
     // find indices in m_bins that this node overlaps
     int col_index_start = node_p->getPosition().getX() / m_bin_width;

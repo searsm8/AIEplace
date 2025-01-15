@@ -47,6 +47,7 @@ private:
     };
     // Data members
     string m_name;
+    string m_orient;
     Position<position_type> m_pos;
     PlacementStatus m_status;
     bool m_is_large; // True if the area of the node is at least 1/16th the area of a bin
@@ -60,7 +61,10 @@ public:
 
     // Constructors
     Node() : m_name("") {}
-    Node(string name) : m_name(name), m_pos(0, 0) {}
+    Node(string name) : m_name(name), m_orient("N"), m_pos(0, 0) {}
+
+    // Need virtual destructor for proper dynamic_cast
+    //virtual ~Node() {} 
 
     // Member Functions
     // Getters
@@ -70,6 +74,7 @@ public:
     void translate(double move_x, double move_y) { m_pos.translate(move_x, move_y); }
     const position_type& getX() { return m_pos.getX(); }
     const position_type& getY() { return m_pos.getY(); }
+    const string& getOrientation() { return m_orient; }
 
     std::vector<Net*> getNets() { return mv_nets; }
     std::vector<BinOverlap> getBinOverlaps() { return mv_bin_overlaps; }
@@ -99,6 +104,7 @@ public:
     }
 
     bool isLarge() { return m_is_large; }
+    bool isPlaced() { return m_status == PLACED; }
 
     void setPosition(Position<position_type> pos) { m_pos = pos; }
     void setPlacementStatus(PlacementStatus status) { m_status = status; }

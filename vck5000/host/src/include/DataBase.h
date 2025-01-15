@@ -79,10 +79,10 @@ private:
     map<string, Pin *> mm_pins;
     map<string, Net *> mm_nets;
     map<int, std::vector<Net *>> mmv_nets_by_degree;
-    //map<int, int> mm_input_index; // Used to track what data has been sent as input to AIEs
-    //map<int, int> mm_output_index; // Used to track what data has been received as output from AIEs
 
     Box<position_type> m_die_area;
+    string m_design_name;
+    int m_units_per_micron; 
     int m_packet_count;
 
 public:
@@ -134,7 +134,7 @@ public:
     int  getPacketCount() { return m_packet_count; }
 
 
-    /// parser callback functions
+    /// parser callback functions for reading input
     ///==== LEF Callbacks ====
     virtual void lef_version_cbk(std::string const &v);
     virtual void lef_version_cbk(double v);
@@ -180,13 +180,23 @@ public:
     virtual void end_def_design();
 
     // Print functions
-    void printNodes();
-    void printPins();
-    void printComponents();
+    // const functions guarantee that this object won't be modified by the function
+    void printNodes() const;
+    void printPins() const;
+    void printComponents() const;
     void printNets();
-    void printNetsByDegree();
+    void printNetsByDegree() const;
     void printInfo();
     void printOverlaps();
+
+    // DEF writer functions
+    bool writeDEF(const std::string& output_path) const;
+    void writeHeader(std::ofstream& out) const;
+    void writeDieArea(std::ofstream& out) const;
+    void writeComponents(std::ofstream& out) const;
+    void writePins(std::ofstream& out) const;
+    void writeNets(std::ofstream& out) const;
+    void writeFooter(std::ofstream& out) const;
 };
 
 AIEPLACE_NAMESPACE_END

@@ -17,7 +17,8 @@ private:
     // List of all nodes on this net, sorted by descending X or Y positions
 
 public:
-    std::vector<Node*> mv_nodes;
+    std::vector<Node*> mv_nodes; // all the nodes on this net
+    std::map<Node*, string> mm_net_pins; // which pins are used for this net
     // For use in computations
     struct XY
     {
@@ -61,6 +62,9 @@ public:
 
     void addNode(Node* n) 
         { mv_nodes.push_back(n); m_degree++; }
+    
+    void addNetPin(Node* n, string pin_str)
+        { mm_net_pins[n] = pin_str; }
 
     // Sorting
     void sortPositionsByX();

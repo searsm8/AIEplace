@@ -12,6 +12,8 @@ class Pin : public Node
 {
 private:
     Box<position_type> m_bounding_box;
+    string m_direction;
+    string m_layer;
 
 public:
     // Constructors
@@ -22,10 +24,14 @@ public:
     float getXsize() { return m_bounding_box.getXsize(); }
     float getYsize() { return m_bounding_box.getYsize(); }
     float getArea()  { return m_bounding_box.getArea();  }
+    string getDirection() { return m_direction; }
+    string getLayer() { return m_layer; }
+    Box<position_type> & getBoundingBox() { return m_bounding_box; }
 
     // Setters
-    void setBoundingBox(position_type xl, position_type xh, position_type yl, position_type yh)
-    { m_bounding_box = Box<position_type>(Position(xl, xh), Position(yl, yh)); }
+    void setDirection(string dir) { m_direction = dir; }
+    void setBoundingBox(position_type llx, position_type lly, position_type urx, position_type ury)
+    { m_bounding_box = Box<position_type>(Position(llx, lly), Position(urx, ury)); }
 
 };
 

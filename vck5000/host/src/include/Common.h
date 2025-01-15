@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cassert>
 #include <math.h>
+#include <sys/time.h>
 
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
