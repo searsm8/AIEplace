@@ -51,7 +51,12 @@ bool DataBase::readLEF()
     bool success = true;
     for(fs::path file : lef_files)
     {
+        //disable LEF parser output by redirecting C stream stdout
+        FILE* oldStdout = freopen("/dev/null", "w", stdout); // "/dev/null" discards all data written to it
         bool flag = LefParser::read(*this, file.string());
+        // restore stdout
+        freopen("/dev/tty", "w", stdout); // "/dev/tty" is the terminal
+
         if (flag) {
             log_info(".lef file parsing successful: " + file.string());
         } else {
@@ -85,7 +90,22 @@ bool DataBase::readDEF()
         if(def_files[i].filename() == "floorplan.def")
             def_file = def_files[i];
     }
+
+
+
+    //disable DEF parser output by redirecting C stream stdout
+    FILE* oldStdout = freopen("/dev/null", "w", stdout); // "/dev/null" discards all data written to it
     bool flag = DefParser::read(*this, def_file);
+    // restore stdout
+    freopen("/dev/tty", "w", stdout); // "/dev/tty" is the terminal
+
+
+
+
+
+
+
+
     if (flag) {
         log_info(".def file parsing successful: " + def_file.string());
         return true;

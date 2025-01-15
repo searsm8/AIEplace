@@ -10,6 +10,7 @@
 #include "Net.h"
 #include "Bin.h"
 #include "Logger.h"
+#include <sstream>
 
 #include <limbo/parsers/lef/adapt/LefDriver.h>             // LEF parser
 #include <limbo/parsers/def/adapt/DefDriver.h>             // DEF parser
