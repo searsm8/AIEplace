@@ -1,13 +1,13 @@
 {
   "params": {
     "use_aie": true,
-    "input_filepath": "host/benchmarks/ispd2015/mgc_fft_1",
-    "output_filepath": "results",
+    "input_filepath": "host/benchmarks/ispd2015/mgc_des_perf_1",
+    "input_filepath1": "host/benchmarks/ispd2015/mgc_fft_1",
     "wirelength_method": "HPWL",
     "bins_per_row": 32,
 
     "gamma": 4,
-    "max_iterations": 10,
+    "max_iterations": 100,
     "init_learning_rate": 0.02,
     "init_global_lambda": 0.00
   }

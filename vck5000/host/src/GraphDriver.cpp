@@ -71,7 +71,7 @@ float GraphDriver::receive_packet(float * output_data)
 
 void PartialsGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id)
 {
-    log_info("PartialsGraphDriver creating PL kernel. Kernel ID: " + std::to_string(kernel_id));
+    log_detail("PartialsGraphDriver creating PL kernel. Kernel ID: " + std::to_string(kernel_id));
     
     // Create kernel objects
     // Be extra sure the names are correct, there might not be an error message!

@@ -19,7 +19,7 @@ class Visualizer
     double m_die_width, m_die_height;
     double m_canvas_width, m_canvas_height;
 
-    const int CANVAS_PIXELS = 1048;
+    const int CANVAS_PIXELS = 1048; // reasonable trade off between image size and detail shown.
     double DIE_START = 0.05; // boundary 
     double MIN_SIZE = 0.004; // Minimum size to be visible
     cairo_surface_t *surface;

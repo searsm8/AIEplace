@@ -87,13 +87,13 @@ void Placer::iterationReset()
 Placer::Placer(std::string xclbin_file) 
         { 
             // Read configuration JSON file
-            string config_filepath = "host/config_aieplace.json"; // default config file
+            string config_filepath = "host/runtime_config.json"; // default config file
 
 
             std::ifstream config_file(config_filepath);
             // check if config file was found
             if (!config_file.is_open()) {
-                log_error("Unable to open configuration JSON file!");
+                log_error("Unable to open configuration JSON file: " + config_filepath);
                 exit(1);
             }
 
@@ -1066,7 +1066,7 @@ void Placer::printIterationResults()
     // every 10 iterations, export an image
     #ifdef CREATE_VISUALIZATION
         if (iteration % 10 == 0)
-            viz.drawPlacement(db, output_dir, iteration);
+            viz.drawPlacement(db, output_dir / "png", iteration);
     #endif
 }
 
@@ -1130,12 +1130,12 @@ fs::path Placer::getOutputPath()
     std::tm* now = std::localtime(&time);
 
     std::stringstream ss;
-    ss << "run_" <<  now->tm_yday << "_" << now->tm_hour << ":" << now->tm_min;
+    ss << "run_" <<  now->tm_yday+1 << "_" << now->tm_hour << ":" << now->tm_min;
 
     fs::path dir = "results";
     dir.append(db.getBenchmarkName());
     dir.append(ss.str());
-    fs::create_directories(dir); // ensure this directory exists
+    fs::create_directories(dir / "png"); // ensure this directory exists
 
     return dir;
 }
