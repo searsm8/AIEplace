@@ -35,7 +35,7 @@ def dct_2d_test():
     print("Output:", x)
 
 def dct_1d_compare():
-    x = np.array([[1,3,5],
+    x = np.array([[121,332,535,321,6876,8243,5323,9234,5489,156,387,954,5689,5879,1684,9782,158,1268,1568,1548,3578,1565,387,685,647,578,687,689,157,37,548,687],
          [2,6,7],
          [8,4,5]])
     print("x:")
@@ -218,12 +218,12 @@ def idct_idxst_test(rho):
     
 
 if __name__ == "__main__":
-    #dct_1d_compare()
+    dct_1d_compare()
     #dct_2d_compare()
     #dct_2d_test()
     #idct_test()
-    size = 4
-    rho = np.random.rand(size, size) * 100
+    #size = 4
+    #rho = np.random.rand(size, size) * 100
     
     #idxst_test(rho)
-    idct_idxst_test(rho)
+    #idct_idxst_test(rho)

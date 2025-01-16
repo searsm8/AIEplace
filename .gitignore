@@ -1,8 +1,10 @@
 *.o
 *.out
-*/__pycache__
-python/AIEmath/__pychache__/
+python/AIEmath
 python/results
+results
 *:Zone.Identifier
-*.json
-
+third_party
+*.cfg
+.vscode
+misc

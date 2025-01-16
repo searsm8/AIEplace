@@ -14,11 +14,12 @@ def dct(input_X):
     dct_result = [0.0]*N
 
     for k in range(N):
-        #Lambda = 1/math.sqrt(2) if k == 0 else 1
+        Lambda = 1/math.sqrt(2) if k == 0 else 1 # used by scipy
         Lambda = 1
         for n in range(N):
             dct_result[k] += Lambda * input_X[n] * math.cos(math.pi*k*(n+0.5)/N)
         # This scaling factor of 2/sqrt(N) is applied all in one step later
+        #dct_result[k] *= math.sqrt(2 / N)# used by scipy
         #dct_result[k] *= 2*math.sqrt(1 / N) # to match fft.cpp
     #dct_result = np.array(dct_result)
 
