@@ -3,6 +3,7 @@
 #define AIEPLACE_NET_H
 
 #include "Common.h"
+#include "Bin.h"
 
 AIEPLACE_NAMESPACE_BEGIN
 class Node;
@@ -80,6 +81,10 @@ public:
     // Debugging
     string to_string();
     void printTerms();
+
+    Box<position_type> getBoundingBox();
+
+    bool hasPin();
 
 }; // End of class Net
 

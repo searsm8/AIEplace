@@ -47,6 +47,10 @@ void Placer::run()
     Position<position_type> target =
                 Position<position_type>(grid.getDieWidth()/2, grid.getDieHeight()/2);
 
+    std::srand(std::time(nullptr)); // use current time as seed for random generator
+    #ifdef CREATE_VISUALIZATION
+        initializeFocus();
+    #endif
     initializePlacement(target, 0, grid.getDieWidth()/4); // even spread around center
     //initializePlacement(target, 0, 500); // Close placement for testing purposes
     //return;
@@ -88,6 +92,7 @@ Placer::Placer(std::string xclbin_file)
         { 
             // Read configuration JSON file
             string config_filepath = "host/runtime_config.json"; // default config file
+            log_info("Reading runtime configuration from: " + config_filepath);
 
 
             std::ifstream config_file(config_filepath);
@@ -105,7 +110,6 @@ Placer::Placer(std::string xclbin_file)
             gamma = params["gamma"];
             learning_rate = params["init_learning_rate"];
             global_lambda = params["init_global_lambda"];
-            bins_per_row = params["bins_per_row"];
             input_dir = fs::path(params["input_filepath"]);
             output_dir = getOutputPath();
 
@@ -116,7 +120,7 @@ Placer::Placer(std::string xclbin_file)
                 viz.init(db.getDieArea());
             #endif
 
-            grid = Grid(db.getDieArea(), bins_per_row, bins_per_row); 
+            grid = Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_ROW); 
             if(params["use_aie"]) {
                 // Open Xilinx Device
                 xrt::device device = xrt::device(DEVICE_ID);
@@ -131,9 +135,9 @@ Placer::Placer(std::string xclbin_file)
                 for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
                     partials_drivers[i].init(device, xclbin_uuid, i);
 
-                density_driver[0].init(device, xclbin_uuid, 0, bins_per_row); // DCT graph
-                density_driver[1].init(device, xclbin_uuid, 1, bins_per_row); // IDCT graph
-                density_driver[2].init(device, xclbin_uuid, 2, bins_per_row); // IDXST graph
+                density_driver[0].init(device, xclbin_uuid, 0, BINS_PER_ROW); // DCT graph
+                density_driver[1].init(device, xclbin_uuid, 1, BINS_PER_ROW); // IDCT graph
+                density_driver[2].init(device, xclbin_uuid, 2, BINS_PER_ROW); // IDXST graph
                 
             }
         }
@@ -153,6 +157,11 @@ void Placer::printWelcomeBanner()
 
     Table banner;
     banner.add_row({logo});
+    banner.format()
+        .width(59)
+        .hide_border()
+        .font_color(Color::white)
+        .font_align(FontAlign::left);
 
     Table info;
     info.add_row({"Version:", AIEPLACE_VERSION});
@@ -161,12 +170,6 @@ void Placer::printWelcomeBanner()
     banner.add_row({"VLSI global placement algorithm accelerated on AI Engines"});
     banner.add_row({}); // This line intentionally left blank
 
-banner.format()
-    .width(59)
-    .hide_border()
-    .font_color(Color::white)
-    .font_align(FontAlign::left);
-    
     banner.print(cout);
 }
 
@@ -395,9 +398,9 @@ void Placer::computeElectricFields_AIE()
     std::vector< std::vector<float> > temp;
 
     //DEBUGGING: print out the rho matrix
-    //for( int x_index = 0; x_index < bins_per_row; x_index++)
+    //for( int x_index = 0; x_index < BINS_PER_ROW; x_index++)
     //{
-    //    for( int y_index = 0; y_index < bins_per_row; y_index++)
+    //    for( int y_index = 0; y_index < BINS_PER_ROW; y_index++)
     //    {
     //        cout << rho[x_index][y_index] << " ";
     //    }
@@ -405,13 +408,13 @@ void Placer::computeElectricFields_AIE()
     //}
     //cout << endl;
 
-    float * input_data  = new float[2*bins_per_row]; 
-    float * output_data = new float[2*bins_per_row];
+    float * input_data  = new float[2*BINS_PER_ROW]; 
+    float * output_data = new float[2*BINS_PER_ROW];
 
     // Send the rho matrix into the AIE, one row at a time, for 1D-DCTs
 
-    for(int row = 0; row < bins_per_row; row++) {
-        for(int col = 0; col < bins_per_row; col++) {
+    for(int row = 0; row < BINS_PER_ROW; row++) {
+        for(int col = 0; col < BINS_PER_ROW; col++) {
         input_data[2*col] = rho[row][col];
         input_data[2*col+1] = 0;
         }
@@ -420,12 +423,12 @@ void Placer::computeElectricFields_AIE()
     density_driver[0].receive_packet(output_data);
 
     std::vector<float> res;
-    for(int col = 0; col < bins_per_row; col++) 
+    for(int col = 0; col < BINS_PER_ROW; col++)
         res.push_back(output_data[2*col]);
     temp.push_back(res);
 
     //std::vector<float> test_output = DCT_naive(test_data);
-    //for(int i = 0; i < bins_per_row; i++) {
+    //for(int i = 0; i < BINS_PER_ROW; i++) {
     //    cout << test_output[i] << " ";
     //} cout << endl;
 
@@ -433,8 +436,8 @@ void Placer::computeElectricFields_AIE()
 
     // Send the rho matrix into the AIE, one column at a time, to complete 2D-DCT
     //cout << "Input" << std::setprecision(2) << endl;
-    for(int col = 0; col < bins_per_row; col++) {
-        for(int row = 0; row < bins_per_row; row++) { // looping order performs DCT on columns
+    for(int col = 0; col < BINS_PER_ROW; col++) {
+        for(int row = 0; row < BINS_PER_ROW; row++) { // looping order performs DCT on columns
         input_data[2*row] = temp[row][col];
         input_data[2*row+1] = 0;
         }
@@ -445,7 +448,7 @@ void Placer::computeElectricFields_AIE()
 
         //cout << endl << "DCT output:" << endl << std::setprecision(2);
         // Store the result a_uv transposed (for comparison)
-        for(int row = 0; row < bins_per_row; row++) {
+        for(int row = 0; row < BINS_PER_ROW; row++) {
             grid.getBin(row, col).a_uv = output_data[2*row];
             //cout << output_data[2*row] << " "; 
         }
@@ -457,14 +460,14 @@ void Placer::computeElectricFields_AIE()
     temp.clear();
     // Setup input for IDCT
     double w_u, w_v, denom_inv;
-    for(int row = 0; row < bins_per_row; row++) { //looping params implement transpose!
+    for(int row = 0; row < BINS_PER_ROW; row++) { //looping params implement transpose!
         //cout << endl << "IDCT input to AIE:" << endl << std::setprecision(2);
-        for(int col = 0; col < bins_per_row; col++) {
+        for(int col = 0; col < BINS_PER_ROW; col++) {
             if(row == 0 && col == 0) 
                 { w_u = 0; w_v = 0; denom_inv = 0;} // for 0, 0 we avoid division by 0
             else {
-                w_u = 2*M_PI*row / bins_per_row;
-                w_v = 2*M_PI*col / bins_per_row;
+                w_u = 2*M_PI*row / BINS_PER_ROW;
+                w_v = 2*M_PI*col / BINS_PER_ROW;
                 denom_inv = 1 / (w_u*w_u + w_v*w_v);
             }
             input_data[2*col] = grid.getBin(row, col).a_uv * w_u * denom_inv;
@@ -480,7 +483,7 @@ void Placer::computeElectricFields_AIE()
 
         //cout << endl << "IDCT output from AIE:" << endl << std::setprecision(2);
         std::vector<float> res;
-        for(int col = 0; col < bins_per_row; col++) {
+        for(int col = 0; col < BINS_PER_ROW; col++) {
             res.push_back(output_data[2*col]);
             //cout << output_data[2*col] << " "; 
         }
@@ -488,8 +491,8 @@ void Placer::computeElectricFields_AIE()
         temp.push_back(res);
     }
 
-    for(int col = 0; col < bins_per_row; col++) {
-        for(int row = 0; row < bins_per_row; row++) { // looping order performs IDXST on columns
+    for(int col = 0; col < BINS_PER_ROW; col++) {
+        for(int row = 0; row < BINS_PER_ROW; row++) { // looping order performs IDXST on columns
             input_data[2*row] = temp[row][col];
             input_data[2*row+1] = 0;
         }
@@ -500,7 +503,7 @@ void Placer::computeElectricFields_AIE()
 
         //cout << endl << "IDXST output:" << endl << std::setprecision(2);
         // Store the result Ex transposed (for comparison)
-        for(int row = 0; row < bins_per_row; row++) {
+        for(int row = 0; row < BINS_PER_ROW; row++) {
             grid.getBin(row, col).eField.x = output_data[2*row];
             //cout << output_data[2*row] << " "; 
         }
@@ -510,14 +513,14 @@ void Placer::computeElectricFields_AIE()
     // Compute Ey
     temp.clear();
     // Setup input for IDXST
-    for(int row = 0; row < bins_per_row; row++) { //looping params implement transpose!
+    for(int row = 0; row < BINS_PER_ROW; row++) { //looping params implement transpose!
         //cout << endl << "IDXST input to AIE:" << endl << std::setprecision(2);
-        for(int col = 0; col < bins_per_row; col++) {
+        for(int col = 0; col < BINS_PER_ROW; col++) {
             if(row == 0 && col == 0) 
                 { w_u = 0; w_v = 0; denom_inv = 0;} // for a(0, 0) we avoid division by 0 (remove dc component)
             else {
-                w_u = 2*M_PI*row / bins_per_row;
-                w_v = 2*M_PI*col / bins_per_row;
+                w_u = 2*M_PI*row / BINS_PER_ROW;
+                w_v = 2*M_PI*col / BINS_PER_ROW;
                 denom_inv = 1 / (w_u*w_u + w_v*w_v);
             }
             input_data[2*col] = grid.getBin(row, col).a_uv * w_v * denom_inv;
@@ -533,7 +536,7 @@ void Placer::computeElectricFields_AIE()
 
         //cout << endl << "IDXST output from AIE:" << endl << std::setprecision(2);
         std::vector<float> res;
-        for(int col = 0; col < bins_per_row; col++) {
+        for(int col = 0; col < BINS_PER_ROW; col++) {
             res.push_back(output_data[2*col]);
             //cout << output_data[2*col] << " "; 
         }
@@ -541,8 +544,8 @@ void Placer::computeElectricFields_AIE()
         temp.push_back(res);
     }
 
-    for(int col = 0; col < bins_per_row; col++) {
-        for(int row = 0; row < bins_per_row; row++) { // looping order performs IDCT on columns
+    for(int col = 0; col < BINS_PER_ROW; col++) {
+        for(int row = 0; row < BINS_PER_ROW; row++) { // looping order performs IDCT on columns
             input_data[2*row] = temp[row][col];
             input_data[2*row+1] = 0;
         }
@@ -553,7 +556,7 @@ void Placer::computeElectricFields_AIE()
 
         //cout << endl << "IDCT output:" << endl << std::setprecision(2);
         // Store the result Ex transposed (for comparison)
-        for(int row = 0; row < bins_per_row; row++) {
+        for(int row = 0; row < BINS_PER_ROW; row++) {
             grid.getBin(row, col).eField.y = output_data[2*row];
             //cout << output_data[2*row] << " "; 
         }
@@ -1133,11 +1136,37 @@ fs::path Placer::getOutputPath()
     ss << "run_" <<  now->tm_yday+1 << "_" << now->tm_hour << ":" << now->tm_min;
 
     fs::path dir = "results";
-    dir.append(db.getBenchmarkName());
+    dir.append(input_dir.filename().string());
     dir.append(ss.str());
     fs::create_directories(dir / "png"); // ensure this directory exists
 
     return dir;
+}
+
+void Placer::initializeFocus()
+{
+    // add named focus nets
+    //for()
+
+    // add random focus nets
+    auto nets = db.getNets();
+    auto iter = nets.begin();
+    for(int i = 0; i < params["rand_focus_nets"]; i++) {
+        // pick a random net to focus which has a pin
+        //std::advance(iter, rand() % nets.size());
+        while(!iter->second->hasPin())
+            std::advance(iter, 1);
+        db.addFocusNet(iter->second);
+        std::advance(iter, 1);
+    }
+
+    auto nodes = db.getComponents();
+    for(int i = 0; i < params["rand_focus_nodes"]; i++) {
+        // pick a random node to focus that isn't a primary IO pin
+        auto node_iter = nodes.begin();
+        std::advance(node_iter, rand() % nodes.size());
+        db.addFocusNode(node_iter->second);
+    }
 }
 
 

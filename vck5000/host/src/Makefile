@@ -43,7 +43,7 @@ COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 
 OPT_FLAG := -O0# no optimizations
 
-.PHONY: all exe objs ${EXE}
+.PHONY: all objs
 
 all: ${EXE}
 

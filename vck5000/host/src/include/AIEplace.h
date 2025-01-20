@@ -96,6 +96,7 @@ public:
     double getInterval(long start_time, long end_time);
     void printFinalResults();
     fs::path getOutputPath();
+    void initializeFocus();
 };
 
 AIEPLACE_NAMESPACE_END

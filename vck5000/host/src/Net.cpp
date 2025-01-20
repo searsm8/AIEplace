@@ -1,6 +1,7 @@
 
 #include "Net.h"
 #include "Node.h"
+#include "Pin.h"
 
 
 AIEPLACE_NAMESPACE_BEGIN
@@ -163,6 +164,26 @@ position_type Net::computeWirelength_RSMT()
 {
     position_type RSMT = 0;
     return RSMT;
+}
+
+Box<position_type> Net::getBoundingBox()
+{
+    sortPositionsByX();
+    int max_x = mv_nodes.front()->getX();
+    int min_x = mv_nodes.back()->getX();
+    sortPositionsByY();
+    int max_y = mv_nodes.front()->getY();
+    int min_y = mv_nodes.back()->getY();
+    return Box<position_type>(min_x, min_y, max_x, max_y);
+}
+
+bool Net::hasPin()
+{
+    for(Node* node : mv_nodes) {
+        if (Pin* pin_ptr = dynamic_cast<Pin*>(node))
+            return true;
+    }
+    return false;
 }
 
 AIEPLACE_NAMESPACE_END

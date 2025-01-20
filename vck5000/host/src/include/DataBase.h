@@ -80,6 +80,8 @@ private:
     map<string, Pin *> mm_pins;
     map<string, Net *> mm_nets;
     map<int, std::vector<Net *>> mmv_nets_by_degree;
+    std::vector<Net *> mv_focus_nets; // list of nets to be highlighted with visualizer
+    std::vector<Node *> mv_focus_nodes; // list of nodes to be highlighted with visualizer
 
     Box<position_type> m_die_area;
     string m_design_name;
@@ -123,6 +125,11 @@ public:
     void sortPositionsByY();
     void sortPositionsMaxMinX();
     void sortPositionsMaxMinY();
+
+    void addFocusNet(Net* net) { mv_focus_nets.push_back(net); }
+    void addFocusNode(Node* node) { mv_focus_nodes.push_back(node); }
+    const vector<Net *> &getFocusNets() { return mv_focus_nets; }
+    const vector<Node *> &getFocusNodes() { return mv_focus_nodes; }
 
     double computeTotalWirelength(string);
     double computeTotalComponentArea();

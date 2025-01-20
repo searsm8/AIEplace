@@ -101,7 +101,7 @@ void PartialsGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int 
 
 void DensityGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id, int bins_per_row)
 {
-    log_info("DensityGraphDriver creating PL kernel. Kernel ID: " + std::to_string(kernel_id));
+    log_detail("DensityGraphDriver creating PL kernel. Kernel ID: " + std::to_string(kernel_id));
     // kernel_id = 0 -> DCT
     // kernel_id = 1 -> IDCT
     // kernel_id = 2 -> IDXST

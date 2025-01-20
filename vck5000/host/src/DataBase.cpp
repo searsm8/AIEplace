@@ -5,14 +5,15 @@
 AIEPLACE_NAMESPACE_BEGIN
 
 DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
-    cout << "INPUT DIR: " << m_input_dir << endl;
+    log_info("Reading design from directory: " + m_input_dir.string());
     bool LEF_success = readLEF();
     bool DEF_success = readDEF();
     if (!LEF_success || !DEF_success)
     {
-        std::cerr << "Design could not be read. Exiting..." << endl;
+        log_error("Design could not be read. Exiting...");
         exit(1);
     }
+
     initializePacketContents();
 }
 

@@ -6,7 +6,6 @@
 #ifdef CREATE_VISUALIZATION
 #include <cairo/cairo.h>
 #include "DataBase.h"
-#include <chrono> // for naming output directories by the minute
 
 AIEPLACE_NAMESPACE_BEGIN 
 
@@ -16,12 +15,13 @@ class Visualizer
 
     // Member Data
     Box<position_type> m_die_area;
-    double m_die_width, m_die_height;
-    double m_canvas_width, m_canvas_height;
+    float m_die_width, m_die_height;
+    float m_canvas_width, m_canvas_height;
 
-    const int CANVAS_PIXELS = 1048; // reasonable trade off between image size and detail shown.
-    double DIE_START = 0.05; // boundary 
-    double MIN_SIZE = 0.004; // Minimum size to be visible
+    const int CANVAS_PIXELS = 2096;//1048; // reasonable trade off between image size and detail shown.
+    const float DIE_START = 0.05; // boundary 
+    const float DIE_SCALE = 1 - 2*DIE_START; // scale for drawing components on the die
+    const float MIN_SIZE = 0.001; // Minimum size to be visible
     cairo_surface_t *surface;
     cairo_t *cr;
 
@@ -34,7 +34,10 @@ class Visualizer
     void drawComponent(Component* c);
     void drawPin(Pin* p);
     void highlightNet(Net* net);
+    void highlightNode(Node* node);
+    void drawCross(float x, float y);
     void drawPlacement(DataBase, fs::path, int);
+    void drawElectricField(DataBase, fs::path, int);
 };
 
 AIEPLACE_NAMESPACE_END
