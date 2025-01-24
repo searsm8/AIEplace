@@ -23,7 +23,8 @@ COMPILE_FLAGS += -Llib
 COMPILE_FLAGS += -llefparseradapt 
 COMPILE_FLAGS += -ldefparseradapt 
 #COMPILE_FLAGS += -lverilogparser
-#COMPILE_FLAGS += -lbookshelfparser
+COMPILE_FLAGS += -lbookshelfparser
+COMPILE_FLAGS += -lgzstream -lz
 
 # Cairo is used for generating images, but disabled now because it causes compile errors:
 # warning: libnvidia-tls.so.430.50, needed by //usr/lib64/libGL.so.1, not found

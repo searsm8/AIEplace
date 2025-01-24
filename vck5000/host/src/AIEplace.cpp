@@ -88,13 +88,10 @@ void Placer::iterationReset()
 }
 
 // Constructor
-Placer::Placer(std::string xclbin_file) 
+Placer::Placer(std::string config_filepath ) 
         { 
             // Read configuration JSON file
-            string config_filepath = "host/runtime_config.json"; // default config file
             log_info("Reading runtime configuration from: " + config_filepath);
-
-
             std::ifstream config_file(config_filepath);
             // check if config file was found
             if (!config_file.is_open()) {
@@ -112,6 +109,7 @@ Placer::Placer(std::string xclbin_file)
             global_lambda = params["init_global_lambda"];
             input_dir = fs::path(params["input_filepath"]);
             output_dir = getOutputPath();
+            string xclbin_file = params["xclbin"];
 
             // Initialize database by reading LEF and DEF design files
             db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
@@ -1068,8 +1066,10 @@ void Placer::printIterationResults()
 
     // every 10 iterations, export an image
     #ifdef CREATE_VISUALIZATION
-        if (iteration % 10 == 0)
-            viz.drawPlacement(db, output_dir / "png", iteration);
+        if (iteration % 10 == 0) {
+            viz.drawPlacement(db, output_dir / "placement", iteration);
+            viz.drawElectricField(grid, output_dir / "efield", iteration);
+        }
     #endif
 }
 
@@ -1138,7 +1138,7 @@ fs::path Placer::getOutputPath()
     fs::path dir = "results";
     dir.append(input_dir.filename().string());
     dir.append(ss.str());
-    fs::create_directories(dir / "png"); // ensure this directory exists
+    fs::create_directories(dir); // ensure this directory exists
 
     return dir;
 }

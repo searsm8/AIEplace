@@ -1,3 +1,6 @@
+#ifndef GRID_H
+#define GRID_H
+
 #include "Common.h"
 #include "Bin.h"
 #include "Node.h"
@@ -52,3 +55,4 @@ public:
 };
 
 AIEPLACE_NAMESPACE_END
+#endif

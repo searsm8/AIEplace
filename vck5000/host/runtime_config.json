@@ -1,14 +1,21 @@
 {
   "params": {
     "use_aie": true,
-    "input_filepath": "host/benchmarks/ispd2015/mgc_des_perf_1",
-    "input_filepath1": "host/benchmarks/ispd2015/mgc_fft_1",
+    "input_filepath1": "host/benchmarks/ispd2005/adaptec1",
+    "input_filepath2": "host/benchmarks/ispd2015/mgc_superblue12",
+    "input_filepath": "host/benchmarks/ispd2015/mgc_fft_1",
+    "input_filepath3": "host/benchmarks/ispd2015/mgc_des_perf_1",
+    "xclbin": "bin/aieplace.hw.xclbin",
     "wirelength_method": "HPWL",
-    "bins_per_row": 32,
 
     "gamma": 4,
-    "max_iterations": 100,
+    "max_iterations": 1000,
     "init_learning_rate": 0.02,
-    "init_global_lambda": 0.00
+    "init_global_lambda": 0.02,
+
+    "focus_nets": [],
+    "rand_focus_nets" : 0,
+    "rand_focus_nodes": 1,
+    "":""
   }
 }

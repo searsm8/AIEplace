@@ -22,12 +22,12 @@ void setup_logging()
     activate_logging_key("ERROR");  // Something VERY bad has happened!
 
     // CUSTOM LOGGING KEYS
-    //activate_logging_key("packets"); // Used in DataBase.cpp for packet initialization
+    activate_logging_key("packets"); // Used in DataBase.cpp for packet initialization
     activate_logging_key("dbinfo");
-    //activate_logging_key("comms");
-    //activate_logging_key("bins");
-    //activate_logging_key("overlap");
-    //activate_logging_key("function"); // Used to log when important functions are called
+    activate_logging_key("comms");
+    activate_logging_key("bins");
+    activate_logging_key("overlap");
+    activate_logging_key("function"); // Used to log when important functions are called
 }
 
 bool log(std::string key, Table t)
@@ -45,6 +45,7 @@ bool log(std::string key, Table t)
             .font_align(FontAlign::right)
             .font_color(getColor(key));
         top.print(std::cout);
+        return true;
     }
 }
 bool log(std::string key, std::string msg)

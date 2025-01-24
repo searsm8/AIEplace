@@ -44,9 +44,8 @@ clean:
 	$(MAKE) -C host clean
 
 # Scripts to run AIEplace application
-BENCHMARK_DIR = host/benchmarks
-
-BENCHMARK = ispd2015/mgc_fft_1
+#BENCHMARK_DIR = host/benchmarks
+#BENCHMARK = ispd2015/mgc_fft_1
 #BENCHMARK = ispd2015/mgc_matrix_mult_1
 #BENCHMARK = ispd2015/mgc_superblue11_a
 #BENCHMARK = ispd2015/mgc_superblue12
@@ -55,9 +54,14 @@ BENCHMARK = ispd2015/mgc_fft_1
 runhw:
 	@unset XCL_EMULATION_MODE
 	@clear
-	@echo "runhw: BENCHMARK =" ${BENCHMARK}
+	@echo "make runhw"
 #perf record #use this for perf profiler
-	time bin/AIEplace.exe ${BENCHMARK_DIR}/${BENCHMARK} bin/aieplace.hw.xclbin
+	time bin/AIEplace.exe xxx bin/aieplace.hw.xclbin
+
+
+# make dse
+# launch python script to perform Design Space Exploration
+dse:
 
 runemu:
 	@clear

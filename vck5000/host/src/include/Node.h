@@ -108,6 +108,7 @@ public:
 
     void setPosition(Position<position_type> pos) { m_pos = pos; }
     void setPlacementStatus(PlacementStatus status) { m_status = status; }
+    void setOrientation(string orient) { m_orient = orient; }
     void setPlacementStatus(string status) 
     { 
         if(status == "UNPLACED")

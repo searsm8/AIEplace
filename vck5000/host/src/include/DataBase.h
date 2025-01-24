@@ -19,6 +19,7 @@
 #include <limbo/parsers/gdsii/stream/GdsWriter.h>          // GDSII writer
 
 AIEPLACE_NAMESPACE_BEGIN
+
 // On AIEs, we process only nets of size 2 thru 8. This covers the great majority of all nets
 // other nets above size 8 will be processed on the host.
 #define MIN_AIE_NET_SIZE 2 // should be 2 by default
@@ -68,7 +69,10 @@ struct Packet
 };
 
 
-class DataBase : public DefParser::DefDataBase, public LefParser::LefDataBase
+class DataBase : 
+    public DefParser::DefDataBase,
+    public LefParser::LefDataBase,
+    public BookshelfParser::BookshelfDataBase
 {
 private:
     // Member Data, prefixed with "m_"
@@ -84,6 +88,7 @@ private:
     std::vector<Node *> mv_focus_nodes; // list of nodes to be highlighted with visualizer
 
     Box<position_type> m_die_area;
+    int m_max_x, m_max_y; // used when reading Bookshelf format to find die_area
     string m_design_name;
     int m_units_per_micron; 
     int m_packet_count;
@@ -115,9 +120,8 @@ public:
     std::vector<fs::path> findExtensions(fs::path, string);
     bool readLEF();
     bool readDEF();
-    // void prereadDEF(string const& filename);
     // bool readVerilog();
-    // bool readBookshelf();
+    bool readBookshelf();
 
 
     void iterationReset();
@@ -186,6 +190,48 @@ public:
     virtual void resize_def_group(int);
     virtual void add_def_group(DefParser::Group const &g);
     virtual void end_def_design();
+
+    // BOOKSHELF callbacks
+    /// @brief set number of terminals 
+    virtual void resize_bookshelf_node_terminals(int, int);
+    /// @brief set number of nets 
+    virtual void resize_bookshelf_net(int);
+    /// @brief set number of pins 
+    virtual void resize_bookshelf_pin(int);
+    /// @brief set number of rows 
+    virtual void resize_bookshelf_row(int);
+    /// @brief set number of shapes 
+    //virtual void resize_bookshelf_shapes(int);
+    /// @brief set number of NI terminals with layers 
+    //virtual void resize_bookshelf_niterminal_layers(int);
+    /// @brief set number of blockage nodes with layers 
+    //virtual void resize_bookshelf_blockage_layers(int);
+    /// @brief add terminal 
+    virtual void add_bookshelf_terminal(string&, int, int);
+    /// @brief add terminal_NI
+    //virtual void add_bookshelf_terminal_NI(string&, int, int);
+    /// @brief add node 
+    virtual void add_bookshelf_node(string&, int, int, bool);
+    /// @brief add net 
+    virtual void add_bookshelf_net(BookshelfParser::Net const&);
+    /// @brief add row 
+    virtual void add_bookshelf_row(BookshelfParser::Row const&);
+    /// @brief set node position 
+    virtual void set_bookshelf_node_position(string const&, double, double, string const&, string const&, bool);
+    /// @brief set net weight 
+    //virtual void set_bookshelf_net_weight(string const& name, double w);
+    /// @brief set node shapes 
+    //virtual void set_bookshelf_shape(NodeShape const&); 
+    /// @brief set routing information 
+    //virtual void set_bookshelf_route_info(RouteInfo const&);
+    /// @brief set NI terminal with layers 
+    //virtual void add_bookshelf_niterminal_layer(string const&, string const&);
+    /// @brief set blockages with layers 
+    //virtual void add_bookshelf_blockage_layers(string const&, vector<string> const&);
+    /// @brief set design name 
+    virtual void set_bookshelf_design(string&);
+    /// @brief a callback when a bookshelf file reaches to the end 
+    virtual void bookshelf_end();
 
     // Print functions
     // const functions guarantee that this object won't be modified by the function

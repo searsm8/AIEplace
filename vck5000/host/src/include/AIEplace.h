@@ -45,7 +45,7 @@ public:
 #endif
 
     // Constructor
-    Placer(std::string xclbin_file);
+    Placer(std::string);
 
     static void printWelcomeBanner();
 

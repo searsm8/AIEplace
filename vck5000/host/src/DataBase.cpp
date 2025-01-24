@@ -6,12 +6,21 @@ AIEPLACE_NAMESPACE_BEGIN
 
 DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
     log_info("Reading design from directory: " + m_input_dir.string());
+    m_max_x = 0;
+    m_max_y = 0;
+
+    // try to read LEF/DEF
     bool LEF_success = readLEF();
     bool DEF_success = readDEF();
+
+    // else look for bookshelf
     if (!LEF_success || !DEF_success)
     {
-        log_error("Design could not be read. Exiting...");
-        exit(1);
+        bool bookshelf_success = readBookshelf();
+        if(!bookshelf_success ) {
+            log_error("Design could not be read. Exiting...");
+            exit(1);
+        }
     }
 
     initializePacketContents();
@@ -45,7 +54,7 @@ bool DataBase::readLEF()
     std::vector<fs::path> lef_files = findExtensions(m_input_dir, ".lef");
     if (lef_files.size() == 0) 
     {
-        log_error("No .lef files found.");
+        log_warning("No .lef files found.");
         return false;
     }
 
@@ -54,15 +63,14 @@ bool DataBase::readLEF()
     {
         //disable LEF parser output by redirecting C stream stdout
         FILE* oldStdout = freopen("/dev/null", "w", stdout); // "/dev/null" discards all data written to it
-        bool flag = LefParser::read(*this, file.string());
+        success = LefParser::read(*this, file.string());
         // restore stdout
         freopen("/dev/tty", "w", stdout); // "/dev/tty" is the terminal
 
-        if (flag) {
+        if (success) {
             log_info(".lef file parsing successful: " + file.string());
         } else {
             log_error(".lef file parsing FAILED: " + file.string());
-            success = false;
         }
     }
     return success;
@@ -73,7 +81,7 @@ bool DataBase::readDEF()
     std::vector<fs::path> def_files = findExtensions(m_input_dir, ".def");
     if (def_files.size() == 0) 
     {
-        log_error("No .def files found.");
+        log_warning("No .def files found.");
         return false;
     }
 
@@ -96,22 +104,45 @@ bool DataBase::readDEF()
 
     //disable DEF parser output by redirecting C stream stdout
     FILE* oldStdout = freopen("/dev/null", "w", stdout); // "/dev/null" discards all data written to it
-    bool flag = DefParser::read(*this, def_file);
+    bool success = DefParser::read(*this, def_file);
     // restore stdout
     freopen("/dev/tty", "w", stdout); // "/dev/tty" is the terminal
 
-
-
-
-
-
-
-
-    if (flag) {
+    if (success) {
         log_info(".def file parsing successful: " + def_file.string());
         return true;
     } else {
         log_error(".def file parsing FAILED: " + def_file.string());
+        return false;
+    }
+}
+
+
+bool DataBase::readBookshelf()
+{
+    std::vector<fs::path> aux_files = findExtensions(m_input_dir, ".aux");
+    if (aux_files.size() == 0) 
+    {
+        log_error("No .aux file found.");
+        return false;
+    }
+
+    if (aux_files.size() > 1) 
+    {
+        log_warning("Multiple .aux files found! Using first one: " + aux_files[0].string());
+    }
+
+    //disable parser output by redirecting C stream stdout
+    //FILE* oldStdout = freopen("/dev/null", "w", stdout); // "/dev/null" discards all data written to it
+    bool success = BookshelfParser::read(*this, aux_files[0]);
+    // restore stdout
+    //freopen("/dev/tty", "w", stdout); // "/dev/tty" is the terminal
+
+    if (success) {
+        log_info("Bookshelf parsing successful!");
+        return true;
+    } else {
+        log_error("Bookshelf parsing FAILED!");
         return false;
     }
 }
@@ -414,14 +445,14 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                 if (net_pin.first == "PIN")
                 {
                     Pin* pin_p = mm_pins[net_pin.second];
-                    assert(pin_p != nullptr && "PIN name points to nullptr while reading .DEF\n");
+                    assert(pin_p != NULL && "PIN name points to nullptr while reading .DEF\n");
                     new_net->addNode(pin_p);
                     pin_p->addNet(new_net);
                 }
                 else // it is a component
                 {
                     Component* comp_p = mm_components[net_pin.first];
-                    assert(comp_p != nullptr && "COMPONENT name points to nullptr while reading .DEF\n");
+                    assert(comp_p != NULL && "COMPONENT name points to nullptr while reading .DEF\n");
                     new_net->addNode(comp_p);
                     new_net->addNetPin(comp_p, net_pin.second);
                     comp_p->addNet(new_net);
@@ -443,6 +474,137 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         void DataBase::resize_def_group(int) {}
         void DataBase::add_def_group(DefParser::Group const& g) {}
         void DataBase::end_def_design() {}
+        
+
+    // *******************************************************************************
+        // BOOKSHELF callbacks
+        /// @brief set number of terminals 
+        void DataBase::resize_bookshelf_node_terminals(int NumNodes, int NumTerminals) {
+        }
+        /// @brief set number of nets 
+        void DataBase::resize_bookshelf_net(int NumNets) {
+        }
+        /// @brief set number of pins 
+        void DataBase::resize_bookshelf_pin(int NumPins) {
+        }
+        /// @brief set number of rows 
+        void DataBase::resize_bookshelf_row(int NumRows) {
+        }
+        /// @brief set number of shapes 
+        //void DataBase::resize_bookshelf_shapes(int) {}
+        /// @brief set number of NI terminals with layers 
+        //void DataBase::resize_bookshelf_niterminal_layers(int) {}
+        /// @brief set number of blockage nodes with layers 
+        //void DataBase::resize_bookshelf_blockage_layers(int) {}
+
+        /// @brief add terminal 
+        void DataBase::add_bookshelf_terminal(string& name, int width, int height) {
+            Pin* new_pin = new Pin(name);
+            new_pin->setBoundingBox(0, 0, width, height);
+            new_pin->setPlacementStatus(PlacementStatus::FIXED);
+            new_pin->setPosition(Position<position_type>(0, 0));
+
+            mm_pins.emplace(std::make_pair(new_pin->getName(), new_pin));
+        }
+
+        /// @brief add terminal_NI
+        //void DataBase::add_bookshelf_terminal_NI(string&, int, int) {}
+        /// @brief add node 
+        void DataBase::add_bookshelf_node(string& name, int width, int height, bool notsurewhatthisboolisfor) {
+            Component* new_comp = new Component(name);
+            // for Bookshelf format, no macro classes are defined by the design
+            // So we create macros named "macro_width_height"
+            string macro_name = "macro_" + std::to_string(width) + "_" + std::to_string(height);
+            MacroClass* macro_p = mm_macros[macro_name];
+            if(macro_p == NULL) {
+                macro_p = new MacroClass(macro_name, width, height);
+                //mm_macros.emplace(std::make_pair(macro_name, macro_p));
+                mm_macros[macro_name] = macro_p;
+            }
+            new_comp->setMacroClass(macro_p);
+            new_comp->setPlacementStatus(PlacementStatus::UNPLACED);
+            new_comp->setPosition(Position((position_type)0, (position_type)0)); // default position (0, 0)
+            mm_components.emplace(std::make_pair(new_comp->getName(), new_comp));
+        }
+        /// @brief add net 
+        void DataBase::add_bookshelf_net(BookshelfParser::Net const& bookshelf_net) { 
+            Net* new_net = new Net(bookshelf_net.net_name);
+                //cout << "Add net: " << bookshelf_net.net_name << endl;
+            for (BookshelfParser::NetPin net_pin : bookshelf_net.vNetPin)
+            {
+                //cout << "\tNetPin: " << net_pin.node_name << endl;
+
+                Pin* pin_p = mm_pins[net_pin.node_name];
+                if(pin_p != NULL) { // it's a pin
+                    new_net->addNode(pin_p);
+                    pin_p->addNet(new_net);
+                } else { // it's a component
+                    Component* comp_p = mm_components[net_pin.node_name];
+                    new_net->addNode(comp_p);
+                    //new_net->addNetPin(comp_p, net_pin.second);
+                    comp_p->addNet(new_net);
+                }
+            }
+
+            mm_nets.emplace(std::make_pair(new_net->getName(), new_net));
+            
+            // Add net to degree map for easy access
+            int degree = new_net->getDegree();
+            if (mmv_nets_by_degree.count(degree) == 0) {
+                mmv_nets_by_degree.emplace(std::make_pair(degree, std::vector<Net*>()));
+            }
+            mmv_nets_by_degree[degree].push_back(new_net);
+
+         }
+
+        /// @brief add row 
+        void DataBase::add_bookshelf_row(BookshelfParser::Row const&) {  }
+
+        /// @brief set node position 
+        void DataBase::set_bookshelf_node_position(string const& name, double x, double y, string const& orientation, string const& placement_status, bool notsurewhatfor) {
+            //cout << "set_bookshelf_node_position(): " << name << ": (" << x << ", " << y << ") " << orientation << " " << orientation << " " << notsurewhatfor << endl;
+            if(placement_status == "FIXED") { // terminal pin
+                Pin* pin = mm_pins[name];
+                assert(pin != NULL && "invalid pin name!");
+                pin->setPosition(Position<position_type>(x, y));
+                pin->setPlacementStatus(PlacementStatus::FIXED);
+                pin->setOrientation(orientation);
+                // Bookshelf format doesn't seem to explicitly give die area?
+                // Instead we look for the pins with the biggest coordinates
+                if(x > m_max_x) m_max_x = x;
+                if(y > m_max_y) m_max_y = y;
+            } else { // non-terminal node
+                Component* comp = mm_components[name];
+                assert(comp != NULL && "invalid component name!");
+                comp->setPosition(Position<position_type>(x, y));
+                comp->setOrientation(orientation);
+            }
+
+        }
+        /// @brief set net weight 
+        //void DataBase::set_bookshelf_net_weight(string const& name, double w) {}
+        /// @brief set node shapes 
+        //void DataBase::set_bookshelf_shape(NodeShape const&) {}
+        /// @brief set routing information 
+        //void DataBase::set_bookshelf_route_info(RouteInfo const&) {}
+        /// @brief set NI terminal with layers 
+        //void DataBase::add_bookshelf_niterminal_layer(string const&, string const&) {}
+        /// @brief set blockages with layers 
+        //void DataBase::add_bookshelf_blockage_layers(string const&, vector<string> const&) {}
+
+        /// @brief set design name 
+        void DataBase::set_bookshelf_design(string& s) { 
+            m_design_name = s;
+            log_info("Bookshelf design: " + s);
+        }
+
+        /// @brief a callback when a bookshelf file reaches to the end 
+        void DataBase::bookshelf_end() { 
+            m_die_area = Box<position_type>(Position((position_type)0, (position_type)0), 
+                                  Position((position_type)m_max_x, (position_type)m_max_y));
+                cout << "m_max_x: " << m_max_x << "\tm_max_y: " << m_max_y << endl;
+            log_info("End of Bookshelf design reading.");
+        }
         
 // Print info functions
 void DataBase::printNodes() const
