@@ -56,7 +56,7 @@ runhw:
 	@clear
 	@echo "make runhw"
 #perf record #use this for perf profiler
-	time bin/AIEplace.exe xxx bin/aieplace.hw.xclbin
+	time -p bin/AIEplace.exe
 
 
 # make dse

@@ -34,8 +34,10 @@ void Visualizer::drawComponent(Component* c)
 
 void Visualizer::drawPin(Pin* p)
 {
-    double x = DIE_START + ((double) p->getX() / (double) m_die_width ) * DIE_SCALE;
-    double y = DIE_START + ((double) p->getY() / (double) m_die_height) * DIE_SCALE;
+    double start_x = (double) p->getX() ;
+    double start_y = (double) p->getY() ;
+    double x = DIE_START + (start_x / (double) m_die_width ) * DIE_SCALE;
+    double y = DIE_START + (start_y / (double) m_die_height) * DIE_SCALE;
     double width = max<double>(MIN_SIZE, (p->getXsize() / (double) m_die_width) * DIE_SCALE);
     double height =max<double>(MIN_SIZE, (p->getYsize() / (double) m_die_height) * DIE_SCALE);
     //cairo_rectangle (cr, x, y, width, height);
@@ -140,14 +142,16 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, int iteration)
     cairo_stroke(cr);
     
     // Draw Components
-    for (auto item : db.getComponents())
+    for (auto item : db.getComponents()) {
        drawComponent(item.second);
+    }
     cairo_set_source_rgb (cr, 0.0, 0.0, 1.0); // blue
     cairo_fill(cr);
 
     // Draw Pins
-    for (auto item : db.getPins())
-       drawPin(item.second);
+    for (auto item : db.getPins()) 
+        drawPin(item.second);
+
     cairo_set_source_rgb (cr, 0.0, 1.0, 0.0); // green
     cairo_fill(cr);
 

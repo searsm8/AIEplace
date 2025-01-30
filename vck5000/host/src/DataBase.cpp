@@ -293,7 +293,7 @@ void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
             input_data[base_addr + 2*net_idx + j*8] = nodes[j]->getX();
             if(nodes[j]->getX() != nodes[j]->getX()) // check for nan
             {
-                cout << "nan detected:\n" << net->to_string() << endl;
+                log_warning(string("NaN detected:\n" + net->to_string() + "\n"));
                 nan = true;
             }
         }
@@ -304,7 +304,7 @@ void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
             input_data[base_addr + 2*net_idx + j*8 + 1] = nodes[j]->getY();
             if(nodes[j]->getY() != nodes[j]->getY()) // check for nan
             {
-                cout << "nan detected:\n" << net->to_string() << endl;
+                log_warning(string("NaN detected:\n" + net->to_string() + "\n"));
                 nan = true;
             }
         }
@@ -503,7 +503,7 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             new_pin->setBoundingBox(0, 0, width, height);
             new_pin->setPlacementStatus(PlacementStatus::FIXED);
             new_pin->setPosition(Position<position_type>(0, 0));
-
+            //cout << "NEW PIN: " << new_pin->getName() << " : " << width << ", " << height << " : " << mm_pins.size() << endl;
             mm_pins.emplace(std::make_pair(new_pin->getName(), new_pin));
         }
 
@@ -533,16 +533,18 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             for (BookshelfParser::NetPin net_pin : bookshelf_net.vNetPin)
             {
                 //cout << "\tNetPin: " << net_pin.node_name << endl;
-
-                Pin* pin_p = mm_pins[net_pin.node_name];
-                if(pin_p != NULL) { // it's a pin
+                if(mm_pins.count(net_pin.node_name) > 0) {
+                    Pin* pin_p = mm_pins[net_pin.node_name]; // this creates a new entry
                     new_net->addNode(pin_p);
                     pin_p->addNet(new_net);
-                } else { // it's a component
+                } else if(mm_components.count(net_pin.node_name)){ // it's a component
                     Component* comp_p = mm_components[net_pin.node_name];
                     new_net->addNode(comp_p);
                     //new_net->addNetPin(comp_p, net_pin.second);
                     comp_p->addNet(new_net);
+                } else {
+                    log_error("Node was not found while parsing bookshelf nets.");
+                    exit(7);
                 }
             }
 
@@ -559,13 +561,14 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
 
         /// @brief add row 
         void DataBase::add_bookshelf_row(BookshelfParser::Row const&) {  }
-
         /// @brief set node position 
         void DataBase::set_bookshelf_node_position(string const& name, double x, double y, string const& orientation, string const& placement_status, bool notsurewhatfor) {
             //cout << "set_bookshelf_node_position(): " << name << ": (" << x << ", " << y << ") " << orientation << " " << orientation << " " << notsurewhatfor << endl;
             if(placement_status == "FIXED") { // terminal pin
                 Pin* pin = mm_pins[name];
+                //cout << "pin found: " << name << " (" << x << ", " << y << ") " << orientation << " " << placement_status << "\tmm_pins.size(): " << mm_pins.size() << endl;
                 assert(pin != NULL && "invalid pin name!");
+                //cout << pin->getName() << " pin->setPosition(" << x << ", " << y << ")\n";
                 pin->setPosition(Position<position_type>(x, y));
                 pin->setPlacementStatus(PlacementStatus::FIXED);
                 pin->setOrientation(orientation);
@@ -574,6 +577,7 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                 if(x > m_max_x) m_max_x = x;
                 if(y > m_max_y) m_max_y = y;
             } else { // non-terminal node
+                //cout << "component found: " << name << " (" << x << ", " << y << ") " << orientation << " " << placement_status << endl;
                 Component* comp = mm_components[name];
                 assert(comp != NULL && "invalid component name!");
                 comp->setPosition(Position<position_type>(x, y));
@@ -602,7 +606,6 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         void DataBase::bookshelf_end() { 
             m_die_area = Box<position_type>(Position((position_type)0, (position_type)0), 
                                   Position((position_type)m_max_x, (position_type)m_max_y));
-                cout << "m_max_x: " << m_max_x << "\tm_max_y: " << m_max_y << endl;
             log_info("End of Bookshelf design reading.");
         }
         

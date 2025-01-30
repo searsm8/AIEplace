@@ -115,7 +115,8 @@ Placer::Placer(std::string config_filepath )
             db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
 
             #ifdef CREATE_VISUALIZATION
-                viz.init(db.getDieArea());
+                if(params["visualize"])
+                    viz.init(db.getDieArea());
             #endif
 
             grid = Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_ROW); 
@@ -258,6 +259,10 @@ double prepare_actual_time = 0, receive_time= 0;
 void Placer::computeAllPartials_AIE()
 {
     log("function", "Begin computeAllPartials_AIE()");
+    prepare_compute_time = 0;
+    prepare_actual_time = 0;
+    receive_time= 0;
+
     // Start timer
     long start_partials = getTime();
 
@@ -316,14 +321,22 @@ void Placer::computeAllPartials_AIE()
 //            partials_threads[graph_index].join();
 //        }
 
+
     // End timer and print
     double partials_compute_time = getInterval(start_partials, getTime());
+    // Add checks to ensure times are valid
+    assert(prepare_compute_time >= 0);
+    assert(prepare_actual_time >= 0);
+    assert(receive_time >= 0);
+    assert(partials_compute_time >= 0);
+
     Table top;
-    top.add_row(RowStream{} << "Prepare packet Total Thread compute time: " << prepare_compute_time);
-    top.add_row(RowStream{} << "Prepare packet actual compute time: " << prepare_actual_time);
-    top.add_row(RowStream{} << "Receive packet actual compute time: " << receive_time);
-    top.add_row(RowStream{} << "Total time for AIE partials compute time: " << partials_compute_time << " sec (" << PARTIALS_GRAPH_COUNT  << " AIE cores used)");
-    log("comms", top);
+    top.add_row(RowStream{} << "Prepare packet Total Thread compute time: " << std::to_string(prepare_compute_time));
+    top.add_row(RowStream{} << "Prepare packet actual compute time: " << std::to_string(prepare_actual_time));
+    top.add_row(RowStream{} << "Receive packet actual compute time: " << std::to_string(receive_time));
+    top.add_row(RowStream{} << "Total time for AIE partials compute time: " << std::to_string(partials_compute_time));
+
+    log("comms", top); // TODO: causes crash?
 }
 
 // Send a packet of coordinate data to the AIE partials computation graph
@@ -584,6 +597,7 @@ void Placer::computeAllPartials_CPU()
     //}
 
     long start_partials = getTime();
+// compute only for nets size 2-8, which is what normally runs on AIE
     for (auto item : db.getNetsByDegree()) {
         if(item.first < MIN_AIE_NET_SIZE || item.first > MAX_AIE_NET_SIZE) continue;
         for (Net* net_p : item.second) {
@@ -1024,8 +1038,16 @@ void Placer::nudgeNode(Node* node_p)
     // learning rate should be dynamic for each node?
     float die_size = min( grid.getDieWidth(), grid.getDieHeight() );
     float coeff = learning_rate * die_size;
-    move.x = coeff * (electro_force.x - node_p->partials_aie.x );
-    move.y = coeff * (electro_force.y - node_p->partials_aie.y );
+    float partials_x, partials_y; 
+    if(params["use_aie"]) {
+        partials_x = node_p->partials_aie.x;
+        partials_y = node_p->partials_aie.y;
+    } else {
+        partials_x = node_p->terms_cpu.partials.x;
+        partials_y = node_p->terms_cpu.partials.y;
+    }
+    move.x = coeff * (electro_force.x - partials_x ); // we subtract the partials to reduce net size!
+    move.y = coeff * (electro_force.y - partials_y );
 
     //cout << "learning_rate: " << learning_rate << "\tcoeff: " <<coeff<< endl;
     //cout << "electro_force.x: " << electro_force.x <<"\telectro_force.y: " << electro_force.y << endl;
@@ -1066,6 +1088,7 @@ void Placer::printIterationResults()
 
     // every 10 iterations, export an image
     #ifdef CREATE_VISUALIZATION
+        if(params["visualize"])
         if (iteration % 10 == 0) {
             viz.drawPlacement(db, output_dir / "placement", iteration);
             viz.drawElectricField(grid, output_dir / "efield", iteration);
@@ -1120,7 +1143,8 @@ void Placer::printFinalResults()
 
     // generate image of final placement
     #ifdef CREATE_VISUALIZATION
-        viz.drawPlacement(db, output_dir, iteration);
+        if(params["visualize"])
+            viz.drawPlacement(db, output_dir, iteration);
     #endif
 
     // write placed design to DEF

@@ -18,16 +18,16 @@ void setup_logging()
     activate_logging_key("INFO");   // Used to give info on things that some people might care about. Usually on.
     activate_logging_key("DATA");   // Used to give data on things that most people will care about. Always on.
     activate_logging_key("DEBUG");  // Used only by developers for debugging!
-    activate_logging_key("WARNING");// Something bad has happened!
+    //activate_logging_key("WARNING");// Something bad has happened!
     activate_logging_key("ERROR");  // Something VERY bad has happened!
 
     // CUSTOM LOGGING KEYS
-    activate_logging_key("packets"); // Used in DataBase.cpp for packet initialization
+    //activate_logging_key("packets"); // Used in DataBase.cpp for packet initialization
     activate_logging_key("dbinfo");
     activate_logging_key("comms");
-    activate_logging_key("bins");
-    activate_logging_key("overlap");
-    activate_logging_key("function"); // Used to log when important functions are called
+    //activate_logging_key("bins");
+    //activate_logging_key("overlap");
+    //activate_logging_key("function"); // Used to log when important functions are called
 }
 
 bool log(std::string key, Table t)
