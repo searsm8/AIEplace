@@ -51,10 +51,10 @@ clean:
 #BENCHMARK = ispd2015/mgc_superblue12
 #BENCHMARK = ispd2015/mgc_superblue16_a
 
-runhw:
+run:
 	@unset XCL_EMULATION_MODE
 	@clear
-	@echo "make runhw"
+	@echo "make run"
 #perf record #use this for perf profiler
 	time -p bin/AIEplace.exe
 

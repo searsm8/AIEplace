@@ -9,12 +9,19 @@
 #define inv_gamma 0.25 // 1/gamma factor for exponents (This should probably be a runtime parameter set by the graph)
 
 // perform fast exp algorithm on all 8 vector lanes
-void fast_exp(aie::vector<float, 8>& data, aie::vector<float, 8>& factor, aie::vector<float, 8>& ones)
+void fast_exp(aie::vector<float, 8>& exp, aie::vector<float, 8>& factor, aie::vector<float, 8>& ones)
 {
-    data = aie::mul(data, factor);
-    data = aie::add(data, ones); // data now contains: 1 + x/2^16
+    exp = aie::mul(exp, factor);
+
+    for(int i = 0; i < 8; i++) // check for valid range to prevent NaN results
+      if(exp[i] < -1)
+          exp[i] = -1; // if there is a very big negative exponent, we just want the result to be zero!
+
+    exp = aie::add(exp, ones); // exp now contains: 1 + x/2^16 (or zero for large negative exponents)
+
+
     for(int i = 0; i < 16; i++) // squaring 16 times yields sufficient precision?
-      data = aie::mul(data, data);
+      exp = aie::mul(exp, exp);
 }
 
 // Output is streamed, but due to limitation of only two in or out streams per kernel, we split:
