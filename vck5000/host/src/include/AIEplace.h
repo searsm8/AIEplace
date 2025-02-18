@@ -39,7 +39,14 @@ public:
     float global_lambda;
     int bins_per_row; // grid size
 
+    // Execution tracking
     int iteration = 0;
+    long double pgrm_start_time;
+    long double db_IO_time;
+    long double algo_start;
+    long double algo_time;
+    long double AIE_time;
+
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;
 #endif
@@ -65,6 +72,7 @@ public:
     void computeNetPartials_CPU (Net* net_p);
     void computeElectricFields_CPU ();
     void computeElectricFields_DCT();
+    void normalizeElectricFields();
 
     // CPU only computations
     void compute_a_terms_CPU (Net* net_p);

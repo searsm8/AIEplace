@@ -4,6 +4,7 @@
 #include <iostream>
 #include <iomanip>
 #include <fstream>
+#include <sstream>
 #include <vector>
 #include <map>
 #include <algorithm>
@@ -41,7 +42,7 @@ using std::min;
 // This is used when building the AIE graphs, and determines how many MM2S and S2MM data movers are required
 // and it is also used by the host code to know how many compute units to send data to.
 // Therefore, changing this value requires a complete rebuild of the entire project
-#define PARTIALS_GRAPH_COUNT 8
+#define PARTIALS_GRAPH_COUNT 24
 
 // ePlace hyperparameters
 #define INITIAL_LAMBDA 1 // inital lambda for each bin
@@ -61,6 +62,7 @@ AIEPLACE_NAMESPACE_BEGIN
 
 typedef float position_type;
 
+#define MIN_TOL 0.0001
 // Contains XY data, which might be coordinates or any other pair of data.
 struct XY
 {
@@ -68,7 +70,6 @@ struct XY
     float y;
     void clear() { x = 0; y = 0;}
 
-    #define MIN_TOL 0.01
     bool isClose(XY other)
     {
         bool close = true;
@@ -81,6 +82,10 @@ struct XY
         return close;
     }
 };
+
+// Execution time tracking functions
+long getEpoch();
+double getTiming(long, long);
 
 AIEPLACE_NAMESPACE_END 
 

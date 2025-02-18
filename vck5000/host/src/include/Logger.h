@@ -4,6 +4,7 @@
 #define LOGGER_H
 
 #include "Common.h"
+#include "Grid.h"
 #include <unordered_set>
 #include <tabulate/table.hpp>
 #include <tabulate/markdown_exporter.hpp>
@@ -12,6 +13,17 @@ using namespace tabulate;
 using std::string;
 
 namespace AIEplace {
+
+struct StatBlock {
+    string name;
+    long final_hpwl;
+    int iteration_count;
+    float init_learning_rate;
+    float final_learning_rate;
+
+    float prgm_runtime, db_IO_time, algo_time, AIE_time;
+};
+
 
 static std::unordered_set<string> logging_keys;
 static std::map<string, Color> string_colors;
@@ -42,6 +54,9 @@ void log_space();
 Color getColor(string key);
 
 void export_markdown(Table t, fs::path dir);
+void append_csv(StatBlock &);
+void export_intermediate_results(Grid& grid, fs::path dir, int iter);
+
 }
 
 #endif

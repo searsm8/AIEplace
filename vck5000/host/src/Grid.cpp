@@ -112,6 +112,7 @@ void Grid::computeBinOverlaps(Node* node_p)
 std::vector< std::vector<float> > Grid::getRho()
 {
     std::vector< std::vector<float> > rho;
+    float bin_area_inv = 1 / m_bins[0][0].bb.getArea();
 
     for (int col = 0; col < m_bins_per_row; col++)
     {
@@ -119,8 +120,8 @@ std::vector< std::vector<float> > Grid::getRho()
         for (int row = 0; row < m_bins_per_col; row++)
         {
             // Do I need to divide by area?
-            //rho[col][row] = m_bins[col][row].overlap / m_bins[col][row].bb.getArea();
-            rho[col][row] = m_bins[col][row].overlap;
+            rho[col][row] = m_bins[col][row].overlap * bin_area_inv ;
+            //rho[col][row] = m_bins[col][row].overlap;
         }
     }
     return rho;

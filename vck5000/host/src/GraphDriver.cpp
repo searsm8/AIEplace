@@ -11,13 +11,13 @@ void GraphDriver::print_info()
         xfer_off_time);
 }
 
-long GraphDriver::getEpoch() {
+long getEpoch() {
   struct timeval tm;
   gettimeofday(&tm, NULL);
   return (tm.tv_sec * 1000000)+tm.tv_usec;
 }
 
-double GraphDriver::getTiming(long end_time, long start_time) {
+double getTiming(long end_time, long start_time) {
   return (end_time - start_time) / 1.0e6;
 }
 

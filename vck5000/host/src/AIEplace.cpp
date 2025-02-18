@@ -28,8 +28,10 @@ void Placer::performIteration()
     if(params["use_aie"]) {
         computeElectricFields_AIE(); // Accelerated compute on AIEs
     } else {
-        computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
+        //computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
+        computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
     }
+    //normalizeElectricFields();
     //computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
     //placer.grid.printElectricFields();
 
@@ -43,6 +45,7 @@ void Placer::performIteration()
 */
 void Placer::run()
 {
+    algo_start = getEpoch();
     // Set the center point of die area as initial placement target
     Position<position_type> target =
                 Position<position_type>(grid.getDieWidth()/2, grid.getDieHeight()/2);
@@ -76,6 +79,7 @@ void Placer::run()
             converged = true;
         else iteration++;
     }
+    algo_time = getTiming(getEpoch(), algo_start);
     printFinalResults();
 }
 
@@ -99,6 +103,7 @@ Placer::Placer(std::string config_filepath )
                 exit(1);
             }
 
+            pgrm_start_time = getEpoch();
 
             json config = json::parse(config_file);
             params = config["params"];
@@ -113,6 +118,9 @@ Placer::Placer(std::string config_filepath )
 
             // Initialize database by reading LEF and DEF design files
             db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
+
+            db_IO_time = getTiming(getEpoch(), pgrm_start_time);
+            log_info("db read time: " + std::to_string(db_IO_time));
 
             #ifdef CREATE_VISUALIZATION
                 if(params["visualize"])
@@ -172,7 +180,6 @@ void Placer::printWelcomeBanner()
     banner.print(cout);
 }
 
-#define MIN_TOL 0.01
 bool isClose(float a, float b)
 {
     float diff = abs(abs(a) - abs(b));
@@ -336,7 +343,7 @@ void Placer::computeAllPartials_AIE()
     top.add_row(RowStream{} << "Receive packet actual compute time: " << std::to_string(receive_time));
     top.add_row(RowStream{} << "Total time for AIE partials compute time: " << std::to_string(partials_compute_time));
 
-    log("comms", top); // TODO: causes crash?
+    log("comms", top);
 }
 
 // Send a packet of coordinate data to the AIE partials computation graph
@@ -426,8 +433,8 @@ void Placer::computeElectricFields_AIE()
 
     for(int row = 0; row < BINS_PER_ROW; row++) {
         for(int col = 0; col < BINS_PER_ROW; col++) {
-        input_data[2*col] = rho[row][col];
-        input_data[2*col+1] = 0;
+        input_data[2*col] = rho[row][col]; // real part
+        input_data[2*col+1] = 0; // imaginary part
         }
 
     density_driver[0].send_packet(input_data);
@@ -457,7 +464,7 @@ void Placer::computeElectricFields_AIE()
         density_driver[0].send_packet(input_data);
         density_driver[0].receive_packet(output_data);
 
-        //cout << endl << "DCT output:" << endl << std::setprecision(2);
+        //cout << endl << "AIE DCT output:" << endl << std::setprecision(2);
         // Store the result a_uv transposed (for comparison)
         for(int row = 0; row < BINS_PER_ROW; row++) {
             grid.getBin(row, col).a_uv = output_data[2*row];
@@ -633,6 +640,8 @@ void Placer::compute_a_terms_CPU(Net* net_p)
     for (Node* node_p : nodes) {
         node_p->terms_cpu.a.plus.x  = exp( (node_p->getX() - nodes.front()->getX()) / gamma);
         node_p->terms_cpu.a.minus.x = exp( (nodes.back()->getX() - node_p->getX()) / gamma);
+        assert(node_p->terms_cpu.a.plus.x <= 1 && "Invalid a+ computed!");
+        assert(node_p->terms_cpu.a.minus.x <= 1 && "Invalid a- computed!");
     }
 
     // Y positions
@@ -692,6 +701,7 @@ void Placer::computeNetPartials_CPU(Net* net_p)
  * @brief On CPU, compute Electric fields using 2D-DCT method
  *
 **/
+// wrong result?
 void Placer::computeElectricFields_CPU()
 {
     compute_a_uv_naive();
@@ -702,6 +712,29 @@ void Placer::computeElectricFields_DCT()
 {
     compute_a_uv_DCT();
     compute_eField_DCT();
+}
+
+void Placer::normalizeElectricFields()
+{
+    float max_abs = 0;
+    // find the max absolute value of all eFields
+    for (int x = 0; x < grid.getBinsPerRow(); x++) {
+        for (int y = 0; y < grid.getBinsPerCol(); y++) {
+            if(abs(grid.getBin(x, y).eField.x) > max_abs)
+                max_abs = abs(grid.getBin(x, y).eField.x);
+            if(abs(grid.getBin(x, y).eField.y) > max_abs)
+                max_abs = abs(grid.getBin(x, y).eField.y);
+        }
+    }
+
+    // normalize values
+    for (int x = 0; x < grid.getBinsPerRow(); x++) {
+        for (int y = 0; y < grid.getBinsPerCol(); y++) {
+            grid.getBin(x, y).eField.x = grid.getBin(x, y).eField.x / max_abs;
+            grid.getBin(x, y).eField.y = grid.getBin(x, y).eField.y / max_abs;
+        }
+    }
+
 }
 
 // Compute the intermediate term a_uv for Efields
@@ -808,24 +841,24 @@ void Placer::compute_a_uv_DCT()
     //cout << endl;
 
     // compare to computed result from other methods
-    bool mismatch = false;
-    Table mismatches;
-    mismatches.add_row({"u", "v", "DCT result", "AIE result", "isClose"});
-    for (int u = 0; u < grid.getBinsPerRow(); u++)
-        for (int v = 0; v < grid.getBinsPerCol(); v++) {
-            //if(!isClose(a_uv[u][v], grid.getBin(u, v).a_uv))
-            {
-                mismatch = true;
-                bool close = isClose(a_uv[u][v], grid.getBin(u, v).a_uv);
-                mismatches.add_row(RowStream{} << std::setprecision(2) << u << v << a_uv[u][v] << grid.getBin(u, v).a_uv << close);
-            }
-        }
-    if(mismatch) {
-        Table top;
-        top.add_row(RowStream{} << "a_uv mismatch");
-        top.add_row({mismatches});
-        log_error(top);
-    } else log_info("Density DCT computation: all a_uv terms match!");
+    //bool mismatch = false;
+    //Table mismatches;
+    //mismatches.add_row({"u", "v", "DCT result", "AIE result", "isClose"});
+    //for (int u = 0; u < grid.getBinsPerRow(); u++)
+    //    for (int v = 0; v < grid.getBinsPerCol(); v++) {
+    //        bool close = isClose(a_uv[u][v], grid.getBin(u, v).a_uv);
+    //        if(!close)
+    //        {
+    //            mismatch = true;
+    //            mismatches.add_row(RowStream{} << std::setprecision(2) << u << v << a_uv[u][v] << grid.getBin(u, v).a_uv << close);
+    //        }
+    //    }
+    //if(mismatch) {
+    //    Table top;
+    //    top.add_row(RowStream{} << "a_uv mismatch");
+    //    top.add_row({mismatches});
+    //    log_error(top);
+    //} else log_info("Density DCT computation: all a_uv terms match!");
 
     for (int u = 0; u < grid.getBinsPerRow(); u++)
         for (int v = 0; v < grid.getBinsPerCol(); v++) {
@@ -859,16 +892,16 @@ void Placer::compute_eField_DCT()
 
     // compute IDCT on all rows of Ex, and IDXST on all rows of Ey
     for (int row_index = 0; row_index < num_rows; row_index++) {
-        cout << endl << "IDCT input from CPU:" << endl << std::setprecision(2);
-        for (int col_index = 0; col_index < num_rows; col_index++)
-            cout << Ex[row_index][col_index] << " ";
+        //cout << endl << "IDCT input from CPU:" << endl << std::setprecision(2);
+        //for (int col_index = 0; col_index < num_rows; col_index++)
+            //cout << Ex[row_index][col_index] << " ";
         Ex[row_index] = IDCT_naive (Ex[row_index]);
-        cout << endl << "IDCT output from CPU:" << endl << std::setprecision(2);
-        for (int col_index = 0; col_index < num_rows; col_index++)
-            cout << Ex[row_index][col_index] << " ";
+        //cout << endl << "IDCT output from CPU:" << endl << std::setprecision(2);
+        //for (int col_index = 0; col_index < num_rows; col_index++)
+            //cout << Ex[row_index][col_index] << " ";
         Ey[row_index] = IDXST_naive(Ey[row_index]);
     }
-    cout << endl;
+    //cout << endl;
 
     Ex = transpose(Ex);
     Ey = transpose(Ey);
@@ -883,45 +916,46 @@ void Placer::compute_eField_DCT()
     Ey = transpose(Ey);
 
     // compare to computed result from other methods
-    bool mismatch = false;
-    Table mismatches;
-    mismatches.add_row({"u", "v", "DCT result", "CPU result", "isClose"});
-    for (int u = 0; u < grid.getBinsPerRow(); u++)
-        for (int v = 0; v < grid.getBinsPerCol(); v++) {
-            //grid.getBin(u, v).a_uv = a_uv[u][v];
-            //if(!isClose(Ex[u][v], grid.getBin(u, v).eField.x))
-            {
-                mismatch = true;
-                bool close = isClose(Ex[u][v], grid.getBin(u, v).eField.x);
-                mismatches.add_row(RowStream{} <<std::setprecision(2) <<  u << v << Ex[u][v] << grid.getBin(u, v).eField.x << close);
-            }
-        }
-    if(mismatch) {
-        Table top;
-        top.add_row(RowStream{} << "eField.y mismatch");
-        top.add_row({mismatches});
-        log_error(top);
-    } else log_info("Density DCT computation: all eField.x terms match!");
 
-    Table mismatch_y;
-    mismatch = false;
-    mismatch_y.add_row({"u", "v", "DCT result", "CPU result", "isClose"});
-    for (int u = 0; u < grid.getBinsPerRow(); u++)
-        for (int v = 0; v < grid.getBinsPerCol(); v++) {
-            //grid.getBin(u, v).a_uv = a_uv[u][v];
-            //if(!isClose(Ex[u][v], grid.getBin(u, v).eField.x))
-            {
-                mismatch = true;
-                bool close = isClose(Ey[u][v], grid.getBin(u, v).eField.y);
-                mismatch_y.add_row(RowStream{} <<std::setprecision(2) <<  u << v << Ey[u][v] << grid.getBin(u, v).eField.y << close);
-            }
-        }
-    if(mismatch) {
-        Table top;
-        top.add_row(RowStream{} << "eField.y mismatch");
-        top.add_row({mismatch_y});
-        log_error(top);
-    } else log_info("Density DCT computation: all eField.y terms match!");
+    //bool mismatch = false;
+    //Table mismatches;
+    //mismatches.add_row({"u", "v", "DCT result", "CPU result", "isClose"});
+    //for (int u = 0; u < grid.getBinsPerRow(); u++)
+    //    for (int v = 0; v < grid.getBinsPerCol(); v++) {
+    //        //grid.getBin(u, v).a_uv = a_uv[u][v];
+    //        bool close = isClose(Ex[u][v], grid.getBin(u, v).eField.x);
+    //        if(!close)
+    //        {
+    //            mismatch = true;
+    //            mismatches.add_row(RowStream{} <<std::setprecision(2) <<  u << v << Ex[u][v] << grid.getBin(u, v).eField.x << close);
+    //        }
+    //    }
+    //if(mismatch) {
+    //    Table top;
+    //    top.add_row(RowStream{} << "eField.x mismatch");
+    //    top.add_row({mismatches});
+    //    log_error(top);
+    //} else log_info("Density DCT computation: all eField.x terms match!");
+
+    //Table mismatch_y;
+    //mismatch = false;
+    //mismatch_y.add_row({"u", "v", "DCT result", "CPU result", "isClose"});
+    //for (int u = 0; u < grid.getBinsPerRow(); u++)
+    //    for (int v = 0; v < grid.getBinsPerCol(); v++) {
+    //        //grid.getBin(u, v).a_uv = a_uv[u][v];
+    //            bool close = isClose(Ey[u][v], grid.getBin(u, v).eField.y);
+    //        if(!close)
+    //        {
+    //            mismatch = true;
+    //            mismatch_y.add_row(RowStream{} <<std::setprecision(2) <<  u << v << Ey[u][v] << grid.getBin(u, v).eField.y << close);
+    //        }
+    //    }
+    //if(mismatch) {
+    //    Table top;
+    //    top.add_row(RowStream{} << "eField.y mismatch");
+    //    top.add_row({mismatch_y});
+    //    log_error(top);
+    //} else log_info("Density DCT computation: all eField.y terms match!");
     //std::stringstream stream_x;
     //std::stringstream stream_y;
     //stream_x << "eField.x" << endl;
@@ -954,8 +988,11 @@ void Placer::computeOverlaps()
 {
     log("function", "Begin computeOverlaps()");
 
+    for (auto item : db.getComponents())
+        grid.computeBinOverlaps(item.second);
     //for (auto item : db.getPins())
     //    grid.computeBinOverlaps(item.second);
+
 
 
     // DEBUG
@@ -964,10 +1001,6 @@ void Placer::computeOverlaps()
         total_node_area += item.second->getArea();
     //for (auto item : db.getPins())
     //    total_node_area += item.second->getArea();
-
-    for (auto item : db.getComponents())
-        grid.computeBinOverlaps(item.second);
-
     double total_overlap = 0;
     for (int col = 0; col < grid.getBinsPerRow(); col++) {
         for (int row = 0; row < grid.getBinsPerCol(); row++) {
@@ -982,7 +1015,7 @@ void Placer::computeOverlaps()
     log("overlap", t);
 }
 
-/* To confirm that the AIE has performed a correct computaiton, this function
+/* To confirm that the AIE has performed a correct computation, this function
  * compares the results to the CPU computation result
  */
 void Placer::comparePartialResults()
@@ -1077,6 +1110,8 @@ void Placer::printIterationResults()
         top.add_row(RowStream{} << "Iteration" << iteration);
         top.add_row(RowStream{} << "HPWL" << db.computeTotalWirelength(params["wirelength_method"]));
         top.add_row(RowStream{} << "Overflow" << grid.computeTotalOverflow());
+        top.add_row(RowStream{} << "Learning Rate" << learning_rate);
+        top.add_row(RowStream{} << "Global Lambda" << global_lambda);
         top.column(0).format().font_align(FontAlign::right);
         top.column(1).format().font_align(FontAlign::left);
         log("DATA", top);
@@ -1094,6 +1129,8 @@ void Placer::printIterationResults()
             viz.drawElectricField(grid, output_dir / "efield", iteration);
         }
     #endif
+
+    //export_intermediate_results(grid, output_dir, iteration);
 }
 
 void Placer::computeStatistics()
@@ -1118,12 +1155,13 @@ void Placer::printFinalResults()
     Table top;
     top.add_row({"AIEplace Run Statistics"});
 
+    float final_hpwl = db.computeTotalWirelength(params["wirelength_method"]);
     Table results;
     results.add_row({"Benchmark name", db.getBenchmarkName()});
     results.add_row(RowStream{} << "Iterations" << iteration);
     results.add_row(RowStream{} << "CPU runtime" << "####"/*CPU_runtime*/);
     results.add_row(RowStream{} << "AIE runtime" << "####"/*AIE_runtime*/);
-    results.add_row(RowStream{} << "Final HPWL" << db.computeTotalWirelength(params["wirelength_method"]));
+    results.add_row(RowStream{} << "Final HPWL" << final_hpwl);
     results.add_row(RowStream{} << "Final Overflow" << grid.computeTotalOverflow());
     results.column(0).format().font_align(FontAlign::right);
     results.column(1).format().font_align(FontAlign::left);
@@ -1139,7 +1177,20 @@ void Placer::printFinalResults()
     top.add_row({hyperparams});
     log("DATA", top);
 
-    export_markdown(top, output_dir);
+    AIEplace::export_markdown(top, output_dir);
+
+    StatBlock stats;
+    stats.name = db.getBenchmarkName();
+    stats.iteration_count = iteration;
+    stats.final_hpwl = final_hpwl;
+    stats.final_learning_rate = learning_rate;
+    // timing stats
+    stats.prgm_runtime = getTiming(getEpoch(), pgrm_start_time);
+    stats.db_IO_time = db_IO_time;
+    stats.algo_time = algo_time;
+    //stats.AIE_time = AIE_time;
+
+    AIEplace::append_csv(stats);
 
     // generate image of final placement
     #ifdef CREATE_VISUALIZATION

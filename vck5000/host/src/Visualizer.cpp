@@ -173,8 +173,11 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, int iteration)
     cairo_set_font_size (cr, .02);
 
     cairo_move_to (cr, .8, .99);
-    std::string iter_str = "Iteration: " + std::to_string(iteration);
+    std::string iter_str = "Iter: " + std::to_string(iteration);
     cairo_show_text (cr, iter_str.c_str());
+    cairo_move_to (cr, .6, .99);
+    //std::string lr_str = "LR: " + std::to_string(learning_rate);
+    //cairo_show_text (cr, lr_str.c_str());
     cairo_stroke(cr);
 
 

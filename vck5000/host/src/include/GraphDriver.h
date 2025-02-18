@@ -43,9 +43,6 @@ public:
     float receive_packet(float * output_data);
 
     void print_info();
-
-    long getEpoch();
-    double getTiming(long end_time, long start_time);
 };
 
 class PartialsGraphDriver : public GraphDriver

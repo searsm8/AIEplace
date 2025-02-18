@@ -105,15 +105,16 @@ struct Bin
         } else if (node_overlap < 0) {
             overlapping_nodes.push_back(node_p);
             node_p->addBinOverlap(this, node_overlap);
-            Table top;
-            top.add_row(RowStream{} << "Negative overlap detected for bin" << "");
-            top.add_row(RowStream{} << "Bottom Left" << "Top Right");
-            top.add_row(RowStream{} << bb.getPosBottomLeft().to_string()<< bb.getPosTopRight().to_string());
-            Table t;
-            t.add_row(RowStream{} << "name" << "X" << "Y" << "area" << "width" << "height" << "overlap" << "width" << "height");
-            t.add_row(RowStream{} << node_p->getName() << node_p->getX() << node_p->getY() << node_p->getArea() << node_p->getXsize() << node_p->getYsize() << node_overlap << overlap_width << overlap_height);
-            top.add_row({t});
-            log("WARNING", top);
+
+            //Table top;
+            //top.add_row(RowStream{} << "Negative overlap detected for bin" << "");
+            //top.add_row(RowStream{} << "Bottom Left" << "Top Right");
+            //top.add_row(RowStream{} << bb.getPosBottomLeft().to_string()<< bb.getPosTopRight().to_string());
+            //Table t;
+            //t.add_row(RowStream{} << "name" << "X" << "Y" << "area" << "width" << "height" << "overlap" << "width" << "height");
+            //t.add_row(RowStream{} << node_p->getName() << node_p->getX() << node_p->getY() << node_p->getArea() << node_p->getXsize() << node_p->getYsize() << node_overlap << overlap_width << overlap_height);
+            //top.add_row({t});
+            //log("WARNING", top);
         }
 
 

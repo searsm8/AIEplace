@@ -18,13 +18,13 @@ void setup_logging()
     activate_logging_key("INFO");   // Used to give info on things that some people might care about. Usually on.
     activate_logging_key("DATA");   // Used to give data on things that most people will care about. Always on.
     activate_logging_key("DEBUG");  // Used only by developers for debugging!
-    //activate_logging_key("WARNING");// Something bad has happened!
+    activate_logging_key("WARNING");// Something bad has happened!
     activate_logging_key("ERROR");  // Something VERY bad has happened!
 
     // CUSTOM LOGGING KEYS
     //activate_logging_key("packets"); // Used in DataBase.cpp for packet initialization
     activate_logging_key("dbinfo");
-    activate_logging_key("comms");
+    //activate_logging_key("comms");
     //activate_logging_key("bins");
     //activate_logging_key("overlap");
     //activate_logging_key("function"); // Used to log when important functions are called
@@ -122,6 +122,52 @@ void export_markdown(Table t, fs::path dir)
     std::ofstream out_file;
     out_file.open(dir.append("statistics.md"));
     out_file << markdown;
+    out_file.close();
+}
+
+// used for debugging, enables easy comparison of CPU and AIE results
+// export intermdiate results of computations such as density or partials terms
+void export_intermediate_results(Grid& grid, fs::path dir, int iter)
+{
+    std::ofstream out_file;
+    out_file.open(dir.append("intermed_eField.dat"), std::ios_base::app);
+    out_file << endl << "Iteration: " << iter << endl;
+    out_file << "eField.x" << endl;
+    for (int x = 0; x < grid.getBinsPerRow(); x++) {
+        out_file << "row " << x << ": ";
+        for (int y = 0; y < grid.getBinsPerCol(); y++) {
+            out_file << grid.getBin(x, y).eField.x << " ";
+        }
+        out_file << endl;
+    }
+
+    out_file << endl << "eField.y" << endl;
+    for (int x = 0; x < grid.getBinsPerRow(); x++) {
+        out_file << "row " << x << ": ";
+        for (int y = 0; y < grid.getBinsPerCol(); y++) {
+            out_file << grid.getBin(x, y).eField.y << " ";
+        }
+        out_file << endl;
+    }
+
+    out_file.close();
+}
+
+void append_csv(StatBlock &stats)
+{
+    // Write to CSV file
+    std::ofstream out_file;
+    out_file.open("results/run_statistics.csv", std::ios_base::app);
+    out_file << stats.name << ", ";
+    out_file << stats.iteration_count << ", ";
+    out_file << std::scientific;
+    out_file << stats.final_hpwl<< ", ";
+    out_file << std::fixed << std::setprecision(3);
+    out_file << stats.final_learning_rate<< ", ";
+    out_file << stats.prgm_runtime << ", ";
+    out_file << stats.db_IO_time << ", ";
+    out_file << stats.algo_time << ", ";
+    out_file << endl;
     out_file.close();
 }
 
