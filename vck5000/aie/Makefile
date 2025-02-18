@@ -41,6 +41,7 @@ AIE_FLAGS += --kernel-linting
 TARGET ?= hw# choose hw or x86sim
 
 # Compile a full graph for AIEplace application, including multiple partials graphs and density graph
+.PHONY: libadf.a
 libadf.a: src/*
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	@echo "INFO: Running aiecompiler for all AIEplace graphs and kernels..."
