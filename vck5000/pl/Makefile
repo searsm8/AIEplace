@@ -27,7 +27,10 @@ AIE_OBJ := ../../aie/libadf.a
 
 # Kernel compiler & linker global settings
 KRNL_COMPILE_OPTS := -t $(TARGET) --config ../design.cfg --save-temps -j 26 -g
-KRNL_LINK_OPTS := -t $(TARGET) --config ../link.cfg -j 26 -g --save-temps
+KRNL_LINK_OPTS := -t $(TARGET) --config ../link.cfg --config ../design.cfg -j 26 -g --save-temps
+#KRNL_LINK_OPTS += --debug.aie=true
+#KRNL_LINK_OPTS += --debug.aie.chipscope TopGraph
+#KRNL_LINK_OPTS += --debug.aie_trace=true --debug.aie_trace_buffer_size=0x8000
 	
 .PHONY: pl
 .ONESHELL:
@@ -36,23 +39,23 @@ pl: mkrefdir config $(XO) $(XCLBIN)
 	cp reference_files_$(TARGET)/$(XCLBIN) ../bin/.
 
 mkrefdir:
-	rm -Rf reference_files_$(TARGET)
+	#rm -Rf reference_files_$(TARGET)
 	mkdir -p reference_files_$(TARGET)
 	mkdir -p ../bin
 
 # Building kernel
 .PHONY: $(XO)
-
 %.xo: src/%.cpp
+	@echo "Generating XO file: $@"
 	cd reference_files_$(TARGET) ; v++ $(KRNL_COMPILE_OPTS) -k $(basename $(notdir $<)) ../$< -o $@
 #$(XO): src/pl_kernel_m2ss.cpp src/pl_kernel_s2mm.cpp
 #	cd reference_files_$(TARGET) ; v++ $(KRNL_COMPILE_OPTS) -c -k $(KERNEL_NAME) -I'$(<D)' -o'$@' ../$<
 .PHONY: $(XSA_OBJ)
 $(XSA_OBJ): $(KERNEL_XO)
-	cd reference_files_$(TARGET) ; v++ $(KRNL_LINK_OPTS) -l -o'$@' $(+) $(AIE_OBJ)
+	cd reference_files_$(TARGET) ; v++ --link $(KRNL_LINK_OPTS) -o'$@' $(+) $(AIE_OBJ)
 .PHONY: $(XCLBIN)
 $(XCLBIN): $(XSA_OBJ)
-	cd reference_files_$(TARGET) ; v++ -p -t $(TARGET) -f $(PLATFORM) $^ $(AIE_OBJ) -o $@ --package.boot_mode=ospi
+	cd reference_files_$(TARGET) ; v++ --package --target $(TARGET) --platform $(PLATFORM) $^ $(AIE_OBJ) -o $@ --package.boot_mode=ospi
 
 # Generates the link.cfg file which specifies connections between PL and AIE
 .PHONY: config

@@ -268,17 +268,17 @@ void Placer::computeAllPartials_AIE()
     log("function", "Begin computeAllPartials_AIE()");
     prepare_compute_time = 0;
     prepare_actual_time = 0;
-    receive_time= 0;
+    receive_time = 0;
 
     // Start timer
     long start_partials = getTime();
 
     // for each packet specified in DataBase
-    int packet_index = 0;
+    int packet_index {0}; // prefered method of initialization
     while(packet_index < db.getPacketCount()) {
-        int graphs_active = 0;
+        int graphs_active {0};
         // send a packet to each AIE graph
-        long start_prep = getTime();
+        long start_prep {getTime()};
         std::thread partials_threads[PARTIALS_GRAPH_COUNT];
         for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
             //cout << "packet_index: " << packet_index << "\t < " << db.mv_packet[graph_index].size() << endl;

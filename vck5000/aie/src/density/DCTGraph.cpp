@@ -1,6 +1,8 @@
 #include "DCTGraph.h"
 
 DCTGraph density_graph;
+IDCTGraph idct_graph;
+IDXSTGraph idxst_graph;
 
 int main(void) {
   adf::return_code ret;

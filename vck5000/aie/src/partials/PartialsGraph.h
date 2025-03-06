@@ -17,17 +17,18 @@ public:
   adf::output_plio outplio_partials[PARTIALS_GRAPH_COUNT];
 
   PartialsGraph(){
+    // create a packet splitter/merger for every `4` streams going out
     int packet_stream_count = PARTIALS_GRAPH_COUNT / PACKET_CLUSTER_SIZE;
     assert(packet_stream_count * PACKET_CLUSTER_SIZE == PARTIALS_GRAPH_COUNT && "Invalid PARTIALS_GRAPH_COUNT");
 
     for(int i = 0; i < packet_stream_count; i++) // iterate over number of packet streams
     {
       // create packet splitter and merger for this packet stream
-      adf::pktsplit<PACKET_CLUSTER_SIZE> splitter; // this may need to be an array outside loop/
-      adf::pktmerge<PACKET_CLUSTER_SIZE> merger;
+      //adf::pktsplit<PACKET_CLUSTER_SIZE> splitter; // this may need to be an array outside loop/
+      //adf::pktmerge<PACKET_CLUSTER_SIZE> merger;
 
-      splitter = adf::pktsplit<PACKET_CLUSTER_SIZE>::create();
-      merger   = adf::pktmerge<PACKET_CLUSTER_SIZE>::create();
+      //splitter = adf::pktsplit<PACKET_CLUSTER_SIZE>::create();
+      //merger   = adf::pktmerge<PACKET_CLUSTER_SIZE>::create();
 
       for(int j = 0; j < PACKET_CLUSTER_SIZE; j++)
       {
@@ -37,8 +38,8 @@ public:
         partials_kernel[index] = adf::kernel::create(compute_partials);
 
         // Primary inputs to the AIE array
-        x_in[index] = adf::input_plio::create("x_in_"+std::to_string(i), adf::plio_128_bits, "golden_data/partials/x_in"+std::to_string(i)+".dat");
-        outplio_partials[index] = adf::output_plio::create("outplio_partials_"+std::to_string(i), adf::plio_128_bits, "simdata/partials"+std::to_string(i)+".dat");
+        x_in[index] = adf::input_plio::create("x_in_"+std::to_string(index), adf::plio_128_bits, "golden_data/partials/x_in"+std::to_string(index)+".dat");
+        outplio_partials[index] = adf::output_plio::create("outplio_partials_"+std::to_string(index), adf::plio_128_bits, "simdata/partials"+std::to_string(index)+".dat");
 
         // Input connections for abc_kernel
         adf::connect<adf::stream> net_in(x_in[index].out[0], abc_kernel[index].in[0]); // x-coords

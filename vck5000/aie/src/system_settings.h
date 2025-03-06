@@ -7,10 +7,11 @@
 #include <aie_api/utils.hpp>
 
 // POINT_SIZE is redundant with BINS_PER_ROW in Common.h and these should be merged to avoid error
-#define POINT_SIZE 32// Must be a power of two for FFT (min 16)
+//#define POINT_SIZE 32// Must be a power of two for FFT (min 16)
+constexpr int POINT_SIZE {32};// Must be a power of two for FFT (min 16)
+constexpr int NUM_ITER {POINT_SIZE};
 #define FFT_DATA_TYPE cfloat // cfloat, cint32, or cint16
 #define TWIDDLE_TYPE cfloat // cfloat, or cint16
-#define NUM_ITER POINT_SIZE
 
 // ---EACH LINE OF IO IS ALWAYS 32b---
 // if cfloat or cint32 is used, then input format must be:

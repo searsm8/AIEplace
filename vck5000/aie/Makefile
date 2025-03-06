@@ -36,7 +36,8 @@ AIE_FLAGS += -include=../host/src/include
 #AIE_FLAGS += -include=$(XILINX_VITIS)/aietools/include/
 AIE_FLAGS += --verbose
 #AIE_FLAGS += --platform=$(PLATFORM) # platform not needed for VCK5000?
-AIE_FLAGS += --kernel-linting
+AIE_FLAGS += --kernel-linting# Used for debugging, has overhead!
+AIE_FLAGS += --event-trace=runtime 
 
 TARGET ?= hw# choose hw or x86sim
 
@@ -72,7 +73,7 @@ aie_x86:
 	@echo "INFO: Running aiecompiler for x86sim..."
 	@rm -rf Work libadf.a
 	@mkdir -p Work
-	aiecompiler --target=x86sim --include="src" --workdir=./Work ${GRAPH_TOP}
+	aiecompiler --target=x86sim --include="src" --workdir=./Work ${GRAPH_TOP} ${AIE_FLAGS}
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # Simulate AIE code
