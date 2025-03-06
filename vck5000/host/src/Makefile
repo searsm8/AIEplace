@@ -50,12 +50,14 @@ all: ${EXE}
 
 ${EXE}: ${MAIN} ${OBJS}
 	@mkdir -p ${TOP_DIR}/bin
+	@printf "\n\tMAKE_INFO: Compile AIEplace executable \"$@\"\n"
 	${GCC} ${PROFILE_FLAG} -o ${EXE} ${MAIN} ${OBJS} ${INCLUDES} ${COMPILE_FLAGS}
 
 objs: ${OBJS}
 
 objs/%.o: ./%.cpp ./include/%.h ./include/Common.h
 	@mkdir -p objs
+	@printf "\n\tMAKE_INFO: Compile object file \"$@\"\n"
 	${GCC} -c ${PROFILE_FLAG}  $< ${INCLUDES} ${COMPILE_FLAGS} -o $@
 
 clean:

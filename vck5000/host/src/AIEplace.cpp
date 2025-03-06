@@ -13,7 +13,7 @@ void Placer::performIteration()
     // launch threads from this function?
 
     // Compute terms for HPWL partials
-    if(params["use_aie"]) {
+    if(params["use_aie_partials"]) {
         computeAllPartials_AIE();
     } else {
         computeAllPartials_CPU();
@@ -25,7 +25,7 @@ void Placer::performIteration()
     //db.printOverlaps();
     //grid.printOverflows();
 
-    if(params["use_aie"]) {
+    if(params["use_aie_density"]) {
         computeElectricFields_AIE(); // Accelerated compute on AIEs
     } else {
         //computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
@@ -128,7 +128,7 @@ Placer::Placer(std::string config_filepath )
             #endif
 
             grid = Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_ROW); 
-            if(params["use_aie"]) {
+            if(params["use_aie_partials"] || params["use_aie_density"]) {
                 // Open Xilinx Device
                 xrt::device device = xrt::device(DEVICE_ID);
                 log_info("Device ID found: " + std::to_string(DEVICE_ID));
@@ -138,14 +138,17 @@ Placer::Placer(std::string config_filepath )
                 xrt::uuid xclbin_uuid = device.load_xclbin(xclbin_file);
                 log_info("Success!");
 
-                // Create drivers which handle buffer IO
-                for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
-                    partials_drivers[i].init(device, xclbin_uuid, i);
-
-                density_driver[0].init(device, xclbin_uuid, 0, BINS_PER_ROW); // DCT graph
-                density_driver[1].init(device, xclbin_uuid, 1, BINS_PER_ROW); // IDCT graph
-                density_driver[2].init(device, xclbin_uuid, 2, BINS_PER_ROW); // IDXST graph
-                
+                if(params["use_aie_partials"]) {
+                    // Create drivers which handle buffer IO
+                    for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
+                        partials_drivers[i].init(device, xclbin_uuid, i);
+                }
+                    
+                if(params["use_aie_density"]) {
+                    density_driver[0].init(device, xclbin_uuid, 0, BINS_PER_ROW); // DCT graph
+                    density_driver[1].init(device, xclbin_uuid, 1, BINS_PER_ROW); // IDCT graph
+                    density_driver[2].init(device, xclbin_uuid, 2, BINS_PER_ROW); // IDXST graph
+                }
             }
         }
 
@@ -1072,7 +1075,7 @@ void Placer::nudgeNode(Node* node_p)
     float die_size = min( grid.getDieWidth(), grid.getDieHeight() );
     float coeff = learning_rate * die_size;
     float partials_x, partials_y; 
-    if(params["use_aie"]) {
+    if(params["use_aie_partials"]) {
         partials_x = node_p->partials_aie.x;
         partials_y = node_p->partials_aie.y;
     } else {
