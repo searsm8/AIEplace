@@ -30,23 +30,23 @@ using std::min;
 #define CREATE_VISUALIZATION // if this is defined, a Visualizer class using Cairo will export images
 
 // Sizes used in multiple files
-#define TEST_NET_SIZE 6 // for testing and debugging only
-#define VEC_SIZE 8 // DO NOT TOUCH. This is the number of floats transferred to AIE kernels at a time.
-#define NETS_PER_GROUP 4 // each AIE vector is of size 8, and we process X and Y data for the net, so 4 nets fit into a vector
-#define LCM_BUFFSIZE 840 // Set buffer size to 840 
+constexpr int TEST_NET_SIZE = 6; // for testing and debugging only
+constexpr int VEC_SIZE = 8; // DO NOT TOUCH. This is the number of floats transferred to AIE kernels at a time.
+constexpr int NETS_PER_GROUP = 4; // each AIE vector is of size 8, and we process X and Y data for the net, so 4 nets fit into a vector
+constexpr int LCM_BUFFSIZE = 840; // Set buffer size to 840 
                         //  840 is the Least Common Multiple (LCM) of netsizes 2 thru 8
-#define INPUT_PACKET_SIZE VEC_SIZE*(LCM_BUFFSIZE+1) // need extra 8 for control data
-#define OUTPUT_PACKET_SIZE VEC_SIZE*LCM_BUFFSIZE
+constexpr int INPUT_PACKET_SIZE  = VEC_SIZE*(LCM_BUFFSIZE+1); // need extra 8 for control data
+constexpr int OUTPUT_PACKET_SIZE = VEC_SIZE*LCM_BUFFSIZE;
 
 // PARTIALS_GRAPH_COUNT is the number of compute units on AIE for partials acceleration.
 // This is used when building the AIE graphs, and determines how many MM2S and S2MM data movers are required
 // and it is also used by the host code to know how many compute units to send data to.
 // Therefore, changing this value requires a complete rebuild of the entire project
-#define PARTIALS_GRAPH_COUNT 8// 30 or more will require more than 64 compute units in PL
+constexpr int PARTIALS_GRAPH_COUNT = 8;// 30 or more will require more than 64 compute units in PL
 // TODO: rewrite PL kernels to require fewer PL resources!
 
 // ePlace hyperparameters
-#define INITIAL_LAMBDA 1 // inital lambda for each bin
+constexpr int INITIAL_LAMBDA = 1; // inital lambda for each bin
 //#define WIRELENGTH_COMPUTE_METHOD "HPWL"
 
 // granularity of bin grid
@@ -63,7 +63,7 @@ AIEPLACE_NAMESPACE_BEGIN
 
 typedef float position_type;
 
-#define MIN_TOL 0.0001
+#define MIN_TOL 0.01
 // Contains XY data, which might be coordinates or any other pair of data.
 struct XY
 {
@@ -81,6 +81,12 @@ struct XY
         if(!((diff_y < MIN_TOL) || (diff_y / y < MIN_TOL)))
             close = false;
         return close;
+    }
+    string toString()
+    {
+        std::ostringstream ss;
+        ss << "(" << x << ", " << y << ")";
+        return ss.str();
     }
 };
 

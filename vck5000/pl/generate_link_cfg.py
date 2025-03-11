@@ -1,12 +1,12 @@
 # File: generate_link_cfg.py
 # Builds the config file link.cfg which specifies connections between PL and AIE
 # reads from "Common.h" the number of Partials Graphs exist in the design
-import re
+import re# regular expressions
 
 def read_partials_graph_count(header_file):
     with open(header_file, 'r') as f:
         content = f.read()
-        match = re.search(r'#define\s+PARTIALS_GRAPH_COUNT\s+(\d+)', content)
+        match = re.search(r'constexpr\s+int\s+PARTIALS_GRAPH_COUNT\s*=\s*(\d+)', content)
         if match:
             return int(match.group(1))
         else:
