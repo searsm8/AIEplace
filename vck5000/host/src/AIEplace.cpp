@@ -1160,7 +1160,7 @@ void Placer::printIterationResults()
     // every 10 iterations, export an image
     #ifdef CREATE_VISUALIZATION
         if(params["visualize"])
-        if (iteration % 10 == 0) {
+        if (iteration % int(params["iterations_per_export"]) == 0) {
             viz.drawPlacement(db, output_dir / "placement", iteration);
             viz.drawElectricField(grid, output_dir / "efield", iteration);
         }

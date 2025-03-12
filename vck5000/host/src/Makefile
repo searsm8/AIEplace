@@ -1,14 +1,14 @@
 GCC := g++#${CXX} # For CPU only build, set to g++
-TOP_DIR := ../..
-PROJ_NAME := AIEplace1
+TOP_DIR := ../../..
+PROJ_NAME := AIEplace
 MAIN = main.cpp
 ITEMS := AIEplace DataBase Grid Net DCT GraphDriver Logger
 ITEMS += Visualizer
 
 OBJS := $(addprefix objs/, $(addsuffix .o, ${ITEMS}))
-EXE := ${TOP_DIR}/bin/AIEplace.exe
+EXE := ${TOP_DIR}/vck5000/bin/AIEplace.exe
 
-THIRD_PARTY := ${HOME}/${PROJ_NAME}/third_party
+THIRD_PARTY := ${TOP_DIR}/third_party
 LIMBO_DIR := ${THIRD_PARTY}/Limbo
 TABLE_DIR := ${THIRD_PARTY}/tabulate/include
 

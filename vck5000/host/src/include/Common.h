@@ -42,7 +42,7 @@ constexpr int OUTPUT_PACKET_SIZE = VEC_SIZE*LCM_BUFFSIZE;
 // This is used when building the AIE graphs, and determines how many MM2S and S2MM data movers are required
 // and it is also used by the host code to know how many compute units to send data to.
 // Therefore, changing this value requires a complete rebuild of the entire project
-constexpr int PARTIALS_GRAPH_COUNT = 8;// 30 or more will require more than 64 compute units in PL
+constexpr int PARTIALS_GRAPH_COUNT = 1;// 30 or more will require more than 64 compute units in PL
 // TODO: rewrite PL kernels to require fewer PL resources!
 
 // ePlace hyperparameters
