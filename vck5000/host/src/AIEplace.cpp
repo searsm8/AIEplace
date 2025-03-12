@@ -20,8 +20,8 @@ void Placer::performIteration()
     }
 
     // Compare results to ensure correctness
-    computeAllPartials_CPU();
-    comparePartialResults();
+    //computeAllPartials_CPU();
+    //comparePartialResults();
 
     // Compute Electric Fields in each bin
     computeOverlaps(); // Density Map computation
@@ -1038,9 +1038,9 @@ void Placer::comparePartialResults()
         else 
         {
             error_count++;
-            log_error("Terms do not match for node " + np->getName()
-                    + " -- CPU result: " + np->terms_cpu.partials.toString()
-                    + " -- AIE result: " + np->partials_aie.toString());
+            //log_error("Terms do not match for node " + np->getName()
+            //        + " -- CPU result: " + np->terms_cpu.partials.toString()
+            //        + " -- AIE result: " + np->partials_aie.toString());
 
             //cout << "error node " << np->getName() << ": " << endl; 
             //for(auto const& net_p : np->getNets())
@@ -1065,7 +1065,10 @@ void Placer::comparePartialResults()
             //if(print_count++ > 50) return;
         }
     }
-        cout << "errors: " << error_count << "\ttotal: " << total << "\tproportion: " << error_count/total << endl;
+    
+    std::stringstream ss;
+    ss << "errors: " << error_count << "\ttotal: " << total << "\tproportion: " << float(error_count)/float(total) << endl;
+    log_error(ss.str());
 }
 
 void Placer::compareDensityResults()

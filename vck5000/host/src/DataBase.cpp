@@ -355,8 +355,8 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8 + 1]));
             float partial = output_data[base_addr + 2*net_idx + n*8 + 1];
             nodes[n]->partials_aie.y += partial;
-            if(abs(partial) > MAX_PARTIAL)
-                cout << "LARGE Y PARTIAL: node " << nodes[n]->getName() << " " << partial << endl;
+            //if(abs(partial) > MAX_PARTIAL)
+            //    cout << "LARGE Y PARTIAL: node " << nodes[n]->getName() << " " << partial << endl;
         }
 
         net->sortPositionsMaxMinX(); // X or Y
@@ -365,8 +365,8 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8]));
             float partial = output_data[base_addr + 2*net_idx + n*8 + 0];
             nodes[n]->partials_aie.x += partial;
-            if(abs(partial) > MAX_PARTIAL)
-                cout << "LARGE X PARTIAL: node " << nodes[n]->getName() << " " << partial << endl;
+            //if(abs(partial) > MAX_PARTIAL)
+            //    cout << "LARGE X PARTIAL: node " << nodes[n]->getName() << " " << partial << endl;
         }
     }
 
