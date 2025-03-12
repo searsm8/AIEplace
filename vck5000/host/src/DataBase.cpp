@@ -211,7 +211,14 @@ double DataBase::computeTotalComponentArea()
     return total_area;
 }
 
-/* @brief: Set up the Packet Contents structure
+/* @brief: Organize data into “groups” to create “packets”.
+Define a “group” as X and Y data of 4 nets of the same size, which gives 8 operands
+A packet is a set of groups. The number of groups_per_packet  =  840 / net_size 
+840 is LCM of sizes 2-8, which means all nets <= 8 will fit neatly into 840
+
+Loop over net_size 2 thru 8.
+Generate packets of current net_size until all nets of this size are assigned.
+
 */
 void DataBase::initializePacketContents()
 {
@@ -324,6 +331,7 @@ void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
 
 }
 
+constexpr float MAX_PARTIAL = 1.0;
 void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
 {
     //int offset = mm_output_index[net_size]; // offset tracks which nets partials should be added to
@@ -344,13 +352,21 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
 
         // nodes are already sorted by Y coords, so store them first
         for(int n = 0; n < net_size; n++) {
-            nodes[n]->partials_aie.y += output_data[base_addr + 2*net_idx + n*8 + 1];
+            //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8 + 1]));
+            float partial = output_data[base_addr + 2*net_idx + n*8 + 1];
+            nodes[n]->partials_aie.y += partial;
+            if(abs(partial) > MAX_PARTIAL)
+                cout << "LARGE Y PARTIAL: node " << nodes[n]->getName() << " " << partial << endl;
         }
 
         net->sortPositionsMaxMinX(); // X or Y
         //nodes = net->getNodes();
         for(int n = 0; n < net_size; n++) {
-            nodes[n]->partials_aie.x += output_data[base_addr + 2*net_idx + n*8];
+            //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8]));
+            float partial = output_data[base_addr + 2*net_idx + n*8 + 0];
+            nodes[n]->partials_aie.x += partial;
+            if(abs(partial) > MAX_PARTIAL)
+                cout << "LARGE X PARTIAL: node " << nodes[n]->getName() << " " << partial << endl;
         }
     }
 

@@ -18,7 +18,10 @@ void Placer::performIteration()
     } else {
         computeAllPartials_CPU();
     }
-    //comparePartialResults();
+
+    // Compare results to ensure correctness
+    computeAllPartials_CPU();
+    comparePartialResults();
 
     // Compute Electric Fields in each bin
     computeOverlaps(); // Density Map computation
@@ -131,7 +134,7 @@ Placer::Placer(std::string config_filepath )
             if(params["use_aie_partials"] || params["use_aie_density"]) {
                 // Open Xilinx Device
                 xrt::device device = xrt::device(DEVICE_ID);
-                log_info("Device ID found: " + std::to_string(DEVICE_ID));
+                log_info("Device found -- ID: " + std::to_string(DEVICE_ID));
 
                 // Load xclbin which includes PL and AIE graph
                 log_info("Loading xclbin: \"" + xclbin_file + "\"");
@@ -277,8 +280,7 @@ void Placer::computeAllPartials_AIE()
     long start_partials = getTime();
 
     // for each packet specified in DataBase
-    int packet_index {0}; // prefered method of initialization
-    while(packet_index < db.getPacketCount()) {
+    for(int packet_index {0}; packet_index < db.getPacketCount(); packet_index++) {
         int graphs_active {0};
         // send a packet to each AIE graph
         long start_prep {getTime()};
@@ -303,8 +305,8 @@ void Placer::computeAllPartials_AIE()
         //    partials_threads[graph_index].join();
         //}
 
-     prepare_actual_time += getInterval(start_prep, getTime());
-     long start_receive = getTime();
+        prepare_actual_time += getInterval(start_prep, getTime());
+        long start_receive = getTime();
 
         // receive output from each AIE graph
         for(int graph_index = 0; graph_index < graphs_active; graph_index++) {
@@ -322,9 +324,7 @@ void Placer::computeAllPartials_AIE()
         //    //cout << "Joining thread: " << graph_index << endl;
         //    partials_threads[graph_index].join();
         //}
-     receive_time += getInterval(start_receive, getTime());
-
-        packet_index++;
+        receive_time += getInterval(start_receive, getTime());
     }
 //        for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
 //            cout << "Joining thread: " << graph_index << endl;
@@ -1026,16 +1026,46 @@ void Placer::comparePartialResults()
     int print_count = 0;
     log_info("Comparing Partial Results.");
     auto nodes_map = db.getComponents();
-    for (auto const& item: nodes_map) {
+    auto nets_map = db.getNets();
+    long error_count = 0, total = 0;
+    for (auto const& item: nodes_map) 
+    {
+        Table top;
         Node* np = item.second;
+        total++;
         if(np->terms_cpu.partials.isClose(np->partials_aie))
             continue;
-        else {
-            log_error("Terms do not match for node: " + np->getName());
-            np->printPartials();
-            if(print_count++ > 50) return;
+        else 
+        {
+            error_count++;
+            log_error("Terms do not match for node " + np->getName()
+                    + " -- CPU result: " + np->terms_cpu.partials.toString()
+                    + " -- AIE result: " + np->partials_aie.toString());
+
+            //cout << "error node " << np->getName() << ": " << endl; 
+            //for(auto const& net_p : np->getNets())
+            //{
+            //    cout << "\tOn net " << net_p->getName() << ": ";
+            //    for(auto const& shares_net : net_p->getNodes())
+            //    {
+            //        cout << shares_net->getName()<< shares_net->getPosition().to_string() << ", ";
+            //    }
+            //    cout << endl;
+            //}
+            //cout << endl;
+
+            //Table t;
+            //t.add_row({RowStream{} << " Partials" << "X" << "Y"});
+            //t.add_row({RowStream{} << "CPU result" << np->terms_cpu.partials.x << np->terms_cpu.partials.y});
+            //t.add_row({RowStream{} << "AIE result" << np->partials_aie.x << np->partials_aie.y});
+
+            //top.add_row({"Node " + np->getName()});
+            //top.add_row({t});
+            //log("DATA", top);
+            //if(print_count++ > 50) return;
         }
     }
+        cout << "errors: " << error_count << "\ttotal: " << total << "\tproportion: " << error_count/total << endl;
 }
 
 void Placer::compareDensityResults()

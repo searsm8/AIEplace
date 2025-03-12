@@ -144,18 +144,6 @@ public:
         cout << endl;
     }
 
-    void printPartials() {
-       // Table t;
-       // t.add_row({RowStream{} << " Partials" << "X" << "Y"});
-       // t.add_row({RowStream{} << "CPU result" << terms_cpu.partials.x << terms_cpu.partials.y});
-       // t.add_row({RowStream{} << "AIE result" << partials_aie.x << partials_aie.y});
-
-       // Table top;
-       // top.add_row({"Node " + m_name});
-       // top.add_row({t});
-       // log("DATA", top);
-
-    }
 }; // End of class Node
 
 

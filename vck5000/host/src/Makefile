@@ -1,5 +1,6 @@
 GCC := g++#${CXX} # For CPU only build, set to g++
 TOP_DIR := ../..
+PROJ_NAME := AIEplace1
 MAIN = main.cpp
 ITEMS := AIEplace DataBase Grid Net DCT GraphDriver Logger
 ITEMS += Visualizer
@@ -7,7 +8,7 @@ ITEMS += Visualizer
 OBJS := $(addprefix objs/, $(addsuffix .o, ${ITEMS}))
 EXE := ${TOP_DIR}/bin/AIEplace.exe
 
-THIRD_PARTY := ${HOME}/AIEplace/third_party
+THIRD_PARTY := ${HOME}/${PROJ_NAME}/third_party
 LIMBO_DIR := ${THIRD_PARTY}/Limbo
 TABLE_DIR := ${THIRD_PARTY}/tabulate/include
 
@@ -39,7 +40,7 @@ COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 #COMPILE_FLAGS += -DCREATE_VISUALIZATION# Comment this out if no visualization is wanted.
 #COMPILE_FLAGS += -DUSE_AIE_ACCELERATION# Comment this out if no visualization is wanted.
 
-#PROFILE_FLAG := -pg# flag for profiling with gprof
+PROFILE_FLAG := -pg# flag for profiling with gprof
 #PROFILE_FLAG += -g# flag for code annotation
 
 OPT_FLAG := -O0# no optimizations
@@ -50,14 +51,14 @@ all: ${EXE}
 
 ${EXE}: ${MAIN} ${OBJS}
 	@mkdir -p ${TOP_DIR}/bin
-	@printf "\n\tMAKE_INFO: Compile AIEplace executable \"$@\"\n"
+	@printf "\n\tMAKE INFO: Compile AIEplace executable \"$@\"\n"
 	${GCC} ${PROFILE_FLAG} -o ${EXE} ${MAIN} ${OBJS} ${INCLUDES} ${COMPILE_FLAGS}
 
 objs: ${OBJS}
 
 objs/%.o: ./%.cpp ./include/%.h ./include/Common.h
 	@mkdir -p objs
-	@printf "\n\tMAKE_INFO: Compile object file \"$@\"\n"
+	@printf "\n\tMAKE INFO: Compile object file \"$@\"\n"
 	${GCC} -c ${PROFILE_FLAG}  $< ${INCLUDES} ${COMPILE_FLAGS} -o $@
 
 clean:
