@@ -1,7 +1,8 @@
 
 #include "density_kernels.h"
 
-/* shuffle function used to precondition data
+/* Shuffle function used to precondition data.
+* Odd entries are extracted, then appended in reverse order
 * for N = 8:
 * input = { x0, x1, x2, x3, x4, x5, x6, x7}
 * output ={ x0, x2, x4, x6, x7, x5, x3, x1}
@@ -11,7 +12,12 @@
 */
 //vectorized implementation
 void shuffle_vectorized(input_stream<FFT_DATA_TYPE> * in, output_stream<FFT_DATA_TYPE> * out) {
-    FFT_DATA_TYPE data;
+    aie::vector<FFT_DATA_TYPE, 8> data;
+    data = readincr_v<8>(in);
+
+    // extract odd entries
+
+    // append odd entries in reverse order
 
 }
 

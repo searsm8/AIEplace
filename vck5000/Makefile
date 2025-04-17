@@ -1,7 +1,6 @@
 # Top level Makefile which calls subdirectory Makefiles
 
 # Modify these parameters to determine what is built
-TARGET ?= hw# choose: hw, hw_emu, or sw_emu
 AIE_GRAPH = aie# choose: aie, partials, or density
 
 .PHONY: help all aie partials density pl repackage host clean
@@ -29,10 +28,10 @@ density:
 	$(MAKE) -C aie density
 
 pl:
-	$(MAKE) -C pl pl TARGET=$(TARGET)
+	$(MAKE) -C pl pl
 
 repackage:
-	$(MAKE) -C pl repackage TARGET=$(TARGET)
+	$(MAKE) -C pl repackage
 
 host:
 	$(MAKE) -C host
@@ -62,6 +61,7 @@ run:
 # make dse
 # launch python script to perform Design Space Exploration
 dse:
+	python3 dse.py
 
 runemu:
 	@clear
@@ -72,10 +72,15 @@ profile:
 #	gprof -qcomputeAllPartials_AIE bin/AIEplace.exe gmon.out 
 #	gprof -b -qPlacer::computeAllPartials_AIE bin/AIEplace.exe
 #	gprof --graph bin/AIEplace.exe
-#	gprof --annotated-source bin/AIEplace.exe > annotation.txt
+	gprof --annotated-source bin/AIEplace.exe > annotation.txt
 # Visualization
-	gprof bin/AIEplace.exe | gprof2dot -s -w | dot -Tpng -o profile.png
+#	gprof bin/AIEplace.exe | gprof2dot -s -w | dot -Tpng -o profile.png
 
 
 cpplines:
 	git ls-files | grep '\.cpp' | xargs wc -l
+
+# make reset
+# Hot reset VCK5000 device
+reset:
+	xbutil reset --device

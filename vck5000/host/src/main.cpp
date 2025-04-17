@@ -2,8 +2,10 @@
 
 int main(int argc, char *argv[])
 {
-    AIEplace::setup_logging();
+    Timer main_timer{"main"};
+
     AIEplace::Placer::printWelcomeBanner();
+    Logger::setup_logging();
 
     // Use argument for config filepath if given
     std::string config_filepath;
@@ -22,6 +24,8 @@ int main(int argc, char *argv[])
     //placer.db.printNetsByDegree();
 
     placer.run();
+    Logger::updateFunctionStats("main", main_timer.stop());
 
+    placer.printFinalResults();
     return 0;
 }

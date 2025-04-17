@@ -9,9 +9,9 @@
 #include <map>
 #include <algorithm>
 #include <cassert>
+#include <numeric>
 #include <math.h>
 #include <sys/time.h>
-
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
 
@@ -56,7 +56,7 @@ constexpr int INITIAL_LAMBDA = 1; // inital lambda for each bin
 #define AIEPLACE_NAMESPACE_BEGIN namespace AIEplace {
 #define AIEPLACE_NAMESPACE_END }
 
-#define AIEPLACE_VERSION "v0.0.1"
+#define AIEPLACE_VERSION "v0.0.2"
 #define stringify std::to_string // alias
 
 AIEPLACE_NAMESPACE_BEGIN 
@@ -75,10 +75,10 @@ struct XY
     {
         bool close = true;
         float diff_x = abs(x - other.x);
-        if(!((diff_x < MIN_TOL) || (diff_x / x < MIN_TOL)))
+        if(!((diff_x < MIN_TOL) || (abs(diff_x / x) < MIN_TOL)))
             close = false;
         float diff_y = abs(y - other.y);
-        if(!((diff_y < MIN_TOL) || (diff_y / y < MIN_TOL)))
+        if(!((diff_y < MIN_TOL) || (abs(diff_y / y) < MIN_TOL)))
             close = false;
         return close;
     }

@@ -12,6 +12,7 @@ void Placer::performIteration()
 
     // launch threads from this function?
 
+    computeAllPartials_CPU();
     // Compute terms for HPWL partials
     if(params["use_aie_partials"]) {
         computeAllPartials_AIE();
@@ -20,8 +21,7 @@ void Placer::performIteration()
     }
 
     // Compare results to ensure correctness
-    //computeAllPartials_CPU();
-    //comparePartialResults();
+    comparePartialResults();
 
     // Compute Electric Fields in each bin
     computeOverlaps(); // Density Map computation
@@ -64,7 +64,7 @@ void Placer::run()
     bool converged = false;
     while( !converged )
     {
-
+        TIME_BLOCK("Algorithm Block");
         // Update hyperparameters for new iteration
         // every 100 iterations, slow learning rate
         if(iteration % 100 == 0)
@@ -83,7 +83,6 @@ void Placer::run()
         else iteration++;
     }
     algo_time = getTiming(getEpoch(), algo_start);
-    printFinalResults();
 }
 
 /* @brief: Reset all nodes and nets in preparation for the next iteration.
@@ -98,11 +97,11 @@ void Placer::iterationReset()
 Placer::Placer(std::string config_filepath ) 
         { 
             // Read configuration JSON file
-            log_info("Reading runtime configuration from: " + config_filepath);
+            Logger::log_info("Reading runtime configuration from: " + config_filepath);
             std::ifstream config_file(config_filepath);
             // check if config file was found
             if (!config_file.is_open()) {
-                log_error("Unable to open configuration JSON file: " + config_filepath);
+                Logger::log_error("Unable to open configuration JSON file: " + config_filepath);
                 exit(1);
             }
 
@@ -119,27 +118,16 @@ Placer::Placer(std::string config_filepath )
             output_dir = getOutputPath();
             string xclbin_file = params["xclbin"];
 
-            // Initialize database by reading LEF and DEF design files
-            db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
-
-            db_IO_time = getTiming(getEpoch(), pgrm_start_time);
-            log_info("db read time: " + std::to_string(db_IO_time));
-
-            #ifdef CREATE_VISUALIZATION
-                if(params["visualize"])
-                    viz.init(db.getDieArea());
-            #endif
-
-            grid = Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_ROW); 
             if(params["use_aie_partials"] || params["use_aie_density"]) {
+                TIME_BLOCK("AIE setup");
                 // Open Xilinx Device
                 xrt::device device = xrt::device(DEVICE_ID);
-                log_info("Device found -- ID: " + std::to_string(DEVICE_ID));
+                Logger::log_info("Device found -- ID: " + std::to_string(DEVICE_ID));
 
                 // Load xclbin which includes PL and AIE graph
-                log_info("Loading xclbin: \"" + xclbin_file + "\"");
+                Logger::log_info("Loading xclbin: \"" + xclbin_file + "\"");
                 xrt::uuid xclbin_uuid = device.load_xclbin(xclbin_file);
-                log_info("Success!");
+                Logger::log_info("Success!");
 
                 if(params["use_aie_partials"]) {
                     // Create drivers which handle buffer IO
@@ -153,6 +141,18 @@ Placer::Placer(std::string config_filepath )
                     density_driver[2].init(device, xclbin_uuid, 2, BINS_PER_ROW); // IDXST graph
                 }
             }
+
+            // Initialize database by reading LEF and DEF design files
+            db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
+
+            db_IO_time = getTiming(getEpoch(), pgrm_start_time);
+            Logger::log_info("db read time: " + std::to_string(db_IO_time));
+            grid = Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_ROW); 
+
+            #ifdef CREATE_VISUALIZATION
+                if(params["visualize"])
+                    viz.init(db.getDieArea());
+            #endif
         }
 
 void Placer::printWelcomeBanner()
@@ -188,7 +188,7 @@ void Placer::printWelcomeBanner()
 
 bool isClose(float a, float b)
 {
-    float diff = abs(abs(a) - abs(b));
+    float diff = abs((a) - (b));
     if((diff < MIN_TOL) || ((diff / abs(a)) < MIN_TOL))
         return true;
     return false;
@@ -202,7 +202,7 @@ bool isClose(float a, float b)
 */
 void Placer::initializePlacement(Position<position_type> target_pos, int min_dist, int max_dist)
 {
-    log("function", "Begin initializePlacement()");
+    Logger::log_trace("Begin initializePlacement()");
     Table top;
     top.add_row(RowStream{} << "Initial Placement");
     Table data;
@@ -211,7 +211,7 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
     data.add_row(RowStream{} << "Max dist" << max_dist); 
     top.add_row({data});
     top.format().font_align(FontAlign::center);
-    log("INFO", top);
+    Logger::log_info(top);
 
     float bin_area_16th = grid.getBinWidth() * grid.getBinHeight() / 16;
     // For each component that isn't fixed
@@ -231,8 +231,14 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
         // if this component is bigger than 1/16th of bin area, set member bool
         item.second->checkIfLarge(bin_area_16th);
 
+        // REMOVE
+        //Logger::log_data(item.second->getName());
+        item.second->printXY();
+
     }
 
+    // TODO
+    // Wild and Crazy Idea: wouldn't this have the same effect as slowly increasing the bin's lambda?
     // Add additional large "phantom" macros for experimentation
     // Observe what affect they have,
     // They could be made to have a repulsive affect on the real nodes or macros
@@ -262,8 +268,6 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
  * AIE acceleration functions
 ****************/
 
-double prepare_compute_time = 0;
-double prepare_actual_time = 0, receive_time= 0;
 /*
  * @brief On AIEs, compute partial derivatives
  *
@@ -271,19 +275,19 @@ double prepare_actual_time = 0, receive_time= 0;
 #define GROUP_SIZE 1 // Size of the group of nets sent before waiting to receive results
 void Placer::computeAllPartials_AIE()
 {
-    log("function", "Begin computeAllPartials_AIE()");
-    prepare_compute_time = 0;
-    prepare_actual_time = 0;
-    receive_time = 0;
+    TIME_FUNCTION();
+    Logger::log_trace("BEGIN computeAllPartials_AIE()");
 
     // Start timer
     long start_partials = getTime();
 
     // for each packet specified in DataBase
     for(int packet_index {0}; packet_index < db.getPacketCount(); packet_index++) {
+        TIME_BLOCK("packet block");
         int graphs_active {0};
         // send a packet to each AIE graph
         long start_prep {getTime()};
+
         std::thread partials_threads[PARTIALS_GRAPH_COUNT];
         for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
             //cout << "packet_index: " << packet_index << "\t < " << db.mv_packet[graph_index].size() << endl;
@@ -305,10 +309,8 @@ void Placer::computeAllPartials_AIE()
         //    partials_threads[graph_index].join();
         //}
 
-        prepare_actual_time += getInterval(start_prep, getTime());
-        long start_receive = getTime();
-
         // receive output from each AIE graph
+        Timer t_receive{};
         for(int graph_index = 0; graph_index < graphs_active; graph_index++) {
             if(packet_index < db.mv_packet[graph_index].size()) {
                 //cout << endl << "Receiving partials for graph " << graph_index << endl;
@@ -318,41 +320,27 @@ void Placer::computeAllPartials_AIE()
                 //});
             }
         }
+        Logger::updateFunctionStats("receiving_packets", t_receive.stop());
 
         // Join threads
         //for(int graph_index = 0; graph_index < graphs_active; graph_index++) {
         //    //cout << "Joining thread: " << graph_index << endl;
         //    partials_threads[graph_index].join();
         //}
-        receive_time += getInterval(start_receive, getTime());
     }
+
 //        for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
 //            cout << "Joining thread: " << graph_index << endl;
 //            partials_threads[graph_index].join();
 //        }
-
-
-    // End timer and print
-    double partials_compute_time = getInterval(start_partials, getTime());
-    // Add checks to ensure times are valid
-    assert(prepare_compute_time >= 0);
-    assert(prepare_actual_time >= 0);
-    assert(receive_time >= 0);
-    assert(partials_compute_time >= 0);
-
-    Table top;
-    top.add_row(RowStream{} << "Prepare packet Total Thread compute time: " << std::to_string(prepare_compute_time));
-    top.add_row(RowStream{} << "Prepare packet actual compute time: " << std::to_string(prepare_actual_time));
-    top.add_row(RowStream{} << "Receive packet actual compute time: " << std::to_string(receive_time));
-    top.add_row(RowStream{} << "Total time for AIE partials compute time: " << std::to_string(partials_compute_time));
-
-    log("comms", top);
+    Logger::log_trace("END computeAllPartials_AIE()");
 }
 
 // Send a packet of coordinate data to the AIE partials computation graph
 void Placer::computePartials(Packet* p)
 {
-
+    TIME_FUNCTION();
+    Logger::log_trace("BEGIN computePartials(Packet* p)");
     float * input_packet = new float[INPUT_PACKET_SIZE]; // extra size for ctrl data
 
     // set ctrl data for the packet
@@ -373,16 +361,18 @@ void Placer::computePartials(Packet* p)
             db.prepareNetGroup(input_packet, pind.net_size, group_index*NETS_PER_GROUP );
         }
     }
-    prepare_compute_time += getInterval(start, getTime());
 
     // send the data packet to PL (maybe as a thread?)
     partials_drivers[p->graph_index].send_packet(input_packet);
 
+    Logger::log_trace("END computePartials(Packet* p)");
 }
 
 // Receive the result and place it into the database appropriately
 void Placer::receivePartials(Packet* p)
 {
+    TIME_FUNCTION();
+    Logger::log_trace("BEGIN receivePartials(Packet* p)");
     //cout << "*receivePartials on graph " << p->graph_index  << "\t" << p->contents[0].to_string();
 
     // receive the result data packet from PL
@@ -400,9 +390,25 @@ void Placer::receivePartials(Packet* p)
     // store it into database, updating node partials
     for(PacketIndex pind : p->contents) {
         for(int group_index = pind.group_start; group_index < pind.group_start + pind.group_count; ++group_index) {
-            db.storeNetGroup(output_packet, pind.net_size, group_index*NETS_PER_GROUP);
+            int nan_count  = db.storeNetGroup(output_packet, pind.net_size, group_index*NETS_PER_GROUP);
+            if(nan_count > 0) {
+                Logger::log_critical("NaN result detected...exiting");
+                Logger::ProgramStatBlock stats;
+                stats.design_name = db.getBenchmarkName();
+                stats.iteration_count = iteration;
+                stats.final_hpwl = 0; // used to denote error
+                stats.final_learning_rate = 0;
+                stats.prgm_runtime = 0;
+                stats.db_IO_time = 0;
+                stats.algo_time = 0;
+                stats.AIE_time = 0;
+                Logger::append_csv(stats);
+                exit(1);
+            }
+
         }
     }
+    Logger::log_trace("END receivePartials(Packet* p)");
 }
 
 
@@ -412,7 +418,7 @@ void Placer::receivePartials(Packet* p)
 **/
 void Placer::computeElectricFields_AIE()
 {
-    log("function", "Begin computeElectricFields_AIE()");
+    Logger::log_trace("Begin computeElectricFields_AIE()");
 
     // Call AIE graph_driver to accelerate computation
     std::vector< std::vector<float> > rho = grid.getRho();
@@ -606,19 +612,18 @@ void Placer::computeAllPartials_CPU()
     //    nets[8][i]->printTerms();
     //}
 
+    TIME_FUNCTION();
     long start_partials = getTime();
 // compute only for nets size 2-8, which is what normally runs on AIE
     for (auto item : db.getNetsByDegree()) {
-        if(item.first < MIN_AIE_NET_SIZE || item.first > MAX_AIE_NET_SIZE) continue;
-        for (Net* net_p : item.second) {
-            computeNetPartials_CPU(net_p);
-        }
+        if(item.first < MIN_AIE_NET_SIZE || item.first > MAX_AIE_NET_SIZE) 
+            continue;
+        else
+            for (Net* net_p : item.second) {
+                computeNetPartials_CPU(net_p);
+            }
     }
 
-    double partials_compute_time = getInterval(start_partials, getTime());
-    Table top;
-    top.add_row(RowStream{} << "Total time for CPU partials compute time: " << partials_compute_time << " sec");
-    log("comms", top);
 
     // DEBUG: Print partials results
     //
@@ -680,10 +685,12 @@ void Placer::compute_bc_terms_CPU(Net* net_p)
 void Placer::computeNetPartials_CPU(Net* net_p)
 {
     // DEBUG: stop at max net size for comparison to AIE computation
-    if(net_p->getDegree() < 2 || net_p->getDegree() > MAX_AIE_NET_SIZE) return;
-    //if(net_p->getDegree() != 8 ) return;
+    assert(net_p->getDegree() >= MIN_AIE_NET_SIZE);
+    assert(net_p->getDegree() <= MAX_AIE_NET_SIZE);
 
     compute_bc_terms_CPU(net_p);
+    Logger::log_detail("#############");
+    Logger::log_detail(net_p->getName());
     for (Node* node_p : net_p->mv_nodes) {
         float partial_x = (( 1 + node_p->getX()/gamma) * net_p->terms_cpu.b.plus.x - (net_p->terms_cpu.c.plus.x / gamma)) 
                                     * (node_p->terms_cpu.a.plus.x / (net_p->terms_cpu.b.plus.x * net_p->terms_cpu.b.plus.x))
@@ -695,8 +702,14 @@ void Placer::computeNetPartials_CPU(Net* net_p)
                          - (( 1 - node_p->getY()/gamma) * net_p->terms_cpu.b.minus.y + (net_p->terms_cpu.c.minus.y / gamma)) 
                                     * (node_p->terms_cpu.a.minus.y / (net_p->terms_cpu.b.minus.y * net_p->terms_cpu.b.minus.y));
 
+        Logger::log_detail(node_p->getName() + " partial_x: " + std::to_string(partial_x));
+        Logger::log_detail(node_p->getName() + " partial_y: " + std::to_string(partial_y));
         node_p->terms_cpu.partials.x += partial_x;
         node_p->terms_cpu.partials.y += partial_y;
+    }
+    for (Node* node_p : net_p->mv_nodes) {
+        Logger::log_detail(node_p->getName() + " total partial_x: " + std::to_string(node_p->terms_cpu.partials.x));
+        Logger::log_detail(node_p->getName() + " total partial_y: " + std::to_string(node_p->terms_cpu.partials.y));
     }
 }
 
@@ -860,8 +873,8 @@ void Placer::compute_a_uv_DCT()
     //    Table top;
     //    top.add_row(RowStream{} << "a_uv mismatch");
     //    top.add_row({mismatches});
-    //    log_error(top);
-    //} else log_info("Density DCT computation: all a_uv terms match!");
+    //    Logger::log_error(top);
+    //} else Logger::log_info("Density DCT computation: all a_uv terms match!");
 
     for (int u = 0; u < grid.getBinsPerRow(); u++)
         for (int v = 0; v < grid.getBinsPerCol(); v++) {
@@ -937,8 +950,8 @@ void Placer::compute_eField_DCT()
     //    Table top;
     //    top.add_row(RowStream{} << "eField.x mismatch");
     //    top.add_row({mismatches});
-    //    log_error(top);
-    //} else log_info("Density DCT computation: all eField.x terms match!");
+    //    Logger::log_error(top);
+    //} else Logger::log_info("Density DCT computation: all eField.x terms match!");
 
     //Table mismatch_y;
     //mismatch = false;
@@ -957,8 +970,8 @@ void Placer::compute_eField_DCT()
     //    Table top;
     //    top.add_row(RowStream{} << "eField.y mismatch");
     //    top.add_row({mismatch_y});
-    //    log_error(top);
-    //} else log_info("Density DCT computation: all eField.y terms match!");
+    //    Logger::log_error(top);
+    //} else Logger::log_info("Density DCT computation: all eField.y terms match!");
     //std::stringstream stream_x;
     //std::stringstream stream_y;
     //stream_x << "eField.x" << endl;
@@ -989,7 +1002,7 @@ void Placer::compute_eField_DCT()
 
 void Placer::computeOverlaps()
 {
-    log("function", "Begin computeOverlaps()");
+    Logger::log_trace("Begin computeOverlaps()");
 
     for (auto item : db.getComponents())
         grid.computeBinOverlaps(item.second);
@@ -1015,7 +1028,7 @@ void Placer::computeOverlaps()
     t.add_row(RowStream{} << "total_node_area" << total_node_area<< ""<<"");
     t.add_row(RowStream{} << "total_overlap" << total_overlap);
     t.add_row(RowStream{} << "single bin area" << grid.getBin(0,0).bb.getArea() << grid.getBin(7,8).bb.getArea() );
-    log("overlap", t);
+    Logger::log("overlap", t);
 }
 
 /* To confirm that the AIE has performed a correct computation, this function
@@ -1024,7 +1037,8 @@ void Placer::computeOverlaps()
 void Placer::comparePartialResults()
 {
     int print_count = 0;
-    log_info("Comparing Partial Results.");
+    Logger::log_info("#############################");
+    Logger::log_info("Comparing Partial Results (Iteration " + std::to_string(iteration) + ")");
     auto nodes_map = db.getComponents();
     auto nets_map = db.getNets();
     long error_count = 0, total = 0;
@@ -1034,13 +1048,18 @@ void Placer::comparePartialResults()
         Node* np = item.second;
         total++;
         if(np->terms_cpu.partials.isClose(np->partials_aie))
+        {
+            Logger::log_data("Terms DO match for node " + np->getName()
+                    + " -- CPU result: " + np->terms_cpu.partials.toString()
+                    + " -- AIE result: " + np->partials_aie.toString());
             continue;
+        }
         else 
         {
             error_count++;
-            //log_error("Terms do not match for node " + np->getName()
-            //        + " -- CPU result: " + np->terms_cpu.partials.toString()
-            //        + " -- AIE result: " + np->partials_aie.toString());
+            Logger::log_error("Terms do not match for node " + np->getName()
+                    + " -- CPU result: " + np->terms_cpu.partials.toString()
+                    + " -- AIE result: " + np->partials_aie.toString());
 
             //cout << "error node " << np->getName() << ": " << endl; 
             //for(auto const& net_p : np->getNets())
@@ -1061,14 +1080,14 @@ void Placer::comparePartialResults()
 
             //top.add_row({"Node " + np->getName()});
             //top.add_row({t});
-            //log("DATA", top);
+            //Logger::log_data(top);
             //if(print_count++ > 50) return;
         }
     }
     
     std::stringstream ss;
     ss << "errors: " << error_count << "\ttotal: " << total << "\tproportion: " << float(error_count)/float(total) << endl;
-    log_error(ss.str());
+    Logger::log_error(ss.str());
 }
 
 void Placer::compareDensityResults()
@@ -1077,7 +1096,7 @@ void Placer::compareDensityResults()
 
 void Placer::nudgeAllNodes()
 {
-    log("function", "Begin nudgeAllNodes()");
+    Logger::log_trace("Begin nudgeAllNodes()");
     for (auto item : db.getComponents())
         nudgeNode(item.second);
     // Assume primary IO Pins are set in place and should not be moved!
@@ -1091,7 +1110,8 @@ void Placer::nudgeNode(Node* node_p)
     XY electro_force;
     electro_force.clear(); // set XY to 0
 
-    // for each bin that this node overlaps
+    // for each bin that this node overlaps,
+    // compute electric force based on bin overlaps
     for (BinOverlap b : node_p->getBinOverlaps()) {
         Bin* bin = b.bin;
         // add electric force
@@ -1122,11 +1142,13 @@ void Placer::nudgeNode(Node* node_p)
     //cout << "electro_force.x: " << electro_force.x <<"\telectro_force.y: " << electro_force.y << endl;
     //if(move.x != move.x) // check if nan
     //{
+    //    cout << endl << "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@" << endl;
     //    cout << "move.x: " << move.x << endl;
     //    node_p->printXY();
-    //    cout << "coeff: " << coeff << endl;
-    //    cout << "electro_force: " << electro_force.x << " : " << electro_force.y << endl;
-    //    cout << "partials: " << node_p->partials_aie.x << " : " << node_p->partials_aie.y << endl;
+    //    //cout << "coeff: " << coeff << endl;
+    //    //cout << "electro_force: " << electro_force.x << " : " << electro_force.y << endl;
+    //    cout << "partials_aie: " << node_p->partials_aie.x << " : " << node_p->partials_aie.y << endl;
+    //    cout << "partials_cpu: " << node_p->terms_cpu.partials.x << " : " << node_p->terms_cpu.partials.y << endl;
     //}
 
     // Update the position of this node
@@ -1150,7 +1172,7 @@ void Placer::printIterationResults()
         top.add_row(RowStream{} << "Global Lambda" << global_lambda);
         top.column(0).format().font_align(FontAlign::right);
         top.column(1).format().font_align(FontAlign::left);
-        log("DATA", top);
+        Logger::log_data(top);
     }
 
     // every 10 iterations, export a table in markdown
@@ -1166,7 +1188,7 @@ void Placer::printIterationResults()
         }
     #endif
 
-    //export_intermediate_results(grid, output_dir, iteration);
+    Logger::export_intermediate_results(grid, output_dir, iteration);
 }
 
 void Placer::computeStatistics()
@@ -1186,10 +1208,9 @@ double Placer::getInterval(long start_time, long end_time) {
 
 void Placer::printFinalResults()
 {
-    log_space();
-    log_info("AIEplace algorithm complete.");
-    Table top;
-    top.add_row({"AIEplace Run Statistics"});
+    Logger::log_info("AIEplace algorithm complete.");
+    Table statistics;
+    statistics.add_row({"AIEplace Run Statistics"});
 
     float final_hpwl = db.computeTotalWirelength(params["wirelength_method"]);
     Table results;
@@ -1208,15 +1229,17 @@ void Placer::printFinalResults()
     hyperparams.column(0).format().font_align(FontAlign::right);
     hyperparams.column(1).format().font_align(FontAlign::left);
 
-    top.format().font_align(FontAlign::center);
-    top.add_row({results});
-    top.add_row({hyperparams});
-    log("DATA", top);
+    statistics.format().font_align(FontAlign::center);
+    statistics.add_row({results});
+    statistics.add_row({hyperparams});
+    Logger::log_data(statistics);
 
-    AIEplace::export_markdown(top, output_dir);
+    Logger::export_markdown(statistics, output_dir);
+    Table function_stats = Logger::printFunctionStats();
+    Logger::export_markdown(function_stats, output_dir, "function_statistics");
 
-    StatBlock stats;
-    stats.name = db.getBenchmarkName();
+    Logger::ProgramStatBlock stats;
+    stats.design_name = db.getBenchmarkName();
     stats.iteration_count = iteration;
     stats.final_hpwl = final_hpwl;
     stats.final_learning_rate = learning_rate;
@@ -1224,9 +1247,9 @@ void Placer::printFinalResults()
     stats.prgm_runtime = getTiming(getEpoch(), pgrm_start_time);
     stats.db_IO_time = db_IO_time;
     stats.algo_time = algo_time;
-    //stats.AIE_time = AIE_time;
+    stats.AIE_time = AIE_time;
 
-    AIEplace::append_csv(stats);
+    Logger::append_csv(stats);
 
     // generate image of final placement
     #ifdef CREATE_VISUALIZATION

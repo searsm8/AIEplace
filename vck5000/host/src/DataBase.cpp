@@ -5,7 +5,8 @@
 AIEPLACE_NAMESPACE_BEGIN
 
 DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
-    log_info("Reading design from directory: " + m_input_dir.string());
+    TIME_BLOCK("DataBase read input");
+    Logger::log_info("Reading design from directory: " + m_input_dir.string());
     m_max_x = 0;
     m_max_y = 0;
 
@@ -18,7 +19,7 @@ DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
     {
         bool bookshelf_success = readBookshelf();
         if(!bookshelf_success ) {
-            log_error("Design could not be read. Exiting...");
+            Logger::log_error("Design could not be read. Exiting...");
             exit(1);
         }
     }
@@ -42,7 +43,7 @@ std::vector<fs::path> DataBase::findExtensions(fs::path dir_path, string extensi
         if (file_extension == extension_match)
         {
             matches.push_back(entry.path());
-            log_detail(extension_match + " file found: \"" + entry.path().string() + "\"");
+            Logger::log_detail(extension_match + " file found: \"" + entry.path().string() + "\"");
         }
     }
 
@@ -54,7 +55,7 @@ bool DataBase::readLEF()
     std::vector<fs::path> lef_files = findExtensions(m_input_dir, ".lef");
     if (lef_files.size() == 0) 
     {
-        log_warning("No .lef files found.");
+        Logger::log_warning("No .lef files found.");
         return false;
     }
 
@@ -68,9 +69,9 @@ bool DataBase::readLEF()
         freopen("/dev/tty", "w", stdout); // "/dev/tty" is the terminal
 
         if (success) {
-            log_info(".lef file parsing successful: " + file.string());
+            Logger::log_info(".lef file parsing successful: " + file.string());
         } else {
-            log_error(".lef file parsing FAILED: " + file.string());
+            Logger::log_error(".lef file parsing FAILED: " + file.string());
         }
     }
     return success;
@@ -81,7 +82,7 @@ bool DataBase::readDEF()
     std::vector<fs::path> def_files = findExtensions(m_input_dir, ".def");
     if (def_files.size() == 0) 
     {
-        log_warning("No .def files found.");
+        Logger::log_warning("No .def files found.");
         return false;
     }
 
@@ -102,6 +103,7 @@ bool DataBase::readDEF()
 
 
 
+    Logger::log_info("Begin parsing .DEF design...");
     //disable DEF parser output by redirecting C stream stdout
     FILE* oldStdout = freopen("/dev/null", "w", stdout); // "/dev/null" discards all data written to it
     bool success = DefParser::read(*this, def_file);
@@ -109,10 +111,10 @@ bool DataBase::readDEF()
     freopen("/dev/tty", "w", stdout); // "/dev/tty" is the terminal
 
     if (success) {
-        log_info(".def file parsing successful: " + def_file.string());
+        Logger::log_info(".def file parsing successful: " + def_file.string());
         return true;
     } else {
-        log_error(".def file parsing FAILED: " + def_file.string());
+        Logger::log_error(".def file parsing FAILED: " + def_file.string());
         return false;
     }
 }
@@ -123,15 +125,16 @@ bool DataBase::readBookshelf()
     std::vector<fs::path> aux_files = findExtensions(m_input_dir, ".aux");
     if (aux_files.size() == 0) 
     {
-        log_error("No .aux file found.");
+        Logger::log_error("No .aux file found.");
         return false;
     }
 
     if (aux_files.size() > 1) 
     {
-        log_warning("Multiple .aux files found! Using first one: " + aux_files[0].string());
+        Logger::log_warning("Multiple .aux files found! Using first one: " + aux_files[0].string());
     }
 
+    Logger::log_info("Begin parsing bookshelf design...");
     //disable parser output by redirecting C stream stdout
     //FILE* oldStdout = freopen("/dev/null", "w", stdout); // "/dev/null" discards all data written to it
     bool success = BookshelfParser::read(*this, aux_files[0]);
@@ -139,10 +142,10 @@ bool DataBase::readBookshelf()
     //freopen("/dev/tty", "w", stdout); // "/dev/tty" is the terminal
 
     if (success) {
-        log_info("Bookshelf parsing successful!");
+        Logger::log_info("Bookshelf parsing successful!");
         return true;
     } else {
-        log_error("Bookshelf parsing FAILED!");
+        Logger::log_error("Bookshelf parsing FAILED!");
         return false;
     }
 }
@@ -222,17 +225,17 @@ Generate packets of current net_size until all nets of this size are assigned.
 */
 void DataBase::initializePacketContents()
 {
-    log("packets", "BEGIN initializePacketContents()");
+    Logger::log("packets", "BEGIN initializePacketContents()");
     int graph_index = 0;
     m_packet_count = 0;
     for(int net_size = MIN_AIE_NET_SIZE; net_size <= MAX_AIE_NET_SIZE; net_size++) {
     //for(int net_size = TEST_NET_SIZE; net_size <= TEST_NET_SIZE; net_size++) {
-        log("packets", "net_size = " + stringify(net_size));
+        Logger::log("packets", "net_size = " + stringify(net_size));
         int groups_per_packet = LCM_BUFFSIZE/net_size; // for netsize 2 thru 8, this will be an exact integer
-        log("packets", "groups_per_packet = " + stringify(groups_per_packet));
-        log("packets", "nets_per_packet = " + stringify(groups_per_packet*NETS_PER_GROUP));
+        Logger::log("packets", "groups_per_packet = " + stringify(groups_per_packet));
+        Logger::log("packets", "nets_per_packet = " + stringify(groups_per_packet*NETS_PER_GROUP));
         int num_nets = mmv_nets_by_degree[net_size].size();
-        log("packets", "num_nets = " + stringify(num_nets));
+        Logger::log("packets", "num_nets = " + stringify(num_nets));
 
         int packet_start = 0;
         //int nets_per_graph = num_nets / PARTIALS_GRAPH_COUNT;
@@ -250,10 +253,10 @@ void DataBase::initializePacketContents()
             p->contents.push_back(PacketIndex(net_size, packet_start, groups_per_packet));
             mv_packet[graph_index].push_back(p);
 
-            PacketIndex* pi = &p->contents[0];
+            PacketIndex &pir = p->contents[0];
             //cout << "graph_index: " << graph_index  << "\t" << p->contents[0].to_string();
-            table.add_row({ stringify(graph_index), stringify(pi->net_size), 
-                            stringify(pi->group_start), stringify(pi->group_count) });
+            table.add_row({ stringify(graph_index), stringify(pir.net_size), 
+                            stringify(pir.group_start), stringify(pir.group_count) });
 
             //move start/stop for next packet
             packet_start += groups_per_packet;
@@ -262,9 +265,9 @@ void DataBase::initializePacketContents()
             graph_index = (graph_index+1) % PARTIALS_GRAPH_COUNT;
         }
         table.format().font_align(FontAlign::center);
-        log("packets", table);
+        Logger::log("packets", table);
     }
-    log("packets", "END initializePacketContents()");
+    Logger::log("packets", "END initializePacketContents()");
 }
 
 /*
@@ -275,6 +278,7 @@ void DataBase::initializePacketContents()
 **/
 void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
 {
+    TIME_FUNCTION();
     // Base address starts at VEC_SIZE to leave room for control data
     int base_addr = VEC_SIZE + (2*offset*net_size)%(LCM_BUFFSIZE*VEC_SIZE); // TODO: This needs an explanation
     bool nan = false;
@@ -298,22 +302,37 @@ void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
         net->sortPositionsMaxMinX(); // This sort might be redundant? 
         for(int j = 0; j < net_size; j++) {
             input_data[base_addr + 2*net_idx + j*8] = nodes[j]->getX();
-            if(nodes[j]->getX() != nodes[j]->getX()) // check for nan
-            {
-                log_warning(string("NaN detected:\n" + net->to_string() + "\n"));
-                nan = true;
+
+            // check for correct ordering
+            if(j > 0) if(input_data[base_addr + 2*net_idx + 0*8] < input_data[base_addr + 2*net_idx + j*8])  {
+                Logger::log_debug("MAX COORD MUST BE FIRST! Net: " + net->getName()
+                    + "\n1st input: " + std::to_string(input_data[base_addr + 2*net_idx + 0*8])
+                    + "\n" + std::to_string(j+1) + "nd input: " + std::to_string(input_data[base_addr + 2*net_idx + j*8]));
+                exit(2);
             }
+            if(j > 1) if(input_data[base_addr + 2*net_idx + 1*8] > input_data[base_addr + 2*net_idx + j*8]) {
+                Logger::log_debug("MIN COORD MUST BE 2ND! Net: " + net->getName()
+                    + "\n2nd input: " + std::to_string(input_data[base_addr + 2*net_idx + 1*8])
+                    + "\n" + std::to_string(j+1) + "nd input: " + std::to_string(input_data[base_addr + 2*net_idx + j*8]));
+                exit(2);
+            }
+
+            //if(nodes[j]->getX() != nodes[j]->getX()) // check for nan
+            //{
+            //    Logger::log_warning(string("NaN detected:\n" + net->to_string() + "\n"));
+            //    nan = true;
+            //}
         }
 
         // prep y data
         net->sortPositionsMaxMinY();
         for(int j = 0; j < net_size; j++) {
             input_data[base_addr + 2*net_idx + j*8 + 1] = nodes[j]->getY();
-            if(nodes[j]->getY() != nodes[j]->getY()) // check for nan
-            {
-                log_warning(string("NaN detected:\n" + net->to_string() + "\n"));
-                nan = true;
-            }
+            //if(nodes[j]->getY() != nodes[j]->getY()) // check for nan
+            //{
+            //    Logger::log_warning(string("NaN detected:\n" + net->to_string() + "\n"));
+            //    nan = true;
+            //}
         }
     }
 
@@ -331,8 +350,15 @@ void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
 
 }
 
-constexpr float MAX_PARTIAL = 1.0;
-void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
+// Debugging vars
+constexpr float MAX_PARTIAL = 2.0;
+static int nan_count = 0;
+constexpr int MAX_WARNINGS = 100;
+float max_size_good_x {0};
+float max_size_good_y {0};
+float min_size_nan_x {__FLT_MAX__};
+float min_size_nan_y {__FLT_MAX__};
+int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
 {
     //int offset = mm_output_index[net_size]; // offset tracks which nets partials should be added to
     //int offset = 0;
@@ -347,28 +373,74 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         }
 
         // otherwise, store partials results in node.terms.partials
-        auto net = mmv_nets_by_degree[net_size][offset + net_idx ];
-        auto &nodes = net->getNodes(); // needs to be a reference, to avoid being a copy!
+        Net* net = mmv_nets_by_degree[net_size][offset + net_idx ];
+
+        std::vector<Node*> nodes = net->getNodes(); // should this be a reference, to avoid being a copy?
 
         // nodes are already sorted by Y coords, so store them first
         for(int n = 0; n < net_size; n++) {
+            Logger::log_detail("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
             //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8 + 1]));
             float partial = output_data[base_addr + 2*net_idx + n*8 + 1];
             nodes[n]->partials_aie.y += partial;
-            //if(abs(partial) > MAX_PARTIAL)
-            //    cout << "LARGE Y PARTIAL: node " << nodes[n]->getName() << " " << partial << endl;
+            Logger::log_data("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: partials_aie.y += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->partials_aie.y));
+
+            //debugging
+            float y_size = net->getBoundingBox().getYsize();
+            if(partial != partial) // check for nan
+            {
+                if(++nan_count < MAX_WARNINGS) {
+                    Logger::log_warning(string("NaN detected on Y partial for node: " + nodes[n]->getName() + " \nInputs:" + net->to_string() + "\n"));
+                    Logger::log_warning(string("partial: " + std::to_string(partial) + "\n"));
+                    Logger::log_warning(string("Net Name: " + net->getName() + "\n"));
+                    Logger::log_warning(string("BAD RESULT: net Y size = " + std::to_string(y_size)));
+                    if(y_size < min_size_nan_y)
+                        min_size_nan_y = y_size;
+                }
+            }
+            else {
+                if(nan_count < MAX_WARNINGS) 
+                    //Logger::log_warning(string("GOOD RESULT: net Y size = " + std::to_string(y_size)));
+                    if(y_size > max_size_good_y)
+                        max_size_good_y = y_size;
+            }
         }
 
         net->sortPositionsMaxMinX(); // X or Y
-        //nodes = net->getNodes();
+        nodes = net->getNodes();
+
         for(int n = 0; n < net_size; n++) {
+            Logger::log_detail("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
             //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8]));
             float partial = output_data[base_addr + 2*net_idx + n*8 + 0];
             nodes[n]->partials_aie.x += partial;
-            //if(abs(partial) > MAX_PARTIAL)
-            //    cout << "LARGE X PARTIAL: node " << nodes[n]->getName() << " " << partial << endl;
+            Logger::log_data("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: partials_aie.x += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->partials_aie.x));
+
+            //debugging
+            float x_size = net->getBoundingBox().getXsize();
+            if(partial != partial) // check for nan
+            {
+                if(++nan_count < MAX_WARNINGS) {
+                    Logger::log_warning(string("NaN detected on X partial for node: " + nodes[n]->getName() + " \nInputs:" + net->to_string() + "\n"));
+                    Logger::log_warning(string("partial: " + std::to_string(partial) + "\n"));
+                    Logger::log_warning(string("BAD RESULT: net X size = " + std::to_string(x_size)));
+                    if(x_size < min_size_nan_x)
+                        min_size_nan_x = x_size;
+                }
+            }
+            else {
+                if(nan_count < MAX_WARNINGS) 
+                    //Logger::log_warning(string("GOOD RESULT: net X size = " + std::to_string(x_size)));
+                    if(x_size > max_size_good_x)
+                        max_size_good_x = x_size;
+            }
         }
     }
+
+    //Logger::log_debug(("max_size_good_x: " + std::to_string(max_size_good_x)));
+    //Logger::log_debug(("max_size_good_y: " + std::to_string(max_size_good_y)));
+    //Logger::log_debug(("min_size_nan_x: " +  std::to_string(min_size_nan_x)));
+    //Logger::log_debug(("min_size_nan_y: " +  std::to_string(min_size_nan_y)));
 
     // DEBUG: print the stored data!
     //if(net_size == 5)
@@ -381,6 +453,7 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
     //    cout << endl;
     //}
 
+    return nan_count;
 }
 
         /// parser callback functions 
@@ -559,7 +632,7 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                     //new_net->addNetPin(comp_p, net_pin.second);
                     comp_p->addNet(new_net);
                 } else {
-                    log_error("Node was not found while parsing bookshelf nets.");
+                    Logger::log_error("Node was not found while parsing bookshelf nets.");
                     exit(7);
                 }
             }
@@ -615,14 +688,14 @@ void DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         /// @brief set design name 
         void DataBase::set_bookshelf_design(string& s) { 
             m_design_name = s;
-            log_info("Bookshelf design: " + s);
+            Logger::log_info("Bookshelf design: " + s);
         }
 
         /// @brief a callback when a bookshelf file reaches to the end 
         void DataBase::bookshelf_end() { 
             m_die_area = Box<position_type>(Position((position_type)0, (position_type)0), 
                                   Position((position_type)m_max_x, (position_type)m_max_y));
-            log_info("End of Bookshelf design reading.");
+            Logger::log_info("End of Bookshelf design reading.");
         }
         
 // Print info functions
@@ -702,7 +775,7 @@ void DataBase::printInfo()
 
     top.add_row({data});
     top.format().font_align(FontAlign::center);
-    log("DATA", top);
+    Logger::log_data(top);
 }
 
 
@@ -733,7 +806,7 @@ void DataBase::printOverlaps()
         top.add_row({overlaps});
         top.format().font_align(FontAlign::center);
         
-        log_info(top);
+        Logger::log_info(top);
     }
 }
 
@@ -742,7 +815,7 @@ bool DataBase::writeDEF(const std::string& output_path) const
     string output_filename = output_path + "/" + m_design_name + ".def";
     std::ofstream out(output_filename);
     if (!out.is_open()) {
-        log_error("DEF write: invalid output filename: " + output_filename);
+        Logger::log_error("DEF write: invalid output filename: " + output_filename);
         return false;
     }
     out.imbue(std::locale::classic()); // set to standard output

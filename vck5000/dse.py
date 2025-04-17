@@ -117,22 +117,22 @@ def run_AIEplace(args=None):
 
 
 benchmark_path = "host/benchmarks/"
-benchmarks = [  ##"ispd2015/mgc_fft_1", 
+benchmarks = [  #"ispd2015/mgc_fft_1", 
                 #"ispd2015/mgc_fft_2", 
-                #"ispd2015/mgc_fft_1", 
+                "ispd2015/mgc_fft_a", 
                 #"ispd2015/mgc_fft_b", 
-                #"ispd2015/mgc_des_perf_1",
-                ##"ispd2015/mgc_des_perf_a",
+                "ispd2015/mgc_des_perf_1",
+                #"ispd2015/mgc_des_perf_a",
                 #"ispd2015/mgc_des_perf_b",
                 #"ispd2015/mgc_edit_dist_a",
                 #"ispd2015/mgc_matrix_mult_1",
-                #"ispd2015/mgc_matrix_mult_2",
+                "ispd2015/mgc_matrix_mult_2",
                 #"ispd2015/mgc_matrix_mult_a",
                 #"ispd2015/mgc_matrix_mult_b",
                 #"ispd2015/mgc_matrix_mult_c",
                 #"ispd2015/mgc_pci_bridge32_a",
-                #"ispd2015/mgc_pci_bridge32_b",
-                #"ispd2015/mgc_superblue11_a",
+                "ispd2015/mgc_pci_bridge32_b",
+                "ispd2015/mgc_superblue11_a",
                 "ispd2015/mgc_superblue12",
                 "ispd2015/mgc_superblue14",
                 "ispd2015/mgc_superblue16_a",
@@ -140,13 +140,13 @@ benchmarks = [  ##"ispd2015/mgc_fft_1",
                 "ispd2005/adaptec1",
                 "ispd2005/adaptec2",
                 "ispd2005/adaptec3",
-                #"ispd2005/adaptec4",
-                #ispd2005/bigblue1",
+                "ispd2005/adaptec4",
+                "ispd2005/bigblue1",
                 "ispd2005/bigblue2",
                 "ispd2005/bigblue3",
                 "ispd2005/bigblue4"
                 ]
-learning_rates = [0.01]#, 0.02, 0.03, 0.04, 0.06]
+learning_rates = [0.02]#, 0.02, 0.03, 0.04, 0.06]
 
 # TODO: expand DSE to use SA or ant colony optimization
 # Design Space Exploration algorithm
@@ -156,6 +156,7 @@ def dse():
         modify_config_parameter(config_path, "input_filepath", benchmark_path+benchmark)
         for learning_rate in learning_rates:
             modify_config_parameter(config_path, "init_learning_rate", learning_rate)
+            modify_config_parameter(config_path, "use_aie_partials", True)
             run_AIEplace()
     
 

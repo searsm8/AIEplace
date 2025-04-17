@@ -142,7 +142,7 @@ public:
     // Packet loading/unloading
     void initializePacketContents();
     void prepareNetGroup(float * input_data, int net_size, int offset);
-    void storeNetGroup(float * output_data, int net_size, int offset);
+    int storeNetGroup(float * output_data, int net_size, int offset);
     int  getPacketCount() { return m_packet_count; }
 
 

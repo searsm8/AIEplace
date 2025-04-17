@@ -12,12 +12,14 @@ help:
 	@echo "      Command to remove the generated files."
 	@echo ""
 #######################################################################################
+#TARGET ?= sw_emu#choose: sw_emu, hw_emu, hw
 TARGET ?= hw#choose: sw_emu, hw_emu, hw
 PLATFORM := xilinx_vck5000_gen4x8_xdma_2_202210_1
-XO := aieplace.$(TARGET).xo
+#XO := aieplace.$(TARGET).xo
+
+REF_FILES := reference_files_$(TARGET)
 XSA_OBJ := aieplace.$(TARGET).xsa
 XCLBIN := aieplace.$(TARGET).xclbin
-
 KERNEL_XO := partials_mm2s.xo partials_s2mm.xo
 KERNEL_XO += density_mm2s.xo density_s2mm.xo
 
@@ -35,8 +37,16 @@ KRNL_LINK_OPTS := -t $(TARGET) --config ../link.cfg --config ../design.cfg -j 26
 .PHONY: pl
 .ONESHELL:
 
-pl: mkrefdir config $(XO) $(XCLBIN)
-	cp reference_files_$(TARGET)/$(XCLBIN) ../bin/.
+pl: mkrefdir config $(XCLBIN)
+	cp $(XCLBIN) ../bin/.
+	echo DONE!
+
+
+# typical flow
+xo: ${KERNEL_XO}
+xsa: ${XSA_OBJ}# This takes awhile for hw builds!
+xclbin: ${XCLBIN}
+
 
 mkrefdir:
 	#rm -Rf reference_files_$(TARGET)
@@ -44,18 +54,21 @@ mkrefdir:
 	mkdir -p ../bin
 
 # Building kernel
-.PHONY: $(XO)
 %.xo: src/%.cpp
-	@echo "Generating XO file: $@"
-	cd reference_files_$(TARGET) ; v++ $(KRNL_COMPILE_OPTS) -k $(basename $(notdir $<)) ../$< -o $@
+	cd ${REF_FILES}
+	v++ $(KRNL_COMPILE_OPTS) --platform $(PLATFORM) -k $(basename $(notdir $<)) ../$< -o $@
+	cp $@ ..
 #$(XO): src/pl_kernel_m2ss.cpp src/pl_kernel_s2mm.cpp
 #	cd reference_files_$(TARGET) ; v++ $(KRNL_COMPILE_OPTS) -c -k $(KERNEL_NAME) -I'$(<D)' -o'$@' ../$<
-.PHONY: $(XSA_OBJ)
 $(XSA_OBJ): $(KERNEL_XO)
-	cd reference_files_$(TARGET) ; v++ --link $(KRNL_LINK_OPTS) -o'$@' $(+) $(AIE_OBJ)
-.PHONY: $(XCLBIN)
+	cd ${REF_FILES}
+	v++ --link $(KRNL_LINK_OPTS) --platform $(PLATFORM) -o'$@' $(+) $(AIE_OBJ)
+	cp $@ ..
 $(XCLBIN): $(XSA_OBJ)
-	cd reference_files_$(TARGET) ; v++ --package --target $(TARGET) --platform $(PLATFORM) $^ $(AIE_OBJ) -o $@ --package.boot_mode=ospi
+	cd ${REF_FILES}
+	v++ --package --target $(TARGET) --platform $(PLATFORM) --save-temps --debug $(AIE_OBJ) -o $@ $^
+	cp $@ ..
+#--package.boot_mode=ospi
 
 # Generates the link.cfg file which specifies connections between PL and AIE
 .PHONY: config
@@ -73,4 +86,4 @@ emconfig:
 # Cleaning stuff
 .PHONY: clean
 clean:
-	rm -rf reference_files_$(TARGET)
+	rm -rf *.xo *.xsa *.xclbin

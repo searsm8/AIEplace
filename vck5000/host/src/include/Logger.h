@@ -1,62 +1,148 @@
 // Logger.h
-// Simple logger for debugging and managing data printed.
+// Simple logger for debugging and managing info and data tables.
 #ifndef LOGGER_H
 #define LOGGER_H
 
 #include "Common.h"
 #include "Grid.h"
 #include <unordered_set>
+#include <mutex>
+#include <climits>
+#include <variant>
 #include <tabulate/table.hpp>
 #include <tabulate/markdown_exporter.hpp>
 
 using namespace tabulate;
 using std::string;
 
-namespace AIEplace {
+// Forward declarations
+class Timer;
+class ScopeTimer;
+class MemoryTracker;
 
-struct StatBlock {
-    string name;
-    long final_hpwl;
-    int iteration_count;
-    float init_learning_rate;
-    float final_learning_rate;
 
-    float prgm_runtime, db_IO_time, algo_time, AIE_time;
+class Logger {
+private:
+    // Singleton class pattern
+    static Logger* iLogger; // single instance of logger
+    static std::mutex iMutex;
+
+    // Define type to match tabulate's expected types:
+    using MsgType = std::variant<std::string, const char*, std::string_view, Table>;
+    //using MsgType = std::variant<string, Table>;
+
+    static std::unordered_set<string> keys;
+    static std::map<string, Color> string_colors;
+
+
+    struct FunctionStatBlock {
+        long long total_time = 0;        // Total time in microseconds
+        int call_count = 0;              // Number of calls
+        long long min_time = LLONG_MAX;  // Minimum execution time
+        long long max_time = 0;          // Maximum execution time
+        std::vector<long long> recent_times; // Recent execution times for percentiles
+    };
+
+    static std::unordered_map<string, FunctionStatBlock> function_stats_map;
+
+    // Constructor, private for singleton
+    Logger();
+
+public:
+    struct ProgramStatBlock {
+        string design_name;
+        long final_hpwl;
+        int iteration_count;
+        float init_learning_rate;
+        float final_learning_rate;
+
+        long long prgm_runtime, db_IO_time, algo_time, AIE_time;
+    };
+
+    // Singleton access
+    static Logger& getLogger();
+    static Logger& getMutex();
+
+    // Setup functions
+    static void setup_logging();
+
+    static inline void activate_logging_key(string key)
+    { Logger::keys.insert(key); }
+
+    static inline void deactivate_logging_key(string key)
+    { Logger::keys.erase(key); }
+
+
+    // Primary logging fucntions
+    static bool log(string key, MsgType msg);
+
+    static Color getColor(string key);
+
+    // inline functions for convenience
+    static inline void log_trace(const MsgType& msg)    { iLogger->log("TRACE", msg); }
+    static inline void log_detail(const MsgType& msg)   { iLogger->log("DETAIL", msg); }
+    static inline void log_debug(const MsgType& msg)    { iLogger->log("DEBUG", msg); }
+    static inline void log_data(const MsgType& msg)     { iLogger->log("DATA", msg); }
+    static inline void log_info(const MsgType& msg)     { iLogger->log("INFO", msg); }
+    static inline void log_warning(const MsgType& msg)  { iLogger->log("WARNING", msg); }
+    static inline void log_error(const MsgType& msg)    { iLogger->log("ERROR", msg); }
+    static inline void log_critical(const MsgType& msg) { iLogger->log("CRITICAL", msg); }
+
+    // Report generation functions
+    static void export_markdown(Table t, fs::path dir, string filename = "statistics");
+    static void append_csv(ProgramStatBlock &);
+    static void export_intermediate_results(AIEplace::Grid& grid, fs::path dir, int iter);
+    static void updateFunctionStats(string func_name, long long func_time);
+    static Table printFunctionStats();
+
+}; // end class Logger
+
+// Timer class for measuring elapsed time
+class Timer {
+private:
+    using clock_type = std::chrono::high_resolution_clock;
+    using time_point = clock_type::time_point;
+    using duration = std::chrono::microseconds;
+    
+    time_point mTimeStart;
+    long long mTotalMicroseconds = 0;
+    bool mIsRunning = false;
+    std::string mName;
+
+public:
+    // Constructor with optional name and auto-start
+    Timer(const std::string& name = "", bool autoStart = true);
+    
+    // Core timer operations
+    void start();
+    long long stop();
+    void reset(bool autoStart = true);
+    
+    // Timer information
+    long long elapsed() const;
+    long long total() const;
+    void setName(const std::string& name);
+    const std::string& getName() const;
 };
 
+// RAII-style timer for automatic function/scope tracking
+class ScopeTimer {
+private:
+    Timer mTimer;
+    std::string mName;
+    string mLogKey;
 
-static std::unordered_set<string> logging_keys;
-static std::map<string, Color> string_colors;
+public:
+    ScopeTimer(const std::string& name, string log_key = "profiling");
+    ~ScopeTimer();
+    
+    // Non-copyable
+    ScopeTimer(const ScopeTimer&) = delete;
+    ScopeTimer& operator=(const ScopeTimer&) = delete;
+};
 
-inline void activate_logging_key(string key)
-{ logging_keys.insert(key); }
+#define TIME_FUNCTION() ScopeTimer scopeTimer(__func__)
+#define TIME_BLOCK(name) ScopeTimer scopeTimer(name)
 
-inline void deactivate_logging_key(string key)
-{ logging_keys.erase(key); }
-
-void setup_logging();
-bool log(string key, Table t);
-bool log(string key, string msg);
-bool log_detail(string msg);
-bool log_info(string msg);
-bool log_debug(string msg);
-bool log_warning(string msg);
-bool log_error(string msg);
-bool log_data(string msg);
-
-bool log_detail(Table t);
-bool log_info(Table t);
-bool log_debug(Table t);
-bool log_warning(Table t);
-bool log_error(Table t);
-bool log_data(Table t);
-void log_space();
-Color getColor(string key);
-
-void export_markdown(Table t, fs::path dir);
-void append_csv(StatBlock &);
-void export_intermediate_results(Grid& grid, fs::path dir, int iter);
-
-}
 
 #endif

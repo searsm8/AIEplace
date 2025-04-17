@@ -85,11 +85,22 @@ void  Visualizer::highlightNode(Node* node)
     for(Net* net : node->getNets())
         highlightNet(net);
 
+    // draw a red cross on the highlighted node
     cairo_set_source_rgb (cr, 1.0, 0.0, 0.0); // red 
     float node_X = DIE_START + node->getX() * DIE_SCALE / m_die_width;
     float node_Y = DIE_START + node->getY() * DIE_SCALE / m_die_height;
     drawCross(node_X, node_Y);
     cairo_arc(cr, node_X, node_Y, .002, 0, 2 * M_PI);
+    cairo_stroke(cr);
+
+    // Write the highlighted net's name in bottom left corner
+    cairo_set_source_rgb (cr, 0.0, 0.0, 0.0); // black
+    cairo_select_font_face (cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size (cr, .02);
+    cairo_move_to (cr, .1, .99);
+    std::string highlight_str = "Focus Node: " + node->getName();
+    cairo_show_text (cr, highlight_str.c_str());
+    cairo_move_to (cr, .6, .99);
     cairo_stroke(cr);
 }
 
@@ -190,7 +201,7 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, int iteration)
     dir.append(filename);
     Table t;
     t.add_row(RowStream{} << "VISUALIZER output PNG to " << dir);
-    log("INFO", t);
+    Logger::log_info(t);
     cairo_surface_write_to_png (surface, dir.c_str());
 }
 
@@ -235,7 +246,7 @@ void Visualizer::drawElectricField(Grid& grid, fs::path dir, int iteration)
     dir.append(filename);
     Table t;
     t.add_row(RowStream{} << "VISUALIZER output E-field to " << dir);
-    log("INFO", t);
+    Logger::log_info(t);
     cairo_surface_write_to_png (surface, dir.c_str());
 
 }

@@ -6,22 +6,29 @@
 //#include "aie_api/aie_adf.hpp"
 //#include <aie_api/utils.hpp>
 
-#define inv_gamma 0.25 // 1/gamma factor for exponents (This should probably be a runtime parameter set by the graph)
-
 // perform fast exp algorithm on all 8 vector lanes
 void fast_exp(aie::vector<float, 8>& exp, aie::vector<float, 8>& factor, aie::vector<float, 8>& ones)
 {
+
+    // Create a mask for values which could cause numerical underflow (avoid NaN for very small values)
+    // Since e^-88 is near the underflow threshold for 32b floats, we mask out any exponents less than -88
+    aie::mask<8> underflow_mask = aie::lt(exp, aie::broadcast<float, 8>(-30.0f)); // was -87.0
+    
+    // apply factor to scale exponent
     exp = aie::mul(exp, factor);
 
-    for(int i = 0; i < 8; i++) // check for valid range to prevent NaN results
-      if(exp[i] < -1)
-          exp[i] = -1; // if there is a very big negative exponent, we just want the result to be zero!
+    exp = aie::add(exp, ones); // old method, this can result in underflow, returning NaN, for very negative exponents
 
-    exp = aie::add(exp, ones); // exp now contains: 1 + x/2^16 (or zero for large negative exponents)
-
-
-    for(int i = 0; i < 16; i++) // squaring 16 times yields sufficient precision?
+    for(int i = 0; i < 16; i++) // repeated squaring T times yields approximatly e^x
       exp = aie::mul(exp, exp);
+
+    // filter any NaN results
+    exp = aie::select(
+                exp,
+                //aie::broadcast<float, 8>(__FLT_MIN__),    // Zero out values which are masked
+                aie::broadcast<float, 8>(0),    // Zero out values which are masked
+                underflow_mask);                   // Mask
+
 }
 
 // Output is streamed, but due to limitation of only two in or out streams per kernel, we split:
@@ -31,8 +38,9 @@ void compute_abc(input_stream<float> * __restrict x_in, output_stream<float> * _
 {
   // Read control data
 	aie::vector<float, 8> ctrl;
-  ctrl.insert(0,readincr_v<4>(x_in));
-  ctrl.insert(1,readincr_v<4>(x_in));
+  //ctrl.insert(0,readincr_v<4>(x_in));
+  //ctrl.insert(1,readincr_v<4>(x_in));
+	ctrl = readincr_v<8>(x_in);
 
   int32 net_size  = ctrl.get(0);
   int32 packet_groups= ctrl.get(1);
@@ -41,14 +49,16 @@ void compute_abc(input_stream<float> * __restrict x_in, output_stream<float> * _
   // Push control data onto output stream for use by partials kernel
   writeincr(bc_out, ctrl);
 
-	aie::vector<float, 8> max_vals, min_vals;
+	aie::vector<float, 8> max_vals, min_vals, x_vals;
 	aie::vector<float, 8> a_plus, a_minus;
 	aie::vector<float, 8> b_plus, b_minus;
 	aie::accum<accfloat, 8> c_plus, c_minus;
 
+	//aie::vector<float, 8> factor = aie::broadcast<float, 8>( 0.0625 ); // 1 / 2^4
+	//aie::vector<float, 8> factor = aie::broadcast<float, 8>( 0.00390625 ); // 1 / 2^8
 	aie::vector<float, 8> factor = aie::broadcast<float, 8>( 0.0000152587890625 ); // 1 / 2^16
 	aie::vector<float, 8> ones   = aie::broadcast<float, 8>( 1.0 );
-	aie::vector<float, 8> data, x_vals;
+	aie::vector<float, 8> data;
 
   for (int net_idx = 0; net_idx < packet_groups; net_idx++) {
     max_vals = readincr_v<8>(x_in); // first 8 vals are always the max for these nets(pre-sorted)
@@ -58,7 +68,11 @@ void compute_abc(input_stream<float> * __restrict x_in, output_stream<float> * _
     // a+ for max val is simply e^0 = 1.0
     writeincr(xa_out, max_vals);  // Stream out x_0
     // TODO: always sending ones! opportunity to reduce communication
+    //################################
+    
     writeincr(xa_out, ones);      // Stream out a_plus_0
+    //fast_exp(ones, factor, ones); // estimate e^(data)
+    //writeincr(xa_out, data);    // Stream out a_plus_0
 
     min_vals = readincr_v<8>(x_in); // second 8 vals are always the min for these nets
     // compute a- for max val
@@ -81,9 +95,10 @@ void compute_abc(input_stream<float> * __restrict x_in, output_stream<float> * _
     writeincr(xa_out, min_vals);  // Stream out x_1
     // a- (max val) is always the same as a+ (min val) 
     // TODO: Redundant data! opportunity to reduce communication
-    writeincr(xa_out, data);    // Stream out a_plus_1 
+    writeincr(xa_out, data);    // Stream out a_plus_1 (always same as a_minus_0)
 
     // a- for min val is simply e^0 = 1.0
+    //################################
     writeincr(xa_out, ones);    // Stream out a_minus_1 
 
     // add a+ to cumulative total for b+ and c+
@@ -122,6 +137,9 @@ void compute_abc(input_stream<float> * __restrict x_in, output_stream<float> * _
       writeincr(xa_out, data);    // Stream out a_minus_i 
 
     }
+
+
+    // compute partials in this same kernel!
 
     // Stream out b and c terms
     writeincr(bc_out, b_plus);

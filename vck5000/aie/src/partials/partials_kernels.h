@@ -2,9 +2,10 @@
 #define PARTIALS_KERNELS_H
 
 #include "system_settings.h"
+#include <adf/x86sim/x86simDebug.h> // for printf debugging
 using namespace adf;
 
-#define inv_gamma 0.25 // 1/gamma factor for exponents (This should ideally be a runtime parameter set by the graph, but can't do that on VCK5000)
+constexpr float inv_gamma = 0.25; // 1/gamma factor for exponents (This should ideally be a runtime parameter set by the graph, but can't do that on VCK5000)
 
 // ********************
 // HPWL compute kernels

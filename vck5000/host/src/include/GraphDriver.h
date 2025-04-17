@@ -12,21 +12,6 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-// used for timing performance in GraphDrivers and AIEplace algorithm execution
-class Timer {
-  std::chrono::high_resolution_clock::time_point mTimeStart;
-public:
-  Timer() { reset(); }
-  long long stop() {
-    std::chrono::high_resolution_clock::time_point timeEnd =
-        std::chrono::high_resolution_clock::now();
-    return std::chrono::duration_cast<std::chrono::microseconds>
-                    (timeEnd - mTimeStart).count();
-  }
-  void reset() { mTimeStart = std::chrono::high_resolution_clock::now(); }
-};
-
-
 // Base class
 class GraphDriver
 {

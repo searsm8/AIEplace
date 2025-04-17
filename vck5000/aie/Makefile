@@ -10,15 +10,17 @@ clean: cleansim
 
 cleansim:
 	rm -rf .Xil .ipcache vivado* *.xpe *.txt *.log *.wcfg *.wdb *.vcd
-	rm -rf x86simulator_output aiesimulator_output xnwOut .AIE_SIM_CMD_LINE_OPTIONS pl_sample_count* *.html ISS_RPC_SERVER_PORT vitis_analyzer*
+	rm -rf xnwOut .AIE_SIM_CMD_LINE_OPTIONS pl_sample_count* *.html ISS_RPC_SERVER_PORT vitis_analyzer*
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 #Compile AIE code
 aie: libadf.a
 
 TOP := TopGraph
+#TOP := partials/PartialsGraph
 GRAPH_TOP := src/${TOP}.cpp
 
+TARGET ?= hw# choose hw or x86sim
 
 DSPLIB_ROOT := ${HOME}/Vitis_Libraries/dsp# Location of Vitis_Libraries/dsp
 XILINX_VITIS := /home/nx08/shared/fpga/xilinx/2022.1/Vitis/2022.1
@@ -39,8 +41,6 @@ AIE_FLAGS += --verbose
 AIE_FLAGS += --kernel-linting# Used for debugging, has overhead!
 AIE_FLAGS += --event-trace=runtime 
 
-TARGET ?= hw# choose hw or x86sim
-
 # Compile a full graph for AIEplace application, including multiple partials graphs and density graph
 .PHONY: libadf.a
 libadf.a: src/*
@@ -48,7 +48,7 @@ libadf.a: src/*
 	@echo "INFO: Running aiecompiler for all AIEplace graphs and kernels..."
 	@rm -rf Work
 	@mkdir -p Work
-	aiecompiler --target=${TARGET} ${AIE_FLAGS} --workdir=./Work src/TopGraph.cpp
+	aiecompiler --target=${TARGET} ${AIE_FLAGS} --workdir=./Work ${GRAPH_TOP}
 
 # Compile a graph for only partials computation
 partials: src/partials/*
@@ -68,24 +68,25 @@ density: src/density/*
 
 
 
-aie_x86: 
+x86: 
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	@echo "INFO: Running aiecompiler for x86sim..."
 	@rm -rf Work libadf.a
 	@mkdir -p Work
-	aiecompiler --target=x86sim --include="src" --workdir=./Work ${GRAPH_TOP} ${AIE_FLAGS}
+	aiecompiler --target=x86sim --include="src" --workdir=./Work_x86 ${GRAPH_TOP} ${AIE_FLAGS}
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # Simulate AIE code
 aiesim: cleansim
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	@echo "INFO: Running aiesimulator..."
-	aiesimulator --pkg-dir=./Work --profile --dump-vcd AIEplace --hang-detect-time=10000
+	aiesimulator --pkg-dir=./Work --profile --dump-vcd AIEplace --hang-detect-time=10000 \
 
-aiesim_x86: cleansim
+
+x86sim: cleansim
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	@echo "INFO: Running x86simulator..."
-	x86simulator --pkg-dir=./Work
+	x86simulator --pkg-dir=./Work_x86
 
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

@@ -8,18 +8,21 @@
 #include "aie_api/aie_adf.hpp"
 #include <aie_api/utils.hpp>
 
+
 void compute_partials( input_stream<float> * __restrict xa_in, input_stream<float> * __restrict bc_in, output_stream<float> * __restrict partials_out)
 {
 	// Read control data
 	aie::vector<float, 8> ctrl;
-	ctrl.insert(0,readincr_v<4>(bc_in));
-	ctrl.insert(1,readincr_v<4>(bc_in));
+	//ctrl.insert(0,readincr_v<4>(bc_in));
+	//ctrl.insert(1,readincr_v<4>(bc_in));
+	ctrl = readincr_v<8>(bc_in);
 	float net_size  = ctrl.get(0);
 	float packet_groups = ctrl.get(1);
 	// ignore ctrl(2) thru ctrl(7)
 
 	aie::vector<float, 8> a_plus, b_plus, c_plus, a_minus, b_minus, c_minus, x_vals;
 	aie::vector<float, 8> ones   = aie::broadcast<float, 8>( 1.0 );
+	aie::vector<float, 8> sixes = aie::broadcast<float, 8>( 6.0 );
 	aie::vector<float, 8> c_over_gamma, b_squared_inv; // intermediate results
 	aie::accum<accfloat, 8> plus_term, minus_term;
 
@@ -35,29 +38,82 @@ void compute_partials( input_stream<float> * __restrict xa_in, input_stream<floa
 		for(int n = 0; n < net_size; n++) {
 			// read in xa stream values
 			x_vals = readincr_v<8>(xa_in); // 4 sets of 32b flot
+			//if(n == 0) a_plus = aie::broadcast<float, 8>( 1.0 );
+			//else 
 			a_plus = readincr_v<8>(xa_in);
+			//if(n == 1) a_minus = aie::broadcast<float, 8>( 1.0 );
+			//else 
 			a_minus = readincr_v<8>(xa_in);
 
 			// compute the plus term
-			plus_term.from_vector(ones, 0);
-			plus_term = aie::mac(plus_term, (float)inv_gamma, x_vals);			// (1 + x/gamma)
-			plus_term = aie::mul(plus_term.to_vector<float>(0), b_plus);	// (1 + x/gamma)*b+
-			plus_term = aie::msc(plus_term, (float)inv_gamma, c_plus); 		// [((1 + x/gamma)*b+) - (c+ / gamma)]
+			//plus_term.from_vector(ones, 0);
+			//plus_term = aie::mac(plus_term, inv_gamma, x_vals);			// (1 + x/gamma)
+			//plus_term = aie::mul(plus_term.to_vector<float>(0), b_plus);	// (1 + x/gamma)*b+
+			//plus_term = aie::msc(plus_term, inv_gamma, c_plus); 		// [((1 + x/gamma)*b+) - (c+ / gamma)]
+			//b_squared_inv = aie::mul_square(aie::inv(b_plus));				// b+^-2
+			//plus_term = aie::mul(plus_term.to_vector<float>(0), b_squared_inv);	// [((1 + x/gamma)*b+) - (c+ / gamma)] / b+^-2
+			//plus_term = aie::mul(plus_term.to_vector<float>(0), a_plus);   	// a+ * [((1 + x/gamma)*b+) - (c+ / gamma)] / b+^2
+
+			// DEBUGGING PRINTFs
+			plus_term.from_vector(x_vals, 0);
+			//printf("line: %d\tplus_term: %f\n", __LINE__, plus_ptr[0]);
+
+			plus_term = aie::mul(plus_term.to_vector<float>(0), b_plus);	// x*b+
+			//printf("line: %d\tplus_term: %f\n", __LINE__, plus_ptr[0]);
+
+			plus_term = aie::sub(plus_term, c_plus);	// x*b+ - c+
+			//printf("line: %d\tplus_term: %f\n", __LINE__, plus_ptr[0]);
+
+			plus_term = aie::mul(plus_term.to_vector<float>(0), inv_gamma);	// (x*b+ - c+) / gamma
+			//printf("line: %d\tplus_term: %f\n", __LINE__, plus_ptr[0]);
+
+			//plus_term = aie::msc(plus_term, inv_gamma, c_plus); 		// [((1 + x/gamma)*b+) - (c+ / gamma)]
+			plus_term = aie::add(plus_term, b_plus); // b+ + (x*b+ - c+) / gamma
+			//printf("line: %d\tplus_term: %f\n", __LINE__, plus_ptr[0]);
+
 			b_squared_inv = aie::mul_square(aie::inv(b_plus));				// b+^-2
 			plus_term = aie::mul(plus_term.to_vector<float>(0), b_squared_inv);	// [((1 + x/gamma)*b+) - (c+ / gamma)] / b+^-2
+			//printf("line: %d\tplus_term: %f\n", __LINE__, plus_ptr[0]);
+
 			plus_term = aie::mul(plus_term.to_vector<float>(0), a_plus);   	// a+ * [((1 + x/gamma)*b+) - (c+ / gamma)] / b+^2
+			//printf("line: %d\tplus_term: %f\n", __LINE__, plus_ptr[0]);
+
+			//printf("%s: %s, %d\n", __FUNCTION__, X86SIM_KERNEL_NAME, __LINE__);
 
 			// compute the minus term
-			minus_term.from_vector(ones, 0);
-			minus_term = aie::msc(minus_term, (float)inv_gamma, x_vals);
+			minus_term.from_vector(x_vals, 0);
 			minus_term = aie::mul(minus_term.to_vector<float>(0), b_minus);
-			minus_term = aie::mac(minus_term, (float)inv_gamma, c_minus);
+			//printf("line: %d\tminus_term: %f\n", __LINE__, minus_ptr[0]);
+			minus_term = aie::sub(c_minus, minus_term.to_vector<float>(0));	// c- - x*b-
+			//printf("line: %d\tminus_term: %f\n", __LINE__, minus_ptr[0]);
+			minus_term = aie::mul(minus_term.to_vector<float>(0), inv_gamma); // (c- - x*b-) / gamma
+			//printf("line: %d\tminus_term: %f\n", __LINE__, minus_ptr[0]);
+			minus_term = aie::add(minus_term.to_vector<float>(0), b_minus); // b- + (c- - x*b-) / gamma
+			//printf("line: %d\tminus_term: %f\n", __LINE__, minus_ptr[0]);
+
 			b_squared_inv = aie::mul_square(aie::inv(b_minus));
-			minus_term = aie::mul(minus_term.to_vector<float>(0), b_squared_inv);
+			minus_term = aie::mul(minus_term.to_vector<float>(0), b_squared_inv); // (b- + (c- - x*b-) / gamma) / (b-)^2
+			//printf("line: %d\tminus_term: %f\n", __LINE__, minus_ptr[0]);
 
 			// subtract and write result
-			plus_term = aie::msc(plus_term, minus_term.to_vector<float>(0), a_minus);
+			//plus_term = aie::msc(plus_term, minus_term.to_vector<float>(0), a_minus); // partial = plus_term - term*(a-)
+			minus_term = aie::mul(minus_term.to_vector<float>(0), a_minus); // term * a-
+			plus_term  = aie::sub(plus_term.to_vector<float>(0), minus_term.to_vector<float>(0)); // partial = plus_term - minus_term
+
+
+
+			// TEMPORARY DEBUG
+			writeincr(partials_out, x_vals);
+			writeincr(partials_out, a_plus);
+			writeincr(partials_out, a_minus);
+
+			writeincr(partials_out, b_plus);
+			writeincr(partials_out, b_minus);
+			writeincr(partials_out, c_plus);
+			writeincr(partials_out, c_minus);
+			
 			writeincr(partials_out, plus_term.to_vector<float>(0));
+			writeincr(partials_out, sixes);
 	  	}
 	}
 }
