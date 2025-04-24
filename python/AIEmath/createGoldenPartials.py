@@ -89,7 +89,7 @@ def createGoldenHPWL(filepath, netsize=2, N=1, bench_num=0):
         # write control values to input stream (netsize and num_nets)
         ctrl_file.write(f"{netsize}\n{N}\n")
         if(not WINDOW_BASED):
-            x_in_file.write(f"{netsize}\n{N}\n0\n0\n")
+            x_in_file.write(f"{netsize}\n{int(N/8)}\n0\n0\n0\n0\n0\n0\n")
         bc_file.write(f"{netsize}\n{N}\n0\n0\n")
 
         for iter in range(math.ceil(N/8)):
@@ -136,7 +136,7 @@ if __name__ == "__main__":
 
     cleanFiles(golden_dir)
     #Create benchmarks for wirelength
-    num_benchmarks = 4
+    num_benchmarks = 8
     for i in range(num_benchmarks):
         createGoldenHPWL(golden_dir , netsize=2, N=8, bench_num=i)
     #createGoldenHPWL(golden_dir , netsize=2, N=8*4)

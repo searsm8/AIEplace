@@ -24,7 +24,7 @@ constexpr float inv_gamma = 0.25; // 1/gamma factor for exponents (This should i
 
 // Stream only kernels
 void compute_abc(input_stream<float> * __restrict x_in, output_stream<float> * __restrict xa_out, output_stream<float> * __restrict bc_out);
-void compute_partials( input_stream<float> * __restrict xa_in, input_stream<float> * __restrict bc_in, output_stream<float> * __restrict partials_out);
+void compute_partials( input_stream<float> * __restrict x_in, output_stream<float> * __restrict partials_out);
 
 
 // Window based kernels

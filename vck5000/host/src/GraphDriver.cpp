@@ -36,14 +36,15 @@ void GraphDriver::send_packet(float * packet)
     start_time = getEpoch();
 
     //DEBUG
+    //SHOULD USE LOGGER log_debug(msg)
     //print input_data
-    cout << "send_packet input:";
-    for(int i = 0; i < OUTPUT_PACKET_SIZE; i++){
-        if(packet[i] == 0) continue;
-        if(i%8 == 0) cout << endl;
-        cout << packet[i] << " ";
-    }
-    cout << endl;
+    //cout << "send_packet input -- kernel_id = " << m_kernel_id;
+    //for(int i = 0; i < INPUT_PACKET_SIZE; i++){
+    //    //if(packet[i] == 0) continue;
+    //    if(i%8 == 0) cout << endl;
+    //    cout << packet[i] << " ";
+    //}
+    //cout << endl;
 
     // Start data movers in PL
     run_device_mm2s.start();
@@ -54,21 +55,24 @@ float GraphDriver::receive_packet(float * output_data)
 {
     // wait for data movers to finish
     run_device_mm2s.wait();
-    run_device_s2mm.wait();
+    Logger::log_trace("run_device_mm2s.wait();");
+    run_device_s2mm.wait(); // gets stuck here!
+    Logger::log_trace("run_device_s2mm.wait();");
     kernel_exec_time = getTiming(getEpoch(), start_time);
     start_time = getEpoch();
     result_buffer.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     result_buffer.read(output_data);
 
     //DEBUG
+    //SHOULD USE LOGGER log_debug(msg)
     //print output_data
-    cout << "receive_packet output:";
-    for(int i = 0; i < OUTPUT_PACKET_SIZE; i++){
-        //if(output_data[i] == 0) continue;
-        if(i%8 == 0) cout << endl;
-        cout << output_data[i] << " ";
-    }
-    cout << endl;
+    //cout << "receive_packet output -- kernel_id = " << m_kernel_id;
+    //for(int i = 0; i < OUTPUT_PACKET_SIZE; i++){
+    //    //if(output_data[i] == 0) continue;
+    //    if(i%8 == 0) cout << endl;
+    //    cout << output_data[i] << " ";
+    //}
+    //cout << endl;
 
     xfer_off_time=getTiming(getEpoch(), start_time);
 }
@@ -76,6 +80,7 @@ float GraphDriver::receive_packet(float * output_data)
 void PartialsGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id)
 {
     Logger::log_trace("PartialsGraphDriver creating PL kernel. Kernel ID: " + std::to_string(kernel_id));
+    m_kernel_id = kernel_id;
     
     // Create kernel objects
     // Be extra sure the names are correct, there might not be an error message!
@@ -106,6 +111,7 @@ void PartialsGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int 
 void DensityGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id, int bins_per_row)
 {
     Logger::log_trace("DensityGraphDriver creating PL kernel. Kernel ID: " + std::to_string(kernel_id));
+    m_kernel_id = kernel_id;
     // kernel_id = 0 -> DCT
     // kernel_id = 1 -> IDCT
     // kernel_id = 2 -> IDXST

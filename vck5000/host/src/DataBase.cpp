@@ -230,12 +230,12 @@ void DataBase::initializePacketContents()
     m_packet_count = 0;
     for(int net_size = MIN_AIE_NET_SIZE; net_size <= MAX_AIE_NET_SIZE; net_size++) {
     //for(int net_size = TEST_NET_SIZE; net_size <= TEST_NET_SIZE; net_size++) {
-        Logger::log("packets", "net_size = " + stringify(net_size));
+        Logger::log("packets",  "net_size = " + stringify(net_size));
         int groups_per_packet = LCM_BUFFSIZE/net_size; // for netsize 2 thru 8, this will be an exact integer
-        Logger::log("packets", "groups_per_packet = " + stringify(groups_per_packet));
-        Logger::log("packets", "nets_per_packet = " + stringify(groups_per_packet*NETS_PER_GROUP));
+        Logger::log("packets",  "groups_per_packet = " + stringify(groups_per_packet));
+        Logger::log("packets",  "nets_per_packet = " + stringify(groups_per_packet*NETS_PER_GROUP));
         int num_nets = mmv_nets_by_degree[net_size].size();
-        Logger::log("packets", "num_nets = " + stringify(num_nets));
+        Logger::log("packets",  "num_nets = " + stringify(num_nets));
 
         int packet_start = 0;
         //int nets_per_graph = num_nets / PARTIALS_GRAPH_COUNT;
@@ -379,11 +379,11 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
 
         // nodes are already sorted by Y coords, so store them first
         for(int n = 0; n < net_size; n++) {
-            Logger::log_detail("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
+            Logger::log_debug("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
             //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8 + 1]));
             float partial = output_data[base_addr + 2*net_idx + n*8 + 1];
             nodes[n]->partials_aie.y += partial;
-            Logger::log_data("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: partials_aie.y += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->partials_aie.y));
+            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: partials_aie.y += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->partials_aie.y));
 
             //debugging
             float y_size = net->getBoundingBox().getYsize();
@@ -410,11 +410,11 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         nodes = net->getNodes();
 
         for(int n = 0; n < net_size; n++) {
-            Logger::log_detail("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
+            Logger::log_debug("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
             //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8]));
             float partial = output_data[base_addr + 2*net_idx + n*8 + 0];
             nodes[n]->partials_aie.x += partial;
-            Logger::log_data("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: partials_aie.x += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->partials_aie.x));
+            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: partials_aie.x += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->partials_aie.x));
 
             //debugging
             float x_size = net->getBoundingBox().getXsize();

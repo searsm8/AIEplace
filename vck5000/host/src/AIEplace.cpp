@@ -12,7 +12,6 @@ void Placer::performIteration()
 
     // launch threads from this function?
 
-    computeAllPartials_CPU();
     // Compute terms for HPWL partials
     if(params["use_aie_partials"]) {
         computeAllPartials_AIE();
@@ -21,7 +20,8 @@ void Placer::performIteration()
     }
 
     // Compare results to ensure correctness
-    comparePartialResults();
+    //computeAllPartials_CPU();
+    //comparePartialResults();
 
     // Compute Electric Fields in each bin
     computeOverlaps(); // Density Map computation
@@ -230,11 +230,6 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
 
         // if this component is bigger than 1/16th of bin area, set member bool
         item.second->checkIfLarge(bin_area_16th);
-
-        // REMOVE
-        //Logger::log_data(item.second->getName());
-        item.second->printXY();
-
     }
 
     // TODO
@@ -288,25 +283,29 @@ void Placer::computeAllPartials_AIE()
         // send a packet to each AIE graph
         long start_prep {getTime()};
 
-        std::thread partials_threads[PARTIALS_GRAPH_COUNT];
+        std::vector<std::thread> partials_threads;
         for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
             //cout << "packet_index: " << packet_index << "\t < " << db.mv_packet[graph_index].size() << endl;
             if(packet_index < db.mv_packet[graph_index].size()) {
                 //cout << "computePartials on graph " << db.mv_packet[graph_index][packet_index]->graph_index
                 //    << "\t" << db.mv_packet[graph_index][packet_index]->contents[0].to_string();
+
+                //partials_threads.emplace_back(computePartials, db.mv_packet[graph_index][packet_index]);
                 computePartials(db.mv_packet[graph_index][packet_index]);
 
                 // Need to tell each thread starting offset, and packets_per_graph to know how far to go
                 //partials_threads[graph_index] = std::thread([this, graph_index, packet_index]() {
                 //    this->computePartials(db.mv_packet[graph_index][packet_index]);
                 //});
+
                 graphs_active++;
             }
         }
 
         // Join threads
-        //for(int graph_index = 0; graph_index < graphs_active; graph_index++) {
-        //    partials_threads[graph_index].join();
+        //for(auto& thread : partials_threads)
+        //{
+        //    thread.join();
         //}
 
         // receive output from each AIE graph
@@ -620,6 +619,7 @@ void Placer::computeAllPartials_CPU()
             continue;
         else
             for (Net* net_p : item.second) {
+                //std::thread t(computeNetPartials_CPU, net_p);
                 computeNetPartials_CPU(net_p);
             }
     }
@@ -689,8 +689,8 @@ void Placer::computeNetPartials_CPU(Net* net_p)
     assert(net_p->getDegree() <= MAX_AIE_NET_SIZE);
 
     compute_bc_terms_CPU(net_p);
-    Logger::log_detail("#############");
-    Logger::log_detail(net_p->getName());
+    Logger::log_debug("#############");
+    Logger::log_debug(net_p->getName());
     for (Node* node_p : net_p->mv_nodes) {
         float partial_x = (( 1 + node_p->getX()/gamma) * net_p->terms_cpu.b.plus.x - (net_p->terms_cpu.c.plus.x / gamma)) 
                                     * (node_p->terms_cpu.a.plus.x / (net_p->terms_cpu.b.plus.x * net_p->terms_cpu.b.plus.x))
@@ -702,14 +702,14 @@ void Placer::computeNetPartials_CPU(Net* net_p)
                          - (( 1 - node_p->getY()/gamma) * net_p->terms_cpu.b.minus.y + (net_p->terms_cpu.c.minus.y / gamma)) 
                                     * (node_p->terms_cpu.a.minus.y / (net_p->terms_cpu.b.minus.y * net_p->terms_cpu.b.minus.y));
 
-        Logger::log_detail(node_p->getName() + " partial_x: " + std::to_string(partial_x));
-        Logger::log_detail(node_p->getName() + " partial_y: " + std::to_string(partial_y));
+        Logger::log_debug(node_p->getName() + " partial_x: " + std::to_string(partial_x));
+        Logger::log_debug(node_p->getName() + " partial_y: " + std::to_string(partial_y));
         node_p->terms_cpu.partials.x += partial_x;
         node_p->terms_cpu.partials.y += partial_y;
     }
     for (Node* node_p : net_p->mv_nodes) {
-        Logger::log_detail(node_p->getName() + " total partial_x: " + std::to_string(node_p->terms_cpu.partials.x));
-        Logger::log_detail(node_p->getName() + " total partial_y: " + std::to_string(node_p->terms_cpu.partials.y));
+        Logger::log_debug(node_p->getName() + " total partial_x: " + std::to_string(node_p->terms_cpu.partials.x));
+        Logger::log_debug(node_p->getName() + " total partial_y: " + std::to_string(node_p->terms_cpu.partials.y));
     }
 }
 
@@ -1049,15 +1049,15 @@ void Placer::comparePartialResults()
         total++;
         if(np->terms_cpu.partials.isClose(np->partials_aie))
         {
-            Logger::log_data("Terms DO match for node " + np->getName()
-                    + " -- CPU result: " + np->terms_cpu.partials.toString()
-                    + " -- AIE result: " + np->partials_aie.toString());
+            //Logger::log_data("Terms DO match for node " + np->getName()
+            //        + " -- CPU result: " + np->terms_cpu.partials.toString()
+            //        + " -- AIE result: " + np->partials_aie.toString());
             continue;
         }
         else 
         {
             error_count++;
-            Logger::log_error("Terms do not match for node " + np->getName()
+            Logger::log_error("Terms DO NOT match for node " + np->getName()
                     + " -- CPU result: " + np->terms_cpu.partials.toString()
                     + " -- AIE result: " + np->partials_aie.toString());
 

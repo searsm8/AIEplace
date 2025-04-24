@@ -18,6 +18,7 @@ class GraphDriver
 public:
     // Member data
     long start_time, xfer_on_time, xfer_off_time, kernel_exec_time;
+    int m_kernel_id;
     xrt::kernel device_mm2s;
     xrt::kernel device_s2mm;
 

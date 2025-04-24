@@ -37,7 +37,7 @@ KRNL_LINK_OPTS := -t $(TARGET) --config ../link.cfg --config ../design.cfg -j 26
 .PHONY: pl
 .ONESHELL:
 
-pl: mkrefdir config $(XCLBIN)
+pl: clean mkrefdir config $(XCLBIN)
 	cp $(XCLBIN) ../bin/.
 	echo DONE!
 
@@ -49,7 +49,6 @@ xclbin: ${XCLBIN}
 
 
 mkrefdir:
-	#rm -Rf reference_files_$(TARGET)
 	mkdir -p reference_files_$(TARGET)
 	mkdir -p ../bin
 
@@ -86,4 +85,5 @@ emconfig:
 # Cleaning stuff
 .PHONY: clean
 clean:
-	rm -rf *.xo *.xsa *.xclbin
+	rm -rf *.xo *.xsa *.xclbin *summary *log
+	rm -rf reference_files_*

@@ -24,9 +24,9 @@ void Logger::setup_logging()
     // DEFAULT LOGGING KEYS
     //Logger::activate_logging_key("TRACE");  // For program execution tracing, e.g. function calls
     Logger::activate_logging_key("DETAIL"); // Used to give detail on things that most people won't care about. Usually off.
-    Logger::activate_logging_key("DEBUG");   // Used to give info on things that some people might care about. Usually on.
+    //Logger::activate_logging_key("DEBUG");  // Used only by developers for debugging!
+    Logger::activate_logging_key("DATA");   // Used to give info on things that some people might care about. Usually on.
     Logger::activate_logging_key("INFO");   // Used to give data on things that most people will care about. Always on.
-    Logger::activate_logging_key("DATA");  // Used only by developers for debugging!
     Logger::activate_logging_key("WARNING");// Something bad has happened!
     Logger::activate_logging_key("ERROR");  // Something VERY bad has happened!
     Logger::activate_logging_key("CRITICAL");// Something devastating has happened, must exit program!
