@@ -40,6 +40,9 @@ AIE_FLAGS += --verbose
 #AIE_FLAGS += --platform=$(PLATFORM) # platform not needed for VCK5000?
 AIE_FLAGS += --kernel-linting# Used for debugging, has overhead!
 AIE_FLAGS += --event-trace=runtime 
+AIE_FLAGS += -xlopt=1
+AIE_FLAGS += --stacksize=2048
+AIE_FLAGS += --constraints=constraints.json # to specify constraints such as location or placement bounding box.
 
 # Compile a full graph for AIEplace application, including multiple partials graphs and density graph
 .PHONY: libadf.a

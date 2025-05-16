@@ -203,6 +203,7 @@ void Logger::append_csv(ProgramStatBlock &stats)
         out_file << "Partials AIE time, ";
         out_file << "computePartials AIE, ";
         out_file << "receivePartials AIE, ";
+        out_file << "lock time, ";
         out_file << endl;
     }
 
@@ -221,12 +222,15 @@ void Logger::append_csv(ProgramStatBlock &stats)
     out_file << std::to_string(function_stats_map["computeAllPartials_AIE"].total_time) << ", ";
     out_file << std::to_string(function_stats_map["computePartials"].total_time) << ", ";
     out_file << std::to_string(function_stats_map["receivePartials"].total_time) << ", ";
+    out_file << std::to_string(function_stats_map["lockNodes"].total_time) << ", ";
     out_file << endl;
     out_file.close();
 }
 
 void Logger::updateFunctionStats(string func_name, long long func_time)
 {
+    std::lock_guard<std::mutex> lock(iMutex); // thread-safe access
+    // Check if the function name already exists in the map
     FunctionStatBlock & s = function_stats_map[func_name];
     s.call_count++;
     s.total_time += func_time;

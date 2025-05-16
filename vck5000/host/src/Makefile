@@ -2,7 +2,7 @@ GCC := g++#${CXX} # For CPU only build, set to g++
 TOP_DIR := ../../..
 PROJ_NAME := AIEplace
 MAIN = main.cpp
-ITEMS := AIEplace DataBase Grid Net DCT GraphDriver Logger
+ITEMS := AIEplace DataBase Grid Net DCT GraphDriver Logger Common
 ITEMS += Visualizer
 
 OBJS := $(addprefix objs/, $(addsuffix .o, ${ITEMS}))
@@ -11,9 +11,11 @@ EXE := ${TOP_DIR}/vck5000/bin/AIEplace.exe
 THIRD_PARTY := ${TOP_DIR}/third_party
 LIMBO_DIR := ${THIRD_PARTY}/Limbo
 TABLE_DIR := ${THIRD_PARTY}/tabulate/include
+TBB_INCLUDE := ${HOME}/.local/include
+TBB_LIB := ${HOME}/.local/lib64
 
 INCLUDES := -I ./include
-INCLUDES += -I${LIMBO_DIR} -I${TABLE_DIR}
+INCLUDES += -I${LIMBO_DIR} -I${TABLE_DIR} -I${TBB_INCLUDE}
 INCLUDES += -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/ -I/lustre/home/nx08/shared/fpga/xilinx/include/ 
 INCLUDES += -I${HOME}/local/boost_1_82_0/
 
@@ -21,11 +23,13 @@ COMPILE_FLAGS := -std=c++17
 COMPILE_FLAGS += -g #see the proper names of variables and functions in your stack frames, 
 				    #and get line numbers and see the source as you step around in the executable
 COMPILE_FLAGS += -Llib 
+COMPILE_FLAGS += -L${TBB_LIB}
 COMPILE_FLAGS += -llefparseradapt 
 COMPILE_FLAGS += -ldefparseradapt 
 #COMPILE_FLAGS += -lverilogparser
 COMPILE_FLAGS += -lbookshelfparser
 COMPILE_FLAGS += -lgzstream -lz
+COMPILE_FLAGS += -ltbb
 
 # Cairo is used for generating images, but disabled now because it causes compile errors:
 # warning: libnvidia-tls.so.430.50, needed by //usr/lib64/libGL.so.1, not found
@@ -41,6 +45,7 @@ COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 #COMPILE_FLAGS += -DUSE_AIE_ACCELERATION# Comment this out if no visualization is wanted.
 
 PROFILE_FLAG := -pg# flag for profiling with gprof
+#PROFILE_FLAG += -fsanitize=thread# flag for thread sanitizer for debugging
 #PROFILE_FLAG += -g# flag for code annotation
 
 OPT_FLAG := -O0# no optimizations

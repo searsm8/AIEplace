@@ -1,6 +1,7 @@
 #include "AIEplace.h"
 #include "DCT.h"
 #include <cmath>
+#include <tbb/tbb.h>
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -59,7 +60,6 @@ void Placer::run()
     #endif
     initializePlacement(target, 0, grid.getDieWidth()/4); // even spread around center
     //initializePlacement(target, 0, 500); // Close placement for testing purposes
-    //return;
 
     bool converged = false;
     while( !converged )
@@ -290,8 +290,10 @@ void Placer::computeAllPartials_AIE()
                 //cout << "computePartials on graph " << db.mv_packet[graph_index][packet_index]->graph_index
                 //    << "\t" << db.mv_packet[graph_index][packet_index]->contents[0].to_string();
 
-                //partials_threads.emplace_back(computePartials, db.mv_packet[graph_index][packet_index]);
-                computePartials(db.mv_packet[graph_index][packet_index]);
+                partials_threads.emplace_back(&AIEplace::Placer::computePartials, this, db.mv_packet[graph_index][packet_index]);
+                //partials_threads[graph_index].detach();
+
+                //computePartials(db.mv_packet[graph_index][packet_index]);
 
                 // Need to tell each thread starting offset, and packets_per_graph to know how far to go
                 //partials_threads[graph_index] = std::thread([this, graph_index, packet_index]() {
@@ -303,10 +305,9 @@ void Placer::computeAllPartials_AIE()
         }
 
         // Join threads
-        //for(auto& thread : partials_threads)
-        //{
-        //    thread.join();
-        //}
+        for(auto& thread : partials_threads) {
+            thread.join();
+        }
 
         // receive output from each AIE graph
         Timer t_receive{};
@@ -601,28 +602,84 @@ void Placer::computeElectricFields_AIE()
  * Results of the partial derivative computation are stored 
  * within each node's data members
 **/
+const int MAX_THREADS = 10; //std::thread::hardware_concurrency(); //On NextGenIO: 96
 void Placer::computeAllPartials_CPU()
 {
-    // DEBUG: run a small subset of nets
-    //auto nets = db.getNetsByDegree();
-    //for(int i = 0; i < 8; i++)
-    //{
-    //    computeNetPartials_CPU(nets[8][i]);
-    //    nets[8][i]->printTerms();
-    //}
+        // The simplest parallel_for usage for your derivatives
+        //void computeDerivatives(std::vector<double>& results, const Design& design) {
+        //    tbb::parallel_for(
+        //        tbb::blocked_range<size_t>(0, results.size()),
+        //        [&](const tbb::blocked_range<size_t>& r) {
+        //            for(size_t i = r.begin(); i < r.end(); ++i) {
+        //                results[i] = computeSingleDerivative(design, i);
+        //            }
+        //        }
+        //    );
+        //}
 
     TIME_FUNCTION();
     long start_partials = getTime();
 // compute only for nets size 2-8, which is what normally runs on AIE
+    //Logger::log_detail("MAX_THREADS: " + std::to_string(MAX_THREADS));
     for (auto item : db.getNetsByDegree()) {
+        //std::vector<std::thread> partials_threads;
+        //std::vector<std::thread::id> thread_ids;
+        std::mutex thread_ids_mutex;
         if(item.first < MIN_AIE_NET_SIZE || item.first > MAX_AIE_NET_SIZE) 
             continue;
-        else
-            for (Net* net_p : item.second) {
-                //std::thread t(computeNetPartials_CPU, net_p);
-                computeNetPartials_CPU(net_p);
-            }
+        else 
+        // parallel implementation
+        {
+            cout << "Iteration " << iteration << " -- Computing partials for nets of size " << item.first << endl;
+            auto & nets = item.second; // all nets of this size in the DataBase
+            size_t block_range = nets.size();
+            size_t grain_size  = nets.size() / MAX_THREADS;
+            // use tbb for parallelization
+            tbb::parallel_for(
+                tbb::blocked_range<size_t>(0, block_range, grain_size),
+                [&](const tbb::blocked_range<size_t>& r) {
+                    //std::lock_guard<std::mutex> lock(thread_ids_mutex);
+                    //thread_ids.push_back(std::this_thread::get_id());
+                    //Logger::log_detail("Thread ID: " + std::to_string(get_index(std::this_thread::get_id())));                    
+                    //Logger::log_detail("nets.size(): " + std::to_string(nets.size()) + " r.begin(): " + std::to_string(r.begin()) + " r.end(): " + std::to_string(r.end()));
+                    for(size_t i = r.begin(); i < r.end(); ++i) {
+                        computeNetPartials_CPU(nets[i]);
+                    }
+                }
+            );
+            //std::cout << "Threads used: " << thread_ids.size() << std::endl;
+        }
+
+        // sequential implementation
+        //for (Net* net_p : item.second) {
+            //launch a batch of threads
+            //partials_threads.emplace_back(&AIEplace::Placer::computeNetPartials_CPU, this, net_p);
+        //    computeNetPartials_CPU(net_p); // no multithreading
+            //if(partials_threads.size() %1000 == 0 || partials_threads.size() > 4000)
+            //Logger::log_detail("Nets of size " + std::to_string(item.first) + ": " + std::to_string(item.second.size()) + " -- Thread count: " + std::to_string(partials_threads.size()));
+            //Logger::log_detail("New thread launched (ID == " + std::to_string(get_index(partials_threads.back().get_id()))+ ") for net " + net_p->getName() + " -- Thread count: " + std::to_string(partials_threads.size()));
+
+            // Join threads
+            //if(partials_threads.size() >= MAX_THREADS) {
+            //    for(auto& thread : partials_threads) {
+            //        if(thread.joinable()) {
+            //            //Logger::log_detail("Join thread... Thread count: " + std::to_string(partials_threads.size()));
+            //            thread.join();
+            //        }
+            //    }
+            //    partials_threads.clear();
+            //}
+        //}
+
+            //Ensure all remaining threads are joined
+            //for(auto& thread : partials_threads) {
+            //    if(thread.joinable()) {
+            //        //Logger::log_detail("Join thread... Thread count: " + std::to_string(partials_threads.size()));
+            //        thread.join();
+            //    }
+            //}
     }
+
 
 
     // DEBUG: Print partials results
@@ -648,7 +705,11 @@ void Placer::compute_a_terms_CPU(Net* net_p)
     for (Node* node_p : nodes) {
         node_p->terms_cpu.a.plus.x  = exp( (node_p->getX() - nodes.front()->getX()) / gamma);
         node_p->terms_cpu.a.minus.x = exp( (nodes.back()->getX() - node_p->getX()) / gamma);
+        //if(node_p->terms_cpu.a.plus.x > 1)
+        //Logger::log_detail("CPU computed a+ = " + std::to_string(node_p->terms_cpu.a.plus.x));
         assert(node_p->terms_cpu.a.plus.x <= 1 && "Invalid a+ computed!");
+        //if(node_p->terms_cpu.a.minus.x > 1)
+        //Logger::log_detail("CPU computed a- = " + std::to_string(node_p->terms_cpu.a.minus.x));
         assert(node_p->terms_cpu.a.minus.x <= 1 && "Invalid a- computed!");
     }
 
@@ -684,13 +745,13 @@ void Placer::compute_bc_terms_CPU(Net* net_p)
  */
 void Placer::computeNetPartials_CPU(Net* net_p)
 {
+    try {
+    //net_p->lockNodes();
     // DEBUG: stop at max net size for comparison to AIE computation
     assert(net_p->getDegree() >= MIN_AIE_NET_SIZE);
     assert(net_p->getDegree() <= MAX_AIE_NET_SIZE);
 
     compute_bc_terms_CPU(net_p);
-    Logger::log_debug("#############");
-    Logger::log_debug(net_p->getName());
     for (Node* node_p : net_p->mv_nodes) {
         float partial_x = (( 1 + node_p->getX()/gamma) * net_p->terms_cpu.b.plus.x - (net_p->terms_cpu.c.plus.x / gamma)) 
                                     * (node_p->terms_cpu.a.plus.x / (net_p->terms_cpu.b.plus.x * net_p->terms_cpu.b.plus.x))
@@ -710,6 +771,12 @@ void Placer::computeNetPartials_CPU(Net* net_p)
     for (Node* node_p : net_p->mv_nodes) {
         Logger::log_debug(node_p->getName() + " total partial_x: " + std::to_string(node_p->terms_cpu.partials.x));
         Logger::log_debug(node_p->getName() + " total partial_y: " + std::to_string(node_p->terms_cpu.partials.y));
+    }
+    net_p->unlockNodes();
+    } catch (std::exception& e) {
+        Logger::log_critical("Exception in computeNetPartials_CPU: " + std::string(e.what()));
+    } catch (...) {
+        Logger::log_critical("Unknown exception in computeNetPartials_CPU");
     }
 }
 

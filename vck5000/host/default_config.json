@@ -1,7 +1,7 @@
 {
   "params": {
     "comment1": "runtime_options",
-    "use_aie_partials": true,
+    "use_aie_partials": false,
     "use_aie_density": false,
     "input_filepathx": "host/benchmarks/ispd2015/mgc_superblue11_a",
     "input_filepaths": "host/benchmarks/ispd2015/mgc_superblue19",
@@ -9,14 +9,18 @@
     "input_filepathx": "host/benchmarks/ispd2005/adaptec1",
     "input_filepath": "host/benchmarks/ispd2005/bigblue1",
     "input_filepathx": "host/benchmarks/ispd2015/toy",
-    "xclbin": "bin/aieplace.hw.xclbin",
+
+    "xclbinx": "bin/aieplace.hw.xclbin",
+    "xclbin_": "bin/aieplace_1cu_bad.hw.xclbin",
+    "xclbin": "bin/aieplace_1cu.hw.xclbin",
     "xclbin_": "bin/aieplace.hw_emu.xclbin",
+
     "visualize": false,
     "iterations_per_export": 1,
     "wirelength_method": "HPWL",
     "comment2": "hyperparameters",
     "gamma": 4,
-    "max_iterations": 30,
+    "max_iterations": 10,
     "init_learning_rate": 0.02,
     "init_global_lambda": 0.0,
     "focus_nets": [],

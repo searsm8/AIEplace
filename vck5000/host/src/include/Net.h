@@ -3,6 +3,7 @@
 #define AIEPLACE_NET_H
 
 #include "Common.h"
+#include "Logger.h"
 #include "Bin.h"
 
 AIEPLACE_NAMESPACE_BEGIN
@@ -15,10 +16,9 @@ private:
     string m_name;
     int m_degree;
 
-    // List of all nodes on this net, sorted by descending X or Y positions
 
 public:
-    std::vector<Node*> mv_nodes; // all the nodes on this net
+    std::vector<Node*> mv_nodes; // List of all nodes on this net, sorted by descending X or Y positions
     std::map<Node*, string> mm_net_pins; // which pins are used for this net
     // For use in computations
     struct XY
@@ -66,6 +66,33 @@ public:
     
     void addNetPin(Node* n, string pin_str)
         { mm_net_pins[n] = pin_str; }
+    
+    bool lockNodes()
+    {
+        //cout << "Locking nodes for net " << m_name << endl;
+        TIME_FUNCTION();
+        std::vector<Node*> locked_nodes;
+        for(Node* node : mv_nodes) {
+            if(std::count(locked_nodes.begin(), locked_nodes.end(), node) == 0)
+            {
+                locked_nodes.push_back(node);
+                node->lock();
+            }
+        }
+    }
+
+    bool unlockNodes()
+    {
+        //cout << "Unlocking nodes for net " << m_name << endl;
+        std::vector<Node*> locked_nodes;
+        for(Node* node : mv_nodes) {
+            if(std::count(locked_nodes.begin(), locked_nodes.end(), node) == 0)
+            {
+                locked_nodes.push_back(node);
+                node->unlock();
+            }
+        }
+    }
 
     // Sorting
     void sortPositionsByX();

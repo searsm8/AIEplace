@@ -48,6 +48,7 @@ private:
     // Data members
     string m_name;
     string m_orient;
+    std::mutex m_mutex;
     Position<position_type> m_pos;
     PlacementStatus m_status;
     bool m_is_large; // True if the area of the node is at least 1/16th the area of a bin
@@ -63,6 +64,8 @@ public:
     Node() : m_name("") {}
     Node(string name) : m_name(name), m_orient("N"), m_pos(0, 0) {}
 
+    virtual ~Node() {} // Destructor
+
     // Need virtual destructor for proper dynamic_cast
     //virtual ~Node() {} 
 
@@ -75,6 +78,8 @@ public:
     const position_type& getX() { return m_pos.getX(); }
     const position_type& getY() { return m_pos.getY(); }
     const string& getOrientation() { return m_orient; }
+    bool lock() {  m_mutex.lock(); }
+    bool unlock() {  m_mutex.unlock();  }
 
     std::vector<Net*> getNets() { return mv_nets; }
     std::vector<BinOverlap> getBinOverlaps() { return mv_bin_overlaps; }
@@ -123,9 +128,12 @@ public:
             m_status = UNKNOWN;
     }
 
-    virtual float getXsize() { return 0.0; }
-    virtual float getYsize() { return 0.0; }
-    virtual float getArea()  { return 0.0; }
+    // pure virtual functions
+    // these must be implemented in derived classes
+    // this makes Node an abstract class
+    virtual float getXsize() = 0;
+    virtual float getYsize() = 0;
+    virtual float getArea()  = 0;
 
 // TODO: remove unused function?
     void printXY() {

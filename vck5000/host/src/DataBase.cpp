@@ -553,7 +553,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             if (mmv_nets_by_degree.count(degree) == 0) {
                 mmv_nets_by_degree.emplace(std::make_pair(degree, std::vector<Net*>()));
             }
-            mmv_nets_by_degree[degree].push_back(new_net);
+            mmv_nets_by_degree[degree].push_back(new_net); //emplace_back(new_net) might work more effienctly
         }
 
         void DataBase::resize_def_blockage(int) {}
