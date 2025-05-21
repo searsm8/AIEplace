@@ -548,6 +548,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                 }
             }
             mm_nets.emplace(std::make_pair(new_net->getName(), new_net));
+            mv_nets.push_back(new_net);
 
             int degree = new_net->getDegree();
             if (mmv_nets_by_degree.count(degree) == 0) {
@@ -638,6 +639,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             }
 
             mm_nets.emplace(std::make_pair(new_net->getName(), new_net));
+            mv_nets.push_back(new_net);
             
             // Add net to degree map for easy access
             int degree = new_net->getDegree();

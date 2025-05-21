@@ -94,6 +94,15 @@ struct XY
     }
 };
 
+typedef XY Point; // alias for XY
+
+struct Term
+{
+    XY plus;
+    XY minus;
+    void clear() { plus.clear(); minus.clear(); }
+};
+
 // Execution time tracking functions
 long getEpoch();
 double getTiming(long, long);

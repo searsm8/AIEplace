@@ -20,13 +20,8 @@ private:
 public:
     std::vector<Node*> mv_nodes; // List of all nodes on this net, sorted by descending X or Y positions
     std::map<Node*, string> mm_net_pins; // which pins are used for this net
-    // For use in computations
-    struct XY
-    {
-        double x;
-        double y;
-        void clear() { x = 0; y = 0;}
-    };
+    std::map<Node*, XY> mm_partials_by_node; // partials for each node
+    int tally = 0; // used to count how many times this net has been processed
 
     struct Term
     {

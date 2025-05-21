@@ -1,5 +1,7 @@
 Work/
 Work_x86/
-golden_data/
+golden_data/*
 x86simulator_output/
 aiesimulator_output/
+*.log
+temp

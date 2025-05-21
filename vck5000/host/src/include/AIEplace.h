@@ -25,6 +25,13 @@ public:
     PartialsGraphDriver partials_drivers[PARTIALS_GRAPH_COUNT];
     DensityGraphDriver density_driver[3];
 
+    // Flat data structure for results (same as before)
+    struct NetNodePartial {
+        Net* net;
+        Node* node;
+        Point partial;
+    };
+
     // Configuration object
     json params;
 
@@ -37,6 +44,7 @@ public:
     float learning_rate;
     float global_lambda;
     int bins_per_row; // grid size
+    int MAX_THREADS; // max number of threads to use
 
     // Execution tracking
     int iteration = 0;
@@ -68,7 +76,10 @@ public:
 
     // Functions implemented on CPU
     void computeAllPartials_CPU ();
+    void computeAllPartials_CPU_orig();
+    void processNetSequentially(Net* net_p, std::vector<NetNodePartial>& results);
     void computeNetPartials_CPU (Net* net_p);
+    void computeNetPartials_ThreadSafe(Net* net_p);
     void computeElectricFields_CPU ();
     void computeElectricFields_DCT();
     void normalizeElectricFields();

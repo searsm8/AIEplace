@@ -83,6 +83,7 @@ private:
     map<string, Component *> mm_components;
     map<string, Pin *> mm_pins;
     map<string, Net *> mm_nets;
+    std::vector<Net *> mv_nets; // list of all nets
     map<int, std::vector<Net *>> mmv_nets_by_degree;
     std::vector<Net *> mv_focus_nets; // list of nets to be highlighted with visualizer
     std::vector<Node *> mv_focus_nodes; // list of nodes to be highlighted with visualizer
@@ -111,6 +112,7 @@ public:
     const map<string, Component *> &getComponents() { return mm_components; }
     const map<string, Pin *> &getPins() { return mm_pins; }
     const map<string, Net *> &getNets() { return mm_nets; }
+    const vector<Net *> &getNetsVector() { return mv_nets; }
     const map<int, std::vector<Net *>> &getNetsByDegree() { return mmv_nets_by_degree; }
     int getNetCountOfDegree(int degree) { return mmv_nets_by_degree[degree].size(); }
     Box<position_type> &getDieArea() { return m_die_area; }

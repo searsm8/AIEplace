@@ -1,8 +1,4 @@
 bin/
-aie/Work
-aie/libadf.a
-aie/*.log
-aie/temp
 pl/link.cfg
 *.log
 core.*

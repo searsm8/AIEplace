@@ -114,6 +114,7 @@ Placer::Placer(std::string config_filepath )
             gamma = params["gamma"];
             learning_rate = params["init_learning_rate"];
             global_lambda = params["init_global_lambda"];
+            MAX_THREADS = params["max_threads"];
             input_dir = fs::path(params["input_filepath"]);
             output_dir = getOutputPath();
             string xclbin_file = params["xclbin"];
@@ -272,9 +273,6 @@ void Placer::computeAllPartials_AIE()
 {
     TIME_FUNCTION();
     Logger::log_trace("BEGIN computeAllPartials_AIE()");
-
-    // Start timer
-    long start_partials = getTime();
 
     // for each packet specified in DataBase
     for(int packet_index {0}; packet_index < db.getPacketCount(); packet_index++) {
@@ -596,14 +594,336 @@ void Placer::computeElectricFields_AIE()
  * CPU functions
 ****************/
 
+// Alignment to prevent false sharing (adjust for your CPU cache line size)
+#define CACHE_LINE_SIZE 64
+
+// Aligned thread-local structure to prevent false sharing
+struct alignas(CACHE_LINE_SIZE) ThreadLocalResults {
+    // Using node pointer as first key to improve locality
+    std::map<Node*, std::map<Net*, XY>> node_to_net_partials;
+    
+    // Pad to ensure no false sharing between thread data
+    char padding[CACHE_LINE_SIZE - sizeof(std::map<Node*, std::map<Net*, XY>>) % CACHE_LINE_SIZE];
+};
+
+// Memory optimized computeAllPartials function
+void Placer::computeAllPartials_CPU()
+{
+    TIME_FUNCTION();
+    // Memory-bandwidth optimized implementation
+    // STEP 1: Sequential pre-processing - single-threaded
+    auto& nets = db.getNetsVector();
+    
+    // We'll use a flat data structure for results
+    struct NetNodePartial {
+        Net* net;
+        Node* node;
+        Point partial;
+    };
+    
+    // Pre-allocate all memory needed
+    // This avoids allocations during parallel processing
+    size_t total_node_count = 0;
+    for (auto* net : nets) {
+        total_node_count += net->getDegree();
+    }
+    
+    std::vector<NetNodePartial> all_partials;
+    all_partials.reserve(total_node_count);
+    
+    // STEP 2: Single-threaded computation - test baseline performance
+    auto start_single = std::chrono::high_resolution_clock::now();
+    
+    // Process all nets sequentially
+    for (Net* net_p : nets) {
+        const std::vector<Node*>& nodes = net_p->getNodes();
+        int net_size = net_p->getDegree();
+        
+        // Skip further processing for very small nets
+        if (net_size <= 1) continue;
+        
+        // Record starting index for this net's results
+        size_t start_idx = all_partials.size();
+        
+        // Pre-allocate space for all results from this net
+        all_partials.resize(start_idx + net_size);
+        
+        // find max and min x and y positions
+        float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = 0, max_y = 0;
+        for (Node* node_p : nodes) {
+            min_x = std::min(min_x, node_p->getX());
+            min_y = std::min(min_y, node_p->getY());
+            max_x = std::max(max_x, node_p->getX());
+            max_y = std::max(max_y, node_p->getY());
+        }
+        
+        // Compute A terms directly into our flat vector
+        std::vector<Term> A(net_size);
+        for (size_t i = 0; i < net_size; i++) {
+            A[i].plus.x  = exp((nodes[i]->getX() - max_x) / gamma);
+            A[i].minus.x = exp((min_x - nodes[i]->getX()) / gamma);
+            A[i].plus.y  = exp((nodes[i]->getY() - max_y) / gamma);
+            A[i].minus.y = exp((min_y - nodes[i]->getY()) / gamma);
+        }
+        
+        // Compute B and C terms
+        Term B, C;
+        B.clear(); C.clear();
+        for (size_t i = 0; i < net_size; i++) {
+            B.plus.x  += A[i].plus.x;
+            B.minus.x += A[i].minus.x;
+            B.plus.y  += A[i].plus.y;
+            B.minus.y += A[i].minus.y;
+            C.plus.x  += A[i].plus.x  * nodes[i]->getX();
+            C.minus.x += A[i].minus.x * nodes[i]->getX();
+            C.plus.y  += A[i].plus.y  * nodes[i]->getY();
+            C.minus.y += A[i].minus.y * nodes[i]->getY();
+        }
+        
+        // Pre-compute common terms
+        float inv_gamma = 1.0f / gamma;
+        float bpx_sq_inv = 1.0f / (B.plus.x * B.plus.x);
+        float bmx_sq_inv = 1.0f / (B.minus.x * B.minus.x);
+        float bpy_sq_inv = 1.0f / (B.plus.y * B.plus.y);
+        float bmy_sq_inv = 1.0f / (B.minus.y * B.minus.y);
+        
+        // Compute partials and store in our flat vector
+        for (size_t i = 0; i < net_size; i++) {
+            float x = nodes[i]->getX();
+            float y = nodes[i]->getY();
+            
+            Point partial;
+            partial.x = ((1 + x * inv_gamma) * B.plus.x - (C.plus.x * inv_gamma)) 
+                      * (A[i].plus.x * bpx_sq_inv)
+                    - ((1 - x * inv_gamma) * B.minus.x + (C.minus.x * inv_gamma)) 
+                      * (A[i].minus.x * bmx_sq_inv);
+                      
+            partial.y = ((1 + y * inv_gamma) * B.plus.y - (C.plus.y * inv_gamma)) 
+                      * (A[i].plus.y * bpy_sq_inv)
+                    - ((1 - y * inv_gamma) * B.minus.y + (C.minus.y * inv_gamma)) 
+                      * (A[i].minus.y * bmy_sq_inv);
+            
+            // Store in our flat array
+            all_partials[start_idx + i].net = net_p;
+            all_partials[start_idx + i].node = nodes[i];
+            all_partials[start_idx + i].partial = partial;
+        }
+
+
+
+        //for(size_t i = 0; i < net_size; i++) {
+        //    net_p->mm_partials_by_node[nodes[i]].x = (( 1 + nodes[i]->getX()/gamma) * B.plus.x - (C.plus.x / gamma)) 
+        //                                * (A[i].plus.x / (B.plus.x * B.plus.x))
+        //                        - (( 1 - nodes[i]->getX()/gamma) * B.minus.x + (C.minus.x / gamma)) 
+        //                                * (A[i].minus.x / (B.minus.x * B.minus.x));
+
+        //    net_p->mm_partials_by_node[nodes[i]].y = (( 1 + nodes[i]->getY()/gamma) * B.plus.y - (C.plus.y / gamma)) 
+        //                                * (A[i].plus.y / (B.plus.y * B.plus.y))
+        //                        - (( 1 - nodes[i]->getY()/gamma) * B.minus.y + (C.minus.y / gamma)) 
+        //                                * (A[i].minus.y / (B.minus.y * B.minus.y));
+        //    //Logger::log_debug(nodes[i]->getName() + " partial_x: " + std::to_string(net_p->mm_partials_by_node[nodes[i]].x));
+        //    //Logger::log_debug(nodes[i]->getName() + " partial_y: " + std::to_string(net_p->mm_partials_by_node[nodes[i]].y));
+        //}
+    }
+    
+    auto end_single = std::chrono::high_resolution_clock::now();
+    auto duration_single = std::chrono::duration_cast<std::chrono::milliseconds>(end_single - start_single).count();
+    Logger::log_detail("Sequential computation took " + std::to_string(duration_single) + " ms");
+    
+    // STEP 3: Update final data structures
+    auto start_update = std::chrono::high_resolution_clock::now();
+    
+    // Simple linear update to final data structure
+    for (const auto& entry : all_partials) {
+        entry.net->mm_partials_by_node[entry.node] = entry.partial;
+    }
+    
+    auto end_update = std::chrono::high_resolution_clock::now();
+    auto duration_update = std::chrono::duration_cast<std::chrono::milliseconds>(end_update - start_update).count();
+    Logger::log_detail("Final update took " + std::to_string(duration_update) + " ms");
+    
+    // Option to try parallel processing later if needed
+    /*
+    // Only enable parallelism if we've verified it helps
+    if (total_node_count > 100000) {  // Example threshold
+        const int num_threads = 4;  // Fixed thread count based on testing
+        tbb::task_arena arena(num_threads);
+        arena.execute([&]{
+            // Parallel processing here
+        });
+    }
+    */
+}
+
+
+//void Placer::computeAllPartials_CPU()
+//    // This is the original computeAllPartials function
+//    // It is not optimized for memory bandwidth and is not parallelized
+//    // It is kept here for reference and comparison
+//{
+//    TIME_FUNCTION();
+//    Logger::log_info("Iteration " + std::to_string(iteration) );
+//    auto & nets = db.getNetsVector();
+//    
+//    // Pre-sort nets by size to improve work distribution
+//    std::vector<std::pair<size_t, Net*>> sorted_nets;
+//    sorted_nets.reserve(nets.size());
+//    for (size_t i = 0; i < nets.size(); ++i) {
+//        sorted_nets.emplace_back(nets[i]->getDegree(), nets[i]);
+//    }
+//    
+//    // Sort largest nets first for better load balancing
+//    std::sort(sorted_nets.begin(), sorted_nets.end(), 
+//              [](const auto& a, const auto& b) { return a.first > b.first; });
+//    
+//    // Try a smaller number of threads first (start with logical cores, not hyperthreads)
+//    // Adjust based on your hardware - this is just an example
+//    //int num_threads = std::thread::hardware_concurrency() / 2;
+//    int num_threads = MAX_THREADS * iteration;
+//    if (num_threads < 1) num_threads = 1;
+//    
+//    // Allocate thread local storage
+//    std::vector<ThreadLocalResults> thread_results(num_threads);
+//    
+//    // Create atomic counter for work stealing
+//    std::atomic<size_t> next_index(0);
+//    
+//    // Performance measurement
+//    auto start_time = std::chrono::high_resolution_clock::now();
+//    
+//    // Create task arena with explicit thread count
+//    tbb::task_arena arena(num_threads);
+//    arena.execute([&]{
+//        // Work stealing approach - each thread grabs the next chunk of work
+//        tbb::parallel_for(0, num_threads, [&](int thread_idx) {
+//            // Get this thread's local result storage
+//            auto& local_result = thread_results[thread_idx];
+//            
+//            // Work-stealing loop
+//            size_t work_index;
+//            while ((work_index = next_index.fetch_add(1)) < sorted_nets.size()) {
+//                Net* net_p = sorted_nets[work_index].second;
+//                
+//                // Process this net
+//                int net_size = net_p->getDegree();
+//                const std::vector<Node*> &nodes = net_p->getNodes();
+//                
+//                // Pre-allocate vectors to avoid reallocation
+//                std::vector<Term> A(net_size);
+//                
+//                // Cache min/max calculations
+//                float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = 0, max_y = 0;
+//                
+//                // Local copies of frequently accessed data
+//                const float gamma_val = gamma; // Cache this value
+//                
+//                // Stage 1: Find min/max x,y
+//                for(Node* node_p : nodes) {
+//                    float x = node_p->getX();
+//                    float y = node_p->getY();
+//                    min_x = std::min(min_x, x);
+//                    min_y = std::min(min_y, y);
+//                    max_x = std::max(max_x, x);
+//                    max_y = std::max(max_y, y);
+//                }
+//                
+//                // Stage 2: Compute A terms
+//                for(size_t i = 0; i < net_size; i++) {
+//                    float x = nodes[i]->getX();
+//                    float y = nodes[i]->getY();
+//                    
+//                    A[i].plus.x  = exp((x - max_x) / gamma_val);
+//                    A[i].minus.x = exp((min_x - x) / gamma_val);
+//                    A[i].plus.y  = exp((y - max_y) / gamma_val);
+//                    A[i].minus.y = exp((min_y - y) / gamma_val);
+//                }
+//                
+//                // Stage 3: Compute B and C terms
+//                Term B, C;
+//                B.clear(); C.clear();
+//                for(size_t i = 0; i < net_size; i++) {
+//                    float x = nodes[i]->getX();
+//                    float y = nodes[i]->getY();
+//                    
+//                    B.plus.x  += A[i].plus.x;
+//                    B.minus.x += A[i].minus.x;
+//                    B.plus.y  += A[i].plus.y;
+//                    B.minus.y += A[i].minus.y;
+//                    
+//                    C.plus.x  += A[i].plus.x  * x;
+//                    C.minus.x += A[i].minus.x * x;
+//                    C.plus.y  += A[i].plus.y  * y;
+//                    C.minus.y += A[i].minus.y * y;
+//                }
+//                
+//                // Stage 4: Compute partials
+//                // Pre-compute common terms to reduce redundant calculations
+//                float inv_gamma = 1.0f / gamma_val;
+//                float bpx_sq_inv = 1.0f / (B.plus.x * B.plus.x);
+//                float bmx_sq_inv = 1.0f / (B.minus.x * B.minus.x);
+//                float bpy_sq_inv = 1.0f / (B.plus.y * B.plus.y);
+//                float bmy_sq_inv = 1.0f / (B.minus.y * B.minus.y);
+//                
+//                float cpx_div_gamma = C.plus.x * inv_gamma;
+//                float cmx_div_gamma = C.minus.x * inv_gamma;
+//                float cpy_div_gamma = C.plus.y * inv_gamma;
+//                float cmy_div_gamma = C.minus.y * inv_gamma;
+//                
+//                for(size_t i = 0; i < net_size; i++) {
+//                    Node* node = nodes[i];
+//                    float x = node->getX();
+//                    float y = node->getY();
+//                    
+//                    // More efficient calculation with pre-computed terms
+//                    XY partial;
+//                    partial.x = ((1 + x * inv_gamma) * B.plus.x - cpx_div_gamma) 
+//                              * (A[i].plus.x * bpx_sq_inv)
+//                            - ((1 - x * inv_gamma) * B.minus.x + cmx_div_gamma) 
+//                              * (A[i].minus.x * bmx_sq_inv);
+//                              
+//                    partial.y = ((1 + y * inv_gamma) * B.plus.y - cpy_div_gamma) 
+//                              * (A[i].plus.y * bpy_sq_inv)
+//                            - ((1 - y * inv_gamma) * B.minus.y + cmy_div_gamma) 
+//                              * (A[i].minus.y * bmy_sq_inv);
+//                    
+//                    // Store in thread-local result map
+//                    local_result.node_to_net_partials[node][net_p] = partial;
+//                }
+//            }
+//        });
+//    });
+//    
+//    auto end_time = std::chrono::high_resolution_clock::now();
+//    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+//    
+//    Logger::log_detail("Parallel computation took " + std::to_string(duration) + " ms with " + 
+//                      std::to_string(num_threads) + " threads");
+//                      
+//    // Merge results efficiently by organizing by node first
+//    start_time = std::chrono::high_resolution_clock::now();
+//    
+//    for (auto& thread_result : thread_results) {
+//        for (auto& [node, net_map] : thread_result.node_to_net_partials) {
+//            for (auto& [net, partial] : net_map) {
+//                net->mm_partials_by_node[node] = partial;
+//            }
+//        }
+//    }
+//    
+//    end_time = std::chrono::high_resolution_clock::now();
+//    duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+//    Logger::log_detail("Merging results took " + std::to_string(duration) + " ms");
+//}
+
+
 /*
  * @brief On CPU, compute Electric fields using 2D-DCT method
  *
  * Results of the partial derivative computation are stored 
  * within each node's data members
 **/
-const int MAX_THREADS = 10; //std::thread::hardware_concurrency(); //On NextGenIO: 96
-void Placer::computeAllPartials_CPU()
+//const int MAX_THREADS = 5; //std::thread::hardware_concurrency(); //On NextGenIO: 96
+void Placer::computeAllPartials_CPU_orig()
 {
         // The simplest parallel_for usage for your derivatives
         //void computeDerivatives(std::vector<double>& results, const Design& design) {
@@ -618,37 +938,75 @@ void Placer::computeAllPartials_CPU()
         //}
 
     TIME_FUNCTION();
-    long start_partials = getTime();
+
+
+// Phase 1: Compute partials for each net, stores result in net object to be inherently thread-safe
 // compute only for nets size 2-8, which is what normally runs on AIE
     //Logger::log_detail("MAX_THREADS: " + std::to_string(MAX_THREADS));
-    for (auto item : db.getNetsByDegree()) {
+    //for (auto item : db.getNetsByDegree()) 
+    {
+    
+
+    // Multithread ALL nets as one big group
+
+
         //std::vector<std::thread> partials_threads;
-        //std::vector<std::thread::id> thread_ids;
+        std::vector<Net*> processed_nets; // Debugging vector to check all nets are processed
+        std::vector<std::thread::id> thread_ids;
+        std::map<std::thread::id, int> thread_ids_map;
         std::mutex thread_ids_mutex;
-        if(item.first < MIN_AIE_NET_SIZE || item.first > MAX_AIE_NET_SIZE) 
-            continue;
-        else 
+        //if(item.first < MIN_AIE_NET_SIZE || item.first > MAX_AIE_NET_SIZE) 
+        //    continue;
+        //else 
         // parallel implementation
         {
-            cout << "Iteration " << iteration << " -- Computing partials for nets of size " << item.first << endl;
-            auto & nets = item.second; // all nets of this size in the DataBase
+            cout << "Iteration " << iteration << endl;
+            //" -- Computing partials for nets of size " << item.first << endl;
+            //auto & nets = item.second; // all nets of this size in the DataBase
+            auto & nets = db.getNetsVector(); // all nets in the DataBase
             size_t block_range = nets.size();
             size_t grain_size  = nets.size() / MAX_THREADS;
+            Logger::log_detail("nets.size(): " + std::to_string(block_range) + " grain_size: " + std::to_string(grain_size));
+
             // use tbb for parallelization
+
+
+            tbb::task_arena arena(MAX_THREADS);
+            arena.execute([&]{
             tbb::parallel_for(
-                tbb::blocked_range<size_t>(0, block_range, grain_size),
+                //tbb::blocked_range<size_t>(0, block_range, grain_size ), //omit grain_size allows tbb to decide
+                tbb::blocked_range<size_t>(0, block_range), //omit grain_size allows tbb to decide
                 [&](const tbb::blocked_range<size_t>& r) {
                     //std::lock_guard<std::mutex> lock(thread_ids_mutex);
-                    //thread_ids.push_back(std::this_thread::get_id());
-                    //Logger::log_detail("Thread ID: " + std::to_string(get_index(std::this_thread::get_id())));                    
-                    //Logger::log_detail("nets.size(): " + std::to_string(nets.size()) + " r.begin(): " + std::to_string(r.begin()) + " r.end(): " + std::to_string(r.end()));
+                    //thread_ids_mutex.lock();
+                    //Logger::log_detail("BEGIN Thread ID: " + std::to_string(get_index(std::this_thread::get_id())) + " -- block_range: " + std::to_string(r.end() - r.begin()) );
+                    //thread_ids_mutex.unlock();
+                    //cout << endl;
                     for(size_t i = r.begin(); i < r.end(); ++i) {
-                        computeNetPartials_CPU(nets[i]);
+                        //thread_ids_mutex.lock();
+                        //thread_ids.push_back(std::this_thread::get_id());
+                        //processed_nets.push_back(nets[i]); // Debugging
+                        //thread_ids_map[std::this_thread::get_id()]++;
+                        //thread_ids_mutex.unlock();
+
+                        computeNetPartials_ThreadSafe(nets[i]);
+                        //computeNetPartials_CPU(nets[i]);
                     }
+                    //thread_ids_mutex.lock();
+                    //Logger::log_detail("END Thread ID: " + std::to_string(get_index(std::this_thread::get_id())));                    
+                    //thread_ids_mutex.unlock();
                 }
             );
+            });
             //std::cout << "Threads used: " << thread_ids.size() << std::endl;
+
         }
+
+        // DEBUG: print all nets processed
+        //for(int i = 0; i < processed_nets.size(); i++) {
+        //    cout << thread_ids[i] << " -- " << thread_ids_map[thread_ids[i]] <<  " -- Net " << i << ": " << processed_nets[i]->getName() << endl;
+        //}   
+        //cout << "function count: " << processed_nets.size() << endl;
 
         // sequential implementation
         //for (Net* net_p : item.second) {
@@ -681,6 +1039,15 @@ void Placer::computeAllPartials_CPU()
     }
 
 
+    // Phase 2: add up the partials
+    for (auto net : db.getNets()) {
+        for(auto pair : net.second->mm_partials_by_node) {
+            Node* node = pair.first;
+            XY partials = pair.second;
+            //node->printXY();
+            //Logger::log_detail("Node: " + node->getName() + " -- partials: " + std::to_string(partials.x) + ", " + std::to_string(partials.y));
+        }
+    }
 
     // DEBUG: Print partials results
     //
@@ -780,6 +1147,96 @@ void Placer::computeNetPartials_CPU(Net* net_p)
     }
 }
 
+
+//static int timeout[8];
+
+/* @brief: For each node on net_p, compute partial derivative with respect to the net.
+ *         Function written to be inherently thread-safe without the need for mutexes
+ *         Results are written to the partials map 
+ */
+void Placer::computeNetPartials_ThreadSafe(Net* net_p)
+{
+    //net_p->tally++;
+    //if(net_p->mv_nodes.size() == 2) return;
+    //if(net_p->mv_nodes.size() > 3)
+    //if(timeout[net_p->getDegree()]++ > 100) {
+    //    Logger::log_critical("Timeout in computeNetPartials_ThreadSafe");
+    //    return;
+    //}
+
+    int net_size = net_p->getDegree();
+    const std::vector<Node*> &nodes = net_p->getNodes();
+
+    // find max and min x and y positions
+    float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = 0, max_y = 0;
+    for(Node* node_p : net_p->getNodes()) {
+        if(node_p->getX() < min_x) min_x = node_p->getX();
+        if(node_p->getY() < min_y) min_y = node_p->getY();
+        if(node_p->getX() > max_x) max_x = node_p->getX();
+        if(node_p->getY() > max_y) max_y = node_p->getY();
+    }
+
+    // compute A terms for each node in the net
+    //Logger::log_detail("\n######\nNet: " + net_p->getName() + " -- min_x: " + std::to_string(min_x) + " max_x: " + std::to_string(max_x));
+    vector<Term> A(net_size);
+    for(size_t i = 0; i < net_size; i++) {
+        A[i].plus.x  = exp( (nodes[i]->getX() - max_x) / gamma);
+        A[i].minus.x = exp( (min_x - nodes[i]->getX()) / gamma);
+        A[i].plus.y  = exp( (nodes[i]->getY() - max_y) / gamma);
+        A[i].minus.y = exp( (min_y - nodes[i]->getY()) / gamma);
+
+        //nodes[i]->printXY();
+        //Logger::log_detail(" A+ x: " + std::to_string(A[i].plus.x));
+        //Logger::log_detail(" A- x: " + std::to_string(A[i].minus.x));
+        //Logger::log_detail(" A+ y: " + std::to_string(A[i].plus.y));
+        //Logger::log_detail(" A- y: " + std::to_string(A[i].minus.y));
+    }
+
+    // compute B and C terms for this net
+    Term B, C;
+    B.clear(); C.clear();
+    for(size_t i = 0; i < net_size; i++) {
+        B.plus.x  += A[i].plus.x;
+        B.minus.x += A[i].minus.x;
+        B.plus.y  += A[i].plus.y;
+        B.minus.y += A[i].minus.y;
+
+        C.plus.x  += A[i].plus.x  * nodes[i]->getX();
+        C.minus.x += A[i].minus.x * nodes[i]->getX();
+        C.plus.y  += A[i].plus.y  * nodes[i]->getY();
+        C.minus.y += A[i].minus.y * nodes[i]->getY();
+    }
+
+    //Logger::log_detail("B+ x: " + std::to_string(B.plus.x));
+    //Logger::log_detail("B- x: " + std::to_string(B.minus.x));
+    //Logger::log_detail("B+ y: " + std::to_string(B.plus.y));
+    //Logger::log_detail("B- y: " + std::to_string(B.minus.y));
+
+    //Logger::log_detail("C+ x: " + std::to_string(C.plus.x));
+    //Logger::log_detail("C- x: " + std::to_string(C.minus.x));
+    //Logger::log_detail("C+ y: " + std::to_string(C.plus.y));
+    //Logger::log_detail("C- y: " + std::to_string(C.minus.y));
+
+    // compute partials, store result in Net object
+    for(size_t i = 0; i < net_size; i++) {
+        net_p->mm_partials_by_node[nodes[i]].x = (( 1 + nodes[i]->getX()/gamma) * B.plus.x - (C.plus.x / gamma)) 
+                                    * (A[i].plus.x / (B.plus.x * B.plus.x))
+                             - (( 1 - nodes[i]->getX()/gamma) * B.minus.x + (C.minus.x / gamma)) 
+                                    * (A[i].minus.x / (B.minus.x * B.minus.x));
+
+        net_p->mm_partials_by_node[nodes[i]].y = (( 1 + nodes[i]->getY()/gamma) * B.plus.y - (C.plus.y / gamma)) 
+                                    * (A[i].plus.y / (B.plus.y * B.plus.y))
+                             - (( 1 - nodes[i]->getY()/gamma) * B.minus.y + (C.minus.y / gamma)) 
+                                    * (A[i].minus.y / (B.minus.y * B.minus.y));
+        //Logger::log_debug(nodes[i]->getName() + " partial_x: " + std::to_string(net_p->mm_partials_by_node[nodes[i]].x));
+        //Logger::log_debug(nodes[i]->getName() + " partial_y: " + std::to_string(net_p->mm_partials_by_node[nodes[i]].y));
+    }
+    
+
+    // partials will be accumulated with other nodes elsewhere
+
+}
+
 /*
  * @brief On CPU, compute Electric fields using 2D-DCT method
  *
@@ -787,12 +1244,14 @@ void Placer::computeNetPartials_CPU(Net* net_p)
 // wrong result?
 void Placer::computeElectricFields_CPU()
 {
+    Logger::log_detail("Begin computeElectricFields_CPU()");
     compute_a_uv_naive();
     compute_eField_naive();
 }
 
 void Placer::computeElectricFields_DCT()
 {
+    Logger::log_detail("Begin computeElectricFields_DCT()");
     compute_a_uv_DCT();
     compute_eField_DCT();
 }
@@ -1107,7 +1566,6 @@ void Placer::comparePartialResults()
     Logger::log_info("#############################");
     Logger::log_info("Comparing Partial Results (Iteration " + std::to_string(iteration) + ")");
     auto nodes_map = db.getComponents();
-    auto nets_map = db.getNets();
     long error_count = 0, total = 0;
     for (auto const& item: nodes_map) 
     {
@@ -1163,7 +1621,7 @@ void Placer::compareDensityResults()
 
 void Placer::nudgeAllNodes()
 {
-    Logger::log_trace("Begin nudgeAllNodes()");
+    Logger::log_detail("Begin nudgeAllNodes()");
     for (auto item : db.getComponents())
         nudgeNode(item.second);
     // Assume primary IO Pins are set in place and should not be moved!
