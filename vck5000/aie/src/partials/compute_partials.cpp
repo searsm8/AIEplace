@@ -165,7 +165,7 @@ void compute_partials( input_stream<float> * __restrict x_in, output_stream<floa
 			plus_term = aie::add(plus_term, b_plus); // b+ + (x*b+ - c+) / gamma
 			//printf("line: %d\tplus_term: %f\n", __LINE__, plus_ptr[0]);
 
-			b_squared_inv = aie::mul_square(aie::inv(b_plus));				// b+^-2
+			b_squared_inv = aie::mul_square(aie::inv(b_plus));	// PRECOMUTE THIS			// b+^-2
 			plus_term = aie::mul(plus_term.to_vector<float>(0), b_squared_inv);	// [((1 + x/gamma)*b+) - (c+ / gamma)] / b+^-2
 			//printf("line: %d\tplus_term: %f\n", __LINE__, plus_ptr[0]);
 
@@ -185,7 +185,7 @@ void compute_partials( input_stream<float> * __restrict x_in, output_stream<floa
 			minus_term = aie::add(minus_term.to_vector<float>(0), b_minus); // b- + (c- - x*b-) / gamma
 			//printf("line: %d\tminus_term: %f\n", __LINE__, minus_ptr[0]);
 
-			b_squared_inv = aie::mul_square(aie::inv(b_minus));
+			b_squared_inv = aie::mul_square(aie::inv(b_minus));// PRECOMUTE THIS
 			minus_term = aie::mul(minus_term.to_vector<float>(0), b_squared_inv); // (b- + (c- - x*b-) / gamma) / (b-)^2
 			//printf("line: %d\tminus_term: %f\n", __LINE__, minus_ptr[0]);
 
