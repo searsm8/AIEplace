@@ -9,6 +9,19 @@
 AIEPLACE_NAMESPACE_BEGIN
 class Node;
 
+struct NodePartial
+{
+    XY partial;
+    Node* node_p; // Pointer to the node this partial belongs to
+    NodePartial() : node_p(nullptr) { partial.clear(); }
+    NodePartial(Node* node) : node_p(node) { partial.clear(); }
+    
+    void clear()
+    {
+        partial.clear();
+    }
+};
+
 class Net
 {
 private:
@@ -20,8 +33,14 @@ private:
 public:
     std::vector<Node*> mv_nodes; // List of all nodes on this net, sorted by descending X or Y positions
     std::map<Node*, string> mm_net_pins; // which pins are used for this net
+    
+    // TODO: use a vector of XY instead of a map
+    // mm_partials_by_node is a map of Node pointers to XY partials
+    // This is used to store the partials computed for each node in the net
     std::map<Node*, XY> mm_partials_by_node; // partials for each node
-    int tally = 0; // used to count how many times this net has been processed
+    std::vector<NodePartial> mv_partials; // partials for each node, used to accumulate results to be reduced later
+
+    int tally = 0; // debugging counter used to track how many times this net has been processed
 
     struct Term
     {

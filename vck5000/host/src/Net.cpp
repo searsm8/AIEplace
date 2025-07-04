@@ -132,27 +132,23 @@ position_type Net::computeWirelength(string method)
 /** 
  * Simple Half-Perimeter Wirelength (HPWL)
  * 
- * @return: The wirelength of the net, computed using HPWL.
+ * @return: Estimate of the wirelength for the net, computed using HPWL.
  */
 position_type Net::computeWirelength_HPWL()
 {
-    sortPositionsByX();
-    position_type width = mv_nodes.front()->getX() - mv_nodes.back()->getX();
-    //cout << "front: " << mv_nodes.front()->getX() << "\tback: " << mv_nodes.back()->getX() << endl;
-    sortPositionsByY();
-    position_type height = mv_nodes.front()->getY() - mv_nodes.back()->getY();
-    // check if nan
-    //if(width != width || height != height)
-    //{
-    //    cout << endl << "Net: " << m_name << endl;
-    //    cout << "front: " << mv_nodes.front()->getX() << " : " << mv_nodes.front()->getY() << endl;
-    //    cout << "back: " << mv_nodes.back()->getX() << " : " << mv_nodes.back()->getY() << endl;
-    //    cout << "Height: " << height << "\tWidth: " << width << "\tHPWL: " << height+width << endl;
-    //    cout << "nodes sorted by Y: " << endl; 
-    //    for(auto np : mv_nodes)
-    //        np->printXY();
-    //}
-    return width + height;
+    float min_x = mv_nodes.front()->getX();
+    float max_x = min_x;
+    float min_y = mv_nodes.front()->getY();
+    float max_y = min_y;
+    for (Node* node_p : mv_nodes) {
+        min_x = std::min(min_x, node_p->getX());
+        min_y = std::min(min_y, node_p->getY());
+        max_x = std::max(max_x, node_p->getX());
+        max_y = std::max(max_y, node_p->getY());
+    }
+    return (max_x - min_x) + (max_y - min_y); // HPWL = (max_x - min_x) + (max_y - min_y)
+    // Note: This is a simple implementation, more complex methods may be used in the future.
+    // For example, we could use Rectilinear Steiner Minimum Spanning Tree (RSMT) for better accuracy.
 }
 
 /** 

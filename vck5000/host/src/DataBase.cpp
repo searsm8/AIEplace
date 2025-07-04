@@ -25,6 +25,11 @@ DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
     }
 
     initializePacketContents();
+
+    m_total_net_degree = 0;
+    for (auto* net : mv_nets) {
+        m_total_net_degree += net->getDegree();
+    }
 }
 
 /**
@@ -195,15 +200,15 @@ void DataBase::sortPositionsMaxMinY()
         item.second->sortPositionsMaxMinY();
 }
 
-double DataBase::computeTotalWirelength(string method)
+float DataBase::computeTotalWirelength(string method)
 {
-    double total = 0;
+    float total = 0;
     for (auto item : mm_nets)
         total += item.second->computeWirelength(method);
     return total;
 }
 
-double DataBase::computeTotalComponentArea()
+float DataBase::computeTotalComponentArea()
 {
     double total_area = 0;
     for(auto item : mm_components)

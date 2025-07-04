@@ -67,7 +67,7 @@ AIEPLACE_NAMESPACE_BEGIN
 
 typedef float position_type;
 
-#define MIN_TOL 0.01
+#define MIN_TOL 0.015
 // Contains XY data, which might be coordinates or any other pair of data.
 struct XY
 {
@@ -101,6 +101,12 @@ struct Term
     XY plus;
     XY minus;
     void clear() { plus.clear(); minus.clear(); }
+    string to_string()
+    {
+        std::ostringstream ss;
+        ss << "Term(+" << plus.toString() << ", -" << minus.toString() << ")";
+        return ss.str();
+    }
 };
 
 // Execution time tracking functions

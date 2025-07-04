@@ -93,6 +93,7 @@ private:
     string m_design_name;
     int m_units_per_micron; 
     int m_packet_count;
+    int m_total_net_degree;
 
 public:
     // each compute graph has a vector of PacketIndex which records what data has been sent
@@ -115,6 +116,7 @@ public:
     const vector<Net *> &getNetsVector() { return mv_nets; }
     const map<int, std::vector<Net *>> &getNetsByDegree() { return mmv_nets_by_degree; }
     int getNetCountOfDegree(int degree) { return mmv_nets_by_degree[degree].size(); }
+    int getTotalNetDegree() { return m_total_net_degree; }
     Box<position_type> &getDieArea() { return m_die_area; }
     string getBenchmarkName() { return m_input_dir.filename().string(); }
 
@@ -137,9 +139,9 @@ public:
     const vector<Net *> &getFocusNets() { return mv_focus_nets; }
     const vector<Node *> &getFocusNodes() { return mv_focus_nodes; }
 
-    double computeTotalWirelength(string);
-    double computeTotalComponentArea();
-    double getTotalOverflow();
+    float computeTotalWirelength(string);
+    float computeTotalComponentArea();
+    float getTotalOverflow();
 
     // Packet loading/unloading
     void initializePacketContents();

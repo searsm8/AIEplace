@@ -37,7 +37,9 @@ COMPILE_FLAGS += -lcairo
 #COMPILE_FLAGS += -l:libcairo.so.2# Specific library for use on nextgenio-amd02 node
 COMPILE_FLAGS += -lstdc++fs
 COMPILE_FLAGS += -lxrt_coreutil -lxilinxopencl
-COMPILE_FLAGS += -O0 -g -L$(XILINX_XRT)/lib/ -lpthread -lrt -lstdc++
+#COMPILE_FLAGS += -O0 # optimization level, 0 means no optimization
+COMPILE_FLAGS += -O1 # optimization level, 3 means full optimization
+COMPILE_FLAGS += -g -L$(XILINX_XRT)/lib/ -lpthread -lrt -lstdc++
 #COMPILE_FLAGS += -Wall
 
 COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
@@ -48,7 +50,6 @@ PROFILE_FLAG := -pg# flag for profiling with gprof
 #PROFILE_FLAG += -fsanitize=thread# flag for thread sanitizer for debugging
 #PROFILE_FLAG += -g# flag for code annotation
 
-OPT_FLAG := -O0# no optimizations
 
 .PHONY: all objs
 

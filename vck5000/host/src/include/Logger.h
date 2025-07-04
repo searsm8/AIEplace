@@ -20,7 +20,6 @@ class Timer;
 class ScopeTimer;
 class MemoryTracker;
 
-
 class Logger {
 private:
     // Singleton class pattern
@@ -55,8 +54,19 @@ public:
         int iteration_count;
         float init_learning_rate;
         float final_learning_rate;
-
         long long prgm_runtime, db_IO_time, algo_time, AIE_time;
+
+        // Claude's fields
+        float final_overflow;
+        float hpwl_improvement;
+        bool has_improvement;
+        float initial_hpwl;
+        float iteration_avg_time;
+        std::string partials_method;
+        std::string density_method; 
+        std::string wirelength_method;
+        float gamma;
+        float learning_rate;
     };
 
     // Singleton access
@@ -90,8 +100,8 @@ public:
 
     // Report generation functions
     static void export_markdown(Table t, fs::path dir, string filename = "statistics");
-    static void append_csv(ProgramStatBlock &);
-    static void export_intermediate_results(AIEplace::Grid& grid, fs::path dir, int iter);
+    static void append_csv(ProgramStatBlock &, string filename = "run_statistics.csv");
+    static void export_eField(AIEplace::Grid& grid, fs::path dir, int iter);
     static void updateFunctionStats(string func_name, long long func_time);
     static Table printFunctionStats();
 

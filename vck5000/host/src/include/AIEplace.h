@@ -19,6 +19,16 @@ AIEPLACE_NAMESPACE_BEGIN
 
 class Placer
 {
+private:
+    float initial_hpwl = 0.0f;
+    
+    void printDSEPerformanceMetrics(float final_hpwl, float final_overflow,
+                                   float total_runtime, float iteration_avg,
+                                   float hpwl_improvement, bool has_improvement);
+    bool checkConvergence();
+    float getMemoryUsageMB(); 
+    float getAIEUtilizationPercent();
+
 public:
     DataBase db;
     Grid grid;
@@ -26,25 +36,33 @@ public:
     DensityGraphDriver density_driver[3];
 
     // Flat data structure for results (same as before)
-    struct NetNodePartial {
-        Net* net;
+    struct NodePartial {
         Node* node;
         Point partial;
     };
 
+    std::map<Net*, NodePartial> all_partials;
+    std::map<Net*, NodePartial> simple_partials;
+
     // Configuration object
-    json params;
+    json cfg;
 
     fs::path input_dir; // parameter loaded from json config file
     fs::path output_dir;
+    std::string result_csv;
 
     // hyper parameters
-    float gamma; // smoothness factor for estimations; 
+    float gamma, inv_gamma; // smoothness factor for estimations; 
                        // larger means less smooth but more accurate
     float learning_rate;
     float global_lambda;
+
+    int die_size; // minimum of width and height of the die area
     int bins_per_row; // grid size
     int MAX_THREADS; // max number of threads to use
+
+    std::string partials_method;
+    std::string density_method;
 
     // Execution tracking
     int iteration = 0;
@@ -53,11 +71,13 @@ public:
     long double algo_start;
     long double algo_time;
     long double AIE_time;
+    std::vector<float> hpwl_history; // history of HPWL values for each iteration
+    std::vector<float> ovfw_history; // history of overflow values for each iteration
+    std::vector<float> learning_coeff_history; 
 
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;
 #endif
-
     // Constructor
     Placer(std::string);
 
@@ -65,6 +85,7 @@ public:
 
     // Pre-run preparation
     void initializePlacement(Position<position_type> target_pos, int min_dist, int max_dist);
+    void recordInitialHPWL();
     void iterationReset();
 
     // Functions which may be accelerated on AIEs
@@ -76,8 +97,8 @@ public:
 
     // Functions implemented on CPU
     void computeAllPartials_CPU ();
+    void computeAllPartials_simple();
     void computeAllPartials_CPU_orig();
-    void processNetSequentially(Net* net_p, std::vector<NetNodePartial>& results);
     void computeNetPartials_CPU (Net* net_p);
     void computeNetPartials_ThreadSafe(Net* net_p);
     void computeElectricFields_CPU ();
@@ -101,9 +122,11 @@ public:
 
     // Run functions
     void nudgeAllNodes();
+    void updateHyperparameters();
     void nudgeNode(Node*);
     void performIteration();
     void printIterationResults();
+    void plotHistories();
     void run();
 
     // Post run analysis

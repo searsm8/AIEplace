@@ -155,74 +155,85 @@ void Logger::export_markdown(Table t, fs::path dir, string filename)
 
 // used for debugging, enables easy comparison of CPU and AIE results
 // export intermdiate results of computations such as density or partials terms
-void Logger::export_intermediate_results(AIEplace::Grid& grid, fs::path dir, int iter)
+void Logger::export_eField(AIEplace::Grid& grid, fs::path dir, int iter)
 {
-    std::ofstream out_file;
-    out_file.open(dir.append("intermed_eField.dat"), std::ios_base::app);
-    out_file << endl << "Iteration: " << iter << endl;
-    out_file << "eField.x" << endl;
+    std::ofstream eField_file;
+    eField_file.open(dir.append("intermed_eField.dat"), std::ios_base::app);
+    eField_file << endl << "Iteration: " << iter << endl;
+    eField_file << "eField.x" << endl;
     for (int x = 0; x < grid.getBinsPerRow(); x++) {
-        out_file << "row " << x << ": ";
+        eField_file << "row " << x << ": ";
         for (int y = 0; y < grid.getBinsPerCol(); y++) {
-            out_file << grid.getBin(x, y).eField.x << " ";
+            eField_file << grid.getBin(x, y).eField.x << " ";
         }
-        out_file << endl;
+        eField_file << endl;
     }
 
-    out_file << endl << "eField.y" << endl;
+    eField_file << endl << "eField.y" << endl;
     for (int x = 0; x < grid.getBinsPerRow(); x++) {
-        out_file << "row " << x << ": ";
+        eField_file << "row " << x << ": ";
         for (int y = 0; y < grid.getBinsPerCol(); y++) {
-            out_file << grid.getBin(x, y).eField.y << " ";
+            eField_file << grid.getBin(x, y).eField.y << " ";
         }
-        out_file << endl;
+        eField_file << endl;
     }
 
-    out_file.close();
+    eField_file.close();
+
 }
 
-void Logger::append_csv(ProgramStatBlock &stats)
+void Logger::append_csv(ProgramStatBlock &stats, string filename)
 {
+    // Create directory if it doesn't exist
+    fs::path p("results");
+    if (!fs::exists(p)) {
+        fs::create_directories(p);
+    }
+
+    p.append(filename);
+
+    // Open file for appending
     std::ofstream out_file;
-    fs::path p("results/run_statistics.csv");
     bool need_header = !fs::exists(p);
-    // Append to CSV file
-    out_file.open("results/run_statistics.csv", std::ios_base::app);
+
+    out_file.open(p, std::ios_base::app); // Append to CSV file
 
     // If file DNE, create and write header
     if(need_header) {
         out_file << "Design, ";
         out_file << "Iterations, ";
-        out_file << "PARTIALS_GRAPH_COUNT, ";
+        //out_file << "PARTIALS_GRAPH_COUNT, ";
         out_file << "HPWL, ";
-        out_file << "Learning Rate, ";
+        //out_file << "Learning Rate, ";
         //out_file << "Runtime, ";
         //out_file << "IO time, ";
-        out_file << "Algo time, ";
+        //out_file << "Algo time, ";
+        out_file << "QuickCalc CPU time, ";
         out_file << "Partials CPU time, ";
-        out_file << "Partials AIE time, ";
-        out_file << "computePartials AIE, ";
-        out_file << "receivePartials AIE, ";
-        out_file << "lock time, ";
+        out_file << "Partials CPU_orig time, ";
+        //out_file << "Partials AIE time, ";
+        //out_file << "computePartials AIE, ";
+        //out_file << "receivePartials AIE, ";
         out_file << endl;
     }
 
     // Add new entry for this design
     out_file << stats.design_name << ", ";
     out_file << stats.iteration_count << ", ";
-    out_file << PARTIALS_GRAPH_COUNT << ", ";
+    //out_file << PARTIALS_GRAPH_COUNT << ", ";
     out_file << std::scientific;
     out_file << std::to_string(stats.final_hpwl) << ", ";
     out_file << std::fixed << std::setprecision(3);
-    out_file << stats.final_learning_rate << ", ";
+    //out_file << stats.final_learning_rate << ", ";
     //out_file << std::to_string(stats.prgm_runtime) << ", ";
     //out_file << std::to_string(stats.db_IO_time) << ", ";
-    out_file << std::to_string(function_stats_map["Algorithm Block"].total_time) << ", ";
+    //out_file << std::to_string(function_stats_map["Algorithm Block"].total_time) << ", ";
+    out_file << std::to_string(function_stats_map["computeAllPartials_simple"].total_time) << ", ";
     out_file << std::to_string(function_stats_map["computeAllPartials_CPU"].total_time) << ", ";
-    out_file << std::to_string(function_stats_map["computeAllPartials_AIE"].total_time) << ", ";
-    out_file << std::to_string(function_stats_map["computePartials"].total_time) << ", ";
-    out_file << std::to_string(function_stats_map["receivePartials"].total_time) << ", ";
-    out_file << std::to_string(function_stats_map["lockNodes"].total_time) << ", ";
+    out_file << std::to_string(function_stats_map["computeAllPartials_CPU_orig"].total_time) << ", ";
+    //out_file << std::to_string(function_stats_map["computeAllPartials_AIE"].total_time) << ", ";
+    //out_file << std::to_string(function_stats_map["computePartials"].total_time) << ", ";
+    //out_file << std::to_string(function_stats_map["receivePartials"].total_time) << ", ";
     out_file << endl;
     out_file.close();
 }

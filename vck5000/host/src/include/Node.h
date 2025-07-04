@@ -74,9 +74,11 @@ public:
     const string& getName() { return m_name; }
     const PlacementStatus& getStatus() { return m_status; }
     Position<position_type>& getPosition() { return m_pos; } // return a reference to avoid copying
-    void translate(double move_x, double move_y) { m_pos.translate(move_x, move_y); }
+    void translate(float move_x, float move_y) { m_pos.translate(move_x, move_y); }
     const position_type& getX() { return m_pos.getX(); }
     const position_type& getY() { return m_pos.getY(); }
+    position_type& setX(float x) { m_pos.setX(x); }
+    position_type& setY(float y) { m_pos.setY(y); }
     const string& getOrientation() { return m_orient; }
     bool lock() {  m_mutex.lock(); }
     bool unlock() {  m_mutex.unlock();  }
