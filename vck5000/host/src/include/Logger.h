@@ -49,24 +49,44 @@ private:
 
 public:
     struct ProgramStatBlock {
-        string design_name;
-        long final_hpwl;
-        int iteration_count;
-        float init_learning_rate;
-        float final_learning_rate;
-        long long prgm_runtime, db_IO_time, algo_time, AIE_time;
-
-        // Claude's fields
-        float final_overflow;
-        float hpwl_improvement;
-        bool has_improvement;
-        float initial_hpwl;
-        float iteration_avg_time;
+        // Basic information
+        std::string timestamp;
+        std::string run_id;
+        std::string design_name;
+        std::string benchmark_size;
+        
+        // Configuration
         std::string partials_method;
-        std::string density_method; 
+        std::string density_method;
         std::string wirelength_method;
         float gamma;
-        float learning_rate;
+        float init_learning_rate;
+        int max_iterations;
+        
+        // Results
+        int iteration_count;
+        float final_hpwl;
+        float initial_hpwl;
+        float hpwl_improvement;
+        bool has_improvement;
+        float final_overflow;
+        float final_learning_rate;
+        bool convergence_reached;
+        
+        // Timing
+        float prgm_runtime;
+        float db_IO_time;
+        float algo_time;
+        float AIE_time;
+        float iteration_avg_time;
+        
+        // System metrics
+        float memory_usage_mb;
+        float aie_utilization_percent;
+        
+        // Status
+        bool success;
+        std::string error_message;
     };
 
     // Singleton access

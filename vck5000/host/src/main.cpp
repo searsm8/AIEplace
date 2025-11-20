@@ -11,7 +11,7 @@ int main(int argc, char *argv[])
     std::string config_filepath;
     if (argc > 1)
         config_filepath = argv[1];
-    else config_filepath = "host/default_config.json"; // default
+    else config_filepath = "host/run_config.json"; // default
 
     // Instantiate the placer
     AIEplace::Placer placer(config_filepath);

@@ -182,61 +182,116 @@ void Logger::export_eField(AIEplace::Grid& grid, fs::path dir, int iter)
 
 }
 
+// Enhanced Logger::append_csv function with comprehensive metrics
 void Logger::append_csv(ProgramStatBlock &stats, string filename)
 {
-    // Create directory if it doesn't exist
-    fs::path p("results");
-    if (!fs::exists(p)) {
-        fs::create_directories(p);
+    // Create results directory if it doesn't exist
+    fs::path results_dir("results");
+    if (!fs::exists(results_dir)) {
+        fs::create_directories(results_dir);
     }
-
-    p.append(filename);
-
+    
+    fs::path csv_path = results_dir / filename;
+    
     // Open file for appending
     std::ofstream out_file;
-    bool need_header = !fs::exists(p);
-
-    out_file.open(p, std::ios_base::app); // Append to CSV file
-
-    // If file DNE, create and write header
+    bool need_header = !fs::exists(csv_path);
+    out_file.open(csv_path, std::ios_base::app);
+    out_file.imbue(std::locale::classic());  // Prevent comma thousands separators
+    
+    // If file doesn't exist, create and write comprehensive header
     if(need_header) {
-        out_file << "Design, ";
-        out_file << "Iterations, ";
-        //out_file << "PARTIALS_GRAPH_COUNT, ";
-        out_file << "HPWL, ";
-        //out_file << "Learning Rate, ";
-        //out_file << "Runtime, ";
-        //out_file << "IO time, ";
-        //out_file << "Algo time, ";
-        out_file << "QuickCalc CPU time, ";
-        out_file << "Partials CPU time, ";
-        out_file << "Partials CPU_orig time, ";
-        //out_file << "Partials AIE time, ";
-        //out_file << "computePartials AIE, ";
-        //out_file << "receivePartials AIE, ";
+        // Basic run information
+        out_file << "Design,";
+        
+        // Configuration
+        out_file << "Partials_Method,";
+        out_file << "Density_Method,";
+        out_file << "Gamma,";
+        out_file << "Init_Learning_Rate,";
+        
+        // Results
+        out_file << "Iterations,";
+        out_file << "Final_HPWL,";
+        out_file << "Initial_HPWL,";
+        out_file << "HPWL_Improvement_Percent,";
+        out_file << "Final_Overflow,";
+        out_file << "Final_Learning_Rate,";
+        
+        // Timing (high-level)
+        out_file << "Benchmark_Size,";
+        out_file << "Total_Runtime_Sec,";
+        out_file << "DB_IO_Time_Sec,";
+        out_file << "Algorithm_Time_Sec,";
+        out_file << "Iteration_Avg_Sec,";
+        
+        // Detailed function timing
+        out_file << "Partials_AIE_Time,";
+        //out_file << "Density_Compute_Time,";
+        //out_file << "Placement_Update_Time,";
+        
+        // System metrics
+        out_file << "Memory_Usage_MB,";
+        out_file << "AIE_Utilization_Percent,";
+        
+        // Status
+        out_file << "Success,";
+        out_file << "Error_Message,";
+        out_file << "Timestamp";
+        
         out_file << endl;
     }
-
-    // Add new entry for this design
-    out_file << stats.design_name << ", ";
-    out_file << stats.iteration_count << ", ";
-    //out_file << PARTIALS_GRAPH_COUNT << ", ";
-    out_file << std::scientific;
-    out_file << std::to_string(stats.final_hpwl) << ", ";
+    
+    // Write data row
+    out_file << "\"" << stats.design_name << "\",";
+    
+    // Configuration
+    out_file << "\"" << stats.partials_method << "\",";
+    out_file << "\"" << stats.density_method << "\",";
+    out_file << stats.gamma << ",";
+    out_file << stats.init_learning_rate << ",";
+    
+    // Results
+    out_file << stats.iteration_count << ",";
+    out_file << std::scientific << stats.final_hpwl << ",";
+    out_file << std::scientific << stats.initial_hpwl << ",";
+    out_file << std::fixed << std::setprecision(2) << stats.hpwl_improvement << ",";
+    out_file << std::scientific << stats.final_overflow << ",";
+    out_file << std::fixed << std::setprecision(6) << stats.final_learning_rate << ",";
+    
+    // Timing (high-level)
+    out_file << "\"" << stats.benchmark_size << "\",";
     out_file << std::fixed << std::setprecision(3);
-    //out_file << stats.final_learning_rate << ", ";
-    //out_file << std::to_string(stats.prgm_runtime) << ", ";
-    //out_file << std::to_string(stats.db_IO_time) << ", ";
-    //out_file << std::to_string(function_stats_map["Algorithm Block"].total_time) << ", ";
-    out_file << std::to_string(function_stats_map["computeAllPartials_simple"].total_time) << ", ";
-    out_file << std::to_string(function_stats_map["computeAllPartials_CPU"].total_time) << ", ";
-    out_file << std::to_string(function_stats_map["computeAllPartials_CPU_orig"].total_time) << ", ";
-    //out_file << std::to_string(function_stats_map["computeAllPartials_AIE"].total_time) << ", ";
-    //out_file << std::to_string(function_stats_map["computePartials"].total_time) << ", ";
-    //out_file << std::to_string(function_stats_map["receivePartials"].total_time) << ", ";
+    out_file << stats.prgm_runtime << ",";
+    out_file << stats.db_IO_time << ",";
+    out_file << stats.algo_time << ",";
+    out_file << stats.iteration_avg_time << ",";
+    
+    // Detailed function timing (with safety checks)
+    auto safe_get_time = [](const std::string& func_name) -> double {
+        if (function_stats_map.find(func_name) != function_stats_map.end()) {
+            return function_stats_map[func_name].total_time;
+        }
+        return 0.0;
+    };
+    
+    out_file << safe_get_time("computeAllPartials_AIE") << ",";
+    //out_file << safe_get_time("computeDensity") << ",";
+    //out_file << safe_get_time("updatePlacements") << ",";
+    
+    // System metrics
+    out_file << stats.memory_usage_mb << ",";
+    out_file << stats.aie_utilization_percent << ",";
+    
+    // Status
+    out_file << (stats.success ? "TRUE" : "FALSE") << ",";
+    out_file << "\"" << stats.error_message << "\",";
+    out_file << "\"" << stats.timestamp << "\"";
+    
     out_file << endl;
     out_file.close();
 }
+
 
 void Logger::updateFunctionStats(string func_name, long long func_time)
 {

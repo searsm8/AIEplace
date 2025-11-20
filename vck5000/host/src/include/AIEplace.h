@@ -9,6 +9,11 @@
 #include "json.h"
 using json = nlohmann::json;
 
+#include <chrono>
+#include <iomanip>
+#include <fstream>
+#include <sstream>
+
 #define DEVICE_ID 0 // Device ID to find VCK5000
 
 #ifdef CREATE_VISUALIZATION
@@ -22,11 +27,19 @@ class Placer
 private:
     float initial_hpwl = 0.0f;
     
-    void printDSEPerformanceMetrics(float final_hpwl, float final_overflow,
-                                   float total_runtime, float iteration_avg,
-                                   float hpwl_improvement, bool has_improvement);
+    // Helper functions for DSE integration and output organization
+    void createRunOutputStructure(std::string& run_output_dir, std::string& run_id);
+    void populateStatsBlock(Logger::ProgramStatBlock& stats, 
+                           float final_hpwl, float final_overflow, 
+                           float total_runtime, float iteration_avg,
+                           float hpwl_improvement, bool has_improvement,
+                           const std::string& run_id);
+    
+    // Helper functions
+    std::string escapeJsonString(const std::string& input);
+    std::string generateRunId();
     bool checkConvergence();
-    float getMemoryUsageMB(); 
+    float getMemoryUsageMB();
     float getAIEUtilizationPercent();
 
 public:
@@ -70,7 +83,6 @@ public:
     long double db_IO_time;
     long double algo_start;
     long double algo_time;
-    long double AIE_time;
     std::vector<float> hpwl_history; // history of HPWL values for each iteration
     std::vector<float> ovfw_history; // history of overflow values for each iteration
     std::vector<float> learning_coeff_history; 
