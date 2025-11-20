@@ -1,0 +1,42 @@
+{
+  "documentation": {
+    "title": "AIEPlace Configuration Options",
+    "description": "This JSON file contains the default configuration parameters for running the AIEPlace placement algorithm. It includes options for method selection, input file paths, and hyperparameters for the algorithm.",
+    "author": "Mark Sears",
+    "input.benchmark": "Path to the benchmark file for placement.",
+    "input.xclbin": "Path to the XCLBIN file for hardware acceleration.",
+    "params.partials_compute_method": "choose: aie, cpu, simple, hybrid, threaded",
+    "params.density_compute_method": "choose: aie, cpu"
+  },
+  "input": {
+    "benchmark": "host/benchmarks/ispd2005/adaptec1",
+    "benchmark1": "host/benchmarks/ispd2015/mgc_superblue11_a",
+    "benchmark2": "host/benchmarks/ispd2015/mgc_superblue19",
+    "benchmarktoy": "host/benchmarks/ispd2015/toy",
+    "xclbin": "bin/aieplace.hw.xclbin",
+    "xclbinx": "bin/aieplace_1cu.hw.xclbin",
+    "xclbin_": "bin/aieplace.hw_emu.xclbin"
+  },
+  "params": {
+    "partials_compute_method": "aie",
+    "density_compute_method": "cpu",
+    "wirelength_method": "HPWL",
+    "comment2": "hyperparameters",
+    "gamma": 4,
+    "max_iterations": 20,
+    "max_threads": 1,
+    "init_learning_rate": 0.02,
+    "init_global_lambda": 0.2,
+    "focus_nets": [],
+    "rand_focus_nets": 0,
+    "rand_focus_nodes": 1
+  },
+  "output": {
+    "result_csv": "results.csv",
+    "log_file": "logs/aieplace.log",
+    "performance_jsonl": "results/aieplace_performance.jsonl",
+    "visualize": true,
+    "iterations_per_export": 10,
+    "visualization_file": "visualizations/aieplace_visualization.png"
+  }
+}
