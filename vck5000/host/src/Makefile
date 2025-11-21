@@ -8,10 +8,10 @@ BUILD_XRT ?= # Set to 1 to build with XRT and VCK5000 support.
 # Auto-detect XRT environment (set on HPC with VCK5000 access)
 ifdef BUILD_XRT
     $(info MAKE INFO: Building with XRT support for VCK5000)
-    ITEMS := AIEplace DataBase Grid Net DCT GraphDriver Logger Common
+    ITEMS := AIEplace Partials DataBase Grid Net DCT GraphDriver Logger Common
 else
     $(info MAKE INFO: Building without XRT - CPU only mode)
-    ITEMS := AIEplace DataBase Grid Net DCT Logger Common
+    ITEMS := AIEplace Partials DataBase Grid Net DCT Logger Common
 endif
 
 ITEMS += Visualizer
@@ -83,7 +83,7 @@ objs: ${OBJS}
 
 objs/%.o: ./%.cpp ./include/%.h ./include/Common.h
 	@mkdir -p objs
-	@printf "\n\tMAKE INFO: Compile object file \"$@\"\n"
+	$(info MAKE INFO: Compile object file "$@")
 	${GCC} -c ${PROFILE_FLAG}  $< ${INCLUDES} ${COMPILE_FLAGS} -o $@
 
 clean:
