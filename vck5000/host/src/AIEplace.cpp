@@ -1,6 +1,8 @@
 #include "DCT.h"
 #include "AIEplace.h"
+#ifdef USE_TBB
 #include <tbb/tbb.h>
+#endif
 #include <cmath>
 #include <cassert>
 
@@ -16,7 +18,12 @@ void Placer::performIteration()
 
     // Compute terms for HPWL partials
     if(partials_method == "aie") {
+#ifdef USE_XILINX_XRT
         computeAllPartials_AIE();
+#else
+        Logger::log_error("partials_method 'aie' requires XRT. Recompile with BUILD_XRT=1 or use 'cpu'/'simple'");
+        exit(1);
+#endif
     }
     else if(partials_method == "cpu") {
         computeAllPartials_CPU();
@@ -25,7 +32,12 @@ void Placer::performIteration()
         computeAllPartials_simple();
     }
     else if(partials_method == "orig") {
+#ifdef USE_TBB
         computeAllPartials_CPU_orig();
+#else
+        Logger::log_error("partials_method 'orig' requires TBB. Recompile with -DUSE_TBB or use 'cpu'/'simple'");
+        exit(1);
+#endif
     }
     else if(partials_method == "hybrid") {
         //computeAllPartials_CPU_hybrid();
@@ -48,7 +60,12 @@ void Placer::performIteration()
     //grid.printOverflows();
 
     if(density_method == "aie") {
+#ifdef USE_XILINX_XRT
         computeElectricFields_AIE(); // Accelerated compute on AIEs
+#else
+        Logger::log_error("density_method 'aie' requires XRT. Recompile with BUILD_XRT=1 or use 'cpu'");
+        exit(1);
+#endif
     } else if(density_method == "cpu") {
         //computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
         computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
@@ -173,6 +190,7 @@ Placer::Placer(std::string config_filepath )
             string xclbin_file = cfg["input"]["xclbin"];
             result_csv = cfg["output"]["result_csv"];
 
+#ifdef USE_XILINX_XRT
             if(partials_method == "aie" || density_method == "aie") {
                 TIME_BLOCK("AIE setup");
                 // Open Xilinx Device
@@ -189,13 +207,20 @@ Placer::Placer(std::string config_filepath )
                     for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
                         partials_drivers[i].init(device, xclbin_uuid, i);
                 }
-                    
+
                 if(density_method == "aie") {
                     density_driver[0].init(device, xclbin_uuid, 0, BINS_PER_ROW); // DCT graph
                     density_driver[1].init(device, xclbin_uuid, 1, BINS_PER_ROW); // IDCT graph
                     density_driver[2].init(device, xclbin_uuid, 2, BINS_PER_ROW); // IDXST graph
                 }
             }
+#else
+            if(partials_method == "aie" || density_method == "aie") {
+                Logger::log_error("AIE acceleration requested but not compiled with XRT support!");
+                Logger::log_error("Recompile with XILINX_XRT environment variable set, or use CPU methods.");
+                exit(1);
+            }
+#endif
 
             // Initialize database by reading LEF and DEF design files
             db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
@@ -317,8 +342,19 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
 }
 
 /***************
- * AIE acceleration functions
-****************/
+ * XRT/AIE ACCELERATION FUNCTIONS - VCK5000 only
+ *
+ * These functions are only compiled when XILINX_XRT environment variable is set.
+ * They provide hardware-accelerated computation on Versal AI Engines via XRT.
+ *
+ * Functions in this section:
+ *   - computeAllPartials_AIE()    : Orchestrates AIE partial derivative computation
+ *   - computePartials()            : Sends data packets to AIE via XRT
+ *   - receivePartials()            : Receives results from AIE via XRT
+ *   - computeElectricFields_AIE()  : Accelerated density/E-field computation
+ ****************/
+
+#ifdef USE_XILINX_XRT
 
 /*
  * @brief On AIEs, compute partial derivatives
@@ -635,10 +671,14 @@ void Placer::computeElectricFields_AIE()
     }
 }
 
+#endif // USE_XILINX_XRT
+
 
 /***************
- * CPU functions
-****************/
+ * CPU FUNCTIONS - Always available
+ *
+ * These functions run on the host CPU and don't require XRT or VCK5000 hardware.
+ ****************/
 
 const int TABLE_SIZE = 11; // Size of the table for partials lookup
 // Pre-compute the table of partials
@@ -1109,6 +1149,7 @@ void Placer::computeAllPartials_CPU()
  * Results of the partial derivative computation are stored 
  * within each node's data members
 **/
+#ifdef USE_TBB
 //const int MAX_THREADS = 5; //std::thread::hardware_concurrency(); //On NextGenIO: 96
 void Placer::computeAllPartials_CPU_orig()
 {
@@ -1250,6 +1291,7 @@ void Placer::computeAllPartials_CPU_orig()
 
     //}
 }
+#endif // USE_TBB
 
 void Placer::compute_a_terms_CPU(Net* net_p)
 {
@@ -1964,7 +2006,7 @@ void Placer::printIterationResults()
 }
 
 void Placer::plotHistories() {
-    
+#ifdef CREATE_VISUALIZATION
     fs::path data_dir = output_dir / "data";
     if (!fs::exists(data_dir))
         fs::create_directories(data_dir);
@@ -1977,17 +2019,18 @@ void Placer::plotHistories() {
     CairoPlotter ovfw_plotter(800, 600);
     ovfw_plotter.plotHistory(ovfw_history, "Overflow", "OVFW Value", 0.0, 0.5, 1.0);
     ovfw_plotter.savePNG(data_dir / "ovfw_history.png");
-    
+
     CairoPlotter coeff_plotter(800, 600);
     coeff_plotter.plotHistory(learning_coeff_history, "Learning Coefficient History", "Learning Coefficient", 1.0, 0.2, 0.2);
     coeff_plotter.savePNG(data_dir / "learning_coeff_history.png");
-    
+
     // Create combined plot
     CairoPlotter dual_plotter(800, 600);
-    dual_plotter.plotDualHistory(hpwl_history, ovfw_history, 
+    dual_plotter.plotDualHistory(hpwl_history, ovfw_history,
                                 "HPWL and Overflow History",
                                 "HPWL (normalized)", "Overflow (normalized)");
     dual_plotter.savePNG(data_dir / "combined_history.png");
+#endif
 }
 
 void Placer::computeStatistics()

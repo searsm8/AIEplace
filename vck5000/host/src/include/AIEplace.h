@@ -4,10 +4,13 @@
 #include "Common.h"
 #include "DataBase.h"
 #include "Grid.h"
-#include "GraphDriver.h"
 #include "Logger.h" // or DebugFramework
 #include "json.h"
 using json = nlohmann::json;
+
+#ifdef USE_XILINX_XRT
+#include "GraphDriver.h"
+#endif
 
 #include <chrono>
 #include <iomanip>
@@ -45,8 +48,10 @@ private:
 public:
     DataBase db;
     Grid grid;
+#ifdef USE_XILINX_XRT
     PartialsGraphDriver partials_drivers[PARTIALS_GRAPH_COUNT];
     DensityGraphDriver density_driver[3];
+#endif
 
     // Flat data structure for results (same as before)
     struct NodePartial {
@@ -110,7 +115,9 @@ public:
     // Functions implemented on CPU
     void computeAllPartials_CPU ();
     void computeAllPartials_simple();
+#ifdef USE_TBB
     void computeAllPartials_CPU_orig();
+#endif
     void computeNetPartials_CPU (Net* net_p);
     void computeNetPartials_ThreadSafe(Net* net_p);
     void computeElectricFields_CPU ();

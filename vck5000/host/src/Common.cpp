@@ -2,7 +2,18 @@
 // Contains functions defined in Common.h
 #include "Common.h"
 
-AIEPLACE_NAMESPACE_BEGIN 
+AIEPLACE_NAMESPACE_BEGIN
+
+// Execution time tracking functions
+long getEpoch() {
+    struct timeval tm;
+    gettimeofday(&tm, NULL);
+    return (tm.tv_sec * 1000000) + tm.tv_usec;
+}
+
+double getTiming(long end_time, long start_time) {
+    return (end_time - start_time) / 1.0e6;
+}
 
 // @brief: return a human-readable thread index, mapped using thread ID
 std::size_t get_index(const std::thread::id id)

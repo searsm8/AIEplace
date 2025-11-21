@@ -11,16 +11,6 @@ void GraphDriver::print_info()
         xfer_off_time);
 }
 
-long getEpoch() {
-  struct timeval tm;
-  gettimeofday(&tm, NULL);
-  return (tm.tv_sec * 1000000)+tm.tv_usec;
-}
-
-double getTiming(long end_time, long start_time) {
-  return (end_time - start_time) / 1.0e6;
-}
-
 /*
  * Send packets of data to the PL data mover kernels.
  * Each packet consists of 8 floats, one coordinate from each net.
