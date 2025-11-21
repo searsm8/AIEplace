@@ -19,11 +19,11 @@ void GraphDriver::print_info()
  */
 void GraphDriver::send_packet(float * packet)
 {
-    start_time = getEpoch();
+    start_time = getTime();
     input_buffer.write(packet);
     input_buffer.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-    xfer_on_time = getTiming(getEpoch(), start_time);
-    start_time = getEpoch();
+    xfer_on_time = getInterval(start_time, getTime());
+    start_time = getTime();
 
     //DEBUG
     //SHOULD USE LOGGER log_debug(msg)
@@ -48,8 +48,8 @@ float GraphDriver::receive_packet(float * output_data)
     Logger::log_trace("run_device_mm2s.wait();");
     run_device_s2mm.wait(); // gets stuck here!
     Logger::log_trace("run_device_s2mm.wait();");
-    kernel_exec_time = getTiming(getEpoch(), start_time);
-    start_time = getEpoch();
+    kernel_exec_time = getInterval(start_time, getTime());
+    start_time = getTime();
     result_buffer.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     result_buffer.read(output_data);
 
@@ -64,7 +64,7 @@ float GraphDriver::receive_packet(float * output_data)
     //}
     //cout << endl;
 
-    xfer_off_time=getTiming(getEpoch(), start_time);
+    xfer_off_time = getInterval(start_time, getTime());
 }
 
 void PartialsGraphDriver::init(xrt::device device, xrt::uuid & xclbin_uuid, int kernel_id)

@@ -110,8 +110,8 @@ struct Term
 };
 
 // Execution time tracking functions
-long getEpoch();
-double getTiming(long, long);
+long getTime();
+double getInterval(long start_time, long end_time);
 
 std::size_t get_index(const std::thread::id id);
 

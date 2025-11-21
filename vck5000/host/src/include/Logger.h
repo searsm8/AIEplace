@@ -82,7 +82,6 @@ public:
         
         // System metrics
         float memory_usage_mb;
-        float aie_utilization_percent;
         
         // Status
         bool success;

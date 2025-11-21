@@ -151,9 +151,7 @@ public:
     // Post run analysis
     void computeStatistics();
 
-    // Timing and print functions
-    long getTime();
-    double getInterval(long start_time, long end_time);
+    // Print functions
     void printFinalResults();
     fs::path getOutputPath();
     void initializeFocus();

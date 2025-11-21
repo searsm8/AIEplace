@@ -232,7 +232,6 @@ void Logger::append_csv(ProgramStatBlock &stats, string filename)
         
         // System metrics
         out_file << "Memory_Usage_MB,";
-        out_file << "AIE_Utilization_Percent,";
         
         // Status
         out_file << "Success,";
@@ -281,7 +280,6 @@ void Logger::append_csv(ProgramStatBlock &stats, string filename)
     
     // System metrics
     out_file << stats.memory_usage_mb << ",";
-    out_file << stats.aie_utilization_percent << ",";
     
     // Status
     out_file << (stats.success ? "TRUE" : "FALSE") << ",";

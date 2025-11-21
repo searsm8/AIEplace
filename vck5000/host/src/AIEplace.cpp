@@ -84,7 +84,7 @@ void Placer::performIteration()
 */
 void Placer::run()
 {
-    algo_start = getEpoch();
+    algo_start = getTime();
     // Set the center point of die area as initial placement target
     Position<position_type> target =
                 Position<position_type>(grid.getDieWidth()/2, grid.getDieHeight()/2);
@@ -117,7 +117,7 @@ void Placer::run()
     }
 
     plotHistories();
-    algo_time = getTiming(getEpoch(), algo_start);
+    algo_time = getInterval(algo_start, getTime());
 }
 
 /* @brief: Implement dynamic adpatation of hyperparameters
@@ -170,7 +170,7 @@ Placer::Placer(std::string config_filepath )
                 exit(1);
             }
 
-            pgrm_start_time = getEpoch();
+            pgrm_start_time = getTime();
 
             cfg = json::parse(config_file);
 
@@ -225,7 +225,7 @@ Placer::Placer(std::string config_filepath )
             // Initialize database by reading LEF and DEF design files
             db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
 
-            db_IO_time = getTiming(getEpoch(), pgrm_start_time);
+            db_IO_time = getInterval(pgrm_start_time, getTime());
             Logger::log_info("db read time: " + std::to_string(db_IO_time));
             grid = Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_ROW); 
 
@@ -268,14 +268,6 @@ void Placer::printWelcomeBanner()
     banner.print(cout);
 }
 
-bool isClose(float a, float b)
-{
-    float diff = abs((a) - (b));
-    if((diff < MIN_TOL) || ((diff / abs(a)) < MIN_TOL))
-        return true;
-    return false;
-}
-
 /* @brief: initialize placement of all moveable nodes randomly,
  *          clustered about the target position
  * @param: target_pos: position around which nodes are spread
@@ -313,6 +305,8 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
         // if this component is bigger than 1/16th of bin area, set member bool
         item.second->checkIfLarge(bin_area_16th);
     }
+    printIterationResults(); // Prints "iteration 0" starting statistics
+    iteration = 1;
 
     // TODO
     // Wild and Crazy Idea: wouldn't this have the same effect as slowly increasing the bin's lambda?
@@ -321,30 +315,12 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
     // They could be made to have a repulsive affect on the real nodes or macros
     // These macros won't be on any nets, but they will add to the density computation
     // and could be created en masse at hotspot areas to gently push other nodes away.
-
-    // First, we create the phantom Macroclass with large size
-
-   // MacroClass* new_macro = new MacroClass(m.name(), m.sizeX(), m.sizeY());
-   // mm_macros.emplace(std::make_pair(m.name(), new_macro));
-
-   // // Next, the components with "large" dimensions, such as 1/2 bin size
-   // Component* new_comp = new Component("phantom");
-   // new_comp->setMacroClass(mm_macros[c.macro_name]);
-   // new_comp->setPlacementStatus(c.status);
-   // new_comp->setPosition(Position((position_type)c.origin[0], (position_type)c.origin[1]));
-   // mm_components.emplace(std::make_pair(new_comp->getName(), new_co
-
-   // // Finally, we scatter these extra macros around the die layout
-
-
-    printIterationResults(); // Prints "iteration 0" starting statistics
-    iteration = 1;
 }
 
 /***************
  * XRT/AIE ACCELERATION FUNCTIONS - VCK5000 only
  *
- * These functions are only compiled when XILINX_XRT environment variable is set.
+ * These functions are only compiled when BUILD_XRT environment variable is set.
  * They provide hardware-accelerated computation on Versal AI Engines via XRT.
  *
  * Functions in this section:
@@ -680,6 +656,7 @@ void Placer::computeElectricFields_AIE()
  * These functions run on the host CPU and don't require XRT or VCK5000 hardware.
  ****************/
 
+// For an extremely simplified partials computation, use a lookup table
 const int TABLE_SIZE = 11; // Size of the table for partials lookup
 // Pre-compute the table of partials
 vector<float> shortcut_table {
@@ -696,14 +673,11 @@ void Placer::computeAllPartials_simple()
     TIME_FUNCTION();
     Logger::log_trace("BEGIN computeAllPartials_simple()");
 
-
     auto& nets = db.getNetsVector();
-    
-    // STEP 2: Single-threaded computation - test baseline performance
+    // Single-threaded computation - test baseline performance
     auto start_single = std::chrono::high_resolution_clock::now();
     
     // Process all nets sequentially
-    int count = 0;
     for (Net* net_p : nets) {
         const std::vector<Node*>& nodes = net_p->getNodes();
         int net_size = net_p->getDegree();
@@ -723,37 +697,6 @@ void Placer::computeAllPartials_simple()
             max_x = std::max(max_x, node_p->getX());
             max_y = std::max(max_y, node_p->getY());
         }
-
-
-        // Compute A terms directly into our flat vector
-       // std::vector<Term> A(net_size);
-       // for (size_t i = 0; i < net_size; i++) {
-       //     A[i].plus.x  = exp((nodes[i]->getX() - max_x) / gamma);
-       //     A[i].minus.x = exp((min_x - nodes[i]->getX()) / gamma);
-       //     A[i].plus.y  = exp((nodes[i]->getY() - max_y) / gamma);
-       //     A[i].minus.y = exp((min_y - nodes[i]->getY()) / gamma);
-       // }
-       // 
-       // // Compute B and C terms
-       // Term B, C;
-       // B.clear(); C.clear();
-       // for (size_t i = 0; i < net_size; i++) {
-       //     B.plus.x  += A[i].plus.x;
-       //     B.minus.x += A[i].minus.x;
-       //     B.plus.y  += A[i].plus.y;
-       //     B.minus.y += A[i].minus.y;
-       //     C.plus.x  += A[i].plus.x  * nodes[i]->getX();
-       //     C.minus.x += A[i].minus.x * nodes[i]->getX();
-       //     C.plus.y  += A[i].plus.y  * nodes[i]->getY();
-       //     C.minus.y += A[i].minus.y * nodes[i]->getY();
-       // }
-       // 
-       // // Pre-compute common terms
-       // float inv_gamma = 1.0f / gamma;
-       // float bpx_sq_inv = 1.0f / (B.plus.x * B.plus.x);
-       // float bmx_sq_inv = 1.0f / (B.minus.x * B.minus.x);
-       // float bpy_sq_inv = 1.0f / (B.plus.y * B.plus.y);
-       // float bmy_sq_inv = 1.0f / (B.minus.y * B.minus.y);
 
         for(size_t i = 0; i < net_size; i++) {
             float x = nodes[i]->getX();
@@ -781,30 +724,6 @@ void Placer::computeAllPartials_simple()
             nodes[i]->terms_cpu.partials.x += simple_partial.x ;
             nodes[i]->terms_cpu.partials.y += simple_partial.y ;
 
-           // // Compute partials using full equations
-           // Point partial;
-           // partial.x = ((1 + x * inv_gamma) * B.plus.x - (C.plus.x * inv_gamma)) 
-           //         * (A[i].plus.x * bpx_sq_inv)
-           //         - ((1 - x * inv_gamma) * B.minus.x + (C.minus.x * inv_gamma)) 
-           //         * (A[i].minus.x * bmx_sq_inv);
-           //         
-           // partial.y = ((1 + y * inv_gamma) * B.plus.y - (C.plus.y * inv_gamma)) 
-           //         * (A[i].plus.y * bpy_sq_inv)
-           //         - ((1 - y * inv_gamma) * B.minus.y + (C.minus.y * inv_gamma)) 
-           //         * (A[i].minus.y * bmy_sq_inv);
-           // 
-
-           // //compare results
-           // if(count++ < 100)
-           // if(net_p->getDegree() < 6)
-           // if(!partial.isClose(simple_partial)) {
-           //     cout << endl;
-           //     Logger::log_error("Partial mismatch on node " + nodes[i]->getName() + " in net " + net_p->getName());
-           //     Logger::log_error("partials x: " + std::to_string(partial.x) + " y:" + std::to_string(partial.y));
-           //     Logger::log_error("simple x: " + std::to_string(simple_partial.x) + " y:" + std::to_string(simple_partial.y));
-           //     cout << net_p->to_string() << endl;
-           //     cout << endl;
-           // }
         }
     }
 
@@ -812,20 +731,6 @@ void Placer::computeAllPartials_simple()
     auto duration_single = std::chrono::duration_cast<std::chrono::milliseconds>(end_single - start_single).count();
     //Logger::log_detail("Simple computation took " + std::to_string(duration_single) + " ms");
 }
-
-
-// Alignment to prevent false sharing (adjust for your CPU cache line size)
-
-#define CACHE_LINE_SIZE 64
-
-// Aligned thread-local structure to prevent false sharing
-struct alignas(CACHE_LINE_SIZE) ThreadLocalResults {
-    // Using node pointer as first key to improve locality
-    std::map<Node*, std::map<Net*, XY>> node_to_net_partials;
-    
-    // Pad to ensure no false sharing between thread data
-    char padding[CACHE_LINE_SIZE - sizeof(std::map<Node*, std::map<Net*, XY>>) % CACHE_LINE_SIZE];
-};
 
 // Memory optimized computeAllPartials function
 void Placer::computeAllPartials_CPU()
@@ -914,12 +819,6 @@ void Placer::computeAllPartials_CPU()
                     - ((1 - y * inv_gamma) * B.minus.y + (C.minus.y * inv_gamma)) 
                       * (A[i].minus.y * bmy_sq_inv);
             
-            // Store in our flat array
-            //NodePartial np;
-            //np.node = nodes[i];
-            //np.partial = partial;
-            //all_partials[net_p] = np;
-
             //check for NaNs
             if(partial.x != partial.x || partial.y != partial.y) {
                 Logger::log_error("NaN detected in partials for node " + nodes[i]->getName() + " in net " + net_p->getName());
@@ -938,360 +837,12 @@ void Placer::computeAllPartials_CPU()
 
 
 
-        //for(size_t i = 0; i < net_size; i++) {
-        //    net_p->mm_partials_by_node[nodes[i]].x = (( 1 + nodes[i]->getX()/gamma) * B.plus.x - (C.plus.x / gamma)) 
-        //                                * (A[i].plus.x / (B.plus.x * B.plus.x))
-        //                        - (( 1 - nodes[i]->getX()/gamma) * B.minus.x + (C.minus.x / gamma)) 
-        //                                * (A[i].minus.x / (B.minus.x * B.minus.x));
-
-        //    net_p->mm_partials_by_node[nodes[i]].y = (( 1 + nodes[i]->getY()/gamma) * B.plus.y - (C.plus.y / gamma)) 
-        //                                * (A[i].plus.y / (B.plus.y * B.plus.y))
-        //                        - (( 1 - nodes[i]->getY()/gamma) * B.minus.y + (C.minus.y / gamma)) 
-        //                                * (A[i].minus.y / (B.minus.y * B.minus.y));
-        //    //Logger::log_debug(nodes[i]->getName() + " partial_x: " + std::to_string(net_p->mm_partials_by_node[nodes[i]].x));
-        //    //Logger::log_debug(nodes[i]->getName() + " partial_y: " + std::to_string(net_p->mm_partials_by_node[nodes[i]].y));
-        //}
     }
     
     auto end_single = std::chrono::high_resolution_clock::now();
     auto duration_single = std::chrono::duration_cast<std::chrono::milliseconds>(end_single - start_single).count();
-    Logger::log_detail("Sequential computation took " + std::to_string(duration_single) + " ms");
-    
-    // STEP 3: Update final data structures
-    //auto start_update = std::chrono::high_resolution_clock::now();
-    
-    //// Simple linear update to final data structure
-    //for (const auto& entry : all_partials) {
-    //    entry.net->mm_partials_by_node[entry.node] = entry.partial;
-    //}
-    
-    //auto end_update = std::chrono::high_resolution_clock::now();
-    //auto duration_update = std::chrono::duration_cast<std::chrono::milliseconds>(end_update - start_update).count();
-    //Logger::log_detail("Final update took " + std::to_string(duration_update) + " ms");
-    
-    // Option to try parallel processing later if needed
-    /*
-    // Only enable parallelism if we've verified it helps
-    if (total_node_count > 100000) {  // Example threshold
-        const int num_threads = 4;  // Fixed thread count based on testing
-        tbb::task_arena arena(num_threads);
-        arena.execute([&]{
-            // Parallel processing here
-        });
-    }
-    */
+    Logger::log_detail("Sequential computation of partials on CPU took " + std::to_string(duration_single) + " ms");
 }
-
-
-//void Placer::computeAllPartials_CPU_orig()
-//    // This is the original computeAllPartials function
-//    // It is not optimized for memory bandwidth and is not parallelized
-//    // It is kept here for reference and comparison
-//{
-//    TIME_FUNCTION();
-//    Logger::log_info("Iteration " + std::to_string(iteration) );
-//    auto & nets = db.getNetsVector();
-//    
-//    // Pre-sort nets by size to improve work distribution
-//    std::vector<std::pair<size_t, Net*>> sorted_nets;
-//    sorted_nets.reserve(nets.size());
-//    for (size_t i = 0; i < nets.size(); ++i) {
-//        sorted_nets.emplace_back(nets[i]->getDegree(), nets[i]);
-//    }
-//    
-//    // Sort largest nets first for better load balancing
-//    std::sort(sorted_nets.begin(), sorted_nets.end(), 
-//              [](const auto& a, const auto& b) { return a.first > b.first; });
-//    
-//    // Try a smaller number of threads first (start with logical cores, not hyperthreads)
-//    // Adjust based on your hardware - this is just an example
-//    //int num_threads = std::thread::hardware_concurrency() / 2;
-//    int num_threads = MAX_THREADS * iteration;
-//    if (num_threads < 1) num_threads = 1;
-//    
-//    // Allocate thread local storage
-//    std::vector<ThreadLocalResults> thread_results(num_threads);
-//    
-//    // Create atomic counter for work stealing
-//    std::atomic<size_t> next_index(0);
-//    
-//    // Performance measurement
-//    auto start_time = std::chrono::high_resolution_clock::now();
-//    
-//    // Create task arena with explicit thread count
-//    tbb::task_arena arena(num_threads);
-//    arena.execute([&]{
-//        // Work stealing approach - each thread grabs the next chunk of work
-//        tbb::parallel_for(0, num_threads, [&](int thread_idx) {
-//            // Get this thread's local result storage
-//            auto& local_result = thread_results[thread_idx];
-//            
-//            // Work-stealing loop
-//            size_t work_index;
-//            while ((work_index = next_index.fetch_add(1)) < sorted_nets.size()) {
-//                Net* net_p = sorted_nets[work_index].second;
-//                
-//                // Process this net
-//                int net_size = net_p->getDegree();
-//                const std::vector<Node*> &nodes = net_p->getNodes();
-//                
-//                // Pre-allocate vectors to avoid reallocation
-//                std::vector<Term> A(net_size);
-//                
-//                // Cache min/max calculations
-//                float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = 0, max_y = 0;
-//                
-//                // Local copies of frequently accessed data
-//                const float gamma_val = gamma; // Cache this value
-//                
-//                // Stage 1: Find min/max x,y
-//                for(Node* node_p : nodes) {
-//                    float x = node_p->getX();
-//                    float y = node_p->getY();
-//                    min_x = std::min(min_x, x);
-//                    min_y = std::min(min_y, y);
-//                    max_x = std::max(max_x, x);
-//                    max_y = std::max(max_y, y);
-//                }
-//                
-//                // Stage 2: Compute A terms
-//                for(size_t i = 0; i < net_size; i++) {
-//                    float x = nodes[i]->getX();
-//                    float y = nodes[i]->getY();
-//                    
-//                    A[i].plus.x  = exp((x - max_x) / gamma_val);
-//                    A[i].minus.x = exp((min_x - x) / gamma_val);
-//                    A[i].plus.y  = exp((y - max_y) / gamma_val);
-//                    A[i].minus.y = exp((min_y - y) / gamma_val);
-//                }
-//                
-//                // Stage 3: Compute B and C terms
-//                Term B, C;
-//                B.clear(); C.clear();
-//                for(size_t i = 0; i < net_size; i++) {
-//                    float x = nodes[i]->getX();
-//                    float y = nodes[i]->getY();
-//                    
-//                    B.plus.x  += A[i].plus.x;
-//                    B.minus.x += A[i].minus.x;
-//                    B.plus.y  += A[i].plus.y;
-//                    B.minus.y += A[i].minus.y;
-//                    
-//                    C.plus.x  += A[i].plus.x  * x;
-//                    C.minus.x += A[i].minus.x * x;
-//                    C.plus.y  += A[i].plus.y  * y;
-//                    C.minus.y += A[i].minus.y * y;
-//                }
-//                
-//                // Stage 4: Compute partials
-//                // Pre-compute common terms to reduce redundant calculations
-//                float inv_gamma = 1.0f / gamma_val;
-//                float bpx_sq_inv = 1.0f / (B.plus.x * B.plus.x);
-//                float bmx_sq_inv = 1.0f / (B.minus.x * B.minus.x);
-//                float bpy_sq_inv = 1.0f / (B.plus.y * B.plus.y);
-//                float bmy_sq_inv = 1.0f / (B.minus.y * B.minus.y);
-//                
-//                float cpx_div_gamma = C.plus.x * inv_gamma;
-//                float cmx_div_gamma = C.minus.x * inv_gamma;
-//                float cpy_div_gamma = C.plus.y * inv_gamma;
-//                float cmy_div_gamma = C.minus.y * inv_gamma;
-//                
-//                for(size_t i = 0; i < net_size; i++) {
-//                    Node* node = nodes[i];
-//                    float x = node->getX();
-//                    float y = node->getY();
-//                    
-//                    // More efficient calculation with pre-computed terms
-//                    XY partial;
-//                    partial.x = ((1 + x * inv_gamma) * B.plus.x - cpx_div_gamma) 
-//                              * (A[i].plus.x * bpx_sq_inv)
-//                            - ((1 - x * inv_gamma) * B.minus.x + cmx_div_gamma) 
-//                              * (A[i].minus.x * bmx_sq_inv);
-//                              
-//                    partial.y = ((1 + y * inv_gamma) * B.plus.y - cpy_div_gamma) 
-//                              * (A[i].plus.y * bpy_sq_inv)
-//                            - ((1 - y * inv_gamma) * B.minus.y + cmy_div_gamma) 
-//                              * (A[i].minus.y * bmy_sq_inv);
-//                    
-//                    // Store in thread-local result map
-//                    local_result.node_to_net_partials[node][net_p] = partial;
-//                }
-//            }
-//        });
-//    });
-//    
-//    auto end_time = std::chrono::high_resolution_clock::now();
-//    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-//    
-//    Logger::log_detail("Parallel computation took " + std::to_string(duration) + " ms with " + 
-//                      std::to_string(num_threads) + " threads");
-//                      
-//    // Merge results efficiently by organizing by node first
-//    start_time = std::chrono::high_resolution_clock::now();
-//    
-//    for (auto& thread_result : thread_results) {
-//        for (auto& [node, net_map] : thread_result.node_to_net_partials) {
-//            for (auto& [net, partial] : net_map) {
-//                net->mm_partials_by_node[node] = partial;
-//            }
-//        }
-//    }
-//    
-//    end_time = std::chrono::high_resolution_clock::now();
-//    duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-//    Logger::log_detail("Merging results took " + std::to_string(duration) + " ms");
-//}
-
-
-/*
- * @brief On CPU, compute Electric fields using 2D-DCT method
- *
- * Results of the partial derivative computation are stored 
- * within each node's data members
-**/
-#ifdef USE_TBB
-//const int MAX_THREADS = 5; //std::thread::hardware_concurrency(); //On NextGenIO: 96
-void Placer::computeAllPartials_CPU_orig()
-{
-        // The simplest parallel_for usage for your derivatives
-        //void computeDerivatives(std::vector<double>& results, const Design& design) {
-        //    tbb::parallel_for(
-        //        tbb::blocked_range<size_t>(0, results.size()),
-        //        [&](const tbb::blocked_range<size_t>& r) {
-        //            for(size_t i = r.begin(); i < r.end(); ++i) {
-        //                results[i] = computeSingleDerivative(design, i);
-        //            }
-        //        }
-        //    );
-        //}
-
-    TIME_FUNCTION();
-
-
-// Phase 1: Compute partials for each net, stores result in net object to be inherently thread-safe
-// compute only for nets size 2-8, which is what normally runs on AIE
-    //Logger::log_detail("MAX_THREADS: " + std::to_string(MAX_THREADS));
-    //for (auto item : db.getNetsByDegree()) 
-    {
-    
-
-    // Multithread ALL nets as one big group
-
-
-        //std::vector<std::thread> partials_threads;
-        std::vector<Net*> processed_nets; // Debugging vector to check all nets are processed
-        std::vector<std::thread::id> thread_ids;
-        std::map<std::thread::id, int> thread_ids_map;
-        std::mutex thread_ids_mutex;
-        //if(item.first < MIN_AIE_NET_SIZE || item.first > MAX_AIE_NET_SIZE) 
-        //    continue;
-        //else 
-        // parallel implementation
-        {
-            //cout << "Iteration " << iteration << endl;
-            //" -- Computing partials for nets of size " << item.first << endl;
-            //auto & nets = item.second; // all nets of this size in the DataBase
-            auto & nets = db.getNetsVector(); // all nets in the DataBase
-            size_t block_range = nets.size();
-            size_t grain_size  = nets.size() / MAX_THREADS;
-            Logger::log_detail("nets.size(): " + std::to_string(block_range) + " grain_size: " + std::to_string(grain_size));
-
-            // use tbb for parallelization
-
-
-            tbb::task_arena arena(MAX_THREADS);
-            arena.execute([&]{
-            tbb::parallel_for(
-                //tbb::blocked_range<size_t>(0, block_range, grain_size ), //omit grain_size allows tbb to decide
-                tbb::blocked_range<size_t>(0, block_range), //omit grain_size allows tbb to decide
-                [&](const tbb::blocked_range<size_t>& r) {
-                    //std::lock_guard<std::mutex> lock(thread_ids_mutex);
-                    //thread_ids_mutex.lock();
-                    //Logger::log_detail("BEGIN Thread ID: " + std::to_string(get_index(std::this_thread::get_id())) + " -- block_range: " + std::to_string(r.end() - r.begin()) );
-                    //thread_ids_mutex.unlock();
-                    //cout << endl;
-                    for(size_t i = r.begin(); i < r.end(); ++i) {
-                        //thread_ids_mutex.lock();
-                        //thread_ids.push_back(std::this_thread::get_id());
-                        //processed_nets.push_back(nets[i]); // Debugging
-                        //thread_ids_map[std::this_thread::get_id()]++;
-                        //thread_ids_mutex.unlock();
-
-                        //computeNetPartials_ThreadSafe(nets[i]);
-                        computeNetPartials_CPU(nets[i]);
-                    }
-                    //thread_ids_mutex.lock();
-                    //Logger::log_detail("END Thread ID: " + std::to_string(get_index(std::this_thread::get_id())));                    
-                    //thread_ids_mutex.unlock();
-                }
-            );
-            });
-            //std::cout << "Threads used: " << thread_ids.size() << std::endl;
-
-        }
-
-        // DEBUG: print all nets processed
-        //for(int i = 0; i < processed_nets.size(); i++) {
-        //    cout << thread_ids[i] << " -- " << thread_ids_map[thread_ids[i]] <<  " -- Net " << i << ": " << processed_nets[i]->getName() << endl;
-        //}   
-        //cout << "function count: " << processed_nets.size() << endl;
-
-        // sequential implementation
-        //for (Net* net_p : item.second) {
-            //launch a batch of threads
-            //partials_threads.emplace_back(&AIEplace::Placer::computeNetPartials_CPU, this, net_p);
-        //    computeNetPartials_CPU(net_p); // no multithreading
-            //if(partials_threads.size() %1000 == 0 || partials_threads.size() > 4000)
-            //Logger::log_detail("Nets of size " + std::to_string(item.first) + ": " + std::to_string(item.second.size()) + " -- Thread count: " + std::to_string(partials_threads.size()));
-            //Logger::log_detail("New thread launched (ID == " + std::to_string(get_index(partials_threads.back().get_id()))+ ") for net " + net_p->getName() + " -- Thread count: " + std::to_string(partials_threads.size()));
-
-            // Join threads
-            //if(partials_threads.size() >= MAX_THREADS) {
-            //    for(auto& thread : partials_threads) {
-            //        if(thread.joinable()) {
-            //            //Logger::log_detail("Join thread... Thread count: " + std::to_string(partials_threads.size()));
-            //            thread.join();
-            //        }
-            //    }
-            //    partials_threads.clear();
-            //}
-        //}
-
-            //Ensure all remaining threads are joined
-            //for(auto& thread : partials_threads) {
-            //    if(thread.joinable()) {
-            //        //Logger::log_detail("Join thread... Thread count: " + std::to_string(partials_threads.size()));
-            //        thread.join();
-            //    }
-            //}
-    }
-
-
-    // Phase 2: add up the partials
-    //for (auto net : db.getNets()) {
-    //    for(auto pair : net.second->mm_partials_by_node) {
-    //        Node* node = pair.first;
-    //        XY partials = pair.second;
-    //        //node->printXY();
-    //        //Logger::log_detail("Node: " + node->getName() + " -- partials: " + std::to_string(partials.x) + ", " + std::to_string(partials.y));
-    //    }
-    //}
-
-    // DEBUG: Print partials results
-    //
-    //for ( auto item :  db.getComponents() )
-    //{
-    //    Node* node_p = item.second;
-    //    cout << node_p->getName() << "\tsum_of_partials_x: " << node_p->terms_cpu.partials.x << endl;
-    //    cout << node_p->getName() << "\tsum_of_partials_y: " << node_p->terms_cpu.partials.y << endl;
-
-    //    for ( Net* net_p : node_p->getNets())
-    //        cout << net_p->to_string();
-    //    cout << "####################" << endl;
-
-    //}
-}
-#endif // USE_TBB
 
 void Placer::compute_a_terms_CPU(Net* net_p)
 {
@@ -1342,13 +893,7 @@ void Placer::compute_bc_terms_CPU(Net* net_p)
 void Placer::computeNetPartials_CPU(Net* net_p)
 {
     try {
-    //net_p->lockNodes();
-    // DEBUG: stop at max net size for comparison to AIE computation
-    //assert(net_p->getDegree() >= MIN_AIE_NET_SIZE);
-    //assert(net_p->getDegree() <= MAX_AIE_NET_SIZE);
-
-    compute_bc_terms_CPU(net_p);
-
+        compute_bc_terms_CPU(net_p);
         // Pre-compute common terms
         float inv_gamma = 1.0f / gamma;
         float bpx_sq_inv = 1.0f / (net_p->terms_cpu.b.plus.x * net_p->terms_cpu.b.plus.x);
@@ -1376,22 +921,6 @@ void Placer::computeNetPartials_CPU(Net* net_p)
             node_p->terms_cpu.partials.y += partial.y;
         }
 
-    //for (Node* node_p : net_p->mv_nodes) {
-    //    float partial_x = (( 1 + node_p->getX()/gamma) * net_p->terms_cpu.b.plus.x - (net_p->terms_cpu.c.plus.x / gamma)) 
-    //                                * (node_p->terms_cpu.a.plus.x / (net_p->terms_cpu.b.plus.x * net_p->terms_cpu.b.plus.x))
-    //                     - (( 1 - node_p->getX()/gamma) * net_p->terms_cpu.b.minus.x + (net_p->terms_cpu.c.minus.x / gamma)) 
-    //                                * (node_p->terms_cpu.a.minus.x / (net_p->terms_cpu.b.minus.x * net_p->terms_cpu.b.minus.x));
-
-    //    float partial_y = (( 1 + node_p->getY()/gamma) * net_p->terms_cpu.b.plus.y - (net_p->terms_cpu.c.plus.y / gamma)) 
-    //                                * (node_p->terms_cpu.a.plus.y / (net_p->terms_cpu.b.plus.y * net_p->terms_cpu.b.plus.y))
-    //                     - (( 1 - node_p->getY()/gamma) * net_p->terms_cpu.b.minus.y + (net_p->terms_cpu.c.minus.y / gamma)) 
-    //                                * (node_p->terms_cpu.a.minus.y / (net_p->terms_cpu.b.minus.y * net_p->terms_cpu.b.minus.y));
-
-    //    Logger::log_debug(node_p->getName() + " partial_x: " + std::to_string(partial_x));
-    //    Logger::log_debug(node_p->getName() + " partial_y: " + std::to_string(partial_y));
-    //    node_p->terms_cpu.partials.x += partial_x;
-    //    node_p->terms_cpu.partials.y += partial_y;
-    //}
     for (Node* node_p : net_p->mv_nodes) {
         Logger::log_debug(node_p->getName() + " total partial_x: " + std::to_string(node_p->terms_cpu.partials.x));
         Logger::log_debug(node_p->getName() + " total partial_y: " + std::to_string(node_p->terms_cpu.partials.y));
@@ -1405,22 +934,12 @@ void Placer::computeNetPartials_CPU(Net* net_p)
 }
 
 
-//static int timeout[8];
-
 /* @brief: For each node on net_p, compute partial derivative with respect to the net.
  *         Function written to be inherently thread-safe without the need for mutexes
  *         Results are written to the partials map 
  */
 void Placer::computeNetPartials_ThreadSafe(Net* net_p)
 {
-    //net_p->tally++;
-    //if(net_p->mv_nodes.size() == 2) return;
-    //if(net_p->mv_nodes.size() > 3)
-    //if(timeout[net_p->getDegree()]++ > 100) {
-    //    Logger::log_critical("Timeout in computeNetPartials_ThreadSafe");
-    //    return;
-    //}
-
     int net_size = net_p->getDegree();
     const std::vector<Node*> &nodes = net_p->getNodes();
 
@@ -1488,20 +1007,16 @@ void Placer::computeNetPartials_ThreadSafe(Net* net_p)
         //Logger::log_debug(nodes[i]->getName() + " partial_x: " + std::to_string(net_p->mm_partials_by_node[nodes[i]].x));
         //Logger::log_debug(nodes[i]->getName() + " partial_y: " + std::to_string(net_p->mm_partials_by_node[nodes[i]].y));
     }
-    
-
     // partials will be accumulated with other nodes elsewhere
-
 }
 
 /*
  * @brief On CPU, compute Electric fields using 2D-DCT method
  *
 **/
-// wrong result?
 void Placer::computeElectricFields_CPU()
 {
-    Logger::log_detail("Begin computeElectricFields_CPU()");
+    //Logger::log_detail("Begin computeElectricFields_CPU()");
     compute_a_uv_naive();
     compute_eField_naive();
 }
@@ -1543,9 +1058,7 @@ void Placer::compute_a_uv_naive()
 {
     std::vector< std::vector<float> > rho = grid.getRho();
     for (int u = 0; u < grid.getBinsPerRow(); u++) {
-// cout << "Computing intermediate a at u = " << u << endl;
         for (int v = 0; v < grid.getBinsPerCol(); v++) {
-// cout << "v = " << v << endl;
             //float w_u = 1 * M_PI * u / grid.getBinsPerRow();
             //float w_v = 1 * M_PI * v / grid.getBinsPerCol();
             float w_u = 2 * M_PI * u / grid.getBinsPerRow();
@@ -1572,9 +1085,7 @@ void Placer::compute_a_uv_naive()
 void Placer::compute_eField_naive()
 {
     for (int x = 0; x < grid.getBinsPerRow(); x++) {
-//cout << "Computing eField at x = " << x << endl;
         for (int y = 0; y < grid.getBinsPerCol(); y++) {
-//cout << "y = " << y << endl;
             float w = 2 * M_PI / grid.getBinsPerRow();
             // For each bin at (u, v) compute the intermediate term a
             float Ex = 0;
@@ -1591,7 +1102,6 @@ void Placer::compute_eField_naive()
             }
             grid.getBin(x, y).eField.x = Ex;
             grid.getBin(x, y).eField.y = Ey;
-            //cout << "Ex: " << Ex << "\tEy:" << Ey << endl;
         }
     }
 }
@@ -1607,22 +1117,6 @@ void Placer::compute_a_uv_DCT()
     for (int row_index = 0; row_index < grid.getBinsPerCol(); row_index++)
         temp.push_back(DCT_naive(rho[row_index]));
 
-    // DEBUG: Print 1D DCT input and result
-    //cout << endl << "CPU rho input to 1D-DCT:" << endl;
-    //for (int j = 0; j < grid.getBinsPerRow(); j++) 
-    //for (int i = 0; i < grid.getBinsPerRow(); i++) {
-    //    cout << rho[j][i] << "\t";
-    //    if((i+1)%16 == 0) cout << endl;
-    //}
-    //cout << endl;
-    //cout << endl << "CPU compute 1D-DCT output:" << endl;
-    //for (int j = 0; j < grid.getBinsPerRow(); j++) 
-    //for (int i = 0; i < grid.getBinsPerRow(); i++) {
-    //    cout << temp[j][i] << "\t";
-    //    if((i+1)%16 == 0) cout << endl;
-    //}
-    //cout << endl;
-
     temp = transpose(temp);
 
     // Perform 1-D DCT on transposed matrix
@@ -1630,34 +1124,6 @@ void Placer::compute_a_uv_DCT()
         a_uv.push_back(DCT_naive(temp[col_index]));
     
     a_uv = transpose(a_uv);
-
-    //cout << endl << "CPU compute a_uv output:" << endl;
-    //for (int j = 0; j < grid.getBinsPerRow(); j++) 
-    //for (int i = 0; i < grid.getBinsPerRow(); i++) {
-    //    cout << a_uv[j][i] << "\t";
-    //    if((i+1)%16 == 0) cout << endl;
-    //}
-    //cout << endl;
-
-    // compare to computed result from other methods
-    //bool mismatch = false;
-    //Table mismatches;
-    //mismatches.add_row({"u", "v", "DCT result", "AIE result", "isClose"});
-    //for (int u = 0; u < grid.getBinsPerRow(); u++)
-    //    for (int v = 0; v < grid.getBinsPerCol(); v++) {
-    //        bool close = isClose(a_uv[u][v], grid.getBin(u, v).a_uv);
-    //        if(!close)
-    //        {
-    //            mismatch = true;
-    //            mismatches.add_row(RowStream{} << std::setprecision(2) << u << v << a_uv[u][v] << grid.getBin(u, v).a_uv << close);
-    //        }
-    //    }
-    //if(mismatch) {
-    //    Table top;
-    //    top.add_row(RowStream{} << "a_uv mismatch");
-    //    top.add_row({mismatches});
-    //    Logger::log_error(top);
-    //} else Logger::log_info("Density DCT computation: all a_uv terms match!");
 
     for (int u = 0; u < grid.getBinsPerRow(); u++)
         for (int v = 0; v < grid.getBinsPerCol(); v++) {
@@ -1691,16 +1157,9 @@ void Placer::compute_eField_DCT()
 
     // compute IDCT on all rows of Ex, and IDXST on all rows of Ey
     for (int row_index = 0; row_index < num_rows; row_index++) {
-        //cout << endl << "IDCT input from CPU:" << endl << std::setprecision(2);
-        //for (int col_index = 0; col_index < num_rows; col_index++)
-            //cout << Ex[row_index][col_index] << " ";
         Ex[row_index] = IDCT_naive (Ex[row_index]);
-        //cout << endl << "IDCT output from CPU:" << endl << std::setprecision(2);
-        //for (int col_index = 0; col_index < num_rows; col_index++)
-            //cout << Ex[row_index][col_index] << " ";
         Ey[row_index] = IDXST_naive(Ey[row_index]);
     }
-    //cout << endl;
 
     Ex = transpose(Ex);
     Ey = transpose(Ey);
@@ -1714,65 +1173,6 @@ void Placer::compute_eField_DCT()
     Ex = transpose(Ex);
     Ey = transpose(Ey);
 
-    // compare to computed result from other methods
-
-    //bool mismatch = false;
-    //Table mismatches;
-    //mismatches.add_row({"u", "v", "DCT result", "CPU result", "isClose"});
-    //for (int u = 0; u < grid.getBinsPerRow(); u++)
-    //    for (int v = 0; v < grid.getBinsPerCol(); v++) {
-    //        //grid.getBin(u, v).a_uv = a_uv[u][v];
-    //        bool close = isClose(Ex[u][v], grid.getBin(u, v).eField.x);
-    //        if(!close)
-    //        {
-    //            mismatch = true;
-    //            mismatches.add_row(RowStream{} <<std::setprecision(2) <<  u << v << Ex[u][v] << grid.getBin(u, v).eField.x << close);
-    //        }
-    //    }
-    //if(mismatch) {
-    //    Table top;
-    //    top.add_row(RowStream{} << "eField.x mismatch");
-    //    top.add_row({mismatches});
-    //    Logger::log_error(top);
-    //} else Logger::log_info("Density DCT computation: all eField.x terms match!");
-
-    //Table mismatch_y;
-    //mismatch = false;
-    //mismatch_y.add_row({"u", "v", "DCT result", "CPU result", "isClose"});
-    //for (int u = 0; u < grid.getBinsPerRow(); u++)
-    //    for (int v = 0; v < grid.getBinsPerCol(); v++) {
-    //        //grid.getBin(u, v).a_uv = a_uv[u][v];
-    //            bool close = isClose(Ey[u][v], grid.getBin(u, v).eField.y);
-    //        if(!close)
-    //        {
-    //            mismatch = true;
-    //            mismatch_y.add_row(RowStream{} <<std::setprecision(2) <<  u << v << Ey[u][v] << grid.getBin(u, v).eField.y << close);
-    //        }
-    //    }
-    //if(mismatch) {
-    //    Table top;
-    //    top.add_row(RowStream{} << "eField.y mismatch");
-    //    top.add_row({mismatch_y});
-    //    Logger::log_error(top);
-    //} else Logger::log_info("Density DCT computation: all eField.y terms match!");
-    //std::stringstream stream_x;
-    //std::stringstream stream_y;
-    //stream_x << "eField.x" << endl;
-    //stream_y << "eField.y" << endl;
-    //for (int y = 0; y < num_rows; y++) {
-    //    stream_x << std::setprecision(2) << std::fixed;
-    //    stream_y << std::setprecision(2) << std::fixed;
-    //    for (int x = 0; x < num_cols; x++) {
-    //        stream_x << Ex[x][y] << "  ";
-    //        stream_y << Ey[x][y] << "  ";
-    //    }
-    //    stream_x << endl;
-    //    stream_y << endl;
-    //}
-
-    //cout << stream_x.str();
-    //cout << stream_y.str();
-    
     // Put results in the grid bins
     for (int x = 0; x < num_cols; x++) {
         for (int y = 0; y < num_rows; y++) {
@@ -1789,10 +1189,6 @@ void Placer::computeOverlaps()
 
     for (auto item : db.getComponents())
         grid.computeBinOverlaps(item.second);
-    //for (auto item : db.getPins())
-    //    grid.computeBinOverlaps(item.second);
-
-
 
     // DEBUG
     double total_node_area = 0;
@@ -1842,28 +1238,6 @@ void Placer::comparePartialResults()
             Logger::log_error("Terms DO NOT match for node " + np->getName()
                     + " -- CPU result: " + np->terms_cpu.partials.toString()
                     + " -- AIE result: " + np->partials_aie.toString());
-
-            //cout << "error node " << np->getName() << ": " << endl; 
-            //for(auto const& net_p : np->getNets())
-            //{
-            //    cout << "\tOn net " << net_p->getName() << ": ";
-            //    for(auto const& shares_net : net_p->getNodes())
-            //    {
-            //        cout << shares_net->getName()<< shares_net->getPosition().to_string() << ", ";
-            //    }
-            //    cout << endl;
-            //}
-            //cout << endl;
-
-            //Table t;
-            //t.add_row({RowStream{} << " Partials" << "X" << "Y"});
-            //t.add_row({RowStream{} << "CPU result" << np->terms_cpu.partials.x << np->terms_cpu.partials.y});
-            //t.add_row({RowStream{} << "AIE result" << np->partials_aie.x << np->partials_aie.y});
-
-            //top.add_row({"Node " + np->getName()});
-            //top.add_row({t});
-            //Logger::log_data(top);
-            //if(print_count++ > 50) return;
         }
     }
     
@@ -1872,19 +1246,11 @@ void Placer::comparePartialResults()
     Logger::log_error(ss.str());
 }
 
-void Placer::compareDensityResults()
-{
-}
-
 void Placer::nudgeAllNodes()
 {
     //Logger::log_detail("Begin nudgeAllNodes()");
     for (auto item : db.getComponents())
         nudgeNode(item.second);
-    // Assume primary IO Pins are set in place and should not be moved!
-    //for (auto item : db.getPins())
-    //    nudgeNode(item.second);
-
 }
 
 void Placer::nudgeNode(Node* node_p)
@@ -1920,19 +1286,6 @@ void Placer::nudgeNode(Node* node_p)
 
     move.x = learning_rate * (electro_force.x - partials_x ); // we subtract the partials to reduce net size!
     move.y = learning_rate * (electro_force.y - partials_y );
-
-    //cout << "learning_rate: " << learning_rate << "\tcoeff: " <<coeff<< endl;
-    //cout << "electro_force.x: " << electro_force.x <<"\telectro_force.y: " << electro_force.y << endl;
-    //if(move.x != move.x) // check if nan
-    //{
-    //    cout << endl << "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@" << endl;
-    //    cout << "move.x: " << move.x << endl;
-    //    node_p->printXY();
-    //    //cout << "coeff: " << coeff << endl;
-    //    //cout << "electro_force: " << electro_force.x << " : " << electro_force.y << endl;
-    //    cout << "partials_aie: " << node_p->partials_aie.x << " : " << node_p->partials_aie.y << endl;
-    //    cout << "partials_cpu: " << node_p->terms_cpu.partials.x << " : " << node_p->terms_cpu.partials.y << endl;
-    //}
 
     // Update the position of this node
     node_p->translate(move.x, move.y);
@@ -2033,21 +1386,6 @@ void Placer::plotHistories() {
 #endif
 }
 
-void Placer::computeStatistics()
-{
-}
-
-// Timing and print functions
-long Placer::getTime() {
-  struct timeval tm;
-  gettimeofday(&tm, NULL);
-  return (tm.tv_sec * 1000000)+tm.tv_usec;
-}
-
-double Placer::getInterval(long start_time, long end_time) {
-  return (end_time - start_time) / 1.0e6;
-}
-
 // Enhanced function to create organized output structure
 void Placer::createRunOutputStructure(std::string& run_output_dir, std::string& run_id)
 {
@@ -2094,7 +1432,7 @@ void Placer::printFinalResults()
     // Calculate final metrics
     float final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
     float final_overflow = grid.computeTotalOverflow();
-    float total_runtime = getTiming(getEpoch(), pgrm_start_time);
+    float total_runtime = getInterval(pgrm_start_time, getTime());
     float iteration_avg = (iteration > 0) ? total_runtime / iteration : 0.0f;
     
     // Calculate HPWL improvement if initial HPWL was recorded
@@ -2229,7 +1567,6 @@ void Placer::populateStatsBlock(Logger::ProgramStatBlock& stats,
     
     // System metrics
     stats.memory_usage_mb = getMemoryUsageMB();
-    stats.aie_utilization_percent = getAIEUtilizationPercent();
     
     // Status
     stats.success = true;  // If we got here, it succeeded
@@ -2312,14 +1649,6 @@ float Placer::getMemoryUsageMB()
     return 0.0f;  // Not found
 }
 #endif
-
-// Helper function to get AIE utilization (implement based on your AIE monitoring)
-float Placer::getAIEUtilizationPercent()
-{
-    // TODO: Implement AIE utilization tracking
-    // This might involve monitoring AIE tile usage, compute efficiency, etc.
-    return 0.0f;  // Placeholder
-}
 
 // Additional function to track initial HPWL (call this at the start of placement)
 void Placer::recordInitialHPWL()

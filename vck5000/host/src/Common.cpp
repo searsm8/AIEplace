@@ -5,13 +5,13 @@
 AIEPLACE_NAMESPACE_BEGIN
 
 // Execution time tracking functions
-long getEpoch() {
+long getTime() {
     struct timeval tm;
     gettimeofday(&tm, NULL);
     return (tm.tv_sec * 1000000) + tm.tv_usec;
 }
 
-double getTiming(long end_time, long start_time) {
+double getInterval(long start_time, long end_time) {
     return (end_time - start_time) / 1.0e6;
 }
 
