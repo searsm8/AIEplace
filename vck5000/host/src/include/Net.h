@@ -81,7 +81,7 @@ public:
     void addNetPin(Node* n, string pin_str)
         { mm_net_pins[n] = pin_str; }
     
-    bool lockNodes()
+    void lockNodes()
     {
         //cout << "Locking nodes for net " << m_name << endl;
         TIME_FUNCTION();
@@ -95,7 +95,7 @@ public:
         }
     }
 
-    bool unlockNodes()
+    void unlockNodes()
     {
         //cout << "Unlocking nodes for net " << m_name << endl;
         std::vector<Node*> locked_nodes;
