@@ -5,16 +5,20 @@ MAIN = main.cpp
 
 BUILD_XRT ?= # Set to 1 to build with XRT and VCK5000 support.
 
+ITEMS := AIEplace Partials Density DataBase Grid Net DCT Logger Common
 # Auto-detect XRT environment (set on HPC with VCK5000 access)
 ifdef BUILD_XRT
-    $(info MAKE INFO: Building with XRT support for VCK5000)
-    ITEMS := AIEplace Partials DataBase Grid Net DCT GraphDriver Logger Common
+$(info MAKE INFO: Building with XRT support for VCK5000)
+ITEMS += GraphDriver
 else
-    $(info MAKE INFO: Building without XRT - CPU only mode)
-    ITEMS := AIEplace Partials DataBase Grid Net DCT Logger Common
+$(info MAKE INFO: Building without XRT - CPU only mode)
 endif
 
+BUILD_VIZ ?= 1 # Set to 1 to build with visualization support.
+ifdef BUILD_VIZ
+$(info MAKE INFO: Building with visualization support)
 ITEMS += Visualizer
+endif
 
 OBJS := $(addprefix objs/, $(addsuffix .o, ${ITEMS}))
 EXE := ${TOP_DIR}/vck5000/bin/AIEplace.exe
@@ -81,7 +85,7 @@ ${EXE}: ${MAIN} ${OBJS}
 
 objs: ${OBJS}
 
-objs/%.o: ./%.cpp ./include/%.h ./include/Common.h
+objs/%.o: ./%.cpp ./include/Common.h
 	@mkdir -p objs
 	$(info MAKE INFO: Compile object file "$@")
 	${GCC} -c ${PROFILE_FLAG}  $< ${INCLUDES} ${COMPILE_FLAGS} -o $@
