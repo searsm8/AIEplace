@@ -4,8 +4,9 @@ PROJ_NAME := AIEplace
 MAIN = main.cpp
 
 BUILD_XRT ?= # Set to 1 to build with XRT and VCK5000 support.
+BUILD_VIZ ?= 1 # Set to 1 to build with visualization support.
 
-ITEMS := AIEplace Partials Density DataBase Grid Net DCT Logger Common
+ITEMS := AIEplace Partials Density Output DataBase Grid Net DCT Logger Common
 # Auto-detect XRT environment (set on HPC with VCK5000 access)
 ifdef BUILD_XRT
 $(info MAKE INFO: Building with XRT support for VCK5000)
@@ -14,9 +15,7 @@ else
 $(info MAKE INFO: Building without XRT - CPU only mode)
 endif
 
-BUILD_VIZ ?= 1 # Set to 1 to build with visualization support.
 ifdef BUILD_VIZ
-$(info MAKE INFO: Building with visualization support)
 ITEMS += Visualizer
 endif
 
@@ -45,10 +44,19 @@ COMPILE_FLAGS += -lbookshelfparser
 COMPILE_FLAGS += -lgzstream -lz
 #COMPILE_FLAGS += -ltbb  # Disabled for WSL build - enable with -DUSE_TBB if needed
 
+ifdef BUILD_XRT
+COMPILE_FLAGS += -DUSE_AIE_ACCELERATION
+endif
+
 # Cairo is used for generating images, but disabled now because it causes compile errors:
 # warning: libnvidia-tls.so.430.50, needed by //usr/lib64/libGL.so.1, not found
+ifdef BUILD_VIZ
+$(info MAKE INFO: Building with visualization support)
 COMPILE_FLAGS += -lcairo
+COMPILE_FLAGS += -DCREATE_VISUALIZATION
+endif
 #COMPILE_FLAGS += -l:libcairo.so.2# Specific library for use on nextgenio-amd02 node
+
 COMPILE_FLAGS += -lstdc++fs
 
 # Conditional XRT linking
@@ -65,8 +73,6 @@ COMPILE_FLAGS += -g -lpthread -lrt -lstdc++
 #COMPILE_FLAGS += -Wall
 
 COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0  # Required for Limbo library compatibility
-#COMPILE_FLAGS += -DCREATE_VISUALIZATION# Comment this out if no visualization is wanted.
-#COMPILE_FLAGS += -DUSE_AIE_ACCELERATION# Comment this out if no AIE acceleration is wanted.
 
 #PROFILE_FLAG := -pg# flag for profiling with gprof
 PROFILE_FLAG :=  # Disabled profiling for WSL debug
