@@ -153,7 +153,6 @@ public:
 
     // Print functions
     void printFinalResults();
-    fs::path getOutputPath();
     void initializeFocus();
 };
 

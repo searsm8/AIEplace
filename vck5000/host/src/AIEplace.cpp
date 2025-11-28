@@ -103,48 +103,105 @@ void Placer::run()
     {
         TIME_BLOCK("Algorithm Block");
 
-
         updateHyperparameters();
 
         performIteration();
-        
-        
-        // check for convergence
-        // TODO: need to actually check for convergence instead of running to max iterations
-        if (iteration >= cfg["params"]["max_iterations"])
-            converged = true;
-        else iteration++;
+
+        // Check for convergence using adaptive criteria
+        converged = checkConvergence();
+
+        if (converged) {
+            if (iteration >= cfg["params"]["max_iterations"]) {
+                Logger::log_info("Convergence: Reached maximum iterations (" +
+                                std::to_string(cfg["params"]["max_iterations"].get<int>()) + ")");
+            } else {
+                Logger::log_info("Convergence: Met HPWL improvement and overflow criteria at iteration " +
+                                std::to_string(iteration));
+            }
+        } else {
+            iteration++;
+        }
     }
 
     plotHistories();
     algo_time = getInterval(algo_start, getTime());
 }
 
-/* @brief: Implement dynamic adpatation of hyperparameters
-*/
+/* @brief: Adaptive hyperparameter schedule based on convergence metrics
+ *
+ * Strategy:
+ * - If HPWL improvement is slow AND overflow is high → increase lambda (more density pressure)
+ * - If HPWL improvement is slow AND overflow is low → decrease learning rate (fine-tuning)
+ * - If HPWL is improving well → maintain current settings with gradual adjustments
+ */
 void Placer::updateHyperparameters()
 {
-        // Option 3: Multi-phase approach
-        if(iteration < 10) learning_rate = 1000;        // Exploration
-        else if(iteration < 50) learning_rate = 100;   // Transition  
-        else if(iteration < 200) learning_rate = 10;   // Transition  
-        else if(iteration < 400) learning_rate = 1;   // Transition  
-        else if(iteration < 700) learning_rate = .1;   // Transition  
-        else learning_rate *= .01;                    // Refinement
+    // Get configuration parameters (with defaults)
+    int adaptation_window = cfg["params"].contains("adaptation_window") ?
+                           cfg["params"]["adaptation_window"].get<int>() : 5;
+    float slow_improvement_threshold = cfg["params"].contains("slow_improvement_threshold") ?
+                                      cfg["params"]["slow_improvement_threshold"].get<float>() : 0.02f; // 2%
+    float high_overflow_threshold = cfg["params"].contains("high_overflow_threshold") ?
+                                   cfg["params"]["high_overflow_threshold"].get<float>() : 0.1f; // 10%
 
+    // Early phase: Use fixed schedule for initial exploration
+    if (iteration < 10) {
+        learning_rate = 1000;  // High learning rate for initial exploration
+        return;
+    }
 
-        // SIMPLEST APPROACH
-        // Update hyperparameters for new iteration
-        // every 100 iterations, slow learning rate
-        //if(iteration % 100 == 0)
-        //    learning_rate *= 0.8;
+    // Need enough history for adaptive behavior
+    if (hpwl_history.size() < adaptation_window + 1) {
+        // Transition phase
+        if (iteration < 50) learning_rate = 100;
+        else learning_rate = 10;
+        return;
+    }
 
-        //// every 10 iterations, bump up lambda (density weighting)
-        if(iteration >= 50 && iteration % 10 == 0)
-            global_lambda *= 1.1;
+    // Calculate HPWL improvement rate over adaptation window
+    float old_hpwl = hpwl_history[hpwl_history.size() - adaptation_window - 1];
+    float current_hpwl = hpwl_history.back();
+    float hpwl_improvement_rate = (old_hpwl - current_hpwl) / old_hpwl;
 
-        global_lambda = std::min(global_lambda, 50.0f); // cap lambda at 100
+    // Calculate relative overflow
+    float current_overflow = ovfw_history.back();
+    float total_cell_area = 0;
+    for (auto item : db.getComponents())
+        total_cell_area += item.second->getArea();
+    float relative_overflow = current_overflow / total_cell_area;
 
+    // Adaptive hyperparameter adjustment
+    bool slow_improvement = (hpwl_improvement_rate < slow_improvement_threshold);
+    bool high_overflow = (relative_overflow > high_overflow_threshold);
+
+    if (slow_improvement && high_overflow) {
+        // Case 1: Stuck with high overlap → increase density pressure
+        global_lambda *= 1.2;
+        global_lambda = std::min(global_lambda, 100.0f); // cap lambda
+        Logger::log_info("Adaptive schedule: Slow HPWL improvement + high overflow → increased lambda to " +
+                          std::to_string(global_lambda));
+    }
+    else if (slow_improvement && !high_overflow) {
+        // Case 2: Low overlap but HPWL not improving → reduce learning rate for fine-tuning
+        learning_rate *= 0.7;
+        learning_rate = std::max(learning_rate, 0.01f); // minimum learning rate
+        Logger::log_info("Adaptive schedule: Slow HPWL improvement + low overflow → decreased learning rate to " +
+                          std::to_string(learning_rate));
+    }
+    else if (!slow_improvement && high_overflow) {
+        // Case 3: Making progress but overlap is high → gradual lambda increase
+        if (iteration % 5 == 0) {
+            global_lambda *= 1.05;
+            global_lambda = std::min(global_lambda, 100.0f);
+        }
+    }
+    else {
+        // Case 4: Good progress with acceptable overlap → maintain with gentle refinement
+        if (iteration % 10 == 0) {
+            learning_rate *= 0.95; // Slow gradual reduction
+            learning_rate = std::max(learning_rate, 0.1f);
+        }
+    }
 }
 
 /* @brief: Reset all nodes and nets in preparation for the next iteration.
@@ -186,7 +243,7 @@ Placer::Placer(std::string config_filepath )
             global_lambda = cfg["params"]["init_global_lambda"];
             MAX_THREADS = cfg["params"]["max_threads"];
             input_dir = fs::path(cfg["input"]["benchmark"]);
-            output_dir = getOutputPath();
+
             string xclbin_file = cfg["input"]["xclbin"];
             result_csv = cfg["output"]["result_csv"];
 
@@ -227,6 +284,13 @@ Placer::Placer(std::string config_filepath )
 
             db_IO_time = getInterval(pgrm_start_time, getTime());
             Logger::log_info("db read time: " + std::to_string(db_IO_time));
+
+            // Create organized output directory with timestamp and method names
+            // Must be after database initialization to get benchmark name
+            std::string output_dir_str, run_id;
+            createRunOutputStructure(output_dir_str, run_id);
+            output_dir = fs::path(output_dir_str);
+
             grid = Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_ROW); 
 
             die_size = min( grid.getDieWidth(), grid.getDieHeight() );
@@ -372,6 +436,48 @@ void Placer::nudgeNode(Node* node_p)
     //    << "\telectro(" << electro_force.x << ", " << electro_force.y << ")" << endl;
 }
 
+// Helper function to check convergence based on HPWL improvement and overflow
+bool Placer::checkConvergence()
+{
+    // Always check max iterations as safety fallback
+    if (iteration >= cfg["params"]["max_iterations"])
+        return true;
 
+    // Need minimum iterations before checking convergence
+    int min_iterations = cfg["params"].contains("min_iterations") ?
+                        cfg["params"]["min_iterations"].get<int>() : 10;
+    if (iteration < min_iterations)
+        return false;
+
+    // Get convergence thresholds from config (with defaults)
+    float hpwl_improvement_threshold = cfg["params"].contains("hpwl_improvement_threshold") ?
+                                      cfg["params"]["hpwl_improvement_threshold"].get<float>() : 0.01f; // 1% improvement
+    float overflow_threshold = cfg["params"].contains("overflow_threshold") ?
+                              cfg["params"]["overflow_threshold"].get<float>() : 0.05f; // 5% overflow
+    int convergence_window = cfg["params"].contains("convergence_window") ?
+                            cfg["params"]["convergence_window"].get<int>() : 5; // Check last 5 iterations
+
+    // Check 1: Overflow must be below threshold
+    float current_overflow = ovfw_history.back();
+    float total_cell_area = 0;
+    for (auto item : db.getComponents())
+        total_cell_area += item.second->getArea();
+    float relative_overflow = current_overflow / total_cell_area;
+
+    bool overflow_converged = (relative_overflow < overflow_threshold);
+
+    // Check 2: HPWL improvement over last N iterations must be small
+    if (hpwl_history.size() < convergence_window + 1)
+        return false;
+
+    float old_hpwl = hpwl_history[hpwl_history.size() - convergence_window - 1];
+    float current_hpwl = hpwl_history.back();
+    float hpwl_improvement = (old_hpwl - current_hpwl) / old_hpwl;
+
+    bool hpwl_converged = (hpwl_improvement < hpwl_improvement_threshold);
+
+    // Combined convergence: both criteria must be met
+    return (overflow_converged && hpwl_converged);
+}
 
 AIEPLACE_NAMESPACE_END

@@ -163,9 +163,9 @@ void Placer::printFinalResults()
 {
     Logger::log_info("AIEplace algorithm complete.");
 
-    // Create organized output structure
-    std::string run_output_dir, run_id;
-    createRunOutputStructure(run_output_dir, run_id);
+    // Use the output directory created in constructor
+    std::string run_output_dir = output_dir.string();
+    std::string run_id = generateRunId();
 
     // Calculate final metrics
     float final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
@@ -358,15 +358,6 @@ std::string Placer::generateRunId()
 }
 
 
-// Helper function to check convergence (implement based on your criteria)
-bool Placer::checkConvergence()
-{
-    // Implement your convergence checking logic here
-    // For now, simple check if we completed all iterations
-    return iteration >= cfg["params"]["max_iterations"];
-}
-
-
 #ifdef __linux__
 // This implementation only works on Linux systems
 float Placer::getMemoryUsageMB()
@@ -393,22 +384,6 @@ void Placer::recordInitialHPWL()
 {
     initial_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
     Logger::log_info("Initial HPWL recorded: " + std::to_string(initial_hpwl));
-}
-
-fs::path Placer::getOutputPath()
-{
-    std::time_t time = std::time(0);   // get time now
-    std::tm* now = std::localtime(&time);
-
-    std::stringstream ss;
-    ss << "run_" <<  now->tm_yday+1 << "_" << now->tm_hour << ":" << now->tm_min;
-
-    fs::path dir = "results";
-    dir.append(input_dir.filename().string());
-    dir.append(ss.str());
-    fs::create_directories(dir); // ensure this directory exists
-
-    return dir;
 }
 
 void Placer::initializeFocus()

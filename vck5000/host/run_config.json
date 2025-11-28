@@ -18,18 +18,27 @@
     "xclbin_": "bin/aieplace.hw_emu.xclbin"
   },
   "params": {
-    "partials_compute_method": "aie",
+    "partials_compute_method": "cpu",
     "density_compute_method": "cpu",
     "wirelength_method": "HPWL",
-    "comment2": "hyperparameters",
+    "comment_hyperparameters": "Basic hyperparameters",
     "gamma": 4,
-    "max_iterations": 20,
+    "max_iterations": 100,
     "max_threads": 1,
     "init_learning_rate": 0.02,
     "init_global_lambda": 0.2,
     "focus_nets": [],
     "rand_focus_nets": 0,
-    "rand_focus_nodes": 1
+    "rand_focus_nodes": 1,
+    "comment_convergence": "Convergence criteria (adaptive algorithm will stop early if met)",
+    "min_iterations": 15,
+    "hpwl_improvement_threshold": 0.01,
+    "overflow_threshold": 0.05,
+    "convergence_window": 5,
+    "comment_adaptive": "Adaptive hyperparameter schedule parameters",
+    "adaptation_window": 5,
+    "slow_improvement_threshold": 0.02,
+    "high_overflow_threshold": 0.1
   },
   "output": {
     "result_csv": "results.csv",
