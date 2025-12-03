@@ -8,8 +8,13 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-/* @brief: perform an entire iteration of the ePlace algorithm.
-*/
+/**
+ * @brief Perform a single iteration of the ePlace algorithm
+ *
+ * Computes partials and electric field simulation based on selected methods in config.
+ * Then nudges all nodes based on computed forces.
+ * This function will be called repeatedly from Placer::run() until convergence is met.
+ */
 void Placer::performIteration()
 {
     Logger::log_detail("BEGIN iteration " + std::to_string(iteration));
@@ -79,9 +84,13 @@ void Placer::performIteration()
     printIterationResults();
 }
 
-/* @brief: Run the ePlace algorithm.
-*          Perform iterations until the convergence condition is met.
-*/
+/**
+ * @brief Run the ePlace algorithm
+ *
+ * Performs iterations until the convergence condition is met.
+ * Each iteration consists of updating hyperparameters, calling performIteration(),
+ * and checking convergence.
+ */
 void Placer::run()
 {
     algo_start = getTime();
@@ -127,12 +136,17 @@ void Placer::run()
     algo_time = getInterval(algo_start, getTime());
 }
 
-/* @brief: Adaptive hyperparameter schedule based on convergence metrics
+/**
+ * @brief Adaptive hyperparameter schedule based on convergence metrics
  *
+ * Goal: modify learning_rate and global_lambda based on progress
  * Strategy:
- * - If HPWL improvement is slow AND overflow is high → increase lambda (more density pressure)
- * - If HPWL improvement is slow AND overflow is low → decrease learning rate (fine-tuning)
- * - If HPWL is improving well → maintain current settings with gradual adjustments
+ * - Early Phase (Iterations < 10): High learning rate for exploration
+ * - Based on iteration history:
+ *    - If HPWL fluctuates, decrease learning rate for fine-tuning
+ *    - If HPWL improvement is consistent, increase learning rate for faster convergence
+ *    - If overflow remains high, increase global lambda to enforce density
+ * 
  */
 void Placer::updateHyperparameters()
 {
@@ -204,8 +218,9 @@ void Placer::updateHyperparameters()
     }
 }
 
-/* @brief: Reset all nodes and nets in preparation for the next iteration.
-*/
+/**
+ * @brief Reset all nodes and nets in preparation for the next iteration
+ */
 void Placer::iterationReset()
 {
     grid.iterationReset();
@@ -215,7 +230,15 @@ void Placer::iterationReset()
     simple_partials.clear();
 }
 
-// Constructor
+/**
+ * @brief Construct a new Placer object and initialize the placement system
+ *
+ * Reads configuration from JSON file, initializes the database from LEF/DEF files,
+ * sets up the grid structure, and initializes XRT/AIE drivers if hardware acceleration
+ * is enabled.
+ *
+ * @param config_filepath Path to the JSON configuration file
+ */
 Placer::Placer(std::string config_filepath ) 
         { 
             // Read configuration JSON file
@@ -302,12 +325,13 @@ Placer::Placer(std::string config_filepath )
         }
 
 
-/* @brief: initialize placement of all moveable nodes randomly,
- *          clustered about the target position
- * @param: target_pos: position around which nodes are spread
- * @param: min_dist: minimum distance from target_pos a node can appear
- * @param: max_dist: maximum distance from target_pos a node can appear
-*/
+/**
+ * @brief Initialize placement of all moveable nodes randomly, clustered about the target position
+ *
+ * @param target_pos Position around which nodes are spread
+ * @param min_dist Minimum distance from target_pos a node can appear
+ * @param max_dist Maximum distance from target_pos a node can appear
+ */
 void Placer::initializePlacement(Position<position_type> target_pos, int min_dist, int max_dist)
 {
     Logger::log_trace("Begin initializePlacement()");
@@ -378,6 +402,12 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
 
 
 
+/**
+ * @brief Nudge all movable nodes based on computed forces
+ *
+ * Iterates through all components in the database and calls nudgeNode()
+ * for each one to update their positions.
+ */
 void Placer::nudgeAllNodes()
 {
     //Logger::log_detail("Begin nudgeAllNodes()");
@@ -385,6 +415,15 @@ void Placer::nudgeAllNodes()
         nudgeNode(item.second);
 }
 
+/**
+ * @brief Update the position of a single node based on electric field and HPWL forces
+ *
+ * Computes the electric force from density (bin overlaps) and combines it with
+ * HPWL partial derivatives to calculate a move vector. The node position is updated
+ * and clamped to die boundaries.
+ *
+ * @param node_p Pointer to the node to be nudged
+ */
 void Placer::nudgeNode(Node* node_p)
 {
     XY electro_force;
@@ -436,7 +475,17 @@ void Placer::nudgeNode(Node* node_p)
     //    << "\telectro(" << electro_force.x << ", " << electro_force.y << ")" << endl;
 }
 
-// Helper function to check convergence based on HPWL improvement and overflow
+/**
+ * @brief Check if the placement algorithm has converged
+ *
+ * Convergence is determined by two criteria that must both be met:
+ * 1. Overflow is below the threshold (relative to total cell area)
+ * 2. HPWL improvement over a window of iterations is below the threshold
+ *
+ * Also enforces minimum iteration count and uses maximum iterations as a fallback.
+ *
+ * @return true if converged (or max iterations reached), false otherwise
+ */
 bool Placer::checkConvergence()
 {
     // Always check max iterations as safety fallback
