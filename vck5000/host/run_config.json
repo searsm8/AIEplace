@@ -1,13 +1,20 @@
 {
-  "documentation": {
-    "title": "AIEPlace Configuration Options",
-    "description": "This JSON file contains the default configuration parameters for running the AIEPlace placement algorithm. It includes options for method selection, input file paths, and hyperparameters for the algorithm.",
-    "author": "Mark Sears",
-    "input.benchmark": "Path to the benchmark file for placement.",
-    "input.xclbin": "Path to the XCLBIN file for hardware acceleration.",
-    "params.partials_compute_method": "choose: aie, cpu, simple, hybrid, threaded",
-    "params.density_compute_method": "choose: aie, cpu"
-  },
+  // =============================================================================
+  // AIEPlace Configuration Options
+  // =============================================================================
+  // This JSON file contains the default configuration parameters for running
+  // the AIEPlace placement algorithm. It includes options for method selection,
+  // input file paths, and hyperparameters for the algorithm.
+  //
+  // Author: Mark Sears
+  //
+  // Field Documentation:
+  //   input.benchmark - Path to the benchmark file for placement
+  //   input.xclbin - Path to the XCLBIN file for hardware acceleration
+  //   params.partials_compute_method - choose: aie, cpu, simple, hybrid, threaded
+  //   params.density_compute_method - choose: aie, cpu
+  // =============================================================================
+
   "input": {
     "benchmark": "host/benchmarks/ispd2005/adaptec1",
     "benchmark1": "host/benchmarks/ispd2015/mgc_superblue11_a",
@@ -18,10 +25,12 @@
     "xclbin_": "bin/aieplace.hw_emu.xclbin"
   },
   "params": {
+    // Computation method selection
     "partials_compute_method": "cpu",
     "density_compute_method": "cpu",
     "wirelength_method": "HPWL",
-    "comment_hyperparameters": "Basic hyperparameters",
+
+    // Basic hyperparameters
     "gamma": 4,
     "max_iterations": 100,
     "max_threads": 1,
@@ -30,12 +39,14 @@
     "focus_nets": [],
     "rand_focus_nets": 0,
     "rand_focus_nodes": 1,
-    "comment_convergence": "Convergence criteria (adaptive algorithm will stop early if met)",
+
+    // Convergence criteria (adaptive algorithm will stop early if met)
     "min_iterations": 15,
     "hpwl_improvement_threshold": 0.01,
     "overflow_threshold": 0.05,
     "convergence_window": 5,
-    "comment_adaptive": "Adaptive hyperparameter schedule parameters",
+
+    // Adaptive hyperparameter schedule parameters
     "adaptation_window": 5,
     "slow_improvement_threshold": 0.02,
     "high_overflow_threshold": 0.1

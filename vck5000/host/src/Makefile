@@ -6,7 +6,7 @@ MAIN = main.cpp
 BUILD_XRT ?= # Set to 1 to build with XRT and VCK5000 support.
 BUILD_VIZ ?= 1 # Set to 1 to build with visualization support.
 
-ITEMS := AIEplace Partials Density Output DataBase Grid Net DCT Logger Common
+ITEMS := AIEplace Partials Density Output DataBase Grid Net DCT Logger Common JsonUtils
 # Auto-detect XRT environment (set on HPC with VCK5000 access)
 ifdef BUILD_XRT
 $(info MAKE INFO: Building with XRT support for VCK5000)
@@ -33,7 +33,7 @@ INCLUDES += -I${LIMBO_DIR} -I${TABLE_DIR} #-I${TBB_INCLUDE}  # TBB disabled for 
 INCLUDES += -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/ -I/lustre/home/nx08/shared/fpga/xilinx/include/ 
 INCLUDES += -I${HOME}/local/boost_1_82_0/
 
-COMPILE_FLAGS := -std=c++17
+COMPILE_FLAGS := -std=c++2a
 COMPILE_FLAGS += -g #see the proper names of variables and functions in your stack frames,
 				    #and get line numbers and see the source as you step around in the executable
 COMPILE_FLAGS += -Llib

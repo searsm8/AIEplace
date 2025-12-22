@@ -1,5 +1,6 @@
 #include "DCT.h"
 #include "AIEplace.h"
+#include "JsonUtils.h"
 #ifdef USE_TBB
 #include <tbb/tbb.h>
 #endif
@@ -241,18 +242,26 @@ void Placer::iterationReset()
  */
 Placer::Placer(std::string config_filepath ) 
         { 
-            // Read configuration JSON file
+            // Read configuration file (supports JSON with comments)
             Logger::log_info("Reading runtime configuration from: " + config_filepath);
             std::ifstream config_file(config_filepath);
             // check if config file was found
             if (!config_file.is_open()) {
-                Logger::log_error("Unable to open configuration JSON file: " + config_filepath);
+                Logger::log_error("Unable to open configuration file: " + config_filepath);
                 exit(1);
             }
 
             pgrm_start_time = getTime();
 
-            cfg = json::parse(config_file);
+            // Read file content and strip comments
+            std::stringstream buffer;
+            buffer << config_file.rdbuf();
+            config_file.close();
+            std::string config_content = buffer.str();
+            std::string json_content = JsonUtils::stripComments(config_content);
+
+            // Parse JSON
+            cfg = json::parse(json_content);
 
             //initialize values from JSON
             partials_method = cfg["params"]["partials_compute_method"];
