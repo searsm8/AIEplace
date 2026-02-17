@@ -1,4 +1,5 @@
 bin/
 pl/link.cfg
 *.log
-core.*
+*core.*
+results/

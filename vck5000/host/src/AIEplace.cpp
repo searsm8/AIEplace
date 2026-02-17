@@ -76,7 +76,7 @@ void Placer::performIteration()
         //computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
         computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
     }
-    //normalizeElectricFields();
+    normalizeElectricFields(); // why is this needed?
     //computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
     //placer.grid.printElectricFields();
 
@@ -113,12 +113,12 @@ void Placer::run()
     {
         TIME_BLOCK("Algorithm Block");
 
-        updateHyperparameters();
-
         performIteration();
+        updateHyperparameters();
 
         // Check for convergence using adaptive criteria
         converged = checkConvergence();
+
 
         if (converged) {
             if (iteration >= cfg["params"]["max_iterations"]) {
@@ -140,83 +140,78 @@ void Placer::run()
 /**
  * @brief Adaptive hyperparameter schedule based on convergence metrics
  *
- * Goal: modify learning_rate and global_lambda based on progress
- * Strategy:
- * - Early Phase (Iterations < 10): High learning rate for exploration
- * - Based on iteration history:
- *    - If HPWL fluctuates, decrease learning rate for fine-tuning
- *    - If HPWL improvement is consistent, increase learning rate for faster convergence
- *    - If overflow remains high, increase global lambda to enforce density
+ * Goal: modify learning_rate (dynamic step size) using Lipshitz constanst and backtracking per ePlace
+ *       modify global_lambda based on iteration progress
  * 
  */
 void Placer::updateHyperparameters()
 {
-    // Get configuration parameters (with defaults)
-    int adaptation_window = cfg["params"].contains("adaptation_window") ?
-                           cfg["params"]["adaptation_window"].get<int>() : 5;
-    float slow_improvement_threshold = cfg["params"].contains("slow_improvement_threshold") ?
-                                      cfg["params"]["slow_improvement_threshold"].get<float>() : 0.02f; // 2%
-    float high_overflow_threshold = cfg["params"].contains("high_overflow_threshold") ?
-                                   cfg["params"]["high_overflow_threshold"].get<float>() : 0.1f; // 10%
-
-    // Early phase: Use fixed schedule for initial exploration
-    if (iteration < 10) {
-        learning_rate = 1000;  // High learning rate for initial exploration
+    // Warm start, for first few iterations use initial learning rate
+    if (iteration < cfg["params"]["warmup"]) {
+        Logger::log_detail("Using initial learning rate: " + std::to_string(learning_rate));
         return;
     }
 
-    // Need enough history for adaptive behavior
-    if (hpwl_history.size() < adaptation_window + 1) {
-        // Transition phase
-        if (iteration < 50) learning_rate = 100;
-        else learning_rate = 10;
-        return;
+
+    // Update learning rate every iteration
+    // Estimate Lipshitz constant L
+    float total_position_change = 0;
+    float total_gradient_change = 0;
+
+    for(auto item : db.getComponents()) {
+        Node* node_p = item.second;
+        Position<position_type>& curr_pos = node_p->getPosition();
+        Position<position_type>& prev_pos = node_p->getPrevPosition();
+        Position<position_type>& prev_grad = node_p->getPrevGrad();
+
+        float pos_change_x = curr_pos.getX() - prev_pos.getX();
+        float pos_change_y = curr_pos.getY() - prev_pos.getY();
+        total_position_change += sqrt(pos_change_x * pos_change_x + pos_change_y * pos_change_y);
+
+        XY& partials = node_p->terms_cpu.partials;
+        if(partials_method == "aie")
+            partials = node_p->partials_aie;
+
+        float grad_x = partials.x;
+        float grad_y = partials.y;
+
+        float grad_change_x = grad_x - prev_grad.getX();
+        float grad_change_y = grad_y - prev_grad.getY();
+        total_gradient_change += sqrt(grad_change_x * grad_change_x + grad_change_y * grad_change_y);
+
+        // Update previous position and gradient for next iteration
+        prev_pos = curr_pos;
+        prev_grad.setX(grad_x);
+        prev_grad.setY(grad_y);
     }
 
-    // Calculate HPWL improvement rate over adaptation window
-    float old_hpwl = hpwl_history[hpwl_history.size() - adaptation_window - 1];
-    float current_hpwl = hpwl_history.back();
-    float hpwl_improvement_rate = (old_hpwl - current_hpwl) / old_hpwl;
+    std::stringstream ss;
+    ss << std::scientific << total_position_change;
+    Logger::log_detail("Total position change: " + ss.str());
+    std::stringstream ss2;
+    ss2 << std::scientific << total_gradient_change;
+    Logger::log_detail("Total gradient change: " + ss2.str());
+    // Update learning rate to 1/L
+    learning_rate = total_position_change / (total_gradient_change + 1e-8f); // avoid div by 0
+    Logger::log_detail("Unclamped learning_rate: " + std::to_string(learning_rate));
+    // Clamp to reasonable range
+    //learning_rate = std::clamp(learning_rate, 0.0001f, 1000.0f);
 
-    // Calculate relative overflow
-    float current_overflow = ovfw_history.back();
-    float total_cell_area = 0;
-    for (auto item : db.getComponents())
-        total_cell_area += item.second->getArea();
-    float relative_overflow = current_overflow / total_cell_area;
+    Logger::log_detail("Updated learning_rate: " + std::to_string(learning_rate));
 
-    // Adaptive hyperparameter adjustment
-    bool slow_improvement = (hpwl_improvement_rate < slow_improvement_threshold);
-    bool high_overflow = (relative_overflow > high_overflow_threshold);
 
-    if (slow_improvement && high_overflow) {
-        // Case 1: Stuck with high overlap → increase density pressure
-        global_lambda *= 1.2;
-        global_lambda = std::min(global_lambda, 100.0f); // cap lambda
-        Logger::log_info("Adaptive schedule: Slow HPWL improvement + high overflow → increased lambda to " +
-                          std::to_string(global_lambda));
-    }
-    else if (slow_improvement && !high_overflow) {
-        // Case 2: Low overlap but HPWL not improving → reduce learning rate for fine-tuning
-        learning_rate *= 0.7;
-        learning_rate = std::max(learning_rate, 0.01f); // minimum learning rate
-        Logger::log_info("Adaptive schedule: Slow HPWL improvement + low overflow → decreased learning rate to " +
-                          std::to_string(learning_rate));
-    }
-    else if (!slow_improvement && high_overflow) {
-        // Case 3: Making progress but overlap is high → gradual lambda increase
-        if (iteration % 5 == 0) {
+
+    // Update global lambda to increase density force over time
+    if (iteration % 10 == 0) {
+        if (global_lambda == 0) {
+            global_lambda = cfg["params"]["init_global_lambda"];
+        } else {
             global_lambda *= 1.05;
+            // cap global_lambda to prevent instability
             global_lambda = std::min(global_lambda, 100.0f);
         }
     }
-    else {
-        // Case 4: Good progress with acceptable overlap → maintain with gentle refinement
-        if (iteration % 10 == 0) {
-            learning_rate *= 0.95; // Slow gradual reduction
-            learning_rate = std::max(learning_rate, 0.1f);
-        }
-    }
+
 }
 
 /**
@@ -515,14 +510,23 @@ bool Placer::checkConvergence()
     int convergence_window = cfg["params"].contains("convergence_window") ?
                             cfg["params"]["convergence_window"].get<int>() : 5; // Check last 5 iterations
 
-    // Check 1: Overflow must be below threshold
-    float current_overflow = ovfw_history.back();
-    float total_cell_area = 0;
-    for (auto item : db.getComponents())
-        total_cell_area += item.second->getArea();
-    float relative_overflow = current_overflow / total_cell_area;
+    // Check 1: Overflow of each bin must be below overflow threshold 
+    bool overflow_converged = true;
 
-    bool overflow_converged = (relative_overflow < overflow_threshold);
+    //DEBUGGING
+    //grid.printOverflows();
+
+    for (int col = 0; col < grid.getBinsPerRow(); col++)
+        for (int row = 0; row < grid.getBinsPerCol(); row++)
+        {
+            float overflow = grid.getBin(col, row).getOverflowRatio();
+            if (overflow > overflow_threshold) {
+                overflow_converged = false;
+                if(overflow > overflow_threshold * 2) // only log significant overflows to avoid log spam
+                    Logger::log_detail("Bin (" + std::to_string(col) + ", " + std::to_string(row) + ") overflow: " + std::to_string(overflow));
+            }
+        }
+
 
     // Check 2: HPWL improvement over last N iterations must be small
     if (hpwl_history.size() < convergence_window + 1)
@@ -535,7 +539,13 @@ bool Placer::checkConvergence()
     bool hpwl_converged = (hpwl_improvement < hpwl_improvement_threshold);
 
     // Combined convergence: both criteria must be met
-    return (overflow_converged && hpwl_converged);
+    if(overflow_converged && hpwl_converged) {
+        return true;
+        Logger::log_info("Convergence met at iteration " + std::to_string(iteration) +
+//                        ": Overflow = " + std::to_string(relative_overflow) +
+                        ", HPWL improvement = " + std::to_string(hpwl_improvement));
+    }
+    else return false;
 }
 
 AIEPLACE_NAMESPACE_END

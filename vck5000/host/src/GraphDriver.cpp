@@ -4,7 +4,7 @@ AIEPLACE_NAMESPACE_BEGIN
 
 void GraphDriver::print_info()
 {
-    printf("Kernel Total runtime : %f sec, (%f xfer on, %f execute, %f xfer off)\n",
+    printf("Kernel Total runtime : %ld sec, (%ld xfer on, %ld execute, %ld xfer off)\n",
         xfer_on_time + kernel_exec_time + xfer_off_time,
         xfer_on_time,
         kernel_exec_time,
@@ -41,7 +41,7 @@ void GraphDriver::send_packet(float * packet)
     run_device_s2mm.start();
 }
 
-float GraphDriver::receive_packet(float * output_data)
+void GraphDriver::receive_packet(float * output_data)
 {
     // wait for data movers to finish
     run_device_mm2s.wait();

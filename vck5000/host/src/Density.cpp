@@ -393,7 +393,7 @@ void Placer::computeOverlaps()
     double total_overlap = 0;
     for (int col = 0; col < grid.getBinsPerRow(); col++) {
         for (int row = 0; row < grid.getBinsPerCol(); row++) {
-            total_overlap += grid.getBin(col, row).overlap;
+            total_overlap += grid.getBin(col, row).getOverlap();
         }
     }
 

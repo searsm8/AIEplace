@@ -3,7 +3,7 @@
 export TOP_DIR = ${PWD}
 
 all:
-	$(MAKE) -C src
+	$(MAKE) -C src -j8
 
 clean:
 	$(MAKE) -C src clean

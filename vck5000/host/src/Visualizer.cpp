@@ -200,7 +200,8 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, int iteration)
     filename.append(".png");
     dir.append(filename);
     Table t;
-    t.add_row(RowStream{} << "VISUALIZER output PNG to " << dir);
+    t.add_row(RowStream{} << "VISUALIZER output PNG to ");
+    t.add_row(RowStream{} << dir);
     Logger::log_info(t);
     cairo_surface_write_to_png (surface, dir.c_str());
 }
@@ -245,7 +246,8 @@ void Visualizer::drawElectricField(Grid& grid, fs::path dir, int iteration)
     filename.append(".png");
     dir.append(filename);
     Table t;
-    t.add_row(RowStream{} << "VISUALIZER output E-field to " << dir);
+    t.add_row(RowStream{} << "VISUALIZER output E-field to ");
+    t.add_row(RowStream{} << dir);
     Logger::log_info(t);
     cairo_surface_write_to_png (surface, dir.c_str());
 

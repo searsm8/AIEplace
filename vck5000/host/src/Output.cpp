@@ -47,7 +47,8 @@ void Placer::printIterationResults()
     float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
     hpwl_history.push_back(hpwl);
 
-    float learning_coeff = learning_rate * die_size;
+    //float learning_coeff = learning_rate * die_size;
+    float learning_coeff = learning_rate * 1;
     learning_coeff_history.push_back(learning_coeff);
 
     float overflow = grid.computeTotalOverflow();
@@ -56,18 +57,19 @@ void Placer::printIterationResults()
 
     //Logger::log_data("HPWL = " + std::to_string(hpwl));
     // every 10 iterations, export a table in markdown
-    if (iteration % 10 == 0)
+    if (iteration % 1 == 0)
     {
         Table top;
         top.add_row(RowStream{} << "Iteration" << iteration);
-        top.add_row(RowStream{} << "HPWL" << hpwl);
-        top.add_row(RowStream{} << "Overflow" << overflow);
+        top.add_row(RowStream{} << "HPWL" << SCI(hpwl));
+        top.add_row(RowStream{} << "Overflow" << SCI(overflow));
         top.add_row(RowStream{} << "Learning Rate" << learning_rate);
-        top.add_row(RowStream{} << "Learning Coeff" << learning_rate * die_size);
+        top.add_row(RowStream{} << "Learning Coeff" << learning_coeff);
         top.add_row(RowStream{} << "Global Lambda" << global_lambda);
         top.column(0).format().font_align(FontAlign::right);
         top.column(1).format().font_align(FontAlign::left);
         Logger::log_data(top);
+        cout << endl;
     }
 
     // every 10 iterations, export an image
@@ -282,6 +284,7 @@ void Placer::populateStatsBlock(Logger::ProgramStatBlock& stats,
     // Configuration
     stats.partials_method = cfg["params"]["partials_compute_method"];
     stats.density_method = cfg["params"]["density_compute_method"];
+    stats.output_dir = output_dir.string();
     stats.wirelength_method = cfg["params"]["wirelength_method"];
     stats.gamma = gamma;
     stats.init_learning_rate = cfg["params"]["init_learning_rate"];

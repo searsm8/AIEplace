@@ -15,10 +15,19 @@
 using namespace tabulate;
 using std::string;
 
+// Macros for convenient logging in scientific notation
+#define SCI(val) \
+    (static_cast<std::ostringstream&>(std::ostringstream() << std::scientific << std::setprecision(2) << val)).str()
+
+#define SCI_P(val, prec) \
+    (static_cast<std::ostringstream&>(std::ostringstream() << std::scientific << std::setprecision(prec) << val)).str()
+
 // Forward declarations
 class Timer;
 class ScopeTimer;
 class MemoryTracker;
+
+
 
 class Logger {
 private:
@@ -54,6 +63,7 @@ public:
         std::string run_id;
         std::string design_name;
         std::string benchmark_size;
+        std::string output_dir;
         
         // Configuration
         std::string partials_method;

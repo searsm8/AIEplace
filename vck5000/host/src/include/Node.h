@@ -49,7 +49,10 @@ private:
     string m_name;
     string m_orient;
     std::mutex m_mutex;
-    Position<position_type> m_pos;
+    Position<position_type> m_pos; // u_k
+    Position<position_type> m_prev_pos; // u_{k-1}
+    Position<position_type> m_lookahead_pos; // v_k
+    Position<position_type> m_prev_grad; // grad_{k-1}
     PlacementStatus m_status;
     bool m_is_large; // True if the area of the node is at least 1/16th the area of a bin
     std::vector<Net*> mv_nets; // List of all nets this node is on
@@ -62,18 +65,19 @@ public:
 
     // Constructors
     Node() : m_name("") {}
-    Node(string name) : m_name(name), m_orient("N"), m_pos(0, 0) {}
-
-    virtual ~Node() {} // Destructor
+    Node(string name) : m_name(name), m_orient("N"), m_pos(0, 0), m_prev_pos(0, 0), m_prev_grad(0, 0){}
 
     // Need virtual destructor for proper dynamic_cast
-    //virtual ~Node() {} 
+    virtual ~Node() {} // Destructor
 
     // Member Functions
     // Getters
     const string& getName() { return m_name; }
     const PlacementStatus& getStatus() { return m_status; }
     Position<position_type>& getPosition() { return m_pos; } // return a reference to avoid copying
+    Position<position_type>& getPrevPosition() { return m_prev_pos; } 
+    Position<position_type>& getLookaheadPosition() { return m_lookahead_pos; } 
+    Position<position_type>& getPrevGrad() { return m_prev_grad; } 
     void translate(float move_x, float move_y) { m_pos.translate(move_x, move_y); }
     const string& getOrientation() { return m_orient; }
     const position_type& getX() { return m_pos.getX(); }

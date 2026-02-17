@@ -50,12 +50,17 @@ void Grid::computeBinOverlaps(Node* node_p)
         if(row_index < 0 || row_index > m_bins_per_col-1) return;
 
         float overlap = node_p->getArea();
-        m_bins[col_index][row_index].overlap += overlap;
-        m_bins[col_index][row_index].overlapping_nodes.push_back(node_p);
+        m_bins[col_index][row_index].total_overlap += overlap;
         node_p->addBinOverlap(&m_bins[col_index][row_index], overlap);
+        m_bins[col_index][row_index].overlapping_nodes.push_back(node_p);
         return;
     }
-    else Logger::log_warning("Large node found: " + node_p->getName()); //TODO: handle large nodes!
+
+
+    //else, large node found, handle it!
+
+    Logger::log_warning("Large node found: " + node_p->getName()); 
+    exit(2); // for now, just exit. TODO: handle large nodes properly!
 
     // find indices in m_bins that this node overlaps
     int col_index_start = node_p->getPosition().getX() / m_bin_width;
@@ -85,11 +90,11 @@ void Grid::computeBinOverlaps(Node* node_p)
         for (int row_index = row_index_start; row_index <= row_index_final; row_index++)
         {
             //m_bins[row_index][col_index].computeOverlap(node_p);
-            float old_overlap = m_bins[col_index][row_index].overlap;
+            float old_overlap = m_bins[col_index][row_index].total_overlap;
             m_bins[col_index][row_index].computeOverlap(node_p); // dangerous, relies on indices being correct
 
             //DEBUG
-            float delta_overlap = m_bins[col_index][row_index].overlap - old_overlap;
+            float delta_overlap = m_bins[col_index][row_index].total_overlap - old_overlap;
             if (delta_overlap < 0) {
                 cout << "Negative overlap:\tcol_index: " << col_index<< "\trow_index: " << row_index << endl;
                 cout << "col_index_start: " << col_index_start << "\tcol_index_final: " << col_index_final << endl;
@@ -120,7 +125,7 @@ std::vector< std::vector<float> > Grid::getRho()
         for (int row = 0; row < m_bins_per_col; row++)
         {
             // Do I need to divide by area?
-            rho[col][row] = m_bins[col][row].overlap * bin_area_inv ;
+            rho[col][row] = m_bins[col][row].total_overlap * bin_area_inv ;
             //rho[col][row] = m_bins[col][row].overlap;
         }
     }
@@ -146,8 +151,9 @@ float Grid::computeTotalOverflow()
 {
     float total = 0;
     for (int col = 0; col < m_bins_per_row; col++)
-        for (int row = 0; row < m_bins_per_col; row++)
-            total += m_bins[col][row].computeOverflow();
+        for (int row = 0; row < m_bins_per_col; row++) {
+            total += m_bins[col][row].getOverflowRatio();
+        }
     return total;
 }
 
@@ -163,17 +169,16 @@ void Grid::printOverflows()
         for( int y_index = 0; y_index < m_bins_per_col; y_index++)
         {
             Bin bin = m_bins[x_index][y_index];
-            float overflow = bin.computeOverflow();
-            float overlap= bin.overlap;
-            if (overlap > 10) 
-            //if (overflow > 0)
+            float overflow = bin.getOverflowRatio();
+            float overlap= bin.total_overlap;
+            if (overflow > 0)
             {
                 overflows.add_row(RowStream{} << std::to_string(x_index) + ", " + std::to_string(y_index)
                         << bin.bb.getArea() << overlap << overflow);
             }
         }
     }
-    //Logger::log_info(overflows);
+    Logger::log_detail(overflows);
 }
 
 void Grid::printElectricFields()

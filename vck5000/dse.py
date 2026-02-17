@@ -228,7 +228,7 @@ def run_all_benchmarks():
 # TODO: expand DSE to use SA or ant colony optimization
 # Design Space Exploration algorithm
 def dse():
-    config_path = "host/default_config.json"
+    config_path = "host/run_config_dse.json"
 
     # Run all benchmarks with simple and cpu partials_compute_method
     for benchmark in benchmark_list:

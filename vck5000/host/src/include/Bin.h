@@ -55,7 +55,7 @@ public:
 struct Bin
 {
     Box<float> bb; // Bounding Box
-    float overlap; // Total Node overlap within this bin
+    float total_overlap; // Total Node overlap within this bin
     float a_uv;
     XY eField; // Computed eField in this Bin
     std::vector<Node*> overlapping_nodes; // list of nodes overlapping this bin
@@ -66,7 +66,7 @@ struct Bin
 
     void iterationReset() 
     {
-        overlap = 0.0;
+        total_overlap = 0.0;
         overlapping_nodes.clear();
         a_uv = 0;
         eField.x = 0; eField.y = 0;
@@ -95,7 +95,7 @@ struct Bin
         //assert(abs(overlap_height) > node_p->getYsize() && "abs(overlap) exceeds node height!");
         
         double node_overlap = overlap_width * overlap_height;
-        overlap += node_overlap;
+        total_overlap += node_overlap;
 
         // If this node has a non-zero overlap with in this bin, add to list
         if (node_overlap > 0)
@@ -121,9 +121,14 @@ struct Bin
 
     }
 
-    float computeOverflow()
+    float getOverlap() {
+        return total_overlap;
+    }
+
+    float getOverflowRatio()
     {
-        return max<float>(0, overlap - bb.getArea());
+        //return max<float>(0, total_overlap - bb.getArea());
+        return max<float>(0, total_overlap / bb.getArea());
     }
 };
 

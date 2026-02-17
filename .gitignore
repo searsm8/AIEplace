@@ -4,7 +4,6 @@ python/AIEmath
 python/results
 results
 *:Zone.Identifier
-third_party
 *.cfg
 .vscode
 misc

@@ -205,8 +205,7 @@ void Logger::append_csv(ProgramStatBlock &stats, string filename)
         out_file << "Design,";
         
         // Configuration
-        out_file << "Partials_Method,";
-        out_file << "Density_Method,";
+        out_file << "Output_Dir,";
         out_file << "Gamma,";
         out_file << "Init_Learning_Rate,";
         
@@ -237,7 +236,6 @@ void Logger::append_csv(ProgramStatBlock &stats, string filename)
         out_file << "Success,";
         out_file << "Error_Message,";
         out_file << "Timestamp";
-        
         out_file << endl;
     }
     
@@ -245,8 +243,7 @@ void Logger::append_csv(ProgramStatBlock &stats, string filename)
     out_file << "\"" << stats.design_name << "\",";
     
     // Configuration
-    out_file << "\"" << stats.partials_method << "\",";
-    out_file << "\"" << stats.density_method << "\",";
+    out_file << "\"" << stats.output_dir << "\",";
     out_file << stats.gamma << ",";
     out_file << stats.init_learning_rate << ",";
     

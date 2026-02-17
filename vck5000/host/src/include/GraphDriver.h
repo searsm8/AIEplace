@@ -41,7 +41,7 @@ public:
     void setBufferSize(int size);
 
     void send_packet(float * input_data);
-    float receive_packet(float * output_data);
+    void receive_packet(float * output_data);
 
     void print_info();
 };

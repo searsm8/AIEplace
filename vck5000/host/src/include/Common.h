@@ -27,6 +27,7 @@ using std::map;
 using std::max;
 using std::min;
 
+
 // Compilation flags
 //#define USE_AIE_ACCELERATION // if this is defined, the application will use VCK5000 acceleration
                     // (To configure AIE and PL, the .xclbin must be specified as a command line parameter)

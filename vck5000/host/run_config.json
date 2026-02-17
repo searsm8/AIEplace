@@ -17,46 +17,50 @@
 
   "input": {
     "benchmark": "host/benchmarks/ispd2005/adaptec1",
-    "benchmark1": "host/benchmarks/ispd2015/mgc_superblue11_a",
-    "benchmark2": "host/benchmarks/ispd2015/mgc_superblue19",
-    "benchmarktoy": "host/benchmarks/ispd2015/toy",
-    "xclbin": "bin/aieplace.hw.xclbin",
-    "xclbinx": "bin/aieplace_1cu.hw.xclbin",
-    "xclbin_": "bin/aieplace.hw_emu.xclbin"
+    //"benchmark": "host/benchmarks/ispd2015/mgc_superblue11_a",
+    //"benchmark": "host/benchmarks/ispd2015/mgc_superblue19",
+    //"benchmark": "host/benchmarks/ispd2015/toy",
+
+    "xclbin": "bin/aieplace.hw.xclbin"
+    //"xclbin": "bin/aieplace_1cu.hw.xclbin"
+    //"xclbin": "bin/aieplace.hw_emu.xclbin"
   },
+
   "params": {
     // Computation method selection
-    "partials_compute_method": "cpu",
-    "density_compute_method": "cpu",
-    "wirelength_method": "HPWL",
+    "partials_compute_method": "cpu", // choose: aie, cpu, simple, hybrid, threaded
+    "density_compute_method": "cpu",  // choose: aie, cpu
+    "wirelength_method": "HPWL",      // choose: HPWL
 
     // Basic hyperparameters
     "gamma": 4,
-    "max_iterations": 100,
+    "max_iterations": 1600,
     "max_threads": 1,
-    "init_learning_rate": 0.02,
-    "init_global_lambda": 0.2,
+    "init_learning_rate": 100,
+    "init_global_lambda": 2.0,
     "focus_nets": [],
     "rand_focus_nets": 0,
     "rand_focus_nodes": 1,
 
     // Convergence criteria (adaptive algorithm will stop early if met)
-    "min_iterations": 15,
-    "hpwl_improvement_threshold": 0.01,
-    "overflow_threshold": 0.05,
+    "min_iterations": 1,
+    "hpwl_improvement_threshold": 0.001,
+    "overflow_threshold": 0.75,
     "convergence_window": 5,
 
     // Adaptive hyperparameter schedule parameters
     "adaptation_window": 5,
     "slow_improvement_threshold": 0.02,
-    "high_overflow_threshold": 0.1
+    "high_overflow_threshold": 0.1,
+    "warmup": 10 
   },
+
   "output": {
-    "result_csv": "results.csv",
+    "result_csv": "results_adaptec1.csv",
     "log_file": "logs/aieplace.log",
     "performance_jsonl": "results/aieplace_performance.jsonl",
     "visualize": true,
-    "iterations_per_export": 10,
+    "iterations_per_export": 1,
     "visualization_file": "visualizations/aieplace_visualization.png"
   }
 }
