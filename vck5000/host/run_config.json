@@ -36,23 +36,28 @@
     "gamma": 4,
     "max_iterations": 1600,
     "max_threads": 1,
-    "init_learning_rate": 100,
-    "init_global_lambda": 2.0,
+    "init_learning_rate": 200,
+    "init_global_lambda": 0.1,
     "focus_nets": [],
     "rand_focus_nets": 0,
     "rand_focus_nodes": 1,
 
     // Convergence criteria (adaptive algorithm will stop early if met)
-    "min_iterations": 1,
+    "min_iterations": 50,
     "hpwl_improvement_threshold": 0.001,
     "overflow_threshold": 0.75,
     "convergence_window": 5,
+
+    // Simple decay parameters (if using simple decay instead of adaptive)
+    "naive_decay": true,
+    "decay_interval": 20,
+    "decay_factor": 0.9,
 
     // Adaptive hyperparameter schedule parameters
     "adaptation_window": 5,
     "slow_improvement_threshold": 0.02,
     "high_overflow_threshold": 0.1,
-    "warmup": 10 
+    "warmup_iterations": 10 
   },
 
   "output": {
@@ -60,7 +65,7 @@
     "log_file": "logs/aieplace.log",
     "performance_jsonl": "results/aieplace_performance.jsonl",
     "visualize": true,
-    "iterations_per_export": 1,
+    "iterations_per_export": 10,
     "visualization_file": "visualizations/aieplace_visualization.png"
   }
 }

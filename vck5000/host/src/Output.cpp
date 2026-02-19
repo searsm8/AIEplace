@@ -62,10 +62,10 @@ void Placer::printIterationResults()
         Table top;
         top.add_row(RowStream{} << "Iteration" << iteration);
         top.add_row(RowStream{} << "HPWL" << SCI(hpwl));
-        top.add_row(RowStream{} << "Overflow" << SCI(overflow));
-        top.add_row(RowStream{} << "Learning Rate" << learning_rate);
-        top.add_row(RowStream{} << "Learning Coeff" << learning_coeff);
-        top.add_row(RowStream{} << "Global Lambda" << global_lambda);
+        top.add_row(RowStream{} << "Overflow" << (overflow));
+        top.add_row(RowStream{} << "Learning Rate" << PREC(learning_rate));
+        top.add_row(RowStream{} << "Learning Coeff" << PREC(learning_coeff));
+        top.add_row(RowStream{} << "Global Lambda" << PREC(global_lambda));
         top.column(0).format().font_align(FontAlign::right);
         top.column(1).format().font_align(FontAlign::left);
         Logger::log_data(top);
@@ -75,8 +75,9 @@ void Placer::printIterationResults()
     // every 10 iterations, export an image
     #ifdef CREATE_VISUALIZATION
         if(cfg["output"]["visualize"])
-        if (iteration % int(cfg["output"]["iterations_per_export"]) == 0) {
-            viz.drawPlacement(db, output_dir / "placement", iteration);
+        if (iteration < 10 || iteration % int(cfg["output"]["iterations_per_export"]) == 0) {
+            PlotInfo info = {iteration, learning_rate, hpwl_history.back(), global_lambda, overflow};
+            viz.drawPlacement(db, output_dir / "placement", info);
             viz.drawElectricField(grid, output_dir / "efield", iteration);
         }
     #endif
@@ -93,8 +94,8 @@ void Placer::printIterationResults()
     hpwl_file << std::setfill('0') << std::setw(3) << iteration << ", "
               << std::setprecision(2) << std::scientific << hpwl << ", "
               << std::setprecision(2) << std::scientific << overflow << ", "
-              << std::setprecision(4) << std::fixed << learning_rate << ", "
-              << std::setprecision(4) << std::fixed << global_lambda << endl;
+              << std::setprecision(2) << std::scientific << learning_rate << ", "
+              << std::setprecision(2) << std::scientific << global_lambda << endl;
     hpwl_file.close();
 }
 
@@ -235,8 +236,10 @@ void Placer::printFinalResults()
 
     // Generate visualization in run-specific directory
     #ifdef CREATE_VISUALIZATION
-        if(cfg["output"]["visualize"])
-            viz.drawPlacement(db, run_output_dir, iteration);
+        if(cfg["output"]["visualize"]) {
+            PlotInfo info = {iteration, learning_rate, final_hpwl, global_lambda, final_overflow};
+            viz.drawPlacement(db, run_output_dir, info);
+        }
     #endif
 
     // Write placed design to DEF in run-specific directory

@@ -147,57 +147,61 @@ void Placer::run()
 void Placer::updateHyperparameters()
 {
     // Warm start, for first few iterations use initial learning rate
-    if (iteration < cfg["params"]["warmup"]) {
+    if (iteration < cfg["params"]["warmup_iterations"]) {
         Logger::log_detail("Using initial learning rate: " + std::to_string(learning_rate));
         return;
     }
 
-
-    // Update learning rate every iteration
-    // Estimate Lipshitz constant L
-    float total_position_change = 0;
-    float total_gradient_change = 0;
-
-    for(auto item : db.getComponents()) {
-        Node* node_p = item.second;
-        Position<position_type>& curr_pos = node_p->getPosition();
-        Position<position_type>& prev_pos = node_p->getPrevPosition();
-        Position<position_type>& prev_grad = node_p->getPrevGrad();
-
-        float pos_change_x = curr_pos.getX() - prev_pos.getX();
-        float pos_change_y = curr_pos.getY() - prev_pos.getY();
-        total_position_change += sqrt(pos_change_x * pos_change_x + pos_change_y * pos_change_y);
-
-        XY& partials = node_p->terms_cpu.partials;
-        if(partials_method == "aie")
-            partials = node_p->partials_aie;
-
-        float grad_x = partials.x;
-        float grad_y = partials.y;
-
-        float grad_change_x = grad_x - prev_grad.getX();
-        float grad_change_y = grad_y - prev_grad.getY();
-        total_gradient_change += sqrt(grad_change_x * grad_change_x + grad_change_y * grad_change_y);
-
-        // Update previous position and gradient for next iteration
-        prev_pos = curr_pos;
-        prev_grad.setX(grad_x);
-        prev_grad.setY(grad_y);
+    if(cfg["params"]["naive_decay"]) {
+        // Naive approach: decay learning rate by a factor every N iterations
+        if (iteration % int(cfg["params"]["decay_interval"]) == 0) {
+            learning_rate *= float(cfg["params"]["decay_factor"]);
+            Logger::log_detail("Decayed learning rate: " + std::to_string(learning_rate));
+        }
     }
 
-    std::stringstream ss;
-    ss << std::scientific << total_position_change;
-    Logger::log_detail("Total position change: " + ss.str());
-    std::stringstream ss2;
-    ss2 << std::scientific << total_gradient_change;
-    Logger::log_detail("Total gradient change: " + ss2.str());
-    // Update learning rate to 1/L
-    learning_rate = total_position_change / (total_gradient_change + 1e-8f); // avoid div by 0
-    Logger::log_detail("Unclamped learning_rate: " + std::to_string(learning_rate));
-    // Clamp to reasonable range
-    //learning_rate = std::clamp(learning_rate, 0.0001f, 1000.0f);
 
-    Logger::log_detail("Updated learning_rate: " + std::to_string(learning_rate));
+    else { // Use adaptive learning rate based on estimated Lipshitz constant of the gradient
+        float total_position_change = 0;
+        float total_gradient_change = 0;
+
+        for(auto item : db.getComponents()) {
+            Node* node_p = item.second;
+            Position<position_type>& curr_pos = node_p->getPosition();
+            Position<position_type>& prev_pos = node_p->getPrevPosition();
+            Position<position_type>& prev_grad = node_p->getPrevGrad();
+
+            float pos_change_x = curr_pos.getX() - prev_pos.getX();
+            float pos_change_y = curr_pos.getY() - prev_pos.getY();
+            total_position_change += sqrt(pos_change_x * pos_change_x + pos_change_y * pos_change_y);
+
+            XY& partials = node_p->terms_cpu.partials;
+            if(partials_method == "aie")
+                partials = node_p->partials_aie;
+
+            float grad_x = partials.x;
+            float grad_y = partials.y;
+
+            float grad_change_x = grad_x - prev_grad.getX();
+            float grad_change_y = grad_y - prev_grad.getY();
+            total_gradient_change += sqrt(grad_change_x * grad_change_x + grad_change_y * grad_change_y);
+
+            // Update previous position and gradient for next iteration
+            prev_pos = curr_pos;
+            prev_grad.setX(grad_x);
+            prev_grad.setY(grad_y);
+        }
+
+        Logger::log_detail("Total position change: " + SCI(total_position_change));
+        Logger::log_detail("Total gradient change: " + SCI(total_gradient_change));
+        // Update learning rate to 1/L
+        learning_rate = total_position_change / (total_gradient_change + 1e-8f); // avoid div by 0
+        Logger::log_detail("Unclamped learning_rate: " + PREC(learning_rate));
+        // Clamp to reasonable range
+        learning_rate = std::clamp(learning_rate, 0.0001f, 400.0f);
+    }
+
+    Logger::log_detail("Updated learning_rate: " + PREC(learning_rate));
 
 
 
@@ -207,8 +211,9 @@ void Placer::updateHyperparameters()
             global_lambda = cfg["params"]["init_global_lambda"];
         } else {
             global_lambda *= 1.05;
+            //global_lambda += 0.1f;
             // cap global_lambda to prevent instability
-            global_lambda = std::min(global_lambda, 100.0f);
+            global_lambda = std::min(global_lambda, 1000.0f);
         }
     }
 
@@ -439,7 +444,9 @@ void Placer::nudgeNode(Node* node_p)
         Bin* bin = b.bin;
         // add electric force
         // What does ePlace do for this step?
-        float coeff = global_lambda * bin->lambda * b.overlap/bin->bb.getArea();
+        //float coeff = global_lambda * bin->lambda * b.overlap/bin->bb.getArea(); // BAD:
+                                                                // dividing by bin area essentially zeroes out the force
+        float coeff = global_lambda * bin->lambda;
         electro_force.x += coeff * bin->eField.x;
         electro_force.y += coeff * bin->eField.y;
     }
@@ -492,13 +499,16 @@ void Placer::nudgeNode(Node* node_p)
  */
 bool Placer::checkConvergence()
 {
-    // Always check max iterations as safety fallback
+    // Check max iterations as safety fallback
     if (iteration >= cfg["params"]["max_iterations"])
         return true;
+
+    return false; // TEMP: disable convergence checking for testing purposes
 
     // Need minimum iterations before checking convergence
     int min_iterations = cfg["params"].contains("min_iterations") ?
                         cfg["params"]["min_iterations"].get<int>() : 10;
+
     if (iteration < min_iterations)
         return false;
 
@@ -542,7 +552,6 @@ bool Placer::checkConvergence()
     if(overflow_converged && hpwl_converged) {
         return true;
         Logger::log_info("Convergence met at iteration " + std::to_string(iteration) +
-//                        ": Overflow = " + std::to_string(relative_overflow) +
                         ", HPWL improvement = " + std::to_string(hpwl_improvement));
     }
     else return false;

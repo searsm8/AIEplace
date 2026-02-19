@@ -140,7 +140,7 @@ void Visualizer::drawArrow(float x, float y, float x_mag, float y_mag)
 
 }
 
-void Visualizer::drawPlacement(DataBase& db, fs::path dir, int iteration)
+void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
 {
     // Start with a white background
     cairo_set_source_rgb (cr, 1.0, 1.0, 1.0); // white
@@ -178,17 +178,23 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, int iteration)
     cairo_set_source_rgb (cr, 0.0, 0.0, 0.0); // black
     drawReticle(0.5, 0.5);
 
-    // print current iteration to bottoxm right corner
+    // print current iteration to bottom right corner
     cairo_select_font_face (cr, "Sans", CAIRO_FONT_SLANT_NORMAL,
                                CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size (cr, .02);
 
     cairo_move_to (cr, .8, .99);
-    std::string iter_str = "Iter: " + std::to_string(iteration);
+    std::string iter_str = "Iter: " + std::to_string(info.iteration);
     cairo_show_text (cr, iter_str.c_str());
     cairo_move_to (cr, .6, .99);
-    //std::string lr_str = "LR: " + std::to_string(learning_rate);
-    //cairo_show_text (cr, lr_str.c_str());
+    std::string lr_str = "LR: " + PREC(info.learning_rate);
+    cairo_show_text (cr, lr_str.c_str());
+    cairo_move_to (cr, .3, .99);
+    std::string lambda_str = "Lambda: " + PREC(info.global_lambda);
+    cairo_show_text (cr, lambda_str.c_str());
+    cairo_move_to (cr, .05, .99);
+    std::string hpwl_str = "HPWL: " + PREC(info.hpwl);
+    cairo_show_text (cr, hpwl_str.c_str());
     cairo_stroke(cr);
 
 
@@ -196,7 +202,7 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, int iteration)
     // index the image based on iteration
     fs::create_directories(dir); // ensure this directory exists
     string filename = "iter_";
-    filename.append(std::to_string(iteration));
+    filename.append(std::to_string(info.iteration));
     filename.append(".png");
     dir.append(filename);
     Table t;

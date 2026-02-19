@@ -11,6 +11,14 @@
 
 AIEPLACE_NAMESPACE_BEGIN 
 
+struct PlotInfo {
+    int iteration;
+    float learning_rate;
+    float hpwl;
+    float global_lambda;
+    float overflow;
+};
+
 class Visualizer
 {
     private:
@@ -41,7 +49,7 @@ class Visualizer
     void drawCross(float x, float y, float cross_size = 0.004);
     void drawReticle(float x, float y, float reticle_size = 0.008);
     void drawArrow(float x, float y, float x_mag, float y_mag);
-    void drawPlacement(DataBase&, fs::path, int);
+    void drawPlacement(DataBase&, fs::path, PlotInfo);
     void drawElectricField(Grid&, fs::path, int);
 };
 

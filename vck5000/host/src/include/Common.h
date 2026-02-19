@@ -32,8 +32,6 @@ using std::min;
 //#define USE_AIE_ACCELERATION // if this is defined, the application will use VCK5000 acceleration
                     // (To configure AIE and PL, the .xclbin must be specified as a command line parameter)
 
-//#define CREATE_VISUALIZATION // if this is defined, a Visualizer class using Cairo will export images
-
 // Sizes used in multiple files
 constexpr int TEST_NET_SIZE = 6; // for testing and debugging only
 constexpr int VEC_SIZE = 8; // DO NOT TOUCH. This is the number of floats transferred to AIE kernels at a time.
@@ -55,7 +53,7 @@ constexpr int INITIAL_LAMBDA = 1; // inital lambda for each bin
 //#define WIRELENGTH_COMPUTE_METHOD "HPWL"
 
 // granularity of bin grid
-#define BINS_PER_ROW 32 // Should be scaled up to 512 or 1024 for final application
+#define BINS_PER_ROW 64 //32 // Should be scaled up to 512 or 1024 for final application
 #define BINS_PER_COL BINS_PER_ROW // Unless otherwise noted, grid of bins is square.
 
 #define AIEPLACE_NAMESPACE_BEGIN namespace AIEplace {
