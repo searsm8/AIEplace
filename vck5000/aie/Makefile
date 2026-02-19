@@ -23,7 +23,7 @@ GRAPH_TOP := src/${TOP}.cpp
 TARGET ?= hw# choose hw or x86sim
 
 DSPLIB_ROOT := ${HOME}/Vitis_Libraries/dsp# Location of Vitis_Libraries/dsp
-XILINX_VITIS := /home/nx08/shared/fpga/xilinx/2022.1/Vitis/2022.1
+#XILINX_VITIS := /home/nx08/shared/fpga/xilinx/2022.1/Vitis/2022.1
 
 AIE_FLAGS := -include=src
 AIE_FLAGS += -include=src/partials

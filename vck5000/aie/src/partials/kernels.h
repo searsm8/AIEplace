@@ -23,14 +23,13 @@ constexpr float inv_gamma = 0.25; // 1/gamma factor for exponents (This should i
         // If net_size * net_count < 64, need to pad with 0's to create a full 64 float window
 
 // Stream only kernels
-void compute_abc(input_stream<float> * __restrict x_in, output_stream<float> * __restrict xa_out, output_stream<float> * __restrict bc_out);
-void compute_partials( input_stream<float> * __restrict x_in, output_stream<float> * __restrict partials_out);
+//void abc_kernel(input_stream<float> * __restrict x_in, output_stream<float> * __restrict xa_out, output_stream<float> * __restrict bc_out);
+void partials_kernel( input_stream<float> * __restrict x_in, output_stream<float> * __restrict partials_out);
 
 
 // Window based kernels
 // a plus/minus
-void compute_apm(input_stream <float> * __restrict ctrl, input_window<float> * __restrict x_in, output_window<float> * __restrict a_plus_out, output_window<float> * __restrict a_minus_out);
-  
+//void compute_apm(input_stream <float> * __restrict ctrl, input_window<float> * __restrict x_in, output_window<float> * __restrict a_plus_out, output_window<float> * __restrict a_minus_out);
 
 // b plus/minus
 //void compute_bcpm( input_stream<float> * __restrict a_plus_in, input_stream<float> * __restrict a_minus_in,

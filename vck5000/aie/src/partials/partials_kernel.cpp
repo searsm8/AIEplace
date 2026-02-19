@@ -8,6 +8,9 @@
 #include "aie_api/aie_adf.hpp"
 #include <aie_api/utils.hpp>
 
+#define MAX_NET_SIZE 8 // Max number of nodes per net that this kernel can handle. 
+						// This allows buffers to be allocated statically
+
 aie::vector<float, 8> scale_factor = aie::broadcast<float, 8>( 0.0000152587890625 ); // 1 / 2^16
 // perform fast exp algorithm on all 8 vector lanes
 void fast_exp(aie::vector<float, 8>& exp)
@@ -33,7 +36,7 @@ void fast_exp(aie::vector<float, 8>& exp)
 
 }
 
-void compute_partials( input_stream<float> * __restrict x_in, output_stream<float> * __restrict partials_out)
+void partials_kernel( input_stream<float> * __restrict x_in, output_stream<float> * __restrict partials_out)
 {
 	// Read control data
 	aie::vector<float, 8> ctrl;
@@ -42,7 +45,7 @@ void compute_partials( input_stream<float> * __restrict x_in, output_stream<floa
 	int32 net_groups = ctrl.get(1);
 	// ctrl(2) thru ctrl(7) unused
 
-	aie::vector<float, 8> x_vals[8], a_plus[8], a_minus[8]; // Max net size kernel must handle is 8
+	aie::vector<float, 8> x_vals[MAX_NET_SIZE], a_plus[MAX_NET_SIZE], a_minus[MAX_NET_SIZE]; // Max net size kernel must handle is 8
 	aie::vector<float, 8> b_plus, b_minus;
 	aie::vector<float, 8> data, b_squared_inv; // intermediate results
 	aie::accum<accfloat, 8> c_plus, c_minus;

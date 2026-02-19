@@ -34,7 +34,7 @@ void fast_exp(aie::vector<float, 8>& exp, aie::vector<float, 8>& factor, aie::ve
 // Output is streamed, but due to limitation of only two in or out streams per kernel, we split:
 // Stream xa_out: x_0, a_plus_0, a_minus_0, x_1, a_plus_1, a_minus_1 ...
 // Stream bc_out: NET_SIZE, NET_COUNT, b+, c+, b-, c-
-void compute_abc(input_stream<float> * __restrict x_in, output_stream<float> * __restrict xa_out, output_stream<float> * __restrict bc_out)
+void abc_kernel(input_stream<float> * __restrict x_in, output_stream<float> * __restrict xa_out, output_stream<float> * __restrict bc_out)
 {
   // Read control data
 	aie::vector<float, 8> ctrl;
