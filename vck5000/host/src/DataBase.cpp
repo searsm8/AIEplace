@@ -24,6 +24,21 @@ DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
         }
     }
 
+    // Add IO pins as focus nets for visualizer
+    int focus_nets_added = 0;
+    const int FOCUS_IO_LIMIT = 10;
+    for (auto item : mm_pins) {
+        if(focus_nets_added >= FOCUS_IO_LIMIT)
+            break;
+        Pin* pin = item.second;
+        for(auto net : pin->getNets()) {
+            addFocusNet(net);
+            Logger::log_info("Adding IO pin net to visualizer focus nets: " + net->to_string());
+            if(++focus_nets_added >= FOCUS_IO_LIMIT)
+                break;
+        }
+    }
+
     initializePacketContents();
 
     m_total_net_degree = 0;
@@ -155,6 +170,47 @@ bool DataBase::readBookshelf()
     }
 }
 
+
+/* @brief: Add fillers to design 
+* Computes the total area of all components in the design and adds enough filler cells
+* to bring the filled area to target utilization.
+*/
+bool DataBase::addFillers(float target_utilization) 
+{
+    // find the smallest macro in the design to use as the filler cell
+    float min_macro_xsize = std::numeric_limits<float>::max();
+    float min_macro_ysize = std::numeric_limits<float>::max();
+
+    for(auto item : mm_macros)
+    {
+        MacroClass* macro_p = item.second;
+        if(macro_p->getXsize() < min_macro_xsize && macro_p->getYsize() < min_macro_ysize) {
+            min_macro_xsize = macro_p->getXsize();
+            min_macro_ysize = macro_p->getYsize();
+        }
+    }
+
+    MacroClass* filler_macro = new MacroClass("filler", min_macro_xsize, min_macro_ysize);
+    mm_macros.emplace(std::make_pair("filler_macroclass", filler_macro));
+
+    Logger::log_info("Adding filler cells to database...");
+
+    float unfilled_area = getDieArea().getArea() * target_utilization - computeTotalComponentArea();
+    Logger::log_info("Total area to fill: " + PREC(unfilled_area));
+
+    int fillers_needed = unfilled_area / filler_macro->getArea();
+
+    for (int i = 0; i < fillers_needed; i++)
+    {
+        Component* filler = new Component("filler_" + stringify(i));
+        filler->setMacroClass(filler_macro);
+        filler->setPlacementStatus(PlacementStatus::UNPLACED);
+        filler->setPosition(Position(0.0f, 0.0f)); // position will be updated during placement
+        mv_fillers.push_back(filler);
+    }
+    Logger::log_info("Total fillers added: " + stringify(fillers_needed));
+    return true;
+}
 
 /* @brief: Reset all nodes and nets in preparation for the next iteration.
 */

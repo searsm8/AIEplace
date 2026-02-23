@@ -16,9 +16,9 @@
   // =============================================================================
 
   "input": {
-    "benchmark": "host/benchmarks/ispd2005/adaptec1",
+    //"benchmark": "host/benchmarks/ispd2005/adaptec1",
     //"benchmark": "host/benchmarks/ispd2015/mgc_superblue11_a",
-    //"benchmark": "host/benchmarks/ispd2015/mgc_superblue19",
+    "benchmark": "host/benchmarks/ispd2015/mgc_superblue19",
     //"benchmark": "host/benchmarks/ispd2015/toy",
 
     "xclbin": "bin/aieplace.hw.xclbin"
@@ -32,13 +32,17 @@
     "density_compute_method": "cpu",  // choose: aie, cpu
     "wirelength_method": "HPWL",      // choose: HPWL
 
+    "use_filler": false,               // whether to include filler cells in placement
+    "target_utilization": 0.9,        // target utilization for density control
+
     // Basic hyperparameters
     "gamma": 4,
-    "max_iterations": 1600,
+    "max_iterations": 200,
     "max_threads": 1,
-    "init_learning_rate": 200,
-    "init_global_lambda": 0.1,
+    "init_learning_rate": 50,
+    "init_global_lambda": 0,
     "focus_nets": [],
+    "rand_focus_IO": 10,
     "rand_focus_nets": 0,
     "rand_focus_nodes": 1,
 
@@ -49,7 +53,7 @@
     "convergence_window": 5,
 
     // Simple decay parameters (if using simple decay instead of adaptive)
-    "naive_decay": true,
+    "naive_decay": false,
     "decay_interval": 20,
     "decay_factor": 0.9,
 
@@ -65,7 +69,7 @@
     "log_file": "logs/aieplace.log",
     "performance_jsonl": "results/aieplace_performance.jsonl",
     "visualize": true,
-    "iterations_per_export": 10,
+    "iterations_per_export": 1,
     "visualization_file": "visualizations/aieplace_visualization.png"
   }
 }

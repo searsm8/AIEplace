@@ -384,6 +384,9 @@ void Placer::computeOverlaps()
     for (auto item : db.getComponents())
         grid.computeBinOverlaps(item.second);
 
+    for (auto filler : db.getFillers())
+        grid.computeBinOverlaps(filler);
+
     // DEBUG
     double total_node_area = 0;
     for (auto item : db.getComponents())

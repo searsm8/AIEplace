@@ -13,10 +13,11 @@ AIEPLACE_NAMESPACE_BEGIN
 
 struct PlotInfo {
     int iteration;
-    float learning_rate;
     float hpwl;
-    float global_lambda;
     float overflow;
+    float learning_rate;
+    float global_lambda;
+    std::string benchmark_name;
 };
 
 class Visualizer

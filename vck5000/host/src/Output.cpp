@@ -76,9 +76,9 @@ void Placer::printIterationResults()
     #ifdef CREATE_VISUALIZATION
         if(cfg["output"]["visualize"])
         if (iteration < 10 || iteration % int(cfg["output"]["iterations_per_export"]) == 0) {
-            PlotInfo info = {iteration, learning_rate, hpwl_history.back(), global_lambda, overflow};
+            PlotInfo info = {iteration, hpwl_history.back(), overflow, learning_rate, global_lambda, db.getBenchmarkName()};
             viz.drawPlacement(db, output_dir / "placement", info);
-            viz.drawElectricField(grid, output_dir / "efield", iteration);
+            //viz.drawElectricField(grid, output_dir / "efield", iteration);
         }
     #endif
 
@@ -237,9 +237,12 @@ void Placer::printFinalResults()
     // Generate visualization in run-specific directory
     #ifdef CREATE_VISUALIZATION
         if(cfg["output"]["visualize"]) {
-            PlotInfo info = {iteration, learning_rate, final_hpwl, global_lambda, final_overflow};
+            PlotInfo info = {iteration, final_hpwl, final_overflow, learning_rate, global_lambda, db.getBenchmarkName()};
             viz.drawPlacement(db, run_output_dir, info);
         }
+        // use python script to create gif from generated pngs in run directory
+            std::string gif_command = "python3 tools/gif_builder.py " + run_output_dir + "/placement" + " -d 100 -o " + run_output_dir + "/full_placement.gif";
+            system(gif_command.c_str());
     #endif
 
     // Write placed design to DEF in run-specific directory

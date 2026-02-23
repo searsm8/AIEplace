@@ -173,7 +173,7 @@ void Placer::updateHyperparameters()
 
             float pos_change_x = curr_pos.getX() - prev_pos.getX();
             float pos_change_y = curr_pos.getY() - prev_pos.getY();
-            total_position_change += sqrt(pos_change_x * pos_change_x + pos_change_y * pos_change_y);
+            total_position_change += (pos_change_x * pos_change_x + pos_change_y * pos_change_y);
 
             XY& partials = node_p->terms_cpu.partials;
             if(partials_method == "aie")
@@ -184,7 +184,7 @@ void Placer::updateHyperparameters()
 
             float grad_change_x = grad_x - prev_grad.getX();
             float grad_change_y = grad_y - prev_grad.getY();
-            total_gradient_change += sqrt(grad_change_x * grad_change_x + grad_change_y * grad_change_y);
+            total_gradient_change += (grad_change_x * grad_change_x + grad_change_y * grad_change_y);
 
             // Update previous position and gradient for next iteration
             prev_pos = curr_pos;
@@ -195,7 +195,7 @@ void Placer::updateHyperparameters()
         Logger::log_detail("Total position change: " + SCI(total_position_change));
         Logger::log_detail("Total gradient change: " + SCI(total_gradient_change));
         // Update learning rate to 1/L
-        learning_rate = total_position_change / (total_gradient_change + 1e-8f); // avoid div by 0
+        learning_rate = sqrt(total_position_change) / sqrt(total_gradient_change + 1e-8f); // avoid div by 0
         Logger::log_detail("Unclamped learning_rate: " + PREC(learning_rate));
         // Clamp to reasonable range
         learning_rate = std::clamp(learning_rate, 0.0001f, 400.0f);
@@ -207,14 +207,12 @@ void Placer::updateHyperparameters()
 
     // Update global lambda to increase density force over time
     if (iteration % 10 == 0) {
-        if (global_lambda == 0) {
-            global_lambda = cfg["params"]["init_global_lambda"];
-        } else {
-            global_lambda *= 1.05;
-            //global_lambda += 0.1f;
-            // cap global_lambda to prevent instability
-            global_lambda = std::min(global_lambda, 1000.0f);
-        }
+        if(global_lambda < 1.0f)
+            global_lambda += 0.1f;
+        else 
+            global_lambda *= 1.1;
+        // cap global_lambda to prevent instability
+        global_lambda = std::min(global_lambda, 1000.0f);
     }
 
 }
@@ -314,6 +312,9 @@ Placer::Placer(std::string config_filepath )
             // Initialize database by reading LEF and DEF design files
             db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
 
+            if(cfg["params"]["use_filler"])   
+                db.addFillers(cfg["params"]["target_utilization"]);
+
             db_IO_time = getInterval(pgrm_start_time, getTime());
             Logger::log_info("db read time: " + std::to_string(db_IO_time));
 
@@ -372,6 +373,18 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
         // if this component is bigger than 1/16th of bin area, set member bool
         item.second->checkIfLarge(bin_area_16th);
     }
+
+    // Place Fillers
+    for (auto filler : db.getFillers()) {
+        int x_offset = min_dist + rand()%(grid.getDieWidth()/2); // clustered around target
+        if(rand()%2 == 1) x_offset *= -1; // 50% chance to negate
+        int y_offset = min_dist + rand()%(grid.getDieHeight()/2); // clustered around target
+        if(rand()%2 == 1) y_offset *= -1; // 50% chance to negate
+        Position<position_type> init_pos = target_pos + Position<position_type>(x_offset, y_offset);
+        filler->setPosition(init_pos);
+    }
+
+
     printIterationResults(); // Prints "iteration 0" starting statistics
     iteration = 1;
 
@@ -422,6 +435,10 @@ void Placer::nudgeAllNodes()
     //Logger::log_detail("Begin nudgeAllNodes()");
     for (auto item : db.getComponents())
         nudgeNode(item.second);
+    
+    // Also nudge fillers if they exist
+    for (auto filler : db.getFillers())
+        nudgeNode(filler);
 }
 
 /**
@@ -468,6 +485,7 @@ void Placer::nudgeNode(Node* node_p)
 
     move.x = learning_rate * (electro_force.x - partials_x ); // we subtract the partials to reduce net size!
     move.y = learning_rate * (electro_force.y - partials_y );
+
 
     // Update the position of this node
     node_p->translate(move.x, move.y);

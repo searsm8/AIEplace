@@ -83,10 +83,11 @@ private:
     map<string, Component *> mm_components;
     map<string, Pin *> mm_pins;
     map<string, Net *> mm_nets;
-    std::vector<Net *> mv_nets; // list of all nets
+    vector<Net *> mv_nets; // list of all nets
+    vector<Component *> mv_fillers; // standard cell fillers
     map<int, std::vector<Net *>> mmv_nets_by_degree;
-    std::vector<Net *> mv_focus_nets; // list of nets to be highlighted with visualizer
-    std::vector<Node *> mv_focus_nodes; // list of nodes to be highlighted with visualizer
+    vector<Net *> mv_focus_nets; // list of nets to be highlighted with visualizer
+    vector<Node *> mv_focus_nodes; // list of nodes to be highlighted with visualizer
 
     Box<position_type> m_die_area;
     int m_max_x, m_max_y; // used when reading Bookshelf format to find die_area
@@ -111,6 +112,7 @@ public:
     // return const references to avoid copying large objects
     const map<string, MacroClass *> &getMacros() { return mm_macros; }
     const map<string, Component *> &getComponents() { return mm_components; }
+    const vector<Component *> &getFillers() { return mv_fillers; }
     const map<string, Pin *> &getPins() { return mm_pins; }
     const map<string, Net *> &getNets() { return mm_nets; }
     const vector<Net *> &getNetsVector() { return mv_nets; }
@@ -127,6 +129,7 @@ public:
     // bool readVerilog();
     bool readBookshelf();
 
+    bool addFillers(float target_utilization);
 
     void iterationReset();
     void sortPositionsByX();
