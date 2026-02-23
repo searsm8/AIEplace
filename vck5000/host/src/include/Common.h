@@ -74,6 +74,9 @@ struct XY
     float y;
     void clear() { x = 0; y = 0;}
 
+    // default constructor initializes to 0,0
+    XY () { clear(); }
+
     bool isClose(XY other)
     {
         bool close = true;

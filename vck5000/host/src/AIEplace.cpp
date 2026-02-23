@@ -175,21 +175,14 @@ void Placer::updateHyperparameters()
             float pos_change_y = curr_pos.getY() - prev_pos.getY();
             total_position_change += (pos_change_x * pos_change_x + pos_change_y * pos_change_y);
 
-            XY& partials = node_p->terms_cpu.partials;
-            if(partials_method == "aie")
-                partials = node_p->partials_aie;
-
-            float grad_x = partials.x;
-            float grad_y = partials.y;
-
-            float grad_change_x = grad_x - prev_grad.getX();
-            float grad_change_y = grad_y - prev_grad.getY();
+            float grad_change_x = node_p->combined_force.x - prev_grad.getX();
+            float grad_change_y = node_p->combined_force.y - prev_grad.getY();
             total_gradient_change += (grad_change_x * grad_change_x + grad_change_y * grad_change_y);
 
             // Update previous position and gradient for next iteration
             prev_pos = curr_pos;
-            prev_grad.setX(grad_x);
-            prev_grad.setY(grad_y);
+            prev_grad.setX(node_p->combined_force.x);
+            prev_grad.setY(node_p->combined_force.y);
         }
 
         Logger::log_detail("Total position change: " + SCI(total_position_change));
@@ -478,13 +471,14 @@ void Placer::nudgeNode(Node* node_p)
         partials_y = node_p->terms_cpu.partials.y;
     }
 
-    XY move;
-    // coeff is the learning rate scaled by the size of the die
-    //float x_coeff = learning_rate * grid.getDieWidth();
-    //float y_coeff = learning_rate * grid.getDieHeight();
 
-    move.x = learning_rate * (electro_force.x - partials_x ); // we subtract the partials to reduce net size!
-    move.y = learning_rate * (electro_force.y - partials_y );
+    node_p->combined_force.x = electro_force.x - partials_x; // we subtract the partials to reduce net size!
+    node_p->combined_force.y = electro_force.y - partials_y;
+
+
+    XY move;
+    move.x = learning_rate * node_p->combined_force.x; 
+    move.y = learning_rate * node_p->combined_force.y;
 
 
     // Update the position of this node

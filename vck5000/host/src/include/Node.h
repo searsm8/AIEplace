@@ -53,6 +53,7 @@ private:
     Position<position_type> m_prev_pos; // u_{k-1}
     Position<position_type> m_lookahead_pos; // v_k
     Position<position_type> m_prev_grad; // grad_{k-1}
+
     PlacementStatus m_status;
     bool m_is_large; // True if the area of the node is at least 1/16th the area of a bin
     std::vector<Net*> mv_nets; // List of all nets this node is on
@@ -62,10 +63,13 @@ public:
 
     XY partials_aie; // Computed on AIE by default 
     Terms terms_cpu; // DEBUG: used to compare AIE with CPU results
+    XY combined_force; // electro_force - partials for BB denominator
 
     // Constructors
     Node() : m_name("") {}
-    Node(string name) : m_name(name), m_orient("N"), m_pos(0, 0), m_prev_pos(0, 0), m_prev_grad(0, 0){}
+    Node(string name) : m_name(name), m_orient("N"), m_pos(0, 0), 
+            m_prev_pos(0, 0), m_prev_grad(0, 0), combined_force() 
+            {}
 
     // Need virtual destructor for proper dynamic_cast
     virtual ~Node() {} // Destructor
