@@ -74,6 +74,8 @@ COMPILE_FLAGS += -O0 # optimization level, 0 means no optimization
 #COMPILE_FLAGS += -Wall
 
 COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0  # Required for Limbo library compatibility
+COMPILE_FLAGS += -MMD -MP 
+-include $(OBJS:.o=.d)
 
 PROFILE_FLAG :=  # Disabled profiling for WSL debug
 #PROFILE_FLAG := -pg# flag for profiling with gprof
