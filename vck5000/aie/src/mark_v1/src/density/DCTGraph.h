@@ -51,8 +51,8 @@ public:
     connect<adf::stream> net_dct_out (DCT_post_kernel.out[0], DCT_out.in[0]);
 
     // Associate kernels with Source files and set runtime ratio
-    source(DCT_shuffle_kernel) = "dct_shuffle.cpp";
-    source(DCT_post_kernel) = "dct_postprocess.cpp";
+    source(DCT_shuffle_kernel) = "density/dct_shuffle.cpp";
+    source(DCT_post_kernel) = "density/dct_postprocess.cpp";
 
     runtime<adf::ratio>(DCT_shuffle_kernel) = 1;
     runtime<adf::ratio>(DCT_post_kernel) = 1;

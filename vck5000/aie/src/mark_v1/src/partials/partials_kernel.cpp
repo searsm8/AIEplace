@@ -2,7 +2,7 @@
 // kernel for computing HPWL partials (see ePlace/DREAMplace)
 // dWL_e / dx_i= [a+ * ((1 + x/gamma)*b+ - c+/gamma)/(b+^2)]  \
 // - [a- * ((1 - x/gamma)*b- + c-/gamma)/(b-^2)]
-#include "partials_kernels.h"
+#include "partials/kernels.h"
 
 #include "aie_api/aie.hpp"
 #include "aie_api/aie_adf.hpp"

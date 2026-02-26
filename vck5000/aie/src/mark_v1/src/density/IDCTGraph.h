@@ -1,6 +1,6 @@
 #pragma once
 
-#include "density_kernels.h"
+#include "density/density_kernels.h"
 #include "fft_ifft_dit_1ch_graph.hpp"
 namespace transform = xf::dsp::aie::fft;
 
@@ -50,8 +50,8 @@ public:
     connect<adf::stream> net_idct_out(IDCT_unshuffle_kernel.out[0], IDCT_out.in[0]);
 
     // Associate kernels with Source files and set runtime ratio
-    source(IDCT_pre_kernel) = "idct_preprocess.cpp";
-    source(IDCT_unshuffle_kernel) = "idct_unshuffle.cpp";
+    source(IDCT_pre_kernel) = "density/idct_preprocess.cpp";
+    source(IDCT_unshuffle_kernel) = "density/idct_unshuffle.cpp";
 
     runtime<adf::ratio>(IDCT_pre_kernel) = 1;
     runtime<adf::ratio>(IDCT_unshuffle_kernel) = 1;

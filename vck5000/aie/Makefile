@@ -2,23 +2,25 @@
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 PROJECT_ROOT ?= $(CURDIR)/..
-PLATFORM := /opt/xilinx/platforms/xilinx_vck5000_gen4x8_qdma_2_202220_1/xilinx_vck5000_gen4x8_qdma_2_202220_1.xpfm
-
-BUILD_DIR := $(PROJECT_ROOT)/build
-BUILD_DIR_AIE := $(BUILD_DIR)/$(TARGET)/aie
-AIE_LIBADF := $(BUILD_DIR_AIE)/libadf_$(AIE).a
-
-AIE_DIR := $(CURDIR)/src/$(AIE)
-
-TOP := TopGraph
-AIE_SRCS_MAIN := $(DIR_AIE)/src/$(AIE)/$(TOPGRAPH).cpp
-AIE_SRCS_OTHER := $(filter-out $(AIE_SRCS_MAIN), $(wildcard $(AIE_DIR)/*))
+TARGET ?= hw
 
 ifeq ($(TARGET),sw_emu)
     TARGET := x86sim
 else
     TARGET := hw
 endif
+
+PLATFORM := /opt/xilinx/platforms/xilinx_vck5000_gen4x8_qdma_2_202220_1/xilinx_vck5000_gen4x8_qdma_2_202220_1.xpfm
+
+BUILD_DIR := $(PROJECT_ROOT)/build
+BUILD_DIR_AIE := $(BUILD_DIR)/$(TARGET)/aie
+AIE_LIBADF := $(BUILD_DIR_AIE)/libadf_$(AIE).a
+
+AIE_DIR := $(PROJECT_ROOT)/aie/src/$(AIE)
+
+TOPGRAPH := TopGraph
+AIE_SRCS_MAIN := $(AIE_DIR)/src/$(TOPGRAPH).cpp
+AIE_SRCS_OTHER := $(filter-out $(AIE_SRCS_MAIN), $(wildcard $(AIE_DIR)/src/*))
 
 AIE_FLAGS := -I "$(AIE_DIR)/src"
 
@@ -72,9 +74,11 @@ system.wdb:
 	vcdanalyze --vcd=AIEplace.vcd -wdb
 
 analyze: #system.wdb
-	vitis_analyzer $(BUILD_DIR_AIE)/Work_$(AIE)/$(TOP).aiecompile_summary
+	vitis_analyzer $(BUILD_DIR_AIE)/Work_$(AIE)/$(TOPGRAPH).aiecompile_summary
 #vitis_analyzer aiesimulator_output/default.aierun_summary
 
+browse:
+	$(PROJECT_ROOT)/aie/scripts/browse_aie.sh $(PROJECT_ROOT)/build/$(TARGET)/aie/Work_$(AIE)/aie
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 #Clean build products

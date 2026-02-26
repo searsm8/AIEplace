@@ -60,7 +60,7 @@ public:
         //adf::source(my_abc_kernel[index]) = "abc_kernel.cpp";
         //adf::runtime<adf::ratio>(my_abc_kernel[index]) = 0.5;
 
-        adf::source(my_partials_kernel[index]) = "partials_kernel.cpp";
+        adf::source(my_partials_kernel[index]) = "partials/partials_kernel.cpp";
         adf::runtime<adf::ratio>(my_partials_kernel[index]) = 0.9;
 
         #ifdef DEBUG_OUTPUT
