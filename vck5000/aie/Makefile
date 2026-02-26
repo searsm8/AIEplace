@@ -1,100 +1,70 @@
 # Makefile for AIEplace: Versal implementation of ePlace algorithm
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-all: aie aiesim
-all_x86: aie_x86 aiesim_x86
 
-#- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-#Clean build products
-clean: cleansim
-	rm -rf Work libadf.a
+PROJECT_ROOT ?= $(CURDIR)/..
+PLATFORM := /opt/xilinx/platforms/xilinx_vck5000_gen4x8_qdma_2_202220_1/xilinx_vck5000_gen4x8_qdma_2_202220_1.xpfm
 
-cleansim:
-	rm -rf .Xil .ipcache vivado* *.xpe *.txt *.log *.wcfg *.wdb *.vcd
-	rm -rf xnwOut .AIE_SIM_CMD_LINE_OPTIONS pl_sample_count* *.html ISS_RPC_SERVER_PORT vitis_analyzer*
+BUILD_DIR := $(PROJECT_ROOT)/build
+BUILD_DIR_AIE := $(BUILD_DIR)/$(TARGET)/aie
+AIE_LIBADF := $(BUILD_DIR_AIE)/libadf_$(AIE).a
 
-#- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-#Compile AIE code
-aie: libadf.a
+AIE_DIR := $(CURDIR)/src/$(AIE)
 
 TOP := TopGraph
-#TOP := partials/PartialsGraph
-GRAPH_TOP := src/${TOP}.cpp
+AIE_SRCS_MAIN := $(DIR_AIE)/src/$(AIE)/$(TOPGRAPH).cpp
+AIE_SRCS_OTHER := $(filter-out $(AIE_SRCS_MAIN), $(wildcard $(AIE_DIR)/*))
 
-TARGET ?= hw# choose hw or x86sim
+ifeq ($(TARGET),sw_emu)
+    TARGET := x86sim
+else
+    TARGET := hw
+endif
 
-DSPLIB_ROOT := ${HOME}/Vitis_Libraries/dsp# Location of Vitis_Libraries/dsp
-#XILINX_VITIS := /home/nx08/shared/fpga/xilinx/2022.1/Vitis/2022.1
+AIE_FLAGS := -I "$(AIE_DIR)/src"
 
-AIE_FLAGS := -include=src
-AIE_FLAGS += -include=src/partials
-AIE_FLAGS += -include=src/density
-AIE_FLAGS += -include=$(DSPLIB_ROOT)/L1/include/aie
-AIE_FLAGS += -include=$(DSPLIB_ROOT)/L1/src/aie
-AIE_FLAGS += -include=$(DSPLIB_ROOT)/L1/tests/aie/inc
-AIE_FLAGS += -include=$(DSPLIB_ROOT)/L1/tests/aie/src
-AIE_FLAGS += -include=$(DSPLIB_ROOT)/L2/include/aie
-AIE_FLAGS += -include=$(DSPLIB_ROOT)/L2/tests/aie/common/inc
-AIE_FLAGS += -include=../host/src/include
-#AIE_FLAGS += -include=$(XILINX_VITIS)/aietools/include/
+# Add subcomponent variables
+-include $(AIE_DIR)/makeflags.mk
+
+# DEBUG vars (TODO: add ifdef DEBUG around it)
 AIE_FLAGS += --verbose
-#AIE_FLAGS += --platform=$(PLATFORM) # platform not needed for VCK5000?
 AIE_FLAGS += --kernel-linting# Used for debugging, has overhead!
-AIE_FLAGS += --event-trace=runtime 
+AIE_FLAGS += --event-trace=runtime
 AIE_FLAGS += -xlopt=1
 AIE_FLAGS += --stacksize=2048
-AIE_FLAGS += --constraints=constraints.json # to specify constraints such as location or placement bounding box.
 
+# to specify constraints such as location or placement bounding box.
+#AIE_FLAGS += --constraints=constraints.json
+
+# Ensures the target recipe dirs exist
+dir_guard = @mkdir -p $(@D)
+
+.PHONY: all
+all: $(AIE_LIBADF)
+
+#- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # Compile a full graph for AIEplace application, including multiple partials graphs and density graph
-.PHONY: libadf.a
-libadf.a: src/*
+$(AIE_LIBADF): $(AIE_SRCS_MAIN) $(AIE_SRCS_OTHER)
+	$(dir_guard)
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	@echo "INFO: Running aiecompiler for all AIEplace graphs and kernels..."
-	@rm -rf Work
-	@mkdir -p Work
-	aiecompiler --target=${TARGET} ${AIE_FLAGS} --workdir=./Work ${GRAPH_TOP}
-
-# Compile a graph for only partials computation
-partials: src/partials/*
-	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
-	@echo "INFO: Running aiecompiler for partials..."
-	@rm -rf Work
-	@mkdir -p Work
-	aiecompiler --target=${TARGET} ${AIE_FLAGS} --workdir=./Work src/partials/PartialsGraph.cpp
-
-# Compile a graph for only density computation
-density: src/density/*
-	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
-	@echo "INFO: Running aiecompiler for density..."
-	@rm -rf Work
-	@mkdir -p Work
-	aiecompiler --target=${TARGET} ${AIE_FLAGS} --workdir=./Work src/density/DCTGraph.cpp
-
-
-
-x86: 
-	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
-	@echo "INFO: Running aiecompiler for x86sim..."
-	@rm -rf Work libadf.a
-	@mkdir -p Work
-	aiecompiler --target=x86sim --include="src" --workdir=./Work_x86 ${GRAPH_TOP} ${AIE_FLAGS}
+	aiecompiler --target=${TARGET} --platform=$(PLATFORM) ${AIE_FLAGS} --workdir=$(@D)/Work_$(AIE) $< --output-archive $@
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+.PHONY: aiesim x86sim
 # Simulate AIE code
-aiesim: cleansim
+aiesim:  $(BUILD_DIR)/hw/aie/libadf_$(AIE).a
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	@echo "INFO: Running aiesimulator..."
-	aiesimulator --pkg-dir=./Work --profile --dump-vcd AIEplace --hang-detect-time=10000 \
+	aiesimulator --pkg-dir=$(<D)/Work_$(AIE) --profile --dump-vcd=AIEplace --hang-detect-time=10000 --output-dir=$(BUILD_DIR)/x86simulator_output
 
-
-x86sim: cleansim
+x86sim:  $(BUILD_DIR)/x86sim/aie/libadf_$(AIE).a
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	@echo "INFO: Running x86simulator..."
-	x86simulator --pkg-dir=./Work_x86
-
+	x86simulator --pkg-dir=$(<D)/Work_$(AIE) --output-dir=$(BUILD_DIR)/x86simulator_output
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # Analysis
-#.PHONY: vcdanalyze system.wdb
+.PHONY: vcdanalyze analyze
 # make vcdanalyze processes the trace, but this can also be done in the analyzer GUI
 vcdanalyze: system.wdb
 
@@ -102,7 +72,23 @@ system.wdb:
 	vcdanalyze --vcd=AIEplace.vcd -wdb
 
 analyze: #system.wdb
-	vitis_analyzer ./Work/$(TOP).aiecompile_summary
+	vitis_analyzer $(BUILD_DIR_AIE)/Work_$(AIE)/$(TOP).aiecompile_summary
 #vitis_analyzer aiesimulator_output/default.aierun_summary
 
+
+#- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+#Clean build products
+.PHONY: clean clean_x86sim clean_hw clean_sim
+
+clean: clean_x86sim clean_hw clean_sim
+
+clean_x86sim:
+	rm -rf $(BUILD_DIR)/x86sim/aie
+clean_hw:
+	rm -rf $(BUILD_DIR)/hw/aie
+
+clean_sim:
+	rm -rf .Xil .ipcache vivado* *.xpe *.txt *.log *.wcfg *.wdb *.vcd
+	rm -rf xnwOut .AIE_SIM_CMD_LINE_OPTIONS pl_sample_count* *.html ISS_RPC_SERVER_PORT vitis_analyzer*
+	rm -rf $(BUILD_DIR)/x86simulator_output $(BUILD_DIR)/aiesimulator_output
 

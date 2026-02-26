@@ -1,12 +1,18 @@
 # Top level Makefile which calls subdirectory Makefiles
 
-# Modify these parameters to determine what is built
-AIE_GRAPH = aie# choose: aie, partials, or density
+# Targets: sw_emu, hw_emu, hw
+TARGET ?= hw
+
+AIE := mark_v1
+PL := mark_v1
+
+PROJECT_ROOT := $(CURDIR)
+BUILD_DIR := $(PROJECT_ROOT)/build
 
 .PHONY: help all aie partials density pl repackage host clean
 
 help:
-	@echo *#*# Makefile for vck5000 implementation of AIEplace *#*#
+	@echo "*#*# Makefile for vck5000 implementation of AIEplace *#*#"
 	@echo You can build the different parts of the application with these commands:
 	@echo -e '\t"make aie"':'\t' Build the AIE graph configuration. Output: libadf.a
 	@echo -e '\t"make partials"': Build the AIE graph for only partials computation.
@@ -16,21 +22,18 @@ help:
 	@echo -e '\t"make host"':'\t' Builds the host code which runs on a host x86 machine.
 	@echo -e '\t"make all"':'\t' Builds the the entire application (aie, pl, and host).
 
-all: $(AIE_GRAPH) pl host
+all: xclbin host
 
 aie:
-	$(MAKE) -C aie $(AIE_GRAPH)
-
-partials:
-	$(MAKE) -C aie partials
-
-density:
-	$(MAKE) -C aie density
+	$(MAKE) -C aie PROJECT_ROOT=$(PROJECT_ROOT) TARGET=$(TARGET) AIE=$(AIE)
 
 pl:
-	$(MAKE) -C pl pl
+	$(MAKE) -C pl PROJECT_ROOT=$(PROJECT_ROOT) TARGET=$(TARGET) PL=$(PL)
 
-repackage:
+xsa: $(XSA)
+	$(MAKE) -C pl repackage
+
+xclbin: $(XCLBIN)
 	$(MAKE) -C pl repackage
 
 host:

@@ -1,1 +1,0 @@
-../../../../test/compare_output.py
