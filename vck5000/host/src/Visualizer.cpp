@@ -207,7 +207,7 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     std::string ovfw_str = "OVFW: " + PREC(info.overflow);
     cairo_show_text (cr, ovfw_str.c_str());
 
-    cairo_move_to (cr, .65, .99);
+    cairo_move_to (cr, .6, .99);
     std::string lr_str = "LR: " + SCI(info.learning_rate);
     cairo_show_text (cr, lr_str.c_str());
 

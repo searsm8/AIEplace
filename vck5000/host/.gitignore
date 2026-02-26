@@ -1,4 +1,4 @@
 build
-src/*.o
-src/*.d
+src/objs
+src/objs
 

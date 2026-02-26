@@ -16,9 +16,9 @@
   // =============================================================================
 
   "input": {
-    //"benchmark": "host/benchmarks/ispd2005/adaptec1",
+    "benchmark": "host/benchmarks/ispd2005/adaptec1",
     //"benchmark": "host/benchmarks/ispd2015/mgc_superblue11_a",
-    "benchmark": "host/benchmarks/ispd2015/mgc_superblue19",
+    //"benchmark": "host/benchmarks/ispd2015/mgc_superblue19",
     //"benchmark": "host/benchmarks/ispd2015/toy",
 
     "xclbin": "bin/aieplace.hw.xclbin"
@@ -32,15 +32,17 @@
     "density_compute_method": "cpu",  // choose: aie, cpu
     "wirelength_method": "HPWL",      // choose: HPWL
 
-    "use_filler": false,               // whether to include filler cells in placement
+    "use_filler": true,               // whether to include filler cells in placement
     "target_utilization": 0.9,        // target utilization for density control
 
     // Basic hyperparameters
     "gamma": 4,
-    "max_iterations": 200,
+    "max_iterations": 1200,
     "max_threads": 1,
     "init_learning_rate": 50,
-    "init_global_lambda": 0,
+    "lambda_init_multiplier": 0.01, // multiplier used to set density penalty
+    "lambda_min_step_size": 0.95,   // minimum step size for lambda updates to prevent stagnation
+    "lambda_max_step_size": 1.05,   // maximum step size for lambda updates to avoid divergence
     "focus_nets": [],
     "rand_focus_IO": 10,
     "rand_focus_nets": 0,
@@ -61,7 +63,7 @@
     "adaptation_window": 5,
     "slow_improvement_threshold": 0.02,
     "high_overflow_threshold": 0.1,
-    "warmup_iterations": 10 
+    "warmup_iterations": 1 
   },
 
   "output": {
@@ -69,7 +71,7 @@
     "log_file": "logs/aieplace.log",
     "performance_jsonl": "results/aieplace_performance.jsonl",
     "visualize": true,
-    "iterations_per_export": 1,
+    "iterations_per_export": 10,
     "visualization_file": "visualizations/aieplace_visualization.png"
   }
 }

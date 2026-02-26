@@ -76,24 +76,46 @@ struct XY
 
     // default constructor initializes to 0,0
     XY () { clear(); }
+    XY (float x_val, float y_val) : x(x_val), y(y_val) {}
 
     bool isClose(XY other)
     {
-        bool close = true;
         float diff_x = abs(x - other.x);
-        if(!((diff_x < MIN_TOL) || (abs(diff_x / x) < MIN_TOL)))
-            close = false;
         float diff_y = abs(y - other.y);
-        if(!((diff_y < MIN_TOL) || (abs(diff_y / y) < MIN_TOL)))
-            close = false;
-        return close;
+        
+        bool close_x = (diff_x < MIN_TOL) || (x != 0.0f && (diff_x / abs(x)) < MIN_TOL);
+        bool close_y = (diff_y < MIN_TOL) || (y != 0.0f && (diff_y / abs(y)) < MIN_TOL);
+        
+        return close_x && close_y;
     }
+
     string toString()
     {
         std::ostringstream ss;
         ss << "(" << x << ", " << y << ")";
         return ss.str();
     }
+
+    XY operator+(const XY& other) const {
+        return XY{x + other.x, y + other.y};
+    }
+
+    XY& operator+=(const XY& other) {
+        x += other.x;
+        y += other.y;
+        return *this;
+    }
+
+    XY operator-(const XY& other) const {
+        return XY{x - other.x, y - other.y};
+    }
+
+    XY operator-=(const XY& other) {
+        x -= other.x;
+        y -= other.y;
+        return *this;
+    }
+
 };
 
 typedef XY Point; // alias for XY

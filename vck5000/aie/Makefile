@@ -46,7 +46,7 @@ AIE_FLAGS += --constraints=constraints.json # to specify constraints such as loc
 
 # Compile a full graph for AIEplace application, including multiple partials graphs and density graph
 .PHONY: libadf.a
-libadf.a: src/*
+libadf.a:
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	@echo "INFO: Running aiecompiler for all AIEplace graphs and kernels..."
 	@rm -rf Work
@@ -54,17 +54,17 @@ libadf.a: src/*
 	aiecompiler --target=${TARGET} ${AIE_FLAGS} --workdir=./Work ${GRAPH_TOP}
 
 # Compile a graph for only partials computation
-partials: src/partials/*
+partials:
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
-	@echo "INFO: Running aiecompiler for partials..."
+	@echo "INFO: Running aiecompiler to build PartialsGraph..."
 	@rm -rf Work
 	@mkdir -p Work
 	aiecompiler --target=${TARGET} ${AIE_FLAGS} --workdir=./Work src/partials/PartialsGraph.cpp
 
 # Compile a graph for only density computation
-density: src/density/*
+density:
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
-	@echo "INFO: Running aiecompiler for density..."
+	@echo "INFO: Running aiecompiler to build DCTGraph..."
 	@rm -rf Work
 	@mkdir -p Work
 	aiecompiler --target=${TARGET} ${AIE_FLAGS} --workdir=./Work src/density/DCTGraph.cpp

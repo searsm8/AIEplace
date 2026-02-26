@@ -44,27 +44,18 @@ void Placer::printWelcomeBanner()
 
 void Placer::printIterationResults()
 {
-    float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
-    hpwl_history.push_back(hpwl);
+    // every X iterations, export a table in markdown
+    int X = 1;
 
-    //float learning_coeff = learning_rate * die_size;
-    float learning_coeff = learning_rate * 1;
-    learning_coeff_history.push_back(learning_coeff);
-
-    float overflow = grid.computeTotalOverflow();
-    //if(iteration >=10)
-    ovfw_history.push_back(overflow);
-
-    //Logger::log_data("HPWL = " + std::to_string(hpwl));
-    // every 10 iterations, export a table in markdown
-    if (iteration % 1 == 0)
+    float hpwl = hpwl_history.back();
+    float overflow = ovfw_history.back();
+    if (iteration % X == 0)
     {
         Table top;
         top.add_row(RowStream{} << "Iteration" << iteration);
         top.add_row(RowStream{} << "HPWL" << SCI(hpwl));
         top.add_row(RowStream{} << "Overflow" << (overflow));
         top.add_row(RowStream{} << "Learning Rate" << PREC(learning_rate));
-        top.add_row(RowStream{} << "Learning Coeff" << PREC(learning_coeff));
         top.add_row(RowStream{} << "Global Lambda" << PREC(global_lambda));
         top.column(0).format().font_align(FontAlign::right);
         top.column(1).format().font_align(FontAlign::left);
@@ -115,7 +106,7 @@ void Placer::plotHistories() {
     ovfw_plotter.savePNG(data_dir / "ovfw_history.png");
 
     CairoPlotter coeff_plotter(800, 600);
-    coeff_plotter.plotHistory(learning_coeff_history, "Learning Coefficient History", "Learning Coefficient", 1.0, 0.2, 0.2);
+    coeff_plotter.plotHistory(learning_rate_history, "Learning Coefficient History", "Learning Coefficient", 1.0, 0.2, 0.2);
     coeff_plotter.savePNG(data_dir / "learning_coeff_history.png");
 
     // Create combined plot
@@ -411,6 +402,17 @@ void Placer::initializeFocus()
         db.addFocusNet(iter->second);
         std::advance(iter, 1);
     }
+}
+
+void Placer::recordIterationResults()
+{
+    float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
+    hpwl_history.push_back(hpwl);
+
+    learning_rate_history.push_back(learning_rate);
+
+    float overflow = grid.computeTotalOverflow();
+    ovfw_history.push_back(overflow);
 }
 
 AIEPLACE_NAMESPACE_END

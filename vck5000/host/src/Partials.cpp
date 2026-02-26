@@ -9,6 +9,42 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
+void Placer::computeAllPartials()
+{
+    if(partials_method == "aie") {
+        #ifdef USE_XILINX_XRT
+            computeAllPartials_AIE();
+        #else
+            Logger::log_error("partials_method 'aie' requires XRT. Recompile with BUILD_XRT=1 or use 'cpu'/'simple'");
+            exit(1);
+        #endif
+    }
+    else if(partials_method == "cpu") {
+        computeAllPartials_CPU();
+    }
+    else if(partials_method == "simple") {
+        computeAllPartials_simple();
+    }
+    else if(partials_method == "orig") {
+        #ifdef USE_TBB
+            computeAllPartials_CPU_orig();
+        #else
+            Logger::log_error("partials_method 'orig' requires TBB. Recompile with -DUSE_TBB or use 'cpu'/'simple'");
+            exit(1);
+        #endif
+    }
+    else if(partials_method == "hybrid") {
+        //computeAllPartials_CPU_hybrid();
+    }
+    else if(partials_method == "threaded") {
+        //computeAllPartials_ThreadSafe();
+    }
+    else { 
+        Logger::log_error("Invalid partials_compute_method specified in config file"); 
+        exit(1);
+    }
+}
+
 /***************
  * XRT/AIE ACCELERATION FUNCTIONS - VCK5000 only
  *
@@ -458,6 +494,14 @@ void Placer::comparePartialResults()
     std::stringstream ss;
     ss << "errors: " << error_count << "\ttotal: " << total << "\tproportion: " << float(error_count)/float(total) << endl;
     Logger::log_error(ss.str());
+}
+
+XY Placer::getNodePartials(Node* node_p)
+{
+    if(partials_method == "aie")
+        return node_p->partials_aie;
+    else
+        return node_p->terms_cpu.partials;
 }
 
 AIEPLACE_NAMESPACE_END

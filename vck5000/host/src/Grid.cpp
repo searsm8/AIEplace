@@ -153,7 +153,6 @@ float Grid::computeTotalOverflow()
     for (int col = 0; col < m_bins_per_row; col++)
         for (int row = 0; row < m_bins_per_col; row++) {
             auto bin_overflow = m_bins[col][row].getOverflowRatio();
-            //if(bin_overflow > 0)
             total += m_bins[col][row].getOverflowRatio();
         }
     return total;

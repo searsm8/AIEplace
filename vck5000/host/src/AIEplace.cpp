@@ -23,65 +23,39 @@ void Placer::performIteration()
     iterationReset();
 
     // Compute terms for HPWL partials
-    if(partials_method == "aie") {
-#ifdef USE_XILINX_XRT
-        computeAllPartials_AIE();
-#else
-        Logger::log_error("partials_method 'aie' requires XRT. Recompile with BUILD_XRT=1 or use 'cpu'/'simple'");
-        exit(1);
-#endif
-    }
-    else if(partials_method == "cpu") {
-        computeAllPartials_CPU();
-    }
-    else if(partials_method == "simple") {
-        computeAllPartials_simple();
-    }
-    else if(partials_method == "orig") {
-#ifdef USE_TBB
-        computeAllPartials_CPU_orig();
-#else
-        Logger::log_error("partials_method 'orig' requires TBB. Recompile with -DUSE_TBB or use 'cpu'/'simple'");
-        exit(1);
-#endif
-    }
-    else if(partials_method == "hybrid") {
-        //computeAllPartials_CPU_hybrid();
-    }
-    else if(partials_method == "threaded") {
-        //computeAllPartials_ThreadSafe();
-    }
-    else { 
-        Logger::log_error("Invalid partials_compute_method specified in config file"); 
-        exit(1);
-    }
+    computeAllPartials();
 
-    // Compare results to ensure correctness
+    // DEBUGGING: Compare results to ensure correctness
     //computeAllPartials_CPU();
     //comparePartialResults();
 
     // Compute Electric Fields in each bin
     computeOverlaps(); // Density Map computation
+
+    // Compute E-fields based on density map
+    computeElectricFields();
+
+    //normalizeElectricFields(); // is this needed? is it helpful?
+
+    // DEBUGGING
     //db.printOverlaps();
     //grid.printOverflows();
-
-    if(density_method == "aie") {
-#ifdef USE_XILINX_XRT
-        computeElectricFields_AIE(); // Accelerated compute on AIEs
-#else
-        Logger::log_error("density_method 'aie' requires XRT. Recompile with BUILD_XRT=1 or use 'cpu'");
-        exit(1);
-#endif
-    } else if(density_method == "cpu") {
-        //computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
-        computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
-    }
-    normalizeElectricFields(); // why is this needed?
-    //computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
     //placer.grid.printElectricFields();
+
+    if(iteration == 1)
+    {
+        recordInitialHPWL();
+        initializeLambda();
+    }
 
     // Perform iteration node movement
     nudgeAllNodes();
+
+    recordIterationResults();
+
+    // Dynamically update hyperparameters based on convergence metrics and iteration progress
+    updateHyperparameters();
+
     printIterationResults();
 }
 
@@ -106,15 +80,12 @@ void Placer::run()
     initializePlacement(target, 0, grid.getDieWidth()/4); // even spread around center
     //initializePlacement(target, 0, 500); // Close placement for testing purposes
 
-    recordInitialHPWL();
-
     bool converged = false;
     while( !converged )
     {
         TIME_BLOCK("Algorithm Block");
 
         performIteration();
-        updateHyperparameters();
 
         // Check for convergence using adaptive criteria
         converged = checkConvergence();
@@ -148,66 +119,88 @@ void Placer::updateHyperparameters()
 {
     // Warm start, for first few iterations use initial learning rate
     if (iteration < cfg["params"]["warmup_iterations"]) {
-        Logger::log_detail("Using initial learning rate: " + std::to_string(learning_rate));
+        Logger::log_detail("Warmup iteration. Skip hyperparam update.");
         return;
     }
 
-    if(cfg["params"]["naive_decay"]) {
-        // Naive approach: decay learning rate by a factor every N iterations
-        if (iteration % int(cfg["params"]["decay_interval"]) == 0) {
-            learning_rate *= float(cfg["params"]["decay_factor"]);
-            Logger::log_detail("Decayed learning rate: " + std::to_string(learning_rate));
-        }
+    updateLearningRate();
+
+    updateLambda();
+}
+
+/**
+ * @brief Dynamically update the learning rate based on observed changes 
+ * in positions and gradients. 
+ * Computes the L2 norm of position changes and gradient changes 
+ * across all nodes, and sets learning_rate to their ratio.
+ * 
+ */
+void Placer::updateLearningRate()
+{
+    float total_position_change = 0;
+    float total_gradient_change = 0;
+
+    for(auto item : db.getComponents()) {
+        Node* node_p = item.second;
+        Position<position_type>& curr_pos = node_p->getPosition();
+        Position<position_type>& prev_pos = node_p->getPrevPosition();
+        Position<position_type>& prev_grad = node_p->getPrevGrad();
+
+        float pos_change_x = curr_pos.getX() - prev_pos.getX();
+        float pos_change_y = curr_pos.getY() - prev_pos.getY();
+        total_position_change += (pos_change_x * pos_change_x + pos_change_y * pos_change_y);
+
+        float grad_change_x = node_p->combined_force.x - prev_grad.getX();
+        float grad_change_y = node_p->combined_force.y - prev_grad.getY();
+        total_gradient_change += (grad_change_x * grad_change_x + grad_change_y * grad_change_y);
+
+        // Update previous position and gradient for next iteration
+        prev_pos = curr_pos;
+        prev_grad.setX(node_p->combined_force.x);
+        prev_grad.setY(node_p->combined_force.y);
     }
 
-
-    else { // Use adaptive learning rate based on estimated Lipshitz constant of the gradient
-        float total_position_change = 0;
-        float total_gradient_change = 0;
-
-        for(auto item : db.getComponents()) {
-            Node* node_p = item.second;
-            Position<position_type>& curr_pos = node_p->getPosition();
-            Position<position_type>& prev_pos = node_p->getPrevPosition();
-            Position<position_type>& prev_grad = node_p->getPrevGrad();
-
-            float pos_change_x = curr_pos.getX() - prev_pos.getX();
-            float pos_change_y = curr_pos.getY() - prev_pos.getY();
-            total_position_change += (pos_change_x * pos_change_x + pos_change_y * pos_change_y);
-
-            float grad_change_x = node_p->combined_force.x - prev_grad.getX();
-            float grad_change_y = node_p->combined_force.y - prev_grad.getY();
-            total_gradient_change += (grad_change_x * grad_change_x + grad_change_y * grad_change_y);
-
-            // Update previous position and gradient for next iteration
-            prev_pos = curr_pos;
-            prev_grad.setX(node_p->combined_force.x);
-            prev_grad.setY(node_p->combined_force.y);
-        }
-
-        Logger::log_detail("Total position change: " + SCI(total_position_change));
-        Logger::log_detail("Total gradient change: " + SCI(total_gradient_change));
-        // Update learning rate to 1/L
-        learning_rate = sqrt(total_position_change) / sqrt(total_gradient_change + 1e-8f); // avoid div by 0
-        Logger::log_detail("Unclamped learning_rate: " + PREC(learning_rate));
-        // Clamp to reasonable range
-        learning_rate = std::clamp(learning_rate, 0.0001f, 400.0f);
-    }
+    Logger::log_detail("Total position change: " + SCI(total_position_change));
+    Logger::log_detail("Total gradient change: " + SCI(total_gradient_change));
+    // Update learning rate to 1/L
+    learning_rate = sqrt(total_position_change) / sqrt(total_gradient_change + 1e-8f); // avoid div by 0
+    Logger::log_detail("Unclamped learning_rate: " + PREC(learning_rate));
+    // Clamp to reasonable range
+    learning_rate = std::clamp(learning_rate, 0.0001f, 400.0f);
 
     Logger::log_detail("Updated learning_rate: " + PREC(learning_rate));
+}
 
+/** 
+ * @brief Update global lambda to increase density force over time
+ * Numerically analyze the current health of the optimization:
+ * Is HPWL improving?
+ * If yes, continue increasing lambda slowly.
+ * If not, decrease lambda to allow HPWL forces to have more influence and escape local minima.
+ */
+void Placer::updateLambda()
+{
+    if(iteration % 3 != 0) // only update lambda every few iterations since HPWL can be noisy
+    {
+        Logger::log_detail("Skipping lambda update on iteration " + std::to_string(iteration));
+        return;
+    }
+    float current_hpwl = hpwl_history.back();
+    float prev_hpwl = hpwl_history[hpwl_history.size() - 2]; // safe because we have warmup iterations
 
+    float lambda_min_step_size = cfg["params"]["lambda_min_step_size"];
+    float lambda_max_step_size = cfg["params"]["lambda_max_step_size"];
+    float lambda_multiplier = lambda_max_step_size;
 
-    // Update global lambda to increase density force over time
-    if (iteration % 10 == 0) {
-        if(global_lambda < 1.0f)
-            global_lambda += 0.1f;
-        else 
-            global_lambda *= 1.1;
-        // cap global_lambda to prevent instability
-        global_lambda = std::min(global_lambda, 1000.0f);
+    if (current_hpwl > prev_hpwl) // if HPWL is not improving, 
+    {
+        float hpwl_percent_change = 100.0f * (current_hpwl - prev_hpwl) / (prev_hpwl + 1e-8f); // avoid div by 0
+        // decrease multiplier to allow HPWL forces to have more influence
+        lambda_multiplier = std::max(lambda_min_step_size, std::pow(lambda_max_step_size, 1 - hpwl_percent_change)); 
     }
 
+    // perform the update
+    global_lambda *= lambda_multiplier;
 }
 
 /**
@@ -263,7 +256,7 @@ Placer::Placer(std::string config_filepath )
             gamma = cfg["params"]["gamma"];
             inv_gamma = 1.0f / gamma;
             learning_rate = cfg["params"]["init_learning_rate"];
-            global_lambda = cfg["params"]["init_global_lambda"];
+            global_lambda = 1.0f; // will be updated on iteration 1 after computing gradients
             MAX_THREADS = cfg["params"]["max_threads"];
             input_dir = fs::path(cfg["input"]["benchmark"]);
 
@@ -378,7 +371,7 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
     }
 
 
-    printIterationResults(); // Prints "iteration 0" starting statistics
+    //printIterationResults(); // Prints "iteration 0" starting statistics
     iteration = 1;
 
     // TODO
@@ -390,21 +383,32 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
     // and could be created en masse at hotspot areas to gently push other nodes away.
 }
 
-/***************
- * XRT/AIE ACCELERATION FUNCTIONS - VCK5000 only
- *
- * These functions are only compiled when BUILD_XRT environment variable is set.
- * They provide hardware-accelerated computation on Versal AI Engines via XRT.
- *
- * Partials functions moved to Partials.cpp
- * Density functions moved to Density.cpp
- ****************/
+/**
+ * @brief Set initial global lambda based on ratio of total HPWL gradient to density gradient
+ * Compute total force produced by the HPWL gradient,
+ * and the total force produced by the density gradient. 
+ * Set initial lambda as the ratio between these two to make them roughly balanced,
+ * multiplied by a small number which makes the density force initially weaker 
+ */
+void Placer::initializeLambda()
+{
+    float HPWL_L1_norm = 0.0f;
+    float density_L1_norm = 0.0f;
+    for(auto item : db.getComponents()) {
+        Node* node_p = item.second;
 
-#ifdef USE_XILINX_XRT
+        XY partials = getNodePartials(node_p);
+        HPWL_L1_norm += fabs(partials.x) + fabs(partials.y);
 
-// XRT-accelerated functions moved to respective files
+        XY electro_force = computeElectrostaticForce(node_p);
+        density_L1_norm += fabs(electro_force.x) + fabs(electro_force.y);
+    }
 
-#endif // USE_XILINX_XRT
+    float initial_multiplier = cfg["params"]["lambda_init_multiplier"];
+    global_lambda = (HPWL_L1_norm / (density_L1_norm + 1e-8f)) * initial_multiplier;
+    Logger::log_info("Initialized global lambda: " + std::to_string(global_lambda));
+}
+
 
 
 /***************
@@ -445,36 +449,11 @@ void Placer::nudgeAllNodes()
  */
 void Placer::nudgeNode(Node* node_p)
 {
-    XY electro_force;
-    electro_force.clear(); // set XY to 0
+    XY partials = getNodePartials(node_p);
+    XY electro_force = computeElectrostaticForce(node_p);
 
-    // for each bin that this node overlaps,
-    // compute electric force based on bin overlaps
-    for (BinOverlap b : node_p->getBinOverlaps()) {
-        Bin* bin = b.bin;
-        // add electric force
-        // What does ePlace do for this step?
-        //float coeff = global_lambda * bin->lambda * b.overlap/bin->bb.getArea(); // BAD:
-                                                                // dividing by bin area essentially zeroes out the force
-        float coeff = global_lambda * bin->lambda;
-        electro_force.x += coeff * bin->eField.x;
-        electro_force.y += coeff * bin->eField.y;
-    }
-
-
-    float partials_x, partials_y; 
-    if(partials_method == "aie") {
-        partials_x = node_p->partials_aie.x;
-        partials_y = node_p->partials_aie.y;
-    } else {
-        partials_x = node_p->terms_cpu.partials.x;
-        partials_y = node_p->terms_cpu.partials.y;
-    }
-
-
-    node_p->combined_force.x = electro_force.x - partials_x; // we subtract the partials to reduce net size!
-    node_p->combined_force.y = electro_force.y - partials_y;
-
+    node_p->combined_force.x = electro_force.x - partials.x; // we subtract the partials to reduce net size!
+    node_p->combined_force.y = electro_force.y - partials.y;
 
     XY move;
     move.x = learning_rate * node_p->combined_force.x; 

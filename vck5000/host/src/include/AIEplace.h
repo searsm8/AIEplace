@@ -90,7 +90,7 @@ public:
     long double algo_time;
     std::vector<float> hpwl_history; // history of HPWL values for each iteration
     std::vector<float> ovfw_history; // history of overflow values for each iteration
-    std::vector<float> learning_coeff_history; 
+    std::vector<float> learning_rate_history; 
 
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;
@@ -100,31 +100,37 @@ public:
 
     static void printWelcomeBanner();
 
+    // Getter functions
+    XY getNodePartials(Node* node_p);
+
     // Pre-run preparation
     void initializePlacement(Position<position_type> target_pos, int min_dist, int max_dist);
     void recordInitialHPWL();
     void iterationReset();
+    void initializeLambda();
 
-    // Functions which may be accelerated on AIEs
+    // Functions to be accelerated on AIEs
     void prepareInputDataPacket(float * input_data, int net_size);
-    void computeAllPartials_AIE ();
+    void computeAllPartials_AIE();
     void computePartials(Packet* p); 
     void receivePartials(Packet* p);
-    void computeElectricFields_AIE ();
+    void computeElectricFields_AIE();
 
     // Functions implemented on CPU
-    void computeAllPartials_CPU ();
+    void computeAllPartials();
+    void computeAllPartials_CPU();
     void computeAllPartials_simple();
 #ifdef USE_TBB
     void computeAllPartials_CPU_orig();
 #endif
-    void computeNetPartials_CPU (Net* net_p);
+    void computeNetPartials_CPU(Net* net_p);
     void computeNetPartials_ThreadSafe(Net* net_p);
-    void computeElectricFields_CPU ();
+    void computeElectricFields();
+    void computeElectricFields_CPU();
     void computeElectricFields_DCT();
     void normalizeElectricFields();
+    XY computeElectrostaticForce(Node* node_p);
 
-    // CPU only computations
     void compute_a_terms_CPU (Net* net_p);
     void compute_bc_terms_CPU (Net* net_p);
 
@@ -134,16 +140,21 @@ public:
     void compute_eField_DCT();
 
     void computeOverlaps();
+    
 
     // Comparison functions for verification
     void comparePartialResults();
     void compareDensityResults();
 
     // Run functions
-    void nudgeAllNodes();
     void updateHyperparameters();
+    void updateLearningRate();
+    void updateLambda();
+
+    void nudgeAllNodes();
     void nudgeNode(Node*);
     void performIteration();
+    void recordIterationResults();
     void printIterationResults();
     void plotHistories();
     void run();

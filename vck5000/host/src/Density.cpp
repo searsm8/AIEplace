@@ -8,6 +8,24 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
+void Placer::computeElectricFields()
+{
+    if(density_method == "aie") {
+        #ifdef USE_XILINX_XRT
+            computeElectricFields_AIE(); // Accelerated compute on AIEs
+        #else
+            Logger::log_error("density_method 'aie' requires XRT. Recompile with BUILD_XRT=1 or use 'cpu'");
+            exit(1);
+        #endif
+    } else if(density_method == "cpu") {
+        //computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
+        computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
+    } else { 
+        Logger::log_error("Invalid density_compute_method specified in config file"); 
+        exit(1);
+    }
+}
+
 /***************
  * XRT/AIE ACCELERATION FUNCTIONS - VCK5000 only
  ****************/
@@ -387,7 +405,7 @@ void Placer::computeOverlaps()
     for (auto filler : db.getFillers())
         grid.computeBinOverlaps(filler);
 
-    // DEBUG
+    // DEBUGGING
     double total_node_area = 0;
     for (auto item : db.getComponents())
         total_node_area += item.second->getArea();
@@ -400,11 +418,27 @@ void Placer::computeOverlaps()
         }
     }
 
-    Table t;
-    t.add_row(RowStream{} << "total_node_area" << total_node_area<< ""<<"");
-    t.add_row(RowStream{} << "total_overlap" << total_overlap);
-    t.add_row(RowStream{} << "single bin area" << grid.getBin(0,0).bb.getArea() << grid.getBin(7,8).bb.getArea() );
-    Logger::log("overlap", t);
+    //Table t;
+    //t.add_row(RowStream{} << "total_node_area" << total_node_area<< ""<<"");
+    //t.add_row(RowStream{} << "total_overlap" << total_overlap);
+    //t.add_row(RowStream{} << "single bin area" << grid.getBin(0,0).bb.getArea() << grid.getBin(7,8).bb.getArea() );
+    //Logger::log("overlap", t);
+}
+
+XY Placer::computeElectrostaticForce(Node* node_p)
+{
+    XY electro_force;
+
+    // for each bin that this node overlaps,
+    // compute electric force based on bin overlaps
+    for (BinOverlap b : node_p->getBinOverlaps()) {
+        Bin* bin = b.bin;
+        float coeff = global_lambda * bin->lambda;
+        electro_force.x += coeff * bin->eField.x;
+        electro_force.y += coeff * bin->eField.y;
+    }
+
+    return electro_force;
 }
 
 AIEPLACE_NAMESPACE_END
