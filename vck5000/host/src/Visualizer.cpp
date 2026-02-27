@@ -199,20 +199,20 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     std::string iter_str = "Iter: " + std::to_string(info.iteration);
     cairo_show_text (cr, iter_str.c_str());
 
-    cairo_move_to (cr, .15, .99);
-    std::string hpwl_str = "HPWL: " + PREC(info.hpwl);
+    cairo_move_to (cr, .12, .99);
+    std::string hpwl_str = "HPWL: " + SCI(info.hpwl);
     cairo_show_text (cr, hpwl_str.c_str());
 
-    cairo_move_to (cr, .4, .99);
-    std::string ovfw_str = "OVFW: " + PREC(info.overflow);
+    cairo_move_to (cr, .35, .99);
+    std::string ovfw_str = "OVFW: " + PREC_P(info.overflow, 2);
     cairo_show_text (cr, ovfw_str.c_str());
 
-    cairo_move_to (cr, .6, .99);
-    std::string lr_str = "LR: " + SCI(info.learning_rate);
+    cairo_move_to (cr, .52, .99);
+    std::string lr_str = "Alpha: " + SCI(info.alpha);
     cairo_show_text (cr, lr_str.c_str());
 
-    cairo_move_to (cr, .8, .99);
-    std::string lambda_str = "Lambda: " + PREC(info.global_lambda);
+    cairo_move_to (cr, .75, .99);
+    std::string lambda_str = "Lambda: " + SCI(info.global_lambda);
     cairo_show_text (cr, lambda_str.c_str());
 
     cairo_stroke(cr);

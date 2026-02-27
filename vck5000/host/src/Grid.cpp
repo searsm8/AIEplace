@@ -147,15 +147,16 @@ std::vector< std::vector<float> > Grid::get_a_uv()
     return a_uv;
 }
 
-float Grid::computeTotalOverflow()
+float Grid::computeTotalOverflow(float target_density, float total_movable_area)
 {
-    float total = 0;
+    float overflow_area = 0;
     for (int col = 0; col < m_bins_per_row; col++)
         for (int row = 0; row < m_bins_per_col; row++) {
-            auto bin_overflow = m_bins[col][row].getOverflowRatio();
-            total += m_bins[col][row].getOverflowRatio();
+            float bin_capacity = m_bins[col][row].bb.getArea() * target_density;
+            float excess = m_bins[col][row].total_overlap - bin_capacity;
+            overflow_area += std::max(0.0f, excess);
         }
-    return total;
+    return overflow_area / (total_movable_area + 1e-8f);
 }
 
 /*****************

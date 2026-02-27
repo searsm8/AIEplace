@@ -1,22 +1,16 @@
-{
   // =============================================================================
   // AIEPlace Configuration Options
   // =============================================================================
   // This JSON file contains the default configuration parameters for running
   // the AIEPlace placement algorithm. It includes options for method selection,
   // input file paths, and hyperparameters for the algorithm.
-  //
-  // Author: Mark Sears
-  //
-  // Field Documentation:
-  //   input.benchmark - Path to the benchmark file for placement
-  //   input.xclbin - Path to the XCLBIN file for hardware acceleration
-  //   params.partials_compute_method - choose: aie, cpu, simple, hybrid, threaded
-  //   params.density_compute_method - choose: aie, cpu
   // =============================================================================
 
+{
   "input": {
-    "benchmark": "host/benchmarks/ispd2005/adaptec1",
+    "benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
+    //"benchmark": "host/benchmarks/ispd2005/adaptec1",
+    //"benchmark": "host/benchmarks/ispd2005/bigblue1",
     //"benchmark": "host/benchmarks/ispd2015/mgc_superblue11_a",
     //"benchmark": "host/benchmarks/ispd2015/mgc_superblue19",
     //"benchmark": "host/benchmarks/ispd2015/toy",
@@ -33,45 +27,47 @@
     "wirelength_method": "HPWL",      // choose: HPWL
 
     "use_filler": true,               // whether to include filler cells in placement
-    "target_utilization": 0.9,        // target utilization for density control
 
-    // Basic hyperparameters
+    // Hyperparameters
     "gamma": 4,
-    "max_iterations": 1200,
-    "max_threads": 1,
-    "init_learning_rate": 50,
+    "max_threads": 1, // multithreading not yet implemented
+    "init_alpha": 50,
     "lambda_init_multiplier": 0.01, // multiplier used to set density penalty
+                                    // 0.01 means that density will contribute about 1%
+                                    // as much to the cost function as wirelength at the start of placement
     "lambda_min_step_size": 0.95,   // minimum step size for lambda updates to prevent stagnation
     "lambda_max_step_size": 1.05,   // maximum step size for lambda updates to avoid divergence
-    "focus_nets": [],
-    "rand_focus_IO": 10,
-    "rand_focus_nets": 0,
-    "rand_focus_nodes": 1,
-
-    // Convergence criteria (adaptive algorithm will stop early if met)
-    "min_iterations": 50,
-    "hpwl_improvement_threshold": 0.001,
-    "overflow_threshold": 0.75,
-    "convergence_window": 5,
-
-    // Simple decay parameters (if using simple decay instead of adaptive)
-    "naive_decay": false,
-    "decay_interval": 20,
-    "decay_factor": 0.9,
 
     // Adaptive hyperparameter schedule parameters
     "adaptation_window": 5,
     "slow_improvement_threshold": 0.02,
     "high_overflow_threshold": 0.1,
-    "warmup_iterations": 1 
+    "warmup_iterations": 10,
+
+    // Convergence criteria (adaptive algorithm will stop early if met)
+    "convergence_min_iterations": 50,
+    "convergence_max_iterations": 800,
+    "convergence_window": 5,
+    "convergence_hpwl_improvement_threshold": 0.01, // If HPWL improvement over window is below this, HPWL convergence is met.
+    "convergence_overflow_threshold": 0.07, // If total overflow is below this, density convergence is met.
+    "convergence_target_density": 0.9,  // Bin density maximum. If density within a bin exceeds this, 
+                                // we consider it overflow. Also used for filler insertion.
+
+    // Simple decay parameters (if using simple decay instead of adaptive)
+    "naive_decay": false,
+    "decay_interval": 20,
+    "decay_factor": 0.9
   },
 
   "output": {
-    "result_csv": "results_adaptec1.csv",
+    "results_csv": "results.csv",
     "log_file": "logs/aieplace.log",
     "performance_jsonl": "results/aieplace_performance.jsonl",
-    "visualize": true,
+    "visualize": false,
     "iterations_per_export": 10,
-    "visualization_file": "visualizations/aieplace_visualization.png"
+    "focus_nets": [],
+    "rand_focus_IO": 0,
+    "rand_focus_nets": 0,
+    "rand_focus_nodes": 0
   }
 }

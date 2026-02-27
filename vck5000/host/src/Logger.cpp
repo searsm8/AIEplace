@@ -207,15 +207,15 @@ void Logger::append_csv(ProgramStatBlock &stats, string filename)
         // Configuration
         out_file << "Output_Dir,";
         out_file << "Gamma,";
-        out_file << "Init_Learning_Rate,";
-        
+        out_file << "Init_Alpha,";
+
         // Results
         out_file << "Iterations,";
         out_file << "Final_HPWL,";
         out_file << "Initial_HPWL,";
         out_file << "HPWL_Improvement_Percent,";
         out_file << "Final_Overflow,";
-        out_file << "Final_Learning_Rate,";
+        out_file << "Final_Alpha,";
         
         // Timing (high-level)
         out_file << "Benchmark_Size,";
@@ -245,7 +245,7 @@ void Logger::append_csv(ProgramStatBlock &stats, string filename)
     // Configuration
     out_file << "\"" << stats.output_dir << "\",";
     out_file << stats.gamma << ",";
-    out_file << stats.init_learning_rate << ",";
+    out_file << stats.init_alpha << ",";
     
     // Results
     out_file << stats.iteration_count << ",";
@@ -253,7 +253,7 @@ void Logger::append_csv(ProgramStatBlock &stats, string filename)
     out_file << std::scientific << stats.initial_hpwl << ",";
     out_file << std::fixed << std::setprecision(2) << stats.hpwl_improvement << ",";
     out_file << std::scientific << stats.final_overflow << ",";
-    out_file << std::fixed << std::setprecision(6) << stats.final_learning_rate << ",";
+    out_file << std::fixed << std::setprecision(6) << stats.final_alpha << ",";
     
     // Timing (high-level)
     out_file << "\"" << stats.benchmark_size << "\",";

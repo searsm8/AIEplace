@@ -25,19 +25,19 @@ DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
     }
 
     // Add IO pins as focus nets for visualizer
-    int focus_nets_added = 0;
-    const int FOCUS_IO_LIMIT = 10;
-    for (auto item : mm_pins) {
-        if(focus_nets_added >= FOCUS_IO_LIMIT)
-            break;
-        Pin* pin = item.second;
-        for(auto net : pin->getNets()) {
-            addFocusNet(net);
-            Logger::log_info("Adding IO pin net to visualizer focus nets: " + net->to_string());
-            if(++focus_nets_added >= FOCUS_IO_LIMIT)
-                break;
-        }
-    }
+    //int focus_nets_added = 0;
+    //const int FOCUS_IO_LIMIT = 2;
+    //for (auto item : mm_pins) {
+    //    if(focus_nets_added >= FOCUS_IO_LIMIT)
+    //        break;
+    //    Pin* pin = item.second;
+    //    for(auto net : pin->getNets()) {
+    //        addFocusNet(net);
+    //        Logger::log_info("Adding IO pin net to visualizer focus nets: " + net->to_string());
+    //        if(++focus_nets_added >= FOCUS_IO_LIMIT)
+    //            break;
+    //    }
+    //}
 
     initializePacketContents();
 

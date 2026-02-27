@@ -402,21 +402,20 @@ void Placer::computeOverlaps()
     for (auto item : db.getComponents())
         grid.computeBinOverlaps(item.second);
 
-    for (auto filler : db.getFillers())
-        grid.computeBinOverlaps(filler);
+    // Fillers should NOT contribute to bin overlaps.
+    //for (auto filler : db.getFillers())
+    //    grid.computeBinOverlaps(filler);
 
     // DEBUGGING
-    double total_node_area = 0;
-    for (auto item : db.getComponents())
-        total_node_area += item.second->getArea();
-    //for (auto item : db.getPins())
+    //double total_node_area = 0;
+    //for (auto item : db.getComponents())
     //    total_node_area += item.second->getArea();
-    double total_overlap = 0;
-    for (int col = 0; col < grid.getBinsPerRow(); col++) {
-        for (int row = 0; row < grid.getBinsPerCol(); row++) {
-            total_overlap += grid.getBin(col, row).getOverlap();
-        }
-    }
+    //double total_overlap = 0;
+    //for (int col = 0; col < grid.getBinsPerRow(); col++) {
+    //    for (int row = 0; row < grid.getBinsPerCol(); row++) {
+    //        total_overlap += grid.getBin(col, row).getOverlap();
+    //    }
+    //}
 
     //Table t;
     //t.add_row(RowStream{} << "total_node_area" << total_node_area<< ""<<"");

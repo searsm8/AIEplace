@@ -46,7 +46,11 @@ public:
     std::vector< std::vector<float> > getRho();
     std::vector< std::vector<float> > get_a_uv();
 
-    float computeTotalOverflow();
+
+    // Returns normalized overflow in [0, 1]: total excess cell area above target_density
+    // across all bins, divided by total movable cell area (fillers excluded).
+    // Equivalent to Xplace's overflow metric; convergence target is typically ~0.07.
+    float computeTotalOverflow(float target_density, float total_movable_area);
 
     // Print Functions
     void printOverflows();

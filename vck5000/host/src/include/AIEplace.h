@@ -64,23 +64,31 @@ public:
 
     // Configuration object
     json cfg;
-
-    fs::path input_dir; // parameter loaded from json config file
+    fs::path input_dir;
     fs::path output_dir;
-    std::string result_csv;
+    std::string results_csv;
 
-    // hyper parameters
+    // Hyperparameters
     float gamma, inv_gamma; // smoothness factor for estimations; 
                        // larger means less smooth but more accurate
-    float learning_rate;
+    float alpha;
     float global_lambda;
 
     int die_size; // minimum of width and height of the die area
     int bins_per_row; // grid size
     int MAX_THREADS; // max number of threads to use
 
+    // Methods of computation, loaded from config file
     std::string partials_method;
     std::string density_method;
+
+    // Convergence Criteria, loaded from config file
+    int min_iterations;
+    int max_iterations;
+    float hpwl_improvement_threshold;
+    float overflow_threshold;
+    int convergence_window;
+    float target_density;
 
     // Execution tracking
     int iteration = 0;
@@ -90,7 +98,7 @@ public:
     long double algo_time;
     std::vector<float> hpwl_history; // history of HPWL values for each iteration
     std::vector<float> ovfw_history; // history of overflow values for each iteration
-    std::vector<float> learning_rate_history; 
+    std::vector<float> alpha_history;
 
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;
@@ -148,7 +156,7 @@ public:
 
     // Run functions
     void updateHyperparameters();
-    void updateLearningRate();
+    void updateAlpha();
     void updateLambda();
 
     void nudgeAllNodes();

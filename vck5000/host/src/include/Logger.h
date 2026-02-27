@@ -17,13 +17,16 @@ using std::string;
 
 // Macros for convenient logging in scientific notation
 #define SCI(val) \
-    (static_cast<std::ostringstream&>(std::ostringstream() << std::scientific << std::setprecision(3) << val)).str()
+    (static_cast<std::ostringstream&>(std::ostringstream() << std::scientific << std::setprecision(2) << val)).str()
 
 #define SCI_P(val, prec) \
     (static_cast<std::ostringstream&>(std::ostringstream() << std::scientific << std::setprecision(prec) << val)).str()
 
 #define PREC(val) \
-    (static_cast<std::ostringstream&>(std::ostringstream() << std::setprecision(3) << val)).str()
+    (static_cast<std::ostringstream&>(std::ostringstream() << std::setprecision(2) << val)).str()
+
+#define PREC_P(val, prec) \
+    (static_cast<std::ostringstream&>(std::ostringstream() << std::setprecision(prec) << val)).str()
 
 // Forward declarations
 class Timer;
@@ -73,7 +76,7 @@ public:
         std::string density_method;
         std::string wirelength_method;
         float gamma;
-        float init_learning_rate;
+        float init_alpha;
         int max_iterations;
         
         // Results
@@ -83,7 +86,7 @@ public:
         float hpwl_improvement;
         bool has_improvement;
         float final_overflow;
-        float final_learning_rate;
+        float final_alpha;
         bool convergence_reached;
         
         // Timing

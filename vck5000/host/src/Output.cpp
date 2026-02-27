@@ -54,9 +54,9 @@ void Placer::printIterationResults()
         Table top;
         top.add_row(RowStream{} << "Iteration" << iteration);
         top.add_row(RowStream{} << "HPWL" << SCI(hpwl));
-        top.add_row(RowStream{} << "Overflow" << (overflow));
-        top.add_row(RowStream{} << "Learning Rate" << PREC(learning_rate));
-        top.add_row(RowStream{} << "Global Lambda" << PREC(global_lambda));
+        top.add_row(RowStream{} << "Overflow" << PREC(overflow));
+        top.add_row(RowStream{} << "Alpha" << SCI(alpha));
+        top.add_row(RowStream{} << "Global Lambda" << SCI(global_lambda));
         top.column(0).format().font_align(FontAlign::right);
         top.column(1).format().font_align(FontAlign::left);
         Logger::log_data(top);
@@ -67,7 +67,7 @@ void Placer::printIterationResults()
     #ifdef CREATE_VISUALIZATION
         if(cfg["output"]["visualize"])
         if (iteration < 10 || iteration % int(cfg["output"]["iterations_per_export"]) == 0) {
-            PlotInfo info = {iteration, hpwl_history.back(), overflow, learning_rate, global_lambda, db.getBenchmarkName()};
+            PlotInfo info = {iteration, hpwl_history.back(), overflow, alpha, global_lambda, db.getBenchmarkName()};
             viz.drawPlacement(db, output_dir / "placement", info);
             //viz.drawElectricField(grid, output_dir / "efield", iteration);
         }
@@ -85,7 +85,7 @@ void Placer::printIterationResults()
     hpwl_file << std::setfill('0') << std::setw(3) << iteration << ", "
               << std::setprecision(2) << std::scientific << hpwl << ", "
               << std::setprecision(2) << std::scientific << overflow << ", "
-              << std::setprecision(2) << std::scientific << learning_rate << ", "
+              << std::setprecision(2) << std::scientific << alpha << ", "
               << std::setprecision(2) << std::scientific << global_lambda << endl;
     hpwl_file.close();
 }
@@ -106,7 +106,7 @@ void Placer::plotHistories() {
     ovfw_plotter.savePNG(data_dir / "ovfw_history.png");
 
     CairoPlotter coeff_plotter(800, 600);
-    coeff_plotter.plotHistory(learning_rate_history, "Learning Coefficient History", "Learning Coefficient", 1.0, 0.2, 0.2);
+    coeff_plotter.plotHistory(alpha_history, "Alpha History", "Alpha", 1.0, 0.2, 0.2);
     coeff_plotter.savePNG(data_dir / "learning_coeff_history.png");
 
     // Create combined plot
@@ -147,7 +147,7 @@ void Placer::createRunOutputStructure(std::string& run_output_dir, std::string& 
         fs::create_directories(run_dir);
     }
 
-    run_output_dir = run_dir.string();
+    output_dir = run_dir; // set the class member output_dir to this run's directory
 
     Logger::log_info("Created run directory: " + run_output_dir);
 }
@@ -163,7 +163,9 @@ void Placer::printFinalResults()
 
     // Calculate final metrics
     float final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
-    float final_overflow = grid.computeTotalOverflow();
+    float final_overflow = grid.computeTotalOverflow(
+                            cfg["params"]["convergence_target_density"],
+                            db.computeTotalComponentArea());
     float total_runtime = getInterval(pgrm_start_time, getTime());
     float iteration_avg = (iteration > 0) ? total_runtime / iteration : 0.0f;
 
@@ -198,7 +200,7 @@ void Placer::printFinalResults()
     Table hyperparams;
     hyperparams.add_row({"Hyperparameter", "Final Value"});
     hyperparams.add_row(RowStream{} << "gamma" << gamma);
-    hyperparams.add_row(RowStream{} << "learning rate" << learning_rate);
+    hyperparams.add_row(RowStream{} << "alpha" << alpha);
     hyperparams.add_row(RowStream{} << "partials method" << cfg["params"]["partials_compute_method"]);
     hyperparams.add_row(RowStream{} << "density method" << cfg["params"]["density_compute_method"]);
     hyperparams.add_row(RowStream{} << "wirelength method" << cfg["params"]["wirelength_method"]);
@@ -223,17 +225,18 @@ void Placer::printFinalResults()
     populateStatsBlock(stats, final_hpwl, final_overflow, total_runtime,
                       iteration_avg, hpwl_improvement, has_improvement, run_id);
 
-    Logger::append_csv(stats, cfg["output"]["result_csv"]);
+    Logger::append_csv(stats, results_csv);
 
     // Generate visualization in run-specific directory
     #ifdef CREATE_VISUALIZATION
         if(cfg["output"]["visualize"]) {
-            PlotInfo info = {iteration, final_hpwl, final_overflow, learning_rate, global_lambda, db.getBenchmarkName()};
+            PlotInfo info = {iteration, final_hpwl, final_overflow, alpha, global_lambda, db.getBenchmarkName()};
             viz.drawPlacement(db, run_output_dir, info);
-        }
-        // use python script to create gif from generated pngs in run directory
+
+            // use python script to create gif from generated pngs in run directory
             std::string gif_command = "python3 tools/gif_builder.py " + run_output_dir + "/placement" + " -d 100 -o " + run_output_dir + "/full_placement.gif";
             system(gif_command.c_str());
+        }
     #endif
 
     // Write placed design to DEF in run-specific directory
@@ -284,8 +287,8 @@ void Placer::populateStatsBlock(Logger::ProgramStatBlock& stats,
     stats.output_dir = output_dir.string();
     stats.wirelength_method = cfg["params"]["wirelength_method"];
     stats.gamma = gamma;
-    stats.init_learning_rate = cfg["params"]["init_learning_rate"];
-    stats.max_iterations = cfg["params"]["max_iterations"];
+    stats.init_alpha = cfg["params"]["init_alpha"];
+    stats.max_iterations = cfg["params"]["convergence_max_iterations"];
 
     // Results
     stats.iteration_count = iteration;
@@ -294,7 +297,7 @@ void Placer::populateStatsBlock(Logger::ProgramStatBlock& stats,
     stats.hpwl_improvement = hpwl_improvement;
     stats.has_improvement = has_improvement;
     stats.final_overflow = final_overflow;
-    stats.final_learning_rate = learning_rate;
+    stats.final_alpha = alpha;
     stats.convergence_reached = checkConvergence();
 
     // Timing
@@ -409,9 +412,11 @@ void Placer::recordIterationResults()
     float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
     hpwl_history.push_back(hpwl);
 
-    learning_rate_history.push_back(learning_rate);
+    alpha_history.push_back(alpha);
 
-    float overflow = grid.computeTotalOverflow();
+    float overflow = grid.computeTotalOverflow(
+            cfg["params"]["convergence_target_density"],
+            db.computeTotalComponentArea());
     ovfw_history.push_back(overflow);
 }
 

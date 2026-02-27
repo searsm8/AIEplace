@@ -52,11 +52,11 @@ void Placer::performIteration()
     nudgeAllNodes();
 
     recordIterationResults();
+    printIterationResults();
 
     // Dynamically update hyperparameters based on convergence metrics and iteration progress
     updateHyperparameters();
 
-    printIterationResults();
 }
 
 /**
@@ -69,14 +69,11 @@ void Placer::performIteration()
 void Placer::run()
 {
     algo_start = getTime();
+    std::srand(std::time(nullptr)); // use current time as seed for random generator
     // Set the center point of die area as initial placement target
     Position<position_type> target =
                 Position<position_type>(grid.getDieWidth()/2, grid.getDieHeight()/2);
 
-    std::srand(std::time(nullptr)); // use current time as seed for random generator
-    #ifdef CREATE_VISUALIZATION
-        initializeFocus();
-    #endif
     initializePlacement(target, 0, grid.getDieWidth()/4); // even spread around center
     //initializePlacement(target, 0, 500); // Close placement for testing purposes
 
@@ -87,21 +84,9 @@ void Placer::run()
 
         performIteration();
 
-        // Check for convergence using adaptive criteria
         converged = checkConvergence();
 
-
-        if (converged) {
-            if (iteration >= cfg["params"]["max_iterations"]) {
-                Logger::log_info("Convergence: Reached maximum iterations (" +
-                                std::to_string(cfg["params"]["max_iterations"].get<int>()) + ")");
-            } else {
-                Logger::log_info("Convergence: Met HPWL improvement and overflow criteria at iteration " +
-                                std::to_string(iteration));
-            }
-        } else {
-            iteration++;
-        }
+        iteration++;
     }
 
     plotHistories();
@@ -109,33 +94,159 @@ void Placer::run()
 }
 
 /**
+ * @brief Construct a new Placer object and initialize the placement system
+ *
+ * Reads configuration from JSON file, initializes the database from LEF/DEF files,
+ * sets up the grid structure, and initializes XRT/AIE drivers if hardware acceleration
+ * is enabled.
+ *
+ * @param config_filepath Path to the JSON configuration file
+ */
+Placer::Placer(std::string config_filepath ) 
+        { 
+            // Read configuration file (supports JSON with comments)
+            Logger::log_info("Reading runtime configuration from: " + config_filepath);
+            std::ifstream config_file(config_filepath);
+            // check if config file was found
+            if (!config_file.is_open()) {
+                Logger::log_error("Unable to open configuration file: " + config_filepath);
+                exit(1);
+            }
+
+            pgrm_start_time = getTime();
+
+            // Read file content and strip comments
+            std::stringstream buffer;
+            buffer << config_file.rdbuf();
+            config_file.close();
+            std::string config_content = buffer.str();
+            std::string json_content = JsonUtils::stripComments(config_content);
+
+            // Parse JSON
+            cfg = json::parse(json_content);
+
+            // Read hyperparameters
+            gamma = cfg["params"]["gamma"];
+            inv_gamma = 1.0f / gamma;
+            alpha = cfg["params"]["init_alpha"];
+            global_lambda = 1.0f; // will be updated on iteration 1 after computing gradients
+
+            // Read compute methods 
+            partials_method = cfg["params"]["partials_compute_method"];
+            density_method = cfg["params"]["density_compute_method"];
+            Logger::log_info("Partials compute method: " + partials_method);
+            Logger::log_info("Density compute method:  " + density_method);
+
+            // Read Convergence criteria
+            max_iterations = cfg["params"]["convergence_max_iterations"];
+            min_iterations = cfg["params"]["convergence_min_iterations"];
+            hpwl_improvement_threshold = cfg["params"]["convergence_hpwl_improvement_threshold"];
+            overflow_threshold = cfg["params"]["convergence_overflow_threshold"];
+            target_density = cfg["params"]["convergence_target_density"];
+
+            // Read other stuff
+            MAX_THREADS = cfg["params"]["max_threads"];
+            input_dir = fs::path(cfg["input"]["benchmark"]);
+            results_csv = cfg["output"]["results_csv"];
+
+// AI Summary:
+// The following section initializes the Xilinx Runtime (XRT) and AI Engine (AIE) drivers if hardware acceleration
+// is requested in the config file. It checks the specified compute methods for partials and density, 
+// and if either is set to "aie", it attempts to initialize the XRT device and load the xclbin file 
+// containing the AIE graph. If XRT support is not compiled in but AIE acceleration is requested, 
+// it logs an error and exits.
+#ifdef USE_XILINX_XRT
+            string xclbin_file = cfg["input"]["xclbin"];
+            if(partials_method == "aie" || density_method == "aie") {
+                TIME_BLOCK("AIE setup");
+                // Open Xilinx Device
+                xrt::device device = xrt::device(DEVICE_ID);
+                Logger::log_info("Device found -- ID: " + std::to_string(DEVICE_ID));
+
+                // Load xclbin which includes PL and AIE graph
+                Logger::log_info("Loading xclbin: \"" + xclbin_file + "\"");
+                xrt::uuid xclbin_uuid = device.load_xclbin(xclbin_file);
+                Logger::log_info("Success!");
+
+                if(partials_method == "aie") {
+                    // Create drivers which handle buffer IO
+                    for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
+                        partials_drivers[i].init(device, xclbin_uuid, i);
+                }
+
+                if(density_method == "aie") {
+                    density_driver[0].init(device, xclbin_uuid, 0, BINS_PER_ROW); // DCT graph
+                    density_driver[1].init(device, xclbin_uuid, 1, BINS_PER_ROW); // IDCT graph
+                    density_driver[2].init(device, xclbin_uuid, 2, BINS_PER_ROW); // IDXST graph
+                }
+            }
+#else
+            if(partials_method == "aie" || density_method == "aie") {
+                Logger::log_error("AIE acceleration requested but not compiled with XRT support!");
+                Logger::log_error("Recompile with XILINX_XRT environment variable set, or use CPU methods.");
+                exit(1);
+            }
+#endif
+
+            // Initialize database by reading LEF and DEF design files
+            db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
+
+            if(cfg["params"]["use_filler"])   
+                db.addFillers(target_density);
+
+            db_IO_time = getInterval(pgrm_start_time, getTime());
+            Logger::log_info("db read time: " + std::to_string(db_IO_time));
+
+            // Create organized output directory with timestamp and method names
+            // Must be after database initialization to get benchmark name
+            std::string output_dir_str, run_id;
+            createRunOutputStructure(output_dir_str, run_id);
+
+            grid = Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_ROW); 
+
+            die_size = min( grid.getDieWidth(), grid.getDieHeight() );
+
+            #ifdef CREATE_VISUALIZATION
+                initializeFocus();
+                if(cfg["output"]["visualize"])
+                    viz.init(db.getDieArea());
+            #endif
+        }
+
+/**
  * @brief Adaptive hyperparameter schedule based on convergence metrics
  *
- * Goal: modify learning_rate (dynamic step size) using Lipshitz constanst and backtracking per ePlace
+ * Goal: modify alpha (dynamic step size) using Lipshitz constanst and backtracking per ePlace
  *       modify global_lambda based on iteration progress
  * 
  */
 void Placer::updateHyperparameters()
 {
-    // Warm start, for first few iterations use initial learning rate
+    // Warm start: hold alpha fixed at init_alpha for the first few iterations
+    // so the BB estimate has valid position/gradient history to work from.
     if (iteration < cfg["params"]["warmup_iterations"]) {
         Logger::log_detail("Warmup iteration. Skip hyperparam update.");
         return;
     }
 
-    updateLearningRate();
+    updateAlpha();
 
     updateLambda();
 }
 
 /**
- * @brief Dynamically update the learning rate based on observed changes 
- * in positions and gradients. 
- * Computes the L2 norm of position changes and gradient changes 
- * across all nodes, and sets learning_rate to their ratio.
- * 
+ * @brief Compute the BB (Barzilai-Borwein) step size estimate alpha (α_k).
+ *
+ * alpha is the step size (1/L, inverse Lipschitz constant) used in nudgeNode()
+ * to scale the gradient when moving each node. It is estimated from the ratio
+ * of the global L2 norm of position changes to gradient changes across all nodes
+ * (Algorithm 2, BkTrk line 1 of ePlace-MS). This is the precursor to backtracking:
+ * the loop that refines alpha based on a consistency check will be added here.
+ *
+ * Uses m_prev_lookahead_pos and m_prev_grad stored on each node, which will
+ * track v_{k-1} positions and gradients once Nesterov is implemented.
  */
-void Placer::updateLearningRate()
+void Placer::updateAlpha()
 {
     float total_position_change = 0;
     float total_gradient_change = 0;
@@ -143,40 +254,39 @@ void Placer::updateLearningRate()
     for(auto item : db.getComponents()) {
         Node* node_p = item.second;
         Position<position_type>& curr_pos = node_p->getPosition();
-        Position<position_type>& prev_pos = node_p->getPrevPosition();
+        Position<position_type>& prev_pos = node_p->getPrevLookaheadPosition();
         Position<position_type>& prev_grad = node_p->getPrevGrad();
 
-        float pos_change_x = curr_pos.getX() - prev_pos.getX();
-        float pos_change_y = curr_pos.getY() - prev_pos.getY();
+        // Δx: position change since last iteration (will use v_k - v_{k-1} after Nesterov)
+        float pos_change_x = curr_pos.x - prev_pos.x;
+        float pos_change_y = curr_pos.y - prev_pos.y;
         total_position_change += (pos_change_x * pos_change_x + pos_change_y * pos_change_y);
 
+        // Δg: gradient change since last iteration (∇f_k - ∇f_{k-1})
         float grad_change_x = node_p->combined_force.x - prev_grad.getX();
         float grad_change_y = node_p->combined_force.y - prev_grad.getY();
         total_gradient_change += (grad_change_x * grad_change_x + grad_change_y * grad_change_y);
 
-        // Update previous position and gradient for next iteration
+        // Store current position and gradient for next iteration's Δx, Δg
         prev_pos = curr_pos;
         prev_grad.setX(node_p->combined_force.x);
         prev_grad.setY(node_p->combined_force.y);
     }
 
-    Logger::log_detail("Total position change: " + SCI(total_position_change));
-    Logger::log_detail("Total gradient change: " + SCI(total_gradient_change));
-    // Update learning rate to 1/L
-    learning_rate = sqrt(total_position_change) / sqrt(total_gradient_change + 1e-8f); // avoid div by 0
-    Logger::log_detail("Unclamped learning_rate: " + PREC(learning_rate));
-    // Clamp to reasonable range
-    learning_rate = std::clamp(learning_rate, 0.0001f, 400.0f);
+    // alpha = ||Δx|| / ||Δg||  (BB estimate of 1/L)
+    alpha = sqrt(total_position_change) / sqrt(total_gradient_change + 1e-8f);
+    Logger::log_detail("Unclamped alpha: " + PREC(alpha));
 
-    Logger::log_detail("Updated learning_rate: " + PREC(learning_rate));
+    alpha = std::clamp(alpha, 0.0001f, 400.0f);
+    Logger::log_detail("Alpha: " + PREC(alpha));
 }
 
 /** 
- * @brief Update global lambda to increase density force over time
+ * @brief Update global lambda to increase density force over time.
  * Numerically analyze the current health of the optimization:
  * Is HPWL improving?
  * If yes, continue increasing lambda slowly.
- * If not, decrease lambda to allow HPWL forces to have more influence and escape local minima.
+ * If not, slow or decrease lambda to allow HPWL forces to have more influence and escape local minima.
  */
 void Placer::updateLambda()
 {
@@ -214,111 +324,6 @@ void Placer::iterationReset()
     all_partials.clear();
     simple_partials.clear();
 }
-
-/**
- * @brief Construct a new Placer object and initialize the placement system
- *
- * Reads configuration from JSON file, initializes the database from LEF/DEF files,
- * sets up the grid structure, and initializes XRT/AIE drivers if hardware acceleration
- * is enabled.
- *
- * @param config_filepath Path to the JSON configuration file
- */
-Placer::Placer(std::string config_filepath ) 
-        { 
-            // Read configuration file (supports JSON with comments)
-            Logger::log_info("Reading runtime configuration from: " + config_filepath);
-            std::ifstream config_file(config_filepath);
-            // check if config file was found
-            if (!config_file.is_open()) {
-                Logger::log_error("Unable to open configuration file: " + config_filepath);
-                exit(1);
-            }
-
-            pgrm_start_time = getTime();
-
-            // Read file content and strip comments
-            std::stringstream buffer;
-            buffer << config_file.rdbuf();
-            config_file.close();
-            std::string config_content = buffer.str();
-            std::string json_content = JsonUtils::stripComments(config_content);
-
-            // Parse JSON
-            cfg = json::parse(json_content);
-
-            //initialize values from JSON
-            partials_method = cfg["params"]["partials_compute_method"];
-            density_method = cfg["params"]["density_compute_method"];
-            Logger::log_info("Partials compute method: " + partials_method);
-            Logger::log_info("Density compute method:  " + density_method);
-
-            gamma = cfg["params"]["gamma"];
-            inv_gamma = 1.0f / gamma;
-            learning_rate = cfg["params"]["init_learning_rate"];
-            global_lambda = 1.0f; // will be updated on iteration 1 after computing gradients
-            MAX_THREADS = cfg["params"]["max_threads"];
-            input_dir = fs::path(cfg["input"]["benchmark"]);
-
-            string xclbin_file = cfg["input"]["xclbin"];
-            result_csv = cfg["output"]["result_csv"];
-
-#ifdef USE_XILINX_XRT
-            if(partials_method == "aie" || density_method == "aie") {
-                TIME_BLOCK("AIE setup");
-                // Open Xilinx Device
-                xrt::device device = xrt::device(DEVICE_ID);
-                Logger::log_info("Device found -- ID: " + std::to_string(DEVICE_ID));
-
-                // Load xclbin which includes PL and AIE graph
-                Logger::log_info("Loading xclbin: \"" + xclbin_file + "\"");
-                xrt::uuid xclbin_uuid = device.load_xclbin(xclbin_file);
-                Logger::log_info("Success!");
-
-                if(partials_method == "aie") {
-                    // Create drivers which handle buffer IO
-                    for(int i = 0; i < PARTIALS_GRAPH_COUNT; i++)
-                        partials_drivers[i].init(device, xclbin_uuid, i);
-                }
-
-                if(density_method == "aie") {
-                    density_driver[0].init(device, xclbin_uuid, 0, BINS_PER_ROW); // DCT graph
-                    density_driver[1].init(device, xclbin_uuid, 1, BINS_PER_ROW); // IDCT graph
-                    density_driver[2].init(device, xclbin_uuid, 2, BINS_PER_ROW); // IDXST graph
-                }
-            }
-#else
-            if(partials_method == "aie" || density_method == "aie") {
-                Logger::log_error("AIE acceleration requested but not compiled with XRT support!");
-                Logger::log_error("Recompile with XILINX_XRT environment variable set, or use CPU methods.");
-                exit(1);
-            }
-#endif
-
-            // Initialize database by reading LEF and DEF design files
-            db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
-
-            if(cfg["params"]["use_filler"])   
-                db.addFillers(cfg["params"]["target_utilization"]);
-
-            db_IO_time = getInterval(pgrm_start_time, getTime());
-            Logger::log_info("db read time: " + std::to_string(db_IO_time));
-
-            // Create organized output directory with timestamp and method names
-            // Must be after database initialization to get benchmark name
-            std::string output_dir_str, run_id;
-            createRunOutputStructure(output_dir_str, run_id);
-            output_dir = fs::path(output_dir_str);
-
-            grid = Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_ROW); 
-
-            die_size = min( grid.getDieWidth(), grid.getDieHeight() );
-
-            #ifdef CREATE_VISUALIZATION
-                if(cfg["output"]["visualize"])
-                    viz.init(db.getDieArea());
-            #endif
-        }
 
 
 /**
@@ -452,16 +457,16 @@ void Placer::nudgeNode(Node* node_p)
     XY partials = getNodePartials(node_p);
     XY electro_force = computeElectrostaticForce(node_p);
 
-    node_p->combined_force.x = electro_force.x - partials.x; // we subtract the partials to reduce net size!
+    node_p->combined_force.x = electro_force.x - partials.x; // negate partials to move down the gradient
     node_p->combined_force.y = electro_force.y - partials.y;
 
     XY move;
-    move.x = learning_rate * node_p->combined_force.x; 
-    move.y = learning_rate * node_p->combined_force.y;
+    move.x = alpha * node_p->combined_force.x; 
+    move.y = alpha * node_p->combined_force.y;
 
 
     // Update the position of this node
-    node_p->translate(move.x, move.y);
+    node_p->translate(move);
 
     // Enforce die boundaries
     if (node_p->getX() < 0) node_p->setX(0);
@@ -490,46 +495,31 @@ void Placer::nudgeNode(Node* node_p)
  */
 bool Placer::checkConvergence()
 {
-    // Check max iterations as safety fallback
-    if (iteration >= cfg["params"]["max_iterations"])
+    // Check 0: Max iterations as safety fallback
+    if (iteration >= max_iterations) {
+        Logger::log_info("Convergence: Reached maximum iteration " +
+                        std::to_string(max_iterations));
         return true;
+    }
 
-    return false; // TEMP: disable convergence checking for testing purposes
-
-    // Need minimum iterations before checking convergence
-    int min_iterations = cfg["params"].contains("min_iterations") ?
-                        cfg["params"]["min_iterations"].get<int>() : 10;
-
+    // Check 1: Enforce minimum iterations
     if (iteration < min_iterations)
         return false;
 
-    // Get convergence thresholds from config (with defaults)
-    float hpwl_improvement_threshold = cfg["params"].contains("hpwl_improvement_threshold") ?
-                                      cfg["params"]["hpwl_improvement_threshold"].get<float>() : 0.01f; // 1% improvement
-    float overflow_threshold = cfg["params"].contains("overflow_threshold") ?
-                              cfg["params"]["overflow_threshold"].get<float>() : 0.05f; // 5% overflow
-    int convergence_window = cfg["params"].contains("convergence_window") ?
-                            cfg["params"]["convergence_window"].get<int>() : 5; // Check last 5 iterations
+    // Check 2: Overflow of each bin must be below overflow threshold 
+    bool overflow_converged = false;
 
-    // Check 1: Overflow of each bin must be below overflow threshold 
-    bool overflow_converged = true;
+    float overflow = grid.computeTotalOverflow( 
+                    target_density, 
+                    db.computeTotalComponentArea());
 
-    //DEBUGGING
-    //grid.printOverflows();
+    Logger::log_detail("Current overflow: " + std::to_string(overflow));
+    if (overflow < overflow_threshold) {
+        overflow_converged = true;
+        Logger::log_info("OVERFLOW CONVERGED (Less than: " + std::to_string(overflow_threshold) + ")");
+    }
 
-    for (int col = 0; col < grid.getBinsPerRow(); col++)
-        for (int row = 0; row < grid.getBinsPerCol(); row++)
-        {
-            float overflow = grid.getBin(col, row).getOverflowRatio();
-            if (overflow > overflow_threshold) {
-                overflow_converged = false;
-                if(overflow > overflow_threshold * 2) // only log significant overflows to avoid log spam
-                    Logger::log_detail("Bin (" + std::to_string(col) + ", " + std::to_string(row) + ") overflow: " + std::to_string(overflow));
-            }
-        }
-
-
-    // Check 2: HPWL improvement over last N iterations must be small
+    // Check 3: HPWL improvement over last N iterations must be small
     if (hpwl_history.size() < convergence_window + 1)
         return false;
 
@@ -537,13 +527,14 @@ bool Placer::checkConvergence()
     float current_hpwl = hpwl_history.back();
     float hpwl_improvement = (old_hpwl - current_hpwl) / old_hpwl;
 
-    bool hpwl_converged = (hpwl_improvement < hpwl_improvement_threshold);
+    bool hpwl_converged = (hpwl_improvement < hpwl_improvement_threshold) 
+                            && (hpwl_improvement > 0.0f);
 
     // Combined convergence: both criteria must be met
     if(overflow_converged && hpwl_converged) {
+        Logger::log_info("CONVERGENCE ACHIEVED at iteration " + std::to_string(iteration) +
+                        ", HPWL improvement = " + std::to_string(100*hpwl_improvement) +"%");
         return true;
-        Logger::log_info("Convergence met at iteration " + std::to_string(iteration) +
-                        ", HPWL improvement = " + std::to_string(hpwl_improvement));
     }
     else return false;
 }
