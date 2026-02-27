@@ -152,6 +152,104 @@ void Placer::createRunOutputStructure(std::string& run_output_dir, std::string& 
     Logger::log_info("Created run directory: " + run_output_dir);
 }
 
+// Append a program run record to the global results CSV file
+static void append_csv(Logger::ProgramStatBlock& stats, const std::string& filename)
+{
+    // Create results directory if it doesn't exist
+    fs::path results_dir("results");
+    if (!fs::exists(results_dir)) {
+        fs::create_directories(results_dir);
+    }
+
+    fs::path csv_path = results_dir / filename;
+
+    // Open file for appending
+    std::ofstream out_file;
+    bool need_header = !fs::exists(csv_path);
+    out_file.open(csv_path, std::ios_base::app);
+    out_file.imbue(std::locale::classic());  // Prevent comma thousands separators
+
+    // If file doesn't exist, create and write comprehensive header
+    if (need_header) {
+        // Basic run information
+        out_file << "Design,";
+
+        // Configuration
+        out_file << "Output_Dir,";
+        out_file << "Gamma,";
+        out_file << "Init_Alpha,";
+
+        // Results
+        out_file << "Iterations,";
+        out_file << "Final_HPWL,";
+        out_file << "Initial_HPWL,";
+        out_file << "HPWL_Improvement_Percent,";
+        out_file << "Final_Overflow,";
+        out_file << "Final_Alpha,";
+
+        // Timing (high-level)
+        out_file << "Benchmark_Size,";
+        out_file << "Total_Runtime_Sec,";
+        out_file << "DB_IO_Time_Sec,";
+        out_file << "Algorithm_Time_Sec,";
+        out_file << "Iteration_Avg_Sec,";
+
+        // Detailed function timing
+        out_file << "Partials_AIE_Time,";
+        //out_file << "Density_Compute_Time,";
+        //out_file << "Placement_Update_Time,";
+
+        // System metrics
+        out_file << "Memory_Usage_MB,";
+
+        // Status
+        out_file << "Success,";
+        out_file << "Error_Message,";
+        out_file << "Timestamp";
+        out_file << endl;
+    }
+
+    // Write data row
+    out_file << "\"" << stats.design_name << "\",";
+
+    // Configuration
+    out_file << "\"" << stats.output_dir << "\",";
+    out_file << stats.gamma << ",";
+    out_file << stats.init_alpha << ",";
+
+    // Results
+    out_file << stats.iteration_count << ",";
+    out_file << std::scientific << stats.final_hpwl << ",";
+    out_file << std::scientific << stats.initial_hpwl << ",";
+    out_file << std::fixed << std::setprecision(2) << stats.hpwl_improvement << ",";
+    out_file << std::scientific << stats.final_overflow << ",";
+    out_file << std::fixed << std::setprecision(6) << stats.final_alpha << ",";
+
+    // Timing (high-level)
+    out_file << "\"" << stats.benchmark_size << "\",";
+    out_file << std::fixed << std::setprecision(3);
+    out_file << stats.prgm_runtime << ",";
+    out_file << stats.db_IO_time << ",";
+    out_file << stats.algo_time << ",";
+    out_file << stats.iteration_avg_time << ",";
+
+    // Detailed function timing
+    out_file << Logger::getFunctionTime("computeAllPartials_AIE") << ",";
+    //out_file << Logger::getFunctionTime("computeDensity") << ",";
+    //out_file << Logger::getFunctionTime("updatePlacements") << ",";
+
+    // System metrics
+    out_file << stats.memory_usage_mb << ",";
+
+    // Status
+    out_file << (stats.success ? "TRUE" : "FALSE") << ",";
+    out_file << "\"" << stats.error_message << "\",";
+    out_file << "\"" << stats.timestamp << "\"";
+
+    out_file << endl;
+    out_file.close();
+}
+
 // Enhanced printFinalResults with organized output structure
 void Placer::printFinalResults()
 {
@@ -225,7 +323,7 @@ void Placer::printFinalResults()
     populateStatsBlock(stats, final_hpwl, final_overflow, total_runtime,
                       iteration_avg, hpwl_improvement, has_improvement, run_id);
 
-    Logger::append_csv(stats, results_csv);
+    append_csv(stats, results_csv);
 
     // Generate visualization in run-specific directory
     #ifdef CREATE_VISUALIZATION

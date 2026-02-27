@@ -135,10 +135,10 @@ public:
 
     // Report generation functions
     static void export_markdown(Table t, fs::path dir, string filename = "statistics");
-    static void append_csv(ProgramStatBlock &, string filename = "run_statistics.csv");
     static void export_eField(AIEplace::Grid& grid, fs::path dir, int iter);
     static void updateFunctionStats(string func_name, long long func_time);
     static Table printFunctionStats();
+    static double getFunctionTime(const std::string& func_name);
 
 }; // end class Logger
 
