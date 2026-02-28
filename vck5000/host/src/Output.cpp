@@ -11,7 +11,7 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-void Placer::printWelcomeBanner()
+void Placer::printWelcomeBanner(bool show_info)
 {
     // Raw string logo
     string logo = R"(
@@ -32,18 +32,23 @@ void Placer::printWelcomeBanner()
         .font_color(Color::white)
         .font_align(FontAlign::left);
 
-    Table info;
-    info.add_row({"Version:", AIEPLACE_VERSION});
-    info.format().hide_border();
-    banner.add_row({info});
-    banner.add_row({"VLSI global placement algorithm accelerated on AI Engines"});
-    banner.add_row({}); // This line intentionally left blank
+    if(show_info)
+    {
+        Table info;
+        info.add_row({"Version:", AIEPLACE_VERSION});
+        info.format().hide_border();
+        banner.add_row({info});
+        banner.add_row({"VLSI global placement algorithm accelerated on AI Engines"});
+        banner.add_row({}); // This line intentionally left blank
+    }
 
     banner.print(cout);
 }
 
 void Placer::printIterationResults()
 {
+    system("clear"); // Clear console for cleaner output each iteration
+    printWelcomeBanner(false);
     // every X iterations, export a table in markdown
     int X = 1;
 
@@ -52,6 +57,7 @@ void Placer::printIterationResults()
     if (iteration % X == 0)
     {
         Table top;
+        top.add_row(RowStream{} << "Benchmark" << db.getBenchmarkName());
         top.add_row(RowStream{} << "Iteration" << iteration);
         top.add_row(RowStream{} << "HPWL" << SCI(hpwl));
         top.add_row(RowStream{} << "Overflow" << PREC(overflow));
@@ -119,7 +125,7 @@ void Placer::plotHistories() {
 }
 
 // Enhanced function to create organized output structure
-void Placer::createRunOutputStructure(std::string& run_output_dir, std::string& run_id)
+void Placer::createRunOutputStructure()
 {
     // Generate run ID and timestamp
     auto now = std::chrono::system_clock::now();
@@ -133,33 +139,24 @@ void Placer::createRunOutputStructure(std::string& run_output_dir, std::string& 
     timestamp_ss << "_" << std::setfill('0') << std::setw(3) << ms.count();
     std::string timestamp = timestamp_ss.str();
 
-    // Generate run ID
-    run_id = db.getBenchmarkName() + "_" + timestamp;
-
-    // Create directory structure: ./results/<benchmark_name>/<timestamped_run_name>/
-    fs::path results_base("results");
-    fs::path benchmark_dir = results_base / db.getBenchmarkName();
-    fs::path run_dir = benchmark_dir / (timestamp + "_" +
+    // Create directory structure: <results_dir>/<benchmark_name>/<timestamped_run_name>/
+    output_dir = results_dir / db.getBenchmarkName() / (timestamp + "_" +
                                        cfg["params"]["partials_compute_method"].get<std::string>() + "_" +
                                        cfg["params"]["density_compute_method"].get<std::string>());
 
-    if (!fs::exists(run_dir))
-        fs::create_directories(run_dir);
+    fs::create_directories(output_dir);
 
-    output_dir = run_dir;
-
-    Logger::log_info("Created run directory: " + run_output_dir);
+    Logger::log_info("Created output directory: " + output_dir.string());
 }
 
 void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
                               float total_runtime, float iteration_avg,
                               float hpwl_improvement, const std::string& run_id)
 {
-    fs::path results_dir("results");
     if (!fs::exists(results_dir))
         fs::create_directories(results_dir);
 
-    fs::path csv_path = results_dir / results_csv;
+    fs::path csv_path = results_dir / "results.csv";
 
     std::ofstream out_file;
     bool need_header = !fs::exists(csv_path);
@@ -175,11 +172,11 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
         out_file << "Final Overflow,";
         out_file << "Final Step Length,";
         out_file << "Gamma,";
+        out_file << "Net Count,";
+        out_file << "Node Count,";
         out_file << "HPWL_Graph,";
         out_file << "Combined_Graph,";
         out_file << "Placement_GIF,";
-        out_file << "Net Count,";
-        out_file << "Node Count,";
         out_file << "Total Runtime Sec,";
         out_file << "DB IO Time Sec,";
         out_file << "Algorithm Time Sec,";
@@ -197,9 +194,10 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
     // Graph hyperlinks (only populated when visualization is built)
     std::string hpwl_graph_cell, combined_graph_cell, placement_gif_cell;
 #ifdef CREATE_VISUALIZATION
-    // Strip "results/" prefix so hyperlinks are relative to the CSV's location
+    // Strip results_dir prefix so hyperlinks are relative to the CSV's location
     std::string out_str = output_dir.string();
-    std::string rel_str = (out_str.rfind("results/", 0) == 0) ? out_str.substr(8) : out_str;
+    std::string results_prefix = results_dir.string() + "/";
+    std::string rel_str = (out_str.rfind(results_prefix, 0) == 0) ? out_str.substr(results_prefix.size()) : out_str;
     std::string hpwl_path    = rel_str + "/data/hpwl_history.png";
     std::string combined_path = rel_str + "/data/combined_history.png";
     std::string gif_path      = rel_str + "/full_placement.gif";
@@ -222,11 +220,11 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
     out_file << std::scientific << SCI(final_overflow) << ",";
     out_file << std::fixed << SCI(step_length) << ",";
     out_file << PREC(gamma) << ",";
+    out_file << db.getNetsVector().size() << ",";
+    out_file << db.getComponents().size() << ",";
     out_file << hpwl_graph_cell << ",";
     out_file << combined_graph_cell << ",";
     out_file << placement_gif_cell << ",";
-    out_file << db.getNetsVector().size() << ",";
-    out_file << db.getComponents().size() << ",";
     out_file << std::fixed << std::setprecision(3);
     out_file << total_runtime << ",";
     out_file << db_IO_time << ",";

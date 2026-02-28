@@ -31,7 +31,7 @@ private:
     float initial_hpwl = 0.0f;
     
     // Helper functions for DSE integration and output organization
-    void createRunOutputStructure(std::string& run_output_dir, std::string& run_id);
+    void createRunOutputStructure();
     void writeResultsCSV(float final_hpwl, float final_overflow,
                          float total_runtime, float iteration_avg,
                          float hpwl_improvement, const std::string& run_id);
@@ -64,7 +64,7 @@ public:
     json cfg;
     fs::path input_dir;
     fs::path output_dir;
-    std::string results_csv;
+    fs::path results_dir;
 
     // Hyperparameters
     float gamma, inv_gamma; // smoothness factor for estimations;
@@ -104,7 +104,7 @@ public:
     // Constructor
     Placer(std::string);
 
-    static void printWelcomeBanner();
+    static void printWelcomeBanner(bool show_info = true);
 
     // Getter functions
     XY getNodePartials(Node* node_p);

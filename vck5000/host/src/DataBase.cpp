@@ -269,8 +269,7 @@ float DataBase::computeTotalComponentArea()
     double total_area = 0;
     for(auto item : mm_components)
     {
-        Component* comp_p = item.second;
-        total_area += comp_p->getArea();
+        total_area += item.second->getArea();
     }
     return total_area;
 }

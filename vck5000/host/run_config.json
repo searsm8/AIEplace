@@ -8,10 +8,10 @@
 
 {
   "input": {
-    //"benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
+    "benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
     //"benchmark": "host/benchmarks/ispd2005/adaptec1",
     //"benchmark": "host/benchmarks/ispd2005/bigblue1",
-    "benchmark": "host/benchmarks/ispd2005/bigblue4",
+    //"benchmark": "host/benchmarks/ispd2005/bigblue4",
     //"benchmark": "host/benchmarks/ispd2015/mgc_superblue11_a",
     //"benchmark": "host/benchmarks/ispd2015/mgc_superblue19",
     //"benchmark": "host/benchmarks/ispd2015/toy",
@@ -61,7 +61,7 @@
   },
 
   "output": {
-    "results_csv": "results.csv",
+    "results_dir": "results/single_runs",
     "log_file": "logs/aieplace.log",
     "performance_jsonl": "results/aieplace_performance.jsonl",
     "visualize": false,

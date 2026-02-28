@@ -147,7 +147,7 @@ Placer::Placer(std::string config_filepath )
             // Read other stuff
             MAX_THREADS = cfg["params"]["max_threads"];
             input_dir = fs::path(cfg["input"]["benchmark"]);
-            results_csv = cfg["output"]["results_csv"];
+            results_dir = fs::path(cfg["output"]["results_dir"].get<std::string>());
 
 // AI Summary:
 // The following section initializes the Xilinx Runtime (XRT) and AI Engine (AIE) drivers if hardware acceleration
@@ -199,8 +199,7 @@ Placer::Placer(std::string config_filepath )
 
             // Create organized output directory with timestamp and method names
             // Must be after database initialization to get benchmark name
-            std::string output_dir_str, run_id;
-            createRunOutputStructure(output_dir_str, run_id);
+            createRunOutputStructure();
 
             grid = Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_ROW); 
 

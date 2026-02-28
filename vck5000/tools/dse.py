@@ -156,29 +156,30 @@ benchmark_list = [
                 "ispd2015/mgc_des_perf_a",
                 #"ispd2015/mgc_des_perf_b",
                 #"ispd2015/mgc_edit_dist_a",
-                "ispd2015/mgc_matrix_mult_1",
+                #"ispd2015/mgc_matrix_mult_1",
                 #"ispd2015/mgc_matrix_mult_2",
-                "ispd2015/mgc_matrix_mult_a",
+                #"ispd2015/mgc_matrix_mult_a",
                 #"ispd2015/mgc_matrix_mult_b",
                 #"ispd2015/mgc_matrix_mult_c",
-                "ispd2015/mgc_pci_bridge32_a",
+                #"ispd2015/mgc_pci_bridge32_a",
                 #"ispd2015/mgc_pci_bridge32_b",
-                "ispd2015/mgc_superblue11_a",
+                #"ispd2015/mgc_superblue11_a",
                 #"ispd2015/mgc_superblue12",
                 #"ispd2015/mgc_superblue14",
-                "ispd2015/mgc_superblue16_a",
-                "ispd2015/mgc_superblue19",
+                #"ispd2015/mgc_superblue16_a",
+                #"ispd2015/mgc_superblue19",
                 "ispd2005/adaptec1",
-                "ispd2005/adaptec2",
-                "ispd2005/adaptec3",
+                #"ispd2005/adaptec2",
+                #"ispd2005/adaptec3",
                 #"ispd2005/adaptec4",
-                "ispd2005/bigblue1",
-                "ispd2005/bigblue2",
+                #"ispd2005/bigblue1",
+                #"ispd2005/bigblue2",
                 #"ispd2005/bigblue3",
-                "ispd2005/bigblue4"
+                #"ispd2005/bigblue4"
                 ]
 #step_length_values = [10, 50, 100, 200, 300, 400, 500, 800, 1000]
-step_length_values = [50, 100, 200]
+#step_length_values = [50, 100, 200]
+step_length_values = [50]
 RUNS_PER_CONFIG = 1
 
 
@@ -204,9 +205,9 @@ def dse():
     config_path = "host/run_config_dse.json"
     args = [config_path]
 
-    # Generate a timestamped results filename to avoid overwriting previous runs
+    # Give every DSE sweep its own subdirectory so runs never collide
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    modify_config_parameter(config_path, "results_csv", f"DSE_results_{timestamp}.csv", section_path="output")
+    modify_config_parameter(config_path, "results_dir", f"results/DSE_{timestamp}", section_path="output")
 
     for benchmark in benchmark_list:
         print(f"\n=== Starting DSE for benchmark: {benchmark} ===")
