@@ -98,29 +98,29 @@ void Placer::printIterationResults()
 
 void Placer::plotHistories() {
 #ifdef CREATE_VISUALIZATION
-    fs::path data_dir = output_dir / "data";
-    if (!fs::exists(data_dir))
-        fs::create_directories(data_dir);
+    fs::path graph_dir = output_dir / "graphs";
+    if (!fs::exists(graph_dir))
+        fs::create_directories(graph_dir);
 
     // Create individual plots
     CairoPlotter hpwl_plotter(800, 600);
     hpwl_plotter.plotHistory(hpwl_history, "HPWL Convergence", "HPWL Value", 0.0, 0.5, 1.0);
-    hpwl_plotter.savePNG(data_dir / "hpwl_history.png");
+    hpwl_plotter.savePNG(graph_dir / "hpwl_history.png");
 
     CairoPlotter ovfw_plotter(800, 600);
     ovfw_plotter.plotHistory(ovfw_history, "Overflow", "OVFW Value", 0.0, 0.5, 1.0);
-    ovfw_plotter.savePNG(data_dir / "ovfw_history.png");
+    ovfw_plotter.savePNG(graph_dir / "ovfw_history.png");
 
     CairoPlotter coeff_plotter(800, 600);
     coeff_plotter.plotHistory(step_length_history, "Step Length History", "Step Length", 1.0, 0.2, 0.2);
-    coeff_plotter.savePNG(data_dir / "learning_coeff_history.png");
+    coeff_plotter.savePNG(graph_dir / "step_length_history.png");
 
     // Create combined plot
     CairoPlotter dual_plotter(800, 600);
     dual_plotter.plotDualHistory(hpwl_history, ovfw_history,
                                 "HPWL and Overflow History",
                                 "HPWL (normalized)", "Overflow (normalized)");
-    dual_plotter.savePNG(data_dir / "combined_history.png");
+    dual_plotter.savePNG(graph_dir / "combined_history.png");
 #endif
 }
 

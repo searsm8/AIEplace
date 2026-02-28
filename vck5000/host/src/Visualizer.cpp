@@ -142,6 +142,7 @@ void Visualizer::drawArrow(float x, float y, float x_mag, float y_mag)
 
 void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
 {
+    Logger::log_info("Exporting placement visualization to PNG...");
     // Draw items from back to front in order of Fillers, Components, Pins, Nets, Focus Nets, Focus Nodes
     // Start with a white background
     cairo_set_source_rgb (cr, 1.0, 1.0, 1.0); // white
@@ -208,11 +209,11 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     cairo_show_text (cr, ovfw_str.c_str());
 
     cairo_move_to (cr, .52, .99);
-    std::string lr_str = "Step Length: " + SCI(info.step_length);
+    std::string lr_str = "Step: " + SCI(info.step_length);
     cairo_show_text (cr, lr_str.c_str());
 
     cairo_move_to (cr, .75, .99);
-    std::string lambda_str = "Density Weight: " + SCI(info.density_weight);
+    std::string lambda_str = "DW: " + SCI(info.density_weight);
     cairo_show_text (cr, lambda_str.c_str());
 
     cairo_stroke(cr);

@@ -291,7 +291,7 @@ void Placer::updateDensityWeight()
 {
     if(iteration % 3 != 0) // only update density_weight every few iterations since HPWL can be noisy
     {
-        Logger::log_detail("Skipping density_weight update on iteration " + std::to_string(iteration));
+        //Logger::log_detail("Skipping density_weight update on iteration " + std::to_string(iteration));
         return;
     }
     float current_hpwl = hpwl_history.back();
@@ -531,8 +531,10 @@ bool Placer::checkConvergence()
 
     // Combined convergence: both criteria must be met
     if(overflow_converged && hpwl_converged) {
-        Logger::log_info("CONVERGENCE ACHIEVED at iteration " + std::to_string(iteration) +
-                        ", HPWL improvement = " + std::to_string(100*hpwl_improvement) +"%");
+        Logger::log_info("CONVERGENCE ACHIEVED at iteration " + std::to_string(iteration));
+
+        Logger::log_info("HPWL improvement from previous "+ std::to_string(convergence_window) +
+                        " iterations: " + std::to_string(100*hpwl_improvement) +"%");
         return true;
     }
     else return false;

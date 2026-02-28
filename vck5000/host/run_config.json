@@ -8,8 +8,8 @@
 
 {
   "input": {
-    "benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
-    //"benchmark": "host/benchmarks/ispd2005/adaptec1",
+    //"benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
+    "benchmark": "host/benchmarks/ispd2005/adaptec1",
     //"benchmark": "host/benchmarks/ispd2005/bigblue1",
     //"benchmark": "host/benchmarks/ispd2005/bigblue4",
     //"benchmark": "host/benchmarks/ispd2015/mgc_superblue11_a",
@@ -62,11 +62,11 @@
 
   "output": {
     "results_dir": "results/single_runs",
-    "log_file": "logs/aieplace.log",
-    "performance_jsonl": "results/aieplace_performance.jsonl",
-    "visualize": false,
+    //"log_file": "logs/aieplace.log",
+    //"performance_jsonl": "results/aieplace_performance.jsonl",
+    "visualize": true, // if true, will export visualization images 
     "iterations_per_export": 10,
-    "focus_nets": [],
+    "focus_nets": [], // focus nets are highlighted in visualization exports.
     "rand_focus_IO": 0,
     "rand_focus_nets": 0,
     "rand_focus_nodes": 0
