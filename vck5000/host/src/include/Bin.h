@@ -59,8 +59,8 @@ struct Bin
     float a_uv;
     XY eField; // Computed eField in this Bin
     std::vector<Node*> overlapping_nodes; // list of nodes overlapping this bin
-    float lambda; // Local Weight parameter for density in this bin. 
-                    // Bigger lambda means the eField will push harder in this bin.
+    float local_density_weight; // Local weight parameter for density in this bin.
+                    // Bigger local_density_weight means the eField will push harder in this bin.
 
     Bin(float xl, float yl, float xh, float yh) : bb(xl, yl, xh, yh) {}
 

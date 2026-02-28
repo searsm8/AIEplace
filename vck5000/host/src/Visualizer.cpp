@@ -208,11 +208,11 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     cairo_show_text (cr, ovfw_str.c_str());
 
     cairo_move_to (cr, .52, .99);
-    std::string lr_str = "Alpha: " + SCI(info.alpha);
+    std::string lr_str = "Step Length: " + SCI(info.step_length);
     cairo_show_text (cr, lr_str.c_str());
 
     cairo_move_to (cr, .75, .99);
-    std::string lambda_str = "Lambda: " + SCI(info.global_lambda);
+    std::string lambda_str = "Density Weight: " + SCI(info.density_weight);
     cairo_show_text (cr, lambda_str.c_str());
 
     cairo_stroke(cr);

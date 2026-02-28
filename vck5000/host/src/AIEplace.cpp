@@ -45,7 +45,7 @@ void Placer::performIteration()
     if(iteration == 1)
     {
         recordInitialHPWL();
-        initializeLambda();
+        initializeDensityWeight();
     }
 
     // Perform iteration node movement
@@ -128,8 +128,8 @@ Placer::Placer(std::string config_filepath )
             // Read hyperparameters
             gamma = cfg["params"]["gamma"];
             inv_gamma = 1.0f / gamma;
-            alpha = cfg["params"]["init_alpha"];
-            global_lambda = 1.0f; // will be updated on iteration 1 after computing gradients
+            step_length = cfg["params"]["init_step_length"];
+            density_weight = 1.0f; // will be updated on iteration 1 after computing gradients
 
             // Read compute methods 
             partials_method = cfg["params"]["partials_compute_method"];
@@ -216,37 +216,37 @@ Placer::Placer(std::string config_filepath )
 /**
  * @brief Adaptive hyperparameter schedule based on convergence metrics
  *
- * Goal: modify alpha (dynamic step size) using Lipshitz constanst and backtracking per ePlace
- *       modify global_lambda based on iteration progress
- * 
+ * Goal: modify step_length (dynamic step size) using Lipschitz constant and backtracking per ePlace
+ *       modify density_weight based on iteration progress
+ *
  */
 void Placer::updateHyperparameters()
 {
-    // Warm start: hold alpha fixed at init_alpha for the first few iterations
+    // Warm start: hold step_length fixed at init_step_length for the first few iterations
     // so the BB estimate has valid position/gradient history to work from.
     if (iteration < cfg["params"]["warmup_iterations"]) {
         Logger::log_detail("Warmup iteration. Skip hyperparam update.");
         return;
     }
 
-    updateAlpha();
+    updateStepLength();
 
-    updateLambda();
+    updateDensityWeight();
 }
 
 /**
- * @brief Compute the BB (Barzilai-Borwein) step size estimate alpha (α_k).
+ * @brief Compute the BB (Barzilai-Borwein) step size estimate step_length (α_k).
  *
- * alpha is the step size (1/L, inverse Lipschitz constant) used in nudgeNode()
+ * step_length is the step size (1/L, inverse Lipschitz constant) used in nudgeNode()
  * to scale the gradient when moving each node. It is estimated from the ratio
  * of the global L2 norm of position changes to gradient changes across all nodes
  * (Algorithm 2, BkTrk line 1 of ePlace-MS). This is the precursor to backtracking:
- * the loop that refines alpha based on a consistency check will be added here.
+ * the loop that refines step_length based on a consistency check will be added here.
  *
  * Uses m_prev_lookahead_pos and m_prev_grad stored on each node, which will
  * track v_{k-1} positions and gradients once Nesterov is implemented.
  */
-void Placer::updateAlpha()
+void Placer::updateStepLength()
 {
     float total_position_change = 0;
     float total_gradient_change = 0;
@@ -273,44 +273,44 @@ void Placer::updateAlpha()
         prev_grad.setY(node_p->combined_force.y);
     }
 
-    // alpha = ||Δx|| / ||Δg||  (BB estimate of 1/L)
-    alpha = sqrt(total_position_change) / sqrt(total_gradient_change + 1e-8f);
-    Logger::log_detail("Unclamped alpha: " + PREC(alpha));
+    // step_length = ||Δx|| / ||Δg||  (BB estimate of 1/L)
+    step_length = sqrt(total_position_change) / sqrt(total_gradient_change + 1e-8f);
+    Logger::log_detail("Unclamped step_length: " + PREC(step_length));
 
-    alpha = std::clamp(alpha, 0.0001f, 400.0f);
-    Logger::log_detail("Alpha: " + PREC(alpha));
+    step_length = std::clamp(step_length, 0.0001f, 400.0f);
+    Logger::log_detail("Step length: " + PREC(step_length));
 }
 
-/** 
- * @brief Update global lambda to increase density force over time.
+/**
+ * @brief Update density_weight to increase density force over time.
  * Numerically analyze the current health of the optimization:
  * Is HPWL improving?
- * If yes, continue increasing lambda slowly.
- * If not, slow or decrease lambda to allow HPWL forces to have more influence and escape local minima.
+ * If yes, continue increasing density_weight slowly.
+ * If not, slow or decrease density_weight to allow HPWL forces to have more influence and escape local minima.
  */
-void Placer::updateLambda()
+void Placer::updateDensityWeight()
 {
-    if(iteration % 3 != 0) // only update lambda every few iterations since HPWL can be noisy
+    if(iteration % 3 != 0) // only update density_weight every few iterations since HPWL can be noisy
     {
-        Logger::log_detail("Skipping lambda update on iteration " + std::to_string(iteration));
+        Logger::log_detail("Skipping density_weight update on iteration " + std::to_string(iteration));
         return;
     }
     float current_hpwl = hpwl_history.back();
     float prev_hpwl = hpwl_history[hpwl_history.size() - 2]; // safe because we have warmup iterations
 
-    float lambda_min_step_size = cfg["params"]["lambda_min_step_size"];
-    float lambda_max_step_size = cfg["params"]["lambda_max_step_size"];
-    float lambda_multiplier = lambda_max_step_size;
+    float dw_min_step = cfg["params"]["density_weight_min_step"];
+    float dw_max_step = cfg["params"]["density_weight_max_step"];
+    float dw_multiplier = dw_max_step;
 
-    if (current_hpwl > prev_hpwl) // if HPWL is not improving, 
+    if (current_hpwl > prev_hpwl) // if HPWL is not improving,
     {
         float hpwl_percent_change = 100.0f * (current_hpwl - prev_hpwl) / (prev_hpwl + 1e-8f); // avoid div by 0
         // decrease multiplier to allow HPWL forces to have more influence
-        lambda_multiplier = std::max(lambda_min_step_size, std::pow(lambda_max_step_size, 1 - hpwl_percent_change)); 
+        dw_multiplier = std::max(dw_min_step, std::pow(dw_max_step, 1 - hpwl_percent_change));
     }
 
     // perform the update
-    global_lambda *= lambda_multiplier;
+    density_weight *= dw_multiplier;
 }
 
 /**
@@ -389,13 +389,13 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
 }
 
 /**
- * @brief Set initial global lambda based on ratio of total HPWL gradient to density gradient
+ * @brief Set initial density_weight based on ratio of total HPWL gradient to density gradient
  * Compute total force produced by the HPWL gradient,
- * and the total force produced by the density gradient. 
- * Set initial lambda as the ratio between these two to make them roughly balanced,
- * multiplied by a small number which makes the density force initially weaker 
+ * and the total force produced by the density gradient.
+ * Set initial density_weight as the ratio between these two to make them roughly balanced,
+ * multiplied by a small number which makes the density force initially weaker
  */
-void Placer::initializeLambda()
+void Placer::initializeDensityWeight()
 {
     float HPWL_L1_norm = 0.0f;
     float density_L1_norm = 0.0f;
@@ -409,9 +409,9 @@ void Placer::initializeLambda()
         density_L1_norm += fabs(electro_force.x) + fabs(electro_force.y);
     }
 
-    float initial_multiplier = cfg["params"]["lambda_init_multiplier"];
-    global_lambda = (HPWL_L1_norm / (density_L1_norm + 1e-8f)) * initial_multiplier;
-    Logger::log_info("Initialized global lambda: " + std::to_string(global_lambda));
+    float initial_multiplier = cfg["params"]["density_weight_init_multiplier"];
+    density_weight = (HPWL_L1_norm / (density_L1_norm + 1e-8f)) * initial_multiplier;
+    Logger::log_info("Initialized density_weight: " + std::to_string(density_weight));
 }
 
 
@@ -461,8 +461,8 @@ void Placer::nudgeNode(Node* node_p)
     node_p->combined_force.y = electro_force.y - partials.y;
 
     XY move;
-    move.x = alpha * node_p->combined_force.x; 
-    move.y = alpha * node_p->combined_force.y;
+    move.x = step_length * node_p->combined_force.x;
+    move.y = step_length * node_p->combined_force.y;
 
 
     // Update the position of this node

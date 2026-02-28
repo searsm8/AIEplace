@@ -67,10 +67,10 @@ public:
     std::string results_csv;
 
     // Hyperparameters
-    float gamma, inv_gamma; // smoothness factor for estimations; 
+    float gamma, inv_gamma; // smoothness factor for estimations;
                        // larger means less smooth but more accurate
-    float alpha;
-    float global_lambda;
+    float step_length;
+    float density_weight;
 
     int die_size; // minimum of width and height of the die area
     int bins_per_row; // grid size
@@ -96,7 +96,7 @@ public:
     long double algo_time;
     std::vector<float> hpwl_history; // history of HPWL values for each iteration
     std::vector<float> ovfw_history; // history of overflow values for each iteration
-    std::vector<float> alpha_history;
+    std::vector<float> step_length_history;
 
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;
@@ -113,7 +113,7 @@ public:
     void initializePlacement(Position<position_type> target_pos, int min_dist, int max_dist);
     void recordInitialHPWL();
     void iterationReset();
-    void initializeLambda();
+    void initializeDensityWeight();
 
     // Functions to be accelerated on AIEs
     void prepareInputDataPacket(float * input_data, int net_size);
@@ -154,8 +154,8 @@ public:
 
     // Run functions
     void updateHyperparameters();
-    void updateAlpha();
-    void updateLambda();
+    void updateStepLength();
+    void updateDensityWeight();
 
     void nudgeAllNodes();
     void nudgeNode(Node*);

@@ -49,7 +49,7 @@ constexpr int PARTIALS_GRAPH_COUNT = 2;// 30 or more will require more than 64 c
 // TODO: rewrite PL kernels to require fewer PL resources!
 
 // ePlace hyperparameters
-constexpr int INITIAL_LAMBDA = 1; // inital lambda for each bin
+constexpr int INITIAL_LOCAL_DENSITY_WEIGHT = 1; // initial local density weight for each bin
 //#define WIRELENGTH_COMPUTE_METHOD "HPWL"
 
 // granularity of bin grid

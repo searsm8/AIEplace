@@ -1,6 +1,6 @@
 {
   "input": {
-    "benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
+    "benchmark": "host/benchmarks/ispd2005/bigblue4",
     "xclbin": "bin/aieplace.hw.xclbin"
   },
   "params": {
@@ -10,10 +10,10 @@
     "use_filler": true,
     "gamma": 4,
     "max_threads": 1,
-    "init_alpha": 50,
-    "lambda_init_multiplier": 0.01,
-    "lambda_min_step_size": 0.95,
-    "lambda_max_step_size": 1.05,
+    "init_step_length": 200,
+    "density_weight_init_multiplier": 0.01,
+    "density_weight_min_step": 0.95,
+    "density_weight_max_step": 1.05,
     "adaptation_window": 5,
     "slow_improvement_threshold": 0.02,
     "high_overflow_threshold": 0.1,
@@ -29,7 +29,7 @@
     "decay_factor": 0.9
   },
   "output": {
-    "results_csv": "DSE_results_20260227_162019.csv",
+    "results_csv": "DSE_results_20260227_205638.csv",
     "log_file": "logs/aieplace.log",
     "performance_jsonl": "results/aieplace_performance.jsonl",
     "visualize": false,

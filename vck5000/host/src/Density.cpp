@@ -432,7 +432,7 @@ XY Placer::computeElectrostaticForce(Node* node_p)
     // compute electric force based on bin overlaps
     for (BinOverlap b : node_p->getBinOverlaps()) {
         Bin* bin = b.bin;
-        float coeff = global_lambda * bin->lambda;
+        float coeff = density_weight * bin->local_density_weight;
         electro_force.x += coeff * bin->eField.x;
         electro_force.y += coeff * bin->eField.y;
     }

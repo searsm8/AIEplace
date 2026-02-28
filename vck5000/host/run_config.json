@@ -8,9 +8,10 @@
 
 {
   "input": {
-    "benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
+    //"benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
     //"benchmark": "host/benchmarks/ispd2005/adaptec1",
     //"benchmark": "host/benchmarks/ispd2005/bigblue1",
+    "benchmark": "host/benchmarks/ispd2005/bigblue4",
     //"benchmark": "host/benchmarks/ispd2015/mgc_superblue11_a",
     //"benchmark": "host/benchmarks/ispd2015/mgc_superblue19",
     //"benchmark": "host/benchmarks/ispd2015/toy",
@@ -31,12 +32,12 @@
     // Hyperparameters
     "gamma": 4,
     "max_threads": 1, // multithreading not yet implemented
-    "init_alpha": 50,
-    "lambda_init_multiplier": 0.01, // multiplier used to set density penalty
+    "init_step_length": 50,
+    "density_weight_init_multiplier": 0.01, // multiplier used to set density penalty
                                     // 0.01 means that density will contribute about 1%
                                     // as much to the cost function as wirelength at the start of placement
-    "lambda_min_step_size": 0.95,   // minimum step size for lambda updates to prevent stagnation
-    "lambda_max_step_size": 1.05,   // maximum step size for lambda updates to avoid divergence
+    "density_weight_min_step": 0.95,   // minimum step size for density_weight updates to prevent stagnation
+    "density_weight_max_step": 1.05,   // maximum step size for density_weight updates to avoid divergence
 
     // Adaptive hyperparameter schedule parameters
     "adaptation_window": 5,

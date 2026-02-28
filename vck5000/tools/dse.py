@@ -2,13 +2,11 @@
 # Design Space Exploration python script
 # Runs bin/AIEplace.exe while modifying host/runtime_config.json between runs
 
+import csv
+import datetime
 import json
-import sys
-import subprocess
 import os
-from typing import Any, Union
-
-import json
+import subprocess
 import sys
 from typing import Any, Union, List
 
@@ -129,122 +127,102 @@ def modify_params_parameter(config_path: str, param_name: str, new_value: Any, o
     modify_config_parameter(config_path, param_name, new_value, output_path, section_path="params")
 
 
-# @brief: Run the compiled program using a subprocess
+# @brief: Run the compiled program using a subprocess.
+# stdout/stderr are inherited from the parent process so output appears in the
+# terminal in real-time without any pipe-deadlock risk.
 def run_AIEplace(args=None):
     if args is None:
         args = []
-    
-    try:
-        # Create the command with executable and any arguments
-        command = ['bin/AIEplace.exe'] + args
-        
-        # Run the program with additional configurations
-        print(f"DSE: {command}")
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,  # This is the older equivalent of text=True
-            bufsize=1  # Line buffered
-        )
-        
-        # Capture output in real-time
-        output = []
-        error_output = []
-        
-        # Read both stdout and stderr simultaneously
-        print(f"DSE: Reading stdout and stderr in real-time...")
-        while True:
-            stdout_line = process.stdout.readline()
-            stderr_line = process.stderr.readline()
-            
-            if stdout_line:
-                output.append(stdout_line)
-                sys.stdout.flush()  # Ensure immediate console output
-            
-            if stderr_line:
-                error_output.append(stderr_line)
-                sys.stderr.flush()  # Ensure immediate console output
-            
-            # Check if process has finished
-            if process.poll() is not None and not stdout_line and not stderr_line:
-                break
-        
-        # Wait for the process to complete
-        print(f"DSE: Waiting for process to finish...")
-        return_code = process.wait()
-        
-        if return_code != 0:
-            error_message = ''.join(error_output)
-            print(f"Runtime error (code {return_code}):\n{error_message}")
-            return None
-        
-        return ''.join(output)
-        
-    except Exception as e:
-        print(f"Error running program: {str(e)}")
-        return None
+
+    command = ['bin/AIEplace.exe'] + args
+    print(f"DSE: Running {command}")
+
+    result = subprocess.run(command)
+
+    if result.returncode != 0:
+        print(f"DSE: ERROR — process exited with code {result.returncode}")
+        return False
+    return True
 
 
 
 benchmark_path = "host/benchmarks/"
-benchmark_list = [  
-                #"ispd2015/mgc_fft_1", 
-                #"ispd2015/mgc_fft_2", 
-                #"ispd2015/mgc_fft_a", 
-                #"ispd2015/mgc_fft_b", 
+benchmark_list = [
+                #"ispd2015/mgc_fft_1",
+                #"ispd2015/mgc_fft_2",
+                #"ispd2015/mgc_fft_a",
+                "ispd2015/mgc_fft_b",
                 #"ispd2015/mgc_des_perf_1",
-                #"ispd2015/mgc_des_perf_a",
+                "ispd2015/mgc_des_perf_a",
                 #"ispd2015/mgc_des_perf_b",
                 #"ispd2015/mgc_edit_dist_a",
-                #"ispd2015/mgc_matrix_mult_1",
+                "ispd2015/mgc_matrix_mult_1",
                 #"ispd2015/mgc_matrix_mult_2",
-                #"ispd2015/mgc_matrix_mult_a",
+                "ispd2015/mgc_matrix_mult_a",
                 #"ispd2015/mgc_matrix_mult_b",
                 #"ispd2015/mgc_matrix_mult_c",
-                #"ispd2015/mgc_pci_bridge32_a",
+                "ispd2015/mgc_pci_bridge32_a",
                 #"ispd2015/mgc_pci_bridge32_b",
-                #"ispd2015/mgc_superblue11_a",
+                "ispd2015/mgc_superblue11_a",
                 #"ispd2015/mgc_superblue12",
                 #"ispd2015/mgc_superblue14",
-                #"ispd2015/mgc_superblue16_a",
-                #"ispd2015/mgc_superblue19",
+                "ispd2015/mgc_superblue16_a",
+                "ispd2015/mgc_superblue19",
                 "ispd2005/adaptec1",
-                #"ispd2005/adaptec2",
-                #"ispd2005/adaptec3",
+                "ispd2005/adaptec2",
+                "ispd2005/adaptec3",
                 #"ispd2005/adaptec4",
-                #"ispd2005/bigblue1",
-                #"ispd2005/bigblue2",
+                "ispd2005/bigblue1",
+                "ispd2005/bigblue2",
                 #"ispd2005/bigblue3",
-                #"ispd2005/bigblue4"
+                "ispd2005/bigblue4"
                 ]
-learning_rates = [10, 50, 100, 200, 300, 400, 500, 800, 1000]
+#step_length_values = [10, 50, 100, 200, 300, 400, 500, 800, 1000]
+step_length_values = [50, 100, 200]
+RUNS_PER_CONFIG = 1
 
-def run_all_benchmarks(config_path):
-    for benchmark in benchmark_list:
-        modify_config_parameter(config_path, "input_filepath", benchmark_path+benchmark)
-        run_AIEplace()
+
+def read_last_csv_row(csv_path: str) -> dict:
+    """Read the last data row from a CSV file and return it as a dict.
+    Returns an empty dict if the file doesn't exist or has no data rows.
+    """
+    try:
+        with open(csv_path, 'r') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            if rows:
+                return dict(rows[-1])
+    except (FileNotFoundError, csv.Error):
+        pass
+    return {}
+
 
 # TODO: expand DSE to use SA or ant colony optimization
 # Design Space Exploration algorithm
+# Runs AIEplace with different configurations by modifying the JSON config file between runs
 def dse():
     config_path = "host/run_config_dse.json"
+    args = [config_path]
 
-    # Run all benchmarks with simple and cpu partials_compute_method
+    # Generate a timestamped results filename to avoid overwriting previous runs
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    modify_config_parameter(config_path, "results_csv", f"DSE_results_{timestamp}.csv", section_path="output")
+
     for benchmark in benchmark_list:
-        for lr in learning_rates:
-            modify_config_parameter(config_path, "benchmark", benchmark_path+benchmark, section_path="input")
-            modify_config_parameter(config_path, "partials_compute_method", "cpu", section_path="params")
-            modify_config_parameter(config_path, "init_learning_rate", lr, section_path="params")
-            run_AIEplace()
-            run_AIEplace()
-            run_AIEplace()
+        print(f"\n=== Starting DSE for benchmark: {benchmark} ===")
+        # Modification of parameters between runs
+        modify_config_parameter(config_path, "benchmark", benchmark_path + benchmark, section_path="input")
+        modify_config_parameter(config_path, "partials_compute_method", "cpu", section_path="params")
 
-            #modify_config_parameter(config_path, "partials_compute_method", "simple", section_path="params")
-            #run_AIEplace()
-            #modify_config_parameter(config_path, "partials_compute_method", "orig", section_path="params")
-            #run_AIEplace()
-    
+        for step_length in step_length_values:
+            modify_config_parameter(config_path, "init_step_length", step_length, section_path="params")
+
+            for run_num in range(1, RUNS_PER_CONFIG + 1):
+                print(f"\nDSE: benchmark={benchmark}  init_step_length={step_length}  run={run_num}/{RUNS_PER_CONFIG}")
+                run_AIEplace(args)
+
+
+
 
 def main():
     dse()

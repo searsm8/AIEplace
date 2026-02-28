@@ -55,8 +55,8 @@ void Placer::printIterationResults()
         top.add_row(RowStream{} << "Iteration" << iteration);
         top.add_row(RowStream{} << "HPWL" << SCI(hpwl));
         top.add_row(RowStream{} << "Overflow" << PREC(overflow));
-        top.add_row(RowStream{} << "Alpha" << SCI(alpha));
-        top.add_row(RowStream{} << "Global Lambda" << SCI(global_lambda));
+        top.add_row(RowStream{} << "Step Length" << SCI(step_length));
+        top.add_row(RowStream{} << "Density Weight" << SCI(density_weight));
         top.column(0).format().font_align(FontAlign::right);
         top.column(1).format().font_align(FontAlign::left);
         Logger::log_data(top);
@@ -67,7 +67,7 @@ void Placer::printIterationResults()
     #ifdef CREATE_VISUALIZATION
         if(cfg["output"]["visualize"])
         if (iteration < 10 || iteration % int(cfg["output"]["iterations_per_export"]) == 0) {
-            PlotInfo info = {iteration, hpwl_history.back(), overflow, alpha, global_lambda, db.getBenchmarkName()};
+            PlotInfo info = {iteration, hpwl_history.back(), overflow, step_length, density_weight, db.getBenchmarkName()};
             viz.drawPlacement(db, output_dir / "placement", info);
             //viz.drawElectricField(grid, output_dir / "efield", iteration);
         }
@@ -80,13 +80,13 @@ void Placer::printIterationResults()
     fs::path dir = output_dir;
     hpwl_file.open(dir.append("hpwl.dat"), std::ios_base::app);
     if(iteration == 0) {
-        hpwl_file << "Iter, HPWL, OVFW, LR, LAMBDA" << endl; // Write header only for the first iteration
+        hpwl_file << "Iter, HPWL, OVFW, STEP_LEN, DW" << endl; // Write header only for the first iteration
     }
     hpwl_file << std::setfill('0') << std::setw(3) << iteration << ", "
               << std::setprecision(2) << std::scientific << hpwl << ", "
               << std::setprecision(2) << std::scientific << overflow << ", "
-              << std::setprecision(2) << std::scientific << alpha << ", "
-              << std::setprecision(2) << std::scientific << global_lambda << endl;
+              << std::setprecision(2) << std::scientific << step_length << ", "
+              << std::setprecision(2) << std::scientific << density_weight << endl;
     hpwl_file.close();
 }
 
@@ -106,7 +106,7 @@ void Placer::plotHistories() {
     ovfw_plotter.savePNG(data_dir / "ovfw_history.png");
 
     CairoPlotter coeff_plotter(800, 600);
-    coeff_plotter.plotHistory(alpha_history, "Alpha History", "Alpha", 1.0, 0.2, 0.2);
+    coeff_plotter.plotHistory(step_length_history, "Step Length History", "Step Length", 1.0, 0.2, 0.2);
     coeff_plotter.savePNG(data_dir / "learning_coeff_history.png");
 
     // Create combined plot
@@ -169,11 +169,11 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
     if (need_header) {
         out_file << "Design,";
         out_file << "Iterations,";
-        out_file << "Initial HPWL,";
         out_file << "Final HPWL,";
+        out_file << "Initial HPWL,";
         out_file << "Improvement %,";
         out_file << "Final Overflow,";
-        out_file << "Final Alpha,";
+        out_file << "Final Step Length,";
         out_file << "Gamma,";
         out_file << "HPWL_Graph,";
         out_file << "Combined_Graph,";
@@ -186,7 +186,7 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
         out_file << "Iteration Avg Sec,";
         out_file << "Partials AIE Time,";
         out_file << "Memory Usage MB,";
-        out_file << "Init Alpha,";
+        out_file << "Init Step Length,";
         out_file << "Output Dir,";
         out_file << "Success,";
         out_file << "Error Message,";
@@ -216,12 +216,12 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
 
     out_file << "\"" << db.getBenchmarkName() << "\",";
     out_file << iteration << ",";
-    out_file << std::scientific << SCI(initial_hpwl) << ",";
     out_file << std::scientific << SCI(final_hpwl) << ",";
+    out_file << std::scientific << SCI(initial_hpwl) << ",";
     out_file << std::fixed << std::setprecision(2) << hpwl_improvement << ",";
-    out_file << std::scientific << final_overflow << ",";
-    out_file << std::fixed << std::setprecision(6) << alpha << ",";
-    out_file << gamma << ",";
+    out_file << std::scientific << SCI(final_overflow) << ",";
+    out_file << std::fixed << SCI(step_length) << ",";
+    out_file << PREC(gamma) << ",";
     out_file << hpwl_graph_cell << ",";
     out_file << combined_graph_cell << ",";
     out_file << placement_gif_cell << ",";
@@ -234,7 +234,7 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
     out_file << iteration_avg << ",";
     out_file << Logger::getFunctionTime("computeAllPartials_AIE") << ",";
     out_file << getMemoryUsageMB() << ",";
-    out_file << cfg["params"]["init_alpha"].get<float>() << ",";
+    out_file << cfg["params"]["init_step_length"].get<float>() << ",";
     out_file << "\"" << output_dir.string() << "\",";
     out_file << "TRUE,";
     out_file << "\"\",";
@@ -291,7 +291,7 @@ void Placer::printFinalResults()
     Table hyperparams;
     hyperparams.add_row({"Hyperparameter", "Final Value"});
     hyperparams.add_row(RowStream{} << "gamma" << gamma);
-    hyperparams.add_row(RowStream{} << "alpha" << alpha);
+    hyperparams.add_row(RowStream{} << "step_length" << step_length);
     hyperparams.add_row(RowStream{} << "partials method" << cfg["params"]["partials_compute_method"]);
     hyperparams.add_row(RowStream{} << "density method" << cfg["params"]["density_compute_method"]);
     hyperparams.add_row(RowStream{} << "wirelength method" << cfg["params"]["wirelength_method"]);
@@ -318,7 +318,7 @@ void Placer::printFinalResults()
     // Generate visualization in run-specific directory
     #ifdef CREATE_VISUALIZATION
         if(cfg["output"]["visualize"]) {
-            PlotInfo info = {iteration, final_hpwl, final_overflow, alpha, global_lambda, db.getBenchmarkName()};
+            PlotInfo info = {iteration, final_hpwl, final_overflow, step_length, density_weight, db.getBenchmarkName()};
             viz.drawPlacement(db, run_output_dir, info);
 
             // use python script to create gif from generated pngs in run directory
@@ -437,7 +437,7 @@ void Placer::recordIterationResults()
     float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
     hpwl_history.push_back(hpwl);
 
-    alpha_history.push_back(alpha);
+    step_length_history.push_back(step_length);
 
     float overflow = grid.computeTotalOverflow(
             cfg["params"]["convergence_target_density"],

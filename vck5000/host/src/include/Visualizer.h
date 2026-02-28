@@ -15,8 +15,8 @@ struct PlotInfo {
     int iteration;
     float hpwl;
     float overflow;
-    float alpha;
-    float global_lambda;
+    float step_length;
+    float density_weight;
     std::string benchmark_name;
 };
 

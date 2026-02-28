@@ -15,7 +15,7 @@ void Grid::init()
         {
             Bin b = Bin(x_index*m_bin_width, y_index*m_bin_height, 
                    (x_index+1)*m_bin_width, (y_index+1)*m_bin_height);
-            b.lambda = INITIAL_LAMBDA;
+            b.local_density_weight = INITIAL_LOCAL_DENSITY_WEIGHT;
             m_bins[x_index].push_back(b);
         }
     }
