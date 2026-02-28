@@ -63,47 +63,6 @@ private:
     Logger();
 
 public:
-    struct ProgramStatBlock {
-        // Basic information
-        std::string timestamp;
-        std::string run_id;
-        std::string design_name;
-        std::string benchmark_size;
-        std::string output_dir;
-        
-        // Configuration
-        std::string partials_method;
-        std::string density_method;
-        std::string wirelength_method;
-        float gamma;
-        float init_alpha;
-        int max_iterations;
-        
-        // Results
-        int iteration_count;
-        float final_hpwl;
-        float initial_hpwl;
-        float hpwl_improvement;
-        bool has_improvement;
-        float final_overflow;
-        float final_alpha;
-        bool convergence_reached;
-        
-        // Timing
-        float prgm_runtime;
-        float db_IO_time;
-        float algo_time;
-        float AIE_time;
-        float iteration_avg_time;
-        
-        // System metrics
-        float memory_usage_mb;
-        
-        // Status
-        bool success;
-        std::string error_message;
-    };
-
     // Singleton access
     static Logger& getLogger();
     static Logger& getMutex();

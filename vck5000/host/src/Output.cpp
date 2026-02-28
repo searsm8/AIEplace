@@ -143,109 +143,102 @@ void Placer::createRunOutputStructure(std::string& run_output_dir, std::string& 
                                        cfg["params"]["partials_compute_method"].get<std::string>() + "_" +
                                        cfg["params"]["density_compute_method"].get<std::string>());
 
-    if (!fs::exists(run_dir)) {
+    if (!fs::exists(run_dir))
         fs::create_directories(run_dir);
-    }
 
-    output_dir = run_dir; // set the class member output_dir to this run's directory
+    output_dir = run_dir;
 
     Logger::log_info("Created run directory: " + run_output_dir);
 }
 
-// Append a program run record to the global results CSV file
-static void append_csv(Logger::ProgramStatBlock& stats, const std::string& filename)
+void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
+                              float total_runtime, float iteration_avg,
+                              float hpwl_improvement, const std::string& run_id)
 {
-    // Create results directory if it doesn't exist
     fs::path results_dir("results");
-    if (!fs::exists(results_dir)) {
+    if (!fs::exists(results_dir))
         fs::create_directories(results_dir);
-    }
 
-    fs::path csv_path = results_dir / filename;
+    fs::path csv_path = results_dir / results_csv;
 
-    // Open file for appending
     std::ofstream out_file;
     bool need_header = !fs::exists(csv_path);
     out_file.open(csv_path, std::ios_base::app);
     out_file.imbue(std::locale::classic());  // Prevent comma thousands separators
 
-    // If file doesn't exist, create and write comprehensive header
     if (need_header) {
-        // Basic run information
         out_file << "Design,";
-
-        // Configuration
-        out_file << "Output_Dir,";
-        out_file << "Gamma,";
-        out_file << "Init_Alpha,";
-
-        // Results
         out_file << "Iterations,";
-        out_file << "Final_HPWL,";
-        out_file << "Initial_HPWL,";
-        out_file << "HPWL_Improvement_Percent,";
-        out_file << "Final_Overflow,";
-        out_file << "Final_Alpha,";
-
-        // Timing (high-level)
-        out_file << "Benchmark_Size,";
-        out_file << "Total_Runtime_Sec,";
-        out_file << "DB_IO_Time_Sec,";
-        out_file << "Algorithm_Time_Sec,";
-        out_file << "Iteration_Avg_Sec,";
-
-        // Detailed function timing
-        out_file << "Partials_AIE_Time,";
-        //out_file << "Density_Compute_Time,";
-        //out_file << "Placement_Update_Time,";
-
-        // System metrics
-        out_file << "Memory_Usage_MB,";
-
-        // Status
+        out_file << "Initial HPWL,";
+        out_file << "Final HPWL,";
+        out_file << "Improvement %,";
+        out_file << "Final Overflow,";
+        out_file << "Final Alpha,";
+        out_file << "Gamma,";
+        out_file << "HPWL_Graph,";
+        out_file << "Combined_Graph,";
+        out_file << "Placement_GIF,";
+        out_file << "Net Count,";
+        out_file << "Node Count,";
+        out_file << "Total Runtime Sec,";
+        out_file << "DB IO Time Sec,";
+        out_file << "Algorithm Time Sec,";
+        out_file << "Iteration Avg Sec,";
+        out_file << "Partials AIE Time,";
+        out_file << "Memory Usage MB,";
+        out_file << "Init Alpha,";
+        out_file << "Output Dir,";
         out_file << "Success,";
-        out_file << "Error_Message,";
+        out_file << "Error Message,";
         out_file << "Timestamp";
         out_file << endl;
     }
 
-    // Write data row
-    out_file << "\"" << stats.design_name << "\",";
+    // Graph hyperlinks (only populated when visualization is built)
+    std::string hpwl_graph_cell, combined_graph_cell, placement_gif_cell;
+#ifdef CREATE_VISUALIZATION
+    // Strip "results/" prefix so hyperlinks are relative to the CSV's location
+    std::string out_str = output_dir.string();
+    std::string rel_str = (out_str.rfind("results/", 0) == 0) ? out_str.substr(8) : out_str;
+    std::string hpwl_path    = rel_str + "/data/hpwl_history.png";
+    std::string combined_path = rel_str + "/data/combined_history.png";
+    std::string gif_path      = rel_str + "/full_placement.gif";
+    hpwl_graph_cell     = "\"=HYPERLINK(\"\"" + hpwl_path     + "\"\",\"\"view\"\")\"";
+    combined_graph_cell = "\"=HYPERLINK(\"\"" + combined_path + "\"\",\"\"view\"\")\"";
+    placement_gif_cell  = "\"=HYPERLINK(\"\"" + gif_path      + "\"\",\"\"view\"\")\"";
+#endif
 
-    // Configuration
-    out_file << "\"" << stats.output_dir << "\",";
-    out_file << stats.gamma << ",";
-    out_file << stats.init_alpha << ",";
+    // Timestamp
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    std::stringstream timestamp;
+    timestamp << std::put_time(std::gmtime(&time_t), "%Y-%m-%d %H:%M:%S");
 
-    // Results
-    out_file << stats.iteration_count << ",";
-    out_file << std::scientific << stats.final_hpwl << ",";
-    out_file << std::scientific << stats.initial_hpwl << ",";
-    out_file << std::fixed << std::setprecision(2) << stats.hpwl_improvement << ",";
-    out_file << std::scientific << stats.final_overflow << ",";
-    out_file << std::fixed << std::setprecision(6) << stats.final_alpha << ",";
-
-    // Timing (high-level)
-    out_file << "\"" << stats.benchmark_size << "\",";
+    out_file << "\"" << db.getBenchmarkName() << "\",";
+    out_file << iteration << ",";
+    out_file << std::scientific << SCI(initial_hpwl) << ",";
+    out_file << std::scientific << SCI(final_hpwl) << ",";
+    out_file << std::fixed << std::setprecision(2) << hpwl_improvement << ",";
+    out_file << std::scientific << final_overflow << ",";
+    out_file << std::fixed << std::setprecision(6) << alpha << ",";
+    out_file << gamma << ",";
+    out_file << hpwl_graph_cell << ",";
+    out_file << combined_graph_cell << ",";
+    out_file << placement_gif_cell << ",";
+    out_file << db.getNetsVector().size() << ",";
+    out_file << db.getComponents().size() << ",";
     out_file << std::fixed << std::setprecision(3);
-    out_file << stats.prgm_runtime << ",";
-    out_file << stats.db_IO_time << ",";
-    out_file << stats.algo_time << ",";
-    out_file << stats.iteration_avg_time << ",";
-
-    // Detailed function timing
+    out_file << total_runtime << ",";
+    out_file << db_IO_time << ",";
+    out_file << algo_time << ",";
+    out_file << iteration_avg << ",";
     out_file << Logger::getFunctionTime("computeAllPartials_AIE") << ",";
-    //out_file << Logger::getFunctionTime("computeDensity") << ",";
-    //out_file << Logger::getFunctionTime("updatePlacements") << ",";
-
-    // System metrics
-    out_file << stats.memory_usage_mb << ",";
-
-    // Status
-    out_file << (stats.success ? "TRUE" : "FALSE") << ",";
-    out_file << "\"" << stats.error_message << "\",";
-    out_file << "\"" << stats.timestamp << "\"";
-
+    out_file << getMemoryUsageMB() << ",";
+    out_file << cfg["params"]["init_alpha"].get<float>() << ",";
+    out_file << "\"" << output_dir.string() << "\",";
+    out_file << "TRUE,";
+    out_file << "\"\",";
+    out_file << "\"" << timestamp.str() << "\"";
     out_file << endl;
     out_file.close();
 }
@@ -318,12 +311,9 @@ void Placer::printFinalResults()
     Table function_stats = Logger::printFunctionStats();
     Logger::export_markdown(function_stats, run_output_dir, "function_statistics");
 
-    // Enhanced CSV export to global results.csv
-    Logger::ProgramStatBlock stats;
-    populateStatsBlock(stats, final_hpwl, final_overflow, total_runtime,
-                      iteration_avg, hpwl_improvement, has_improvement, run_id);
-
-    append_csv(stats, results_csv);
+    // Write run record to global results CSV
+    writeResultsCSV(final_hpwl, final_overflow, total_runtime,
+                    iteration_avg, hpwl_improvement, run_id);
 
     // Generate visualization in run-specific directory
     #ifdef CREATE_VISUALIZATION
@@ -347,69 +337,6 @@ void Placer::printFinalResults()
     dst << src.rdbuf();
 
     Logger::log_info("All outputs saved to: " + run_output_dir);
-}
-
-// Helper function to populate the comprehensive stats block
-void Placer::populateStatsBlock(Logger::ProgramStatBlock& stats,
-                               float final_hpwl, float final_overflow,
-                               float total_runtime, float iteration_avg,
-                               float hpwl_improvement, bool has_improvement,
-                               const std::string& run_id)
-{
-    // Generate timestamp
-    auto now = std::chrono::system_clock::now();
-    auto time_t = std::chrono::system_clock::to_time_t(now);
-    std::stringstream timestamp_ss;
-    timestamp_ss << std::put_time(std::gmtime(&time_t), "%Y-%m-%d %H:%M:%S");
-
-    // Basic information
-    stats.timestamp = timestamp_ss.str();
-    stats.run_id = run_id;
-    stats.design_name = db.getBenchmarkName();
-    int net_count = db.getNetsVector().size();
-    std::string category;
-    if (net_count < 100000) {
-        category = " (Small)";
-    } else if (net_count < 500000) {
-        category = " (Medium)";
-    } else if (net_count < 1000000) {
-        category = " (Large)";
-    } else {
-        category = " (XLarge)";
-    }
-    stats.benchmark_size = std::to_string(net_count) + category;
-
-    // Configuration
-    stats.partials_method = cfg["params"]["partials_compute_method"];
-    stats.density_method = cfg["params"]["density_compute_method"];
-    stats.output_dir = output_dir.string();
-    stats.wirelength_method = cfg["params"]["wirelength_method"];
-    stats.gamma = gamma;
-    stats.init_alpha = cfg["params"]["init_alpha"];
-    stats.max_iterations = cfg["params"]["convergence_max_iterations"];
-
-    // Results
-    stats.iteration_count = iteration;
-    stats.final_hpwl = final_hpwl;
-    stats.initial_hpwl = initial_hpwl;
-    stats.hpwl_improvement = hpwl_improvement;
-    stats.has_improvement = has_improvement;
-    stats.final_overflow = final_overflow;
-    stats.final_alpha = alpha;
-    stats.convergence_reached = checkConvergence();
-
-    // Timing
-    stats.prgm_runtime = total_runtime;
-    stats.db_IO_time = db_IO_time;
-    stats.algo_time = algo_time;
-    stats.iteration_avg_time = iteration_avg;
-
-    // System metrics
-    stats.memory_usage_mb = getMemoryUsageMB();
-
-    // Status
-    stats.success = true;  // If we got here, it succeeded
-    stats.error_message = "";
 }
 
 // Helper function to escape JSON strings
