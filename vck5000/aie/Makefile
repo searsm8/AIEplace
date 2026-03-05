@@ -10,13 +10,7 @@ else
     TARGET := hw
 endif
 
-PLATFORM := /opt/xilinx/platforms/xilinx_vck5000_gen4x8_qdma_2_202220_1/xilinx_vck5000_gen4x8_qdma_2_202220_1.xpfm
-
-BUILD_DIR := $(PROJECT_ROOT)/build
-BUILD_DIR_AIE := $(BUILD_DIR)/$(TARGET)/aie
-AIE_LIBADF := $(BUILD_DIR_AIE)/libadf_$(AIE).a
-
-AIE_DIR := $(PROJECT_ROOT)/aie/src/$(AIE)
+include $(PROJECT_ROOT)/common.mk
 
 TOPGRAPH := TopGraph
 AIE_SRCS_MAIN := $(AIE_DIR)/src/$(TOPGRAPH).cpp
@@ -36,9 +30,6 @@ AIE_FLAGS += --stacksize=2048
 
 # to specify constraints such as location or placement bounding box.
 #AIE_FLAGS += --constraints=constraints.json
-
-# Ensures the target recipe dirs exist
-dir_guard = @mkdir -p $(@D)
 
 .PHONY: all
 all: $(AIE_LIBADF)

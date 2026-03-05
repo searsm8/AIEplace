@@ -1,5 +1,5 @@
 bin/
-pl/link.cfg
+pl/src/*/link.cfg
 *.log
 *core.*
 results/

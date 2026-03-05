@@ -3,11 +3,12 @@
 # Targets: sw_emu, hw_emu, hw
 TARGET ?= hw
 
-AIE := mark_v1
-PL := mark_v1
+AIE ?= mark_v1
+PL ?= mark_v1
 
 PROJECT_ROOT := $(CURDIR)
-BUILD_DIR := $(PROJECT_ROOT)/build
+
+include $(PROJECT_ROOT)/common.mk
 
 .PHONY: help all aie partials density pl repackage host clean
 
@@ -23,6 +24,8 @@ help:
 	@echo -e '\t"make all"':'\t' Builds the the entire application (aie, pl, and host).
 
 all: xclbin host
+xclbin: $(XCLBIN)
+xsa: $(XSA)
 
 aie:
 	$(MAKE) -C aie PROJECT_ROOT=$(PROJECT_ROOT) TARGET=$(TARGET) AIE=$(AIE)
@@ -30,20 +33,34 @@ aie:
 pl:
 	$(MAKE) -C pl PROJECT_ROOT=$(PROJECT_ROOT) TARGET=$(TARGET) PL=$(PL)
 
-xsa: $(XSA)
-	$(MAKE) -C pl repackage
+$(XSA): $(AIE_LIBADF) $(PL_KERNELS) | config
+	$(dir_guard)
+	v++ --link --target $(TARGET) --platform $(PLATFORM) $(XSA_LINK_OPTS) $^ -o $@
 
-xclbin: $(XCLBIN)
-	$(MAKE) -C pl repackage
+$(XCLBIN): $(XSA) $(AIE_LIBADF)
+	$(dir_guard)
+	v++ --package --target $(TARGET) --platform $(PLATFORM) $(XCLBIN_PACKAGE_OPTS) $^ -o $@
 
 host:
 	$(MAKE) -C host
 
+%emconfig.json:
+	emconfigutil --platform $(PLATFORM) --nd 1 --od $(@D)
+
+# Generates the link.cfg file which specifies connections between PL and AIE
+.PHONY: config
+config:
+	python3 $(PL_DIR)/generate_link_cfg.py
+
+
+.PHONY: clean clean_all
 clean:
-	rm -rf core.*
 	$(MAKE) -C aie clean
 	$(MAKE) -C pl clean
 	$(MAKE) -C host clean
+
+clean_all:
+	rm -rf $(BUILD_DIR)
 
 # Scripts to run AIEplace application
 #BENCHMARK_DIR = host/benchmarks
