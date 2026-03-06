@@ -34,8 +34,8 @@
     "max_threads": 1, // multithreading not yet implemented
     "init_step_length": 50,
     "density_weight_init_multiplier": 0.01, // multiplier used to set density penalty
-                                    // 0.01 means that density will contribute about 1%
-                                    // as much to the cost function as wirelength at the start of placement
+                                            // 0.01 means that density will contribute about 1% as much
+                                            // as wirelength to the cost function at the start of placement
     "density_weight_min_step": 0.95,   // minimum step size for density_weight updates to prevent stagnation
     "density_weight_max_step": 1.05,   // maximum step size for density_weight updates to avoid divergence
 
@@ -43,18 +43,21 @@
     "adaptation_window": 5,
     "slow_improvement_threshold": 0.02,
     "high_overflow_threshold": 0.1,
-    "warmup_iterations": 10,
+    "warmup_iterations": 5,
+    "backtrack_enabled": true,
+    "backtrack_max_tries": 10,
+    "backtrack_epsilon": 1.05,
 
     // Convergence criteria (adaptive algorithm will stop early if met)
     "convergence_min_iterations": 50,
     "convergence_max_iterations": 800,
     "convergence_window": 5,
     "convergence_hpwl_improvement_threshold": 0.01, // If HPWL improvement over window is below this, HPWL convergence is met.
-    "convergence_overflow_threshold": 0.07, // If total overflow is below this, density convergence is met.
+    "convergence_overflow_threshold": 0.07, // If ratio of total overflow to total node area is below this, density convergence is met.
     "convergence_target_density": 0.9,  // Bin density maximum. If density within a bin exceeds this, 
-                                // we consider it overflow. Also used for filler insertion.
+                                        // we consider it overflow. Also used for filler insertion.
 
-    // Simple decay parameters (if using simple decay instead of adaptive)
+    // Simple decay parameters (used for simple hyperparameter schedule, not adaptive)
     "naive_decay": false,
     "decay_interval": 20,
     "decay_factor": 0.9
@@ -62,13 +65,13 @@
 
   "output": {
     "results_dir": "results/single_runs",
-    //"log_file": "logs/aieplace.log",
-    //"performance_jsonl": "results/aieplace_performance.jsonl",
     "visualize": true, // if true, will export visualization images 
     "iterations_per_export": 10,
     "focus_nets": [], // focus nets are highlighted in visualization exports.
     "rand_focus_IO": 0,
     "rand_focus_nets": 0,
     "rand_focus_nodes": 0
+    //"log_file": "logs/aieplace.log",
+    //"performance_jsonl": "results/aieplace_performance.jsonl",
   }
 }

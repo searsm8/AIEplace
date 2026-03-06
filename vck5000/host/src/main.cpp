@@ -4,7 +4,6 @@ int main(int argc, char *argv[])
 {
     Timer main_timer{"main"};
 
-    AIEplace::Placer::printWelcomeBanner();
     Logger::setup_logging();
 
     // Use argument for config filepath if given

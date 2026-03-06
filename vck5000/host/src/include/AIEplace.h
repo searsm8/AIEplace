@@ -28,7 +28,8 @@ AIEPLACE_NAMESPACE_BEGIN
 class Placer
 {
 private:
-    float initial_hpwl = 0.0f;
+    float m_initial_hpwl = 0.0f;
+    std::string m_config_filepath;
     
     // Helper functions for DSE integration and output organization
     void createRunOutputStructure();
@@ -46,6 +47,7 @@ private:
 public:
     DataBase db;
     Grid grid;
+
 #ifdef USE_XILINX_XRT
     PartialsGraphDriver partials_drivers[PARTIALS_GRAPH_COUNT];
     DensityGraphDriver density_driver[3];
@@ -67,10 +69,11 @@ public:
     fs::path results_dir;
 
     // Hyperparameters
+    float step_length; // α (alpha) in eplace
+    int backtrack_steps = 0;
+    float density_weight; // λ (lambda) in eplace
     float gamma, inv_gamma; // smoothness factor for estimations;
                        // larger means less smooth but more accurate
-    float step_length;
-    float density_weight;
 
     int die_size; // minimum of width and height of the die area
     int bins_per_row; // grid size
@@ -104,7 +107,7 @@ public:
     // Constructor
     Placer(std::string);
 
-    static void printWelcomeBanner(bool show_info = true);
+    void printWelcomeBanner(bool show_info = true);
 
     // Getter functions
     XY getNodePartials(Node* node_p);
@@ -153,9 +156,11 @@ public:
     void compareDensityResults();
 
     // Run functions
-    void updateHyperparameters();
-    void updateStepLength();
-    void updateDensityWeight();
+    float computeBBStep();     // pure BB computation, no side-effects
+    void  snapshotPreNudge();  // snapshot (v_k, ∇f_pre(v_k)) into lookahead fields before nudge
+    void  updateBBState();     // stores pre-nudge snapshot into prev-lookahead for next BB estimate
+    void  nudgeAndUpdate();    // BkTrk loop + nudge + BB state update + density weight
+    void  updateDensityWeight();
 
     void nudgeAllNodes();
     void nudgeNode(Node*);

@@ -11,6 +11,8 @@ AIEPLACE_NAMESPACE_BEGIN
 
 void Placer::computeAllPartials()
 {
+    db.clearPartials();
+
     if(partials_method == "aie") {
         #ifdef USE_XILINX_XRT
             computeAllPartials_AIE();

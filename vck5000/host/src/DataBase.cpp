@@ -225,6 +225,12 @@ void DataBase::iterationReset()
         item.second->iterationReset();
 }
 
+void DataBase::clearPartials()
+{
+    for (auto item : mm_components)
+        item.second->clearPartials();
+}
+
 
 // For all Nets in the database, sort Positions (X descending)
 void DataBase::sortPositionsByX()

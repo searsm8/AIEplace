@@ -60,7 +60,7 @@ bool Logger::log(string key, MsgType msg)
         Table top;
         //top.add_row({"key", "msg"});
         top.add_row({key, msg});
-        top.format().hide_border().font_align(FontAlign::center);
+        top.format().hide_border().font_align(FontAlign::left);
         top.column(0).format()
             .width(12)
             .font_style({FontStyle::bold, FontStyle::italic})

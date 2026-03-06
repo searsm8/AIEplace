@@ -61,6 +61,14 @@ public:
         return pos;
     }
 
+    Position<T> operator-(Position<T> other)
+    {
+        Position<T> pos;
+        pos.x = x - other.x;
+        pos.y = y - other.y;
+        return pos;
+    }
+
 
 }; // End of class Position
 

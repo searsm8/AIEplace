@@ -26,8 +26,6 @@ void Placer::performIteration()
     computeAllPartials();
 
     // DEBUGGING: Compare results to ensure correctness
-    //computeAllPartials_CPU();
-    //comparePartialResults();
 
     // Compute Electric Fields in each bin
     computeOverlaps(); // Density Map computation
@@ -38,6 +36,8 @@ void Placer::performIteration()
     //normalizeElectricFields(); // is this needed? is it helpful?
 
     // DEBUGGING
+    //computeAllPartials_CPU();
+    //comparePartialResults();
     //db.printOverlaps();
     //grid.printOverflows();
     //placer.grid.printElectricFields();
@@ -48,15 +48,11 @@ void Placer::performIteration()
         initializeDensityWeight();
     }
 
-    // Perform iteration node movement
-    nudgeAllNodes();
+    nudgeAndUpdate();
+    updateDensityWeight();
 
     recordIterationResults();
     printIterationResults();
-
-    // Dynamically update hyperparameters based on convergence metrics and iteration progress
-    updateHyperparameters();
-
 }
 
 /**
@@ -102,8 +98,10 @@ void Placer::run()
  *
  * @param config_filepath Path to the JSON configuration file
  */
-Placer::Placer(std::string config_filepath ) 
+Placer::Placer(std::string config_filepath) 
         { 
+            m_config_filepath = config_filepath;
+            printWelcomeBanner();
             // Read configuration file (supports JSON with comments)
             Logger::log_info("Reading runtime configuration from: " + config_filepath);
             std::ifstream config_file(config_filepath);
@@ -213,71 +211,177 @@ Placer::Placer(std::string config_filepath )
         }
 
 /**
- * @brief Adaptive hyperparameter schedule based on convergence metrics
+ * @brief Pure BB step. Estimate ᾱ_k from current positions vs stored prev-iteration data.
  *
- * Goal: modify step_length (dynamic step size) using Lipschitz constant and backtracking per ePlace
- *       modify density_weight based on iteration progress
+ * Reads: node positions, prev_lookahead_pos (v_{k-1}), HPWL partials ∇f_pre(v_k),
+ *        prev_lookahead_grad (∇f_pre(v_{k-1})).
+ * Does NOT modify any state — call updateBBState() after the committed nudge.
  *
+ * @return Clamped BB step estimate [0.0001, 4000].
  */
-void Placer::updateHyperparameters()
+float Placer::computeBBStep()
 {
-    // Warm start: hold step_length fixed at init_step_length for the first few iterations
-    // so the BB estimate has valid position/gradient history to work from.
-    if (iteration < cfg["params"]["warmup_iterations"]) {
-        Logger::log_detail("Warmup iteration. Skip hyperparam update.");
-        return;
+    float total_pos_change  = 0.0f;
+    float total_grad_change = 0.0f;
+
+    for (auto item : db.getComponents()) {
+        Node* node = item.second;
+
+        float dx = node->getX() - node->getPrevProbePosition().x;
+        float dy = node->getY() - node->getPrevProbePosition().y;
+        total_pos_change += dx*dx + dy*dy; // ||v_k − v_{k-1}||
+
+        XY p = getNodePartials(node);                          // ∇f_pre(v_k)
+        float dgx = p.x - node->getPrevProbeGrad().getX(); // ∇f_pre(v_k) − ∇f_pre(v_{k-1})
+        float dgy = p.y - node->getPrevProbeGrad().getY();
+        total_grad_change += dgx*dgx + dgy*dgy; // ||∇f_pre(v_k) − ∇f_pre(v_{k-1})||
     }
 
-    updateStepLength();
-
-    updateDensityWeight();
+    float new_step_size = sqrtf(total_pos_change) / sqrtf(total_grad_change + 1e-8f);
+    Logger::log_detail("New step (pre-nudge): " + PREC(new_step_size));
+    return std::clamp(bb, 0.0001f, 4000.0f);
 }
 
 /**
- * @brief Compute the BB (Barzilai-Borwein) step size estimate step_length (α_k).
+ * @brief Snapshot current node positions and HPWL partials into lookahead fields.
  *
- * step_length is the step size (1/L, inverse Lipschitz constant) used in nudgeNode()
- * to scale the gradient when moving each node. It is estimated from the ratio
- * of the global L2 norm of position changes to gradient changes across all nodes
- * (Algorithm 2, BkTrk line 1 of ePlace-MS). This is the precursor to backtracking:
- * the loop that refines step_length based on a consistency check will be added here.
- *
- * Uses m_prev_lookahead_pos and m_prev_grad stored on each node, which will
- * track v_{k-1} positions and gradients once Nesterov is implemented.
+ * Must be called before nudgeAllNodes(). Stores (v_k, ∇f_pre(v_k)) so that
+ * updateBBState() can save the pre-nudge state for the next iteration's BB estimate.
  */
-void Placer::updateStepLength()
+void Placer::snapshotPreNudge()
 {
-    float total_position_change = 0;
-    float total_gradient_change = 0;
+    for (auto item : db.getComponents()) {
+        Node* node = item.second;
+        node->getProbePosition() = node->getPosition();
+        XY p = getNodePartials(node);
+        node->getProbeGrad().setX(p.x);
+        node->getProbeGrad().setY(p.y);
+    }
+    for (auto filler : db.getFillers())
+        filler->getProbePosition() = filler->getPosition();
+}
 
-    for(auto item : db.getComponents()) {
-        Node* node_p = item.second;
-        Position<position_type>& curr_pos = node_p->getPosition();
-        Position<position_type>& prev_pos = node_p->getPrevLookaheadPosition();
-        Position<position_type>& prev_grad = node_p->getPrevGrad();
+/**
+ * @brief Store the pre-nudge snapshot into prev-lookahead fields for next iteration's BB estimate.
+ *
+ * Must be called after snapshotPreNudge() and after the committed nudge.
+ * Reads from getLookaheadPosition/Grad() (set by snapshotPreNudge()) so that
+ * computeBBStep() next iteration gets: dx = û_k − v_k, dg = ∇f_pre(û_k) − ∇f_pre(v_k).
+ */
+void Placer::updateBBState()
+{
+    for (auto item : db.getComponents()) {
+        Node* node = item.second;
+        node->getPrevProbePosition() = node->getProbePosition();  // v_k
+        node->getPrevProbeGrad()     = node->getProbeGrad();      // ∇f_pre(v_k)
+    }
+}
 
-        // Δx: position change since last iteration (will use v_k - v_{k-1} after Nesterov)
-        float pos_change_x = curr_pos.x - prev_pos.x;
-        float pos_change_y = curr_pos.y - prev_pos.y;
-        total_position_change += (pos_change_x * pos_change_x + pos_change_y * pos_change_y);
+/**
+ * @brief Algorithm 2 (BkTrk): backtracking BB step refinement, node nudge, and hyperparameter update.
+ *
+ * During warmup: plain nudge + BB state init, no density weight update.
+ * Post-warmup with backtrack disabled: single nudge with BB step + density weight update.
+ * Post-warmup with backtrack enabled:
+ *   1. Compute initial ᾱ_k (BB estimate, pre-nudge).
+ *   2. Trial nudge û_{k+1} = v_k − ᾱ_k ∇f_pre(v_k).
+ *   3. Compute fresh BB from the trial step.
+ *   4. If ᾱ_k > ε · fresh_BB: replace ᾱ_k with fresh BB, retry from v_k.
+ *   5. Repeat until consistent or max_tries reached.
+ *   Density field is held fixed throughout the loop.
+ */
+void Placer::nudgeAndUpdate()
+{
+    const bool in_warmup = (iteration <= (int)cfg["params"]["warmup_iterations"]);
 
-        // Δg: gradient change since last iteration (∇f_k - ∇f_{k-1})
-        float grad_change_x = node_p->combined_force.x - prev_grad.getX();
-        float grad_change_y = node_p->combined_force.y - prev_grad.getY();
-        total_gradient_change += (grad_change_x * grad_change_x + grad_change_y * grad_change_y);
-
-        // Store current position and gradient for next iteration's Δx, Δg
-        prev_pos = curr_pos;
-        prev_grad.setX(node_p->combined_force.x);
-        prev_grad.setY(node_p->combined_force.y);
+    // ── Warmup path: plain nudge, initialize BB state ────────────────────
+    if (in_warmup) {
+        snapshotPreNudge();
+        nudgeAllNodes();
+        updateBBState();
+        return;
     }
 
-    // step_length = ||Δx|| / ||Δg||  (BB estimate of 1/L)
-    step_length = sqrt(total_position_change) / sqrt(total_gradient_change + 1e-8f);
-    Logger::log_detail("Unclamped step_length: " + PREC(step_length));
+    // ── Algorithm 2: BkTrk ───────────────────────────────────────────────
 
-    step_length = std::clamp(step_length, 0.0001f, 400.0f);
-    Logger::log_detail("Step length: " + PREC(step_length));
+    // Line 1: compute initial ᾱ_k from previous iteration data (pre-nudge)
+    step_length = computeBBStep();
+
+    backtrack_steps = 0;
+    const bool  enabled   = cfg["params"]["backtrack_enabled"];
+    const int   max_tries = cfg["params"]["backtrack_max_tries"];
+    const float epsilon   = cfg["params"]["backtrack_epsilon"];
+
+    if (!enabled) {
+        snapshotPreNudge();
+        nudgeAllNodes();
+        updateBBState();
+        updateDensityWeight();
+        return;
+    }
+
+    // Snapshot v_k into node-local lookahead fields
+    snapshotPreNudge();
+
+    for (int t = 0; t < max_tries; t++)
+    {
+        // Lines 2/6: û_{k+1} = v_k − ᾱ_k ∇f_pre(v_k)
+        nudgeAllNodes();
+
+        // Compute ∇f_pre(û_{k+1}) at trial positions (density field held fixed)
+        computeAllPartials();
+
+        // Compute fresh BB estimate: ‖û − v_k‖ / ‖∇f_pre(û) − ∇f_pre(v_k)‖
+        float num_sq = 0.0f, den_sq = 0.0f;
+        for (auto item : db.getComponents()) {
+            Node* node = item.second;
+            float dx = node->getX() - node->getProbePosition().x;
+            float dy = node->getY() - node->getProbePosition().y;
+            num_sq += dx*dx + dy*dy;
+
+            XY p = getNodePartials(node);
+            float dgx = p.x - node->getProbeGrad().getX();
+            float dgy = p.y - node->getProbeGrad().getY();
+            den_sq += dgx*dgx + dgy*dgy;
+        }
+        float fresh_bb = sqrtf(num_sq) / sqrtf(den_sq + 1e-8f);
+
+        // Line 4: accept if ᾱ_k ≤ ε · fresh_BB
+        if (step_length <= epsilon * fresh_bb)
+            break;
+
+        // Condition failed (Lines 5–7): update ᾱ_k and restore to v_k
+        backtrack_steps++;
+        step_length = std::clamp(fresh_bb, 0.0001f, 400.0f);
+
+        if (t < max_tries - 1) {
+            for (auto item : db.getComponents()) {
+                Node* node = item.second;
+                node->setX(node->getProbePosition().x);
+                node->setY(node->getProbePosition().y);
+            }
+            for (auto filler : db.getFillers()) {
+                filler->setX(filler->getProbePosition().x);
+                filler->setY(filler->getProbePosition().y);
+            }
+            // Restore ∇f_pre(v_k) from snapshot (avoids full recomputation)
+            for (auto item : db.getComponents()) {
+                Node* node = item.second;
+                if (partials_method == "aie") {
+                    node->partials_aie.x = node->getProbeGrad().getX();
+                    node->partials_aie.y = node->getProbeGrad().getY();
+                } else {
+                    node->terms_cpu.partials.x = node->getProbeGrad().getX();
+                    node->terms_cpu.partials.y = node->getProbeGrad().getY();
+                }
+            }
+        }
+        // On the last try: accept whatever position we have (ensure progress)
+    }
+    Logger::log_detail("BkTrk steps taken: " + std::to_string(backtrack_steps));
+
+    // Committed position is set; partials at committed position are in memory
+    updateBBState();
 }
 
 /**
@@ -303,8 +407,8 @@ void Placer::updateDensityWeight()
 
     if (current_hpwl > prev_hpwl) // if HPWL is not improving,
     {
-        float hpwl_percent_change = 100.0f * (current_hpwl - prev_hpwl) / (prev_hpwl + 1e-8f); // avoid div by 0
         // decrease multiplier to allow HPWL forces to have more influence
+        float hpwl_percent_change = 100.0f * (current_hpwl - prev_hpwl) / (prev_hpwl + 1e-8f); // avoid div by 0
         dw_multiplier = std::max(dw_min_step, std::pow(dw_max_step, 1 - hpwl_percent_change));
     }
 
@@ -526,7 +630,7 @@ bool Placer::checkConvergence()
     float current_hpwl = hpwl_history.back();
     float hpwl_improvement = (old_hpwl - current_hpwl) / old_hpwl;
 
-    bool hpwl_converged = (hpwl_improvement < hpwl_improvement_threshold) 
+    bool hpwl_converged = (hpwl_improvement < hpwl_improvement_threshold)
                             && (hpwl_improvement > 0.0f);
 
     // Combined convergence: both criteria must be met

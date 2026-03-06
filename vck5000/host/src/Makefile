@@ -6,7 +6,7 @@ PROJ_NAME := AIEplace
 MAIN = main.cpp
 
 BUILD_XRT ?= # Set to 1 to build with XRT and VCK5000 support.
-BUILD_VIZ ?= 1# Set to 1 to build with visualization support.
+BUILD_DEBUG ?= 1# Set to 1 to build with visualization support, debug symbols, and no optimization.
 
 ITEMS := AIEplace Partials Density Output DataBase Grid Net DCT Logger Common JsonUtils
 # Auto-detect XRT environment (set on HPC with VCK5000 access)
@@ -17,7 +17,7 @@ else
 $(info MAKE INFO: Building without XRT - CPU only mode)
 endif
 
-ifdef BUILD_VIZ
+ifdef BUILD_DEBUG
 ITEMS += Visualizer
 endif
 
@@ -36,8 +36,11 @@ INCLUDES += -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/ -I/lustre/home/
 INCLUDES += -I${HOME}/local/boost_1_82_0/
 
 COMPILE_FLAGS := -std=c++2a
-COMPILE_FLAGS += -g # Debugging flag: see the proper names of variables and functions in your stack frames,
-				    # and get line numbers and see the source as you step around in the executable
+ifdef BUILD_DEBUG
+COMPILE_FLAGS += -g# Debugging flag: see the proper names of variables and functions in your stack frames,
+# and get line numbers and see the source as you step around in the executable
+endif
+
 ifdef BUILD_XRT
 COMPILE_FLAGS += -DUSE_AIE_ACCELERATION
 endif
@@ -63,7 +66,7 @@ LINK_FLAGS += -lpthread -lrt -lstdc++
 #LINK_FLAGS += -ltbb  # Disabled for WSL build - enable with -DUSE_TBB if needed
 # Cairo is used for generating images, but disabled now because it causes compile errors:
 # warning: libnvidia-tls.so.430.50, needed by //usr/lib64/libGL.so.1, not found
-ifdef BUILD_VIZ
+ifdef BUILD_DEBUG
 $(info MAKE INFO: Building with visualization support)
 LINK_FLAGS += -lcairo
 COMPILE_FLAGS += -DCREATE_VISUALIZATION
@@ -71,8 +74,12 @@ endif
 #LINK_FLAGS += -l:libcairo.so.2# Specific library for use on nextgenio-amd02 node
 
 
+ifdef BUILD_DEBUG
 COMPILE_FLAGS += -O0 # optimization level, 0 means no optimization
-#COMPILE_FLAGS += -O1 # optimization level, 3 means full optimization
+else
+COMPILE_FLAGS += -O3 # optimization level, 3 means full optimization
+endif
+
 #COMPILE_FLAGS += -Wall
 
 COMPILE_FLAGS += -D_GLIBCXX_USE_CXX11_ABI=0  # Required for Limbo library compatibility
@@ -84,11 +91,10 @@ PROFILE_FLAG :=  # Disabled profiling for WSL debug
 #PROFILE_FLAG += -fsanitize=thread# flag for thread sanitizer for debugging
 #PROFILE_FLAG += -g# flag for code annotation
 
-.DEFAULT_GOAL := all
+.DEFAULT_GOAL := ${EXE}
 
-.PHONY: all objs
+.PHONY: objs
 
-all: ${EXE}
 
 ${EXE}: ${MAIN} ${OBJS}
 	@mkdir -p ${TOP_DIR}/bin

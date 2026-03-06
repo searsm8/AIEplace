@@ -132,6 +132,7 @@ public:
     bool addFillers(float target_utilization);
 
     void iterationReset();
+    void clearPartials();
     void sortPositionsByX();
     void sortPositionsByY();
     void sortPositionsMaxMinX();

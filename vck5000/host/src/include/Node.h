@@ -50,9 +50,10 @@ private:
     string m_orient;
     std::mutex m_mutex;
     Position<position_type> m_pos; // u_k, actual location of the node
-    Position<position_type> m_lookahead_pos; // v_k
-    Position<position_type> m_prev_lookahead_pos; // v_{k-1}
-    Position<position_type> m_prev_grad; // grad(v_{k-1})
+    Position<position_type> m_probe_pos;  // v_k, used as a "lookahead" or "probe" to test the optimiazation landscape
+    Position<position_type> m_prev_probe_pos;  // v_{k-1}
+    XY m_probe_grad; // ∇(v_k)
+    XY m_prev_probe_grad; // ∇(v_{k-1})
 
     PlacementStatus m_status;
     bool m_is_large; // True if the area of the node is at least 1/16th the area of a bin
@@ -67,8 +68,9 @@ public:
 
     // Constructors
     Node() : m_name("") {}
-    Node(string name) : m_name(name), m_orient("N"), m_pos(0, 0), 
-            m_prev_lookahead_pos(0, 0), m_prev_grad(0, 0), combined_force() 
+    Node(string name) : m_name(name), m_orient("N"), m_pos(0, 0),
+            m_probe_pos(0, 0), m_probe_grad(0, 0),
+            m_prev_probe_pos(0, 0), m_prev_probe_grad(0, 0), combined_force()
             {}
 
     // Need virtual destructor for proper dynamic_cast
@@ -79,9 +81,10 @@ public:
     const string& getName() { return m_name; }
     const PlacementStatus& getStatus() { return m_status; }
     Position<position_type>& getPosition() { return m_pos; } // return a reference to avoid copying
-    Position<position_type>& getPrevLookaheadPosition() { return m_prev_lookahead_pos; } 
-    Position<position_type>& getLookaheadPosition() { return m_lookahead_pos; } 
-    Position<position_type>& getPrevGrad() { return m_prev_grad; } 
+    Position<position_type>& getProbePosition() { return m_probe_pos; }
+    Position<position_type>& getPrevProbePosition() { return m_prev_probe_pos; }
+    XY& getProbeGrad() { return m_probe_grad; }
+    XY& getPrevProbeGrad() { return m_prev_probe_grad; }
     void translate(float move_x, float move_y) { m_pos.translate(move_x, move_y); }
     void translate(XY move) { m_pos.translate(move.x, move.y); }
     const string& getOrientation() { return m_orient; }
@@ -95,10 +98,15 @@ public:
     std::vector<Net*> getNets() { return mv_nets; }
     std::vector<BinOverlap> getBinOverlaps() { return mv_bin_overlaps; }
 
-    // Setters
     void iterationReset()
     {
         mv_bin_overlaps.clear();
+        terms_cpu.clear();
+        partials_aie.clear();
+    }
+
+    void clearPartials()
+    {
         terms_cpu.clear();
         partials_aie.clear();
     }

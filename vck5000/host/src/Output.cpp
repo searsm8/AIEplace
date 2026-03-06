@@ -49,22 +49,44 @@ void Placer::printIterationResults()
 {
     system("clear"); // Clear console for cleaner output each iteration
     printWelcomeBanner(false);
+    if (cfg["output"].contains("DSE_info"))
+    {
+    //    Logger::log_info("DSE parameters:\n" + cfg["output"]["DSE_info"].get<std::string>());
+        Table DSE_info;
+        std::string dse_info_str = cfg["output"]["DSE_info"].get<std::string>();
+        std::istringstream stream(dse_info_str);
+        std::string line;
+
+        while (std::getline(stream, line)) {
+            auto eq = line.find('=');
+            if (eq != std::string::npos)
+                DSE_info.add_row(RowStream{} << line.substr(0, eq) << line.substr(eq + 1));
+            else
+                DSE_info.add_row(RowStream{} << line);
+        }
+        DSE_info.column(0).format().font_align(FontAlign::right);
+        DSE_info.column(1).format().font_align(FontAlign::left);
+        //DSE_info.format().hide_border();
+        Logger::log_info(DSE_info);
+    }
+
     // every X iterations, export a table in markdown
     int X = 1;
-
     float hpwl = hpwl_history.back();
     float overflow = ovfw_history.back();
     if (iteration % X == 0)
     {
         Table top;
-        top.add_row(RowStream{} << "Benchmark" << db.getBenchmarkName());
-        top.add_row(RowStream{} << "Iteration" << iteration);
-        top.add_row(RowStream{} << "HPWL" << SCI(hpwl));
-        top.add_row(RowStream{} << "Overflow" << PREC(overflow));
-        top.add_row(RowStream{} << "Step Length" << SCI(step_length));
-        top.add_row(RowStream{} << "Density Weight" << SCI(density_weight));
-        top.column(0).format().font_align(FontAlign::right);
-        top.column(1).format().font_align(FontAlign::left);
+        top.add_row(RowStream{} << "   " << "Benchmark" << db.getBenchmarkName() << "    ");
+        top.add_row(RowStream{} << "   " << "Iteration" << iteration << "   ");
+        top.add_row(RowStream{} << "   " << "HPWL" << SCI(hpwl) << "   ");
+        top.add_row(RowStream{} << "   " << "Overflow" << PREC(overflow) << "   ");
+        top.add_row(RowStream{} << "   " << "Step Length" << SCI(step_length) << "   ");
+        top.add_row(RowStream{} << "   " << "Density Weight" << SCI(density_weight) << "   ");
+        top.add_row(RowStream{} << "   " << "BkTrk steps" << std::to_string(backtrack_steps) << "   ");
+        top.column(1).format().font_align(FontAlign::right);
+        top.column(2).format().font_align(FontAlign::left);
+        //top.format().hide_border();
         Logger::log_data(top);
         cout << endl;
     }
@@ -85,14 +107,17 @@ void Placer::printIterationResults()
     std::ofstream hpwl_file;
     fs::path dir = output_dir;
     hpwl_file.open(dir.append("hpwl.dat"), std::ios_base::app);
-    if(iteration == 0) {
-        hpwl_file << "Iter, HPWL, OVFW, STEP_LEN, DW" << endl; // Write header only for the first iteration
-    }
+
+    // Add header if this is the first iteration
+    if(iteration == 1)
+        hpwl_file << "Iter, HPWL, OVFW, step_len, density_weight, BkSteps" << endl;
+
     hpwl_file << std::setfill('0') << std::setw(3) << iteration << ", "
-              << std::setprecision(2) << std::scientific << hpwl << ", "
-              << std::setprecision(2) << std::scientific << overflow << ", "
-              << std::setprecision(2) << std::scientific << step_length << ", "
-              << std::setprecision(2) << std::scientific << density_weight << endl;
+              << SCI(hpwl) << ", "
+              << SCI(overflow) << ", "
+              << SCI(step_length) << ", "
+              << SCI(density_weight) << ", "
+              << backtrack_steps << endl;
     hpwl_file.close();
 }
 
@@ -215,7 +240,7 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
     out_file << "\"" << db.getBenchmarkName() << "\",";
     out_file << iteration << ",";
     out_file << std::scientific << SCI(final_hpwl) << ",";
-    out_file << std::scientific << SCI(initial_hpwl) << ",";
+    out_file << std::scientific << SCI(m_initial_hpwl) << ",";
     out_file << std::fixed << std::setprecision(2) << hpwl_improvement << ",";
     out_file << std::scientific << SCI(final_overflow) << ",";
     out_file << std::fixed << SCI(step_length) << ",";
@@ -261,8 +286,8 @@ void Placer::printFinalResults()
     // Calculate HPWL improvement if initial HPWL was recorded
     float hpwl_improvement = 0.0f;
     bool has_improvement = false;
-    if (initial_hpwl > 0) {
-        hpwl_improvement = ((initial_hpwl - final_hpwl) / initial_hpwl) * 100.0f;
+    if (m_initial_hpwl > 0) {
+        hpwl_improvement = ((m_initial_hpwl - final_hpwl) / m_initial_hpwl) * 100.0f;
         has_improvement = true;
     }
 
@@ -279,7 +304,7 @@ void Placer::printFinalResults()
     results.add_row(RowStream{} << "Avg iteration time (s)" << std::fixed << std::setprecision(3) << iteration_avg);
     results.add_row(RowStream{} << "Final HPWL" << std::scientific << std::setprecision(3) << final_hpwl);
     if (has_improvement) {
-        results.add_row(RowStream{} << "Initial HPWL" << std::scientific << std::setprecision(3) << initial_hpwl);
+        results.add_row(RowStream{} << "Initial HPWL" << std::scientific << std::setprecision(3) << m_initial_hpwl);
         results.add_row(RowStream{} << "HPWL improvement (%)" << std::fixed << std::setprecision(2) << hpwl_improvement);
     }
     results.add_row(RowStream{} << "Final Overflow" << std::scientific << std::setprecision(3) << final_overflow);
@@ -329,9 +354,8 @@ void Placer::printFinalResults()
     db.writeDEF(run_output_dir);
 
     // Copy config file to run directory for reproducibility
-    std::string config_backup = run_output_dir + "/config_used.json";
-    std::ifstream src("host/run_config.json");
-    std::ofstream dst(config_backup);
+    std::ifstream src(m_config_filepath);
+    std::ofstream dst(run_output_dir + "/config_used.json");
     dst << src.rdbuf();
 
     Logger::log_info("All outputs saved to: " + run_output_dir);
@@ -408,8 +432,8 @@ float Placer::getMemoryUsageMB()
 // Additional function to track initial HPWL (call this at the start of placement)
 void Placer::recordInitialHPWL()
 {
-    initial_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
-    Logger::log_info("Initial HPWL recorded: " + std::to_string(initial_hpwl));
+    m_initial_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
+    Logger::log_info("Initial HPWL recorded: " + std::to_string(m_initial_hpwl));
 }
 
 void Placer::initializeFocus()

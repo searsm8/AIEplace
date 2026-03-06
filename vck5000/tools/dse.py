@@ -8,7 +8,50 @@ import json
 import os
 import subprocess
 import sys
-from typing import Any, Union, List
+from typing import Any, Union, List, Tuple
+
+
+# Registry of DSE-controlled parameters: list of (section_path_list, param_name) tuples.
+# Populated by dse() before the sweep begins; used by update_info_string().
+_dse_params: List[Tuple[List[str], str]] = []
+
+# Overall sweep progress, written into DSE_info by update_info_string().
+_dse_current_run: int = 0
+_dse_total_runs: int = 0
+
+
+def update_info_string(config: dict, config_path: str) -> None:
+    """
+    Build a DSE_info string from all DSE-controlled parameters and write it
+    into config["output"]["DSE_info"], then save the config file.
+
+    The string has the form:
+        "param1=value1 param2=value2 ..."
+    in the order that parameters were registered in _dse_params.
+
+    This is a no-op if _dse_params is empty or if the config has no "output" section.
+    """
+    if not _dse_params or "output" not in config:
+        return
+
+    parts = []
+    for section_list, param_name in _dse_params:
+        section = config
+        for key in section_list:
+            section = section.get(key, {})
+        if isinstance(section, dict) and param_name in section:
+            value = section[param_name]
+            if param_name == "benchmark":
+                value = str(value).rsplit('/', 1)[-1]
+            parts.append(f"{param_name}={value}")
+
+    if _dse_total_runs > 0:
+        parts.insert(0, f"DSE sweep progress={_dse_current_run} of {_dse_total_runs}")
+
+    config["output"]["DSE_info"] = "\n".join(parts)
+
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
 
 
 def modify_config_parameter(
@@ -106,6 +149,8 @@ def modify_config_parameter(
             print(f"DSE: Updated param '{param_name}' in section '{display_path}' to {new_value}")
         else:
             print(f"DSE: Updated param '{param_name}' at root level to {new_value}")
+
+        update_info_string(config, save_path)
         
     except FileNotFoundError:
         print(f"Error: Config file '{config_path}' not found")
@@ -151,14 +196,14 @@ benchmark_list = [
                 #"ispd2015/mgc_fft_1",
                 #"ispd2015/mgc_fft_2",
                 #"ispd2015/mgc_fft_a",
-                "ispd2015/mgc_fft_b",
+                #"ispd2015/mgc_fft_b",
                 #"ispd2015/mgc_des_perf_1",
-                "ispd2015/mgc_des_perf_a",
+                #"ispd2015/mgc_des_perf_a",
                 #"ispd2015/mgc_des_perf_b",
                 #"ispd2015/mgc_edit_dist_a",
                 #"ispd2015/mgc_matrix_mult_1",
                 #"ispd2015/mgc_matrix_mult_2",
-                #"ispd2015/mgc_matrix_mult_a",
+                "ispd2015/mgc_matrix_mult_a",
                 #"ispd2015/mgc_matrix_mult_b",
                 #"ispd2015/mgc_matrix_mult_c",
                 #"ispd2015/mgc_pci_bridge32_a",
@@ -172,38 +217,35 @@ benchmark_list = [
                 #"ispd2005/adaptec2",
                 #"ispd2005/adaptec3",
                 #"ispd2005/adaptec4",
-                #"ispd2005/bigblue1",
+                "ispd2005/bigblue1",
                 #"ispd2005/bigblue2",
                 #"ispd2005/bigblue3",
                 #"ispd2005/bigblue4"
                 ]
 #step_length_values = [10, 50, 100, 200, 300, 400, 500, 800, 1000]
-#step_length_values = [50, 100, 200]
-step_length_values = [50]
-RUNS_PER_CONFIG = 1
+step_length_values = [50, 100, 200]
+#step_length_values = [50]
+RUNS_PER_CONFIG = 2
 
 
-def read_last_csv_row(csv_path: str) -> dict:
-    """Read the last data row from a CSV file and return it as a dict.
-    Returns an empty dict if the file doesn't exist or has no data rows.
-    """
-    try:
-        with open(csv_path, 'r') as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-            if rows:
-                return dict(rows[-1])
-    except (FileNotFoundError, csv.Error):
-        pass
-    return {}
-
-
-# TODO: expand DSE to use SA or ant colony optimization
-# Design Space Exploration algorithm
+# Design Space Exploration
 # Runs AIEplace with different configurations by modifying the JSON config file between runs
+# TODO: expand DSE to use SA or ant colony optimization
 def dse():
+    global _dse_params, _dse_current_run, _dse_total_runs
     config_path = "host/run_config_dse.json"
     args = [config_path]
+
+    # Register all parameters under DSE control so update_info_string() can build DSE_info.
+    _dse_params = [
+        (["input"],  "benchmark"),
+        (["params"], "partials_compute_method"),
+        (["params"], "init_step_length"),
+    ]
+
+    # Total runs = product of all swept list sizes times repeats per config.
+    _dse_total_runs = len(benchmark_list) * len(step_length_values) * RUNS_PER_CONFIG
+    _dse_current_run = 0
 
     # Give every DSE sweep its own subdirectory so runs never collide
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -219,6 +261,11 @@ def dse():
             modify_config_parameter(config_path, "init_step_length", step_length, section_path="params")
 
             for run_num in range(1, RUNS_PER_CONFIG + 1):
+                _dse_current_run += 1
+                # Re-sync DSE_info with the updated run counter before launching.
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                update_info_string(config, config_path)
                 print(f"\nDSE: benchmark={benchmark}  init_step_length={step_length}  run={run_num}/{RUNS_PER_CONFIG}")
                 run_AIEplace(args)
 
@@ -227,7 +274,6 @@ def dse():
 
 def main():
     dse()
-
 
 if __name__=="__main__":
     main()
