@@ -12,11 +12,13 @@ endif
 
 include $(PROJECT_ROOT)/common.mk
 
+PLATFORM := /opt/xilinx/platforms/$(PLATFORM)/$(PLATFORM).xpfm
+
 TOPGRAPH := TopGraph
 AIE_SRCS_MAIN := $(AIE_DIR)/src/$(TOPGRAPH).cpp
 AIE_SRCS_OTHER := $(filter-out $(AIE_SRCS_MAIN), $(wildcard $(AIE_DIR)/src/*))
 
-AIE_FLAGS := -I "$(AIE_DIR)/src"
+AIE_FLAGS := --include "$(AIE_DIR)/src"
 
 # Add subcomponent variables
 -include $(AIE_DIR)/makeflags.mk
