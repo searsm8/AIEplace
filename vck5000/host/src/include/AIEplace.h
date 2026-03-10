@@ -109,9 +109,6 @@ public:
 
     void printWelcomeBanner(bool show_info = true);
 
-    // Getter functions
-    XY getNodePartials(Node* node_p);
-
     // Pre-run preparation
     void initializePlacement(Position<position_type> target_pos, int min_dist, int max_dist);
     void recordInitialHPWL();
@@ -158,30 +155,31 @@ public:
     // Main algorithm loop functions
     void run();
     void performIteration();
-    void oldPerformIteration(); // for testing purposes, to compare with new performIteration that has backtracking
 
-    // Main algorithm helper functions
+    // TODO: DELETE THESE FUNCS
+    //void oldPerformIteration(); // TODO: REMOVE. Legacy func to compare with new performIteration that has backtracking
     //float computeBBStep();     // pure BB computation, no side-effects
     //void  snapshotPreNudge();  // snapshot (v_k, ∇(v_k)) into lookahead fields before nudge
     //void  updateBBState();     // stores pre-nudge snapshot into prev-lookahead for next BB estimate
     //void  nudgeAndUpdate();    // BkTrk loop + nudge + BB state update + density weight
-    void updateDensityWeight();
-    void computeAllProbeGradients();    // ∇W and ∇N at v_1; result cached on nodes
-    void computeStepLength(bool backtracking); // Algorithm 1, lines 1–2: BkTrk + gradient step
-    void performMomentumStep();         // Algorithm 1, lines 3–4: Nesterov momentum
+    //void nudgeAllNodes();
+    //void nudgeNode(Node*);
 
-    void nudgeAllNodes();
-    void nudgeNode(Node*);
+    // Main algorithm iteration functions
+    void computeAllProbeGradients();    // ∇W and ∇N at v_1; result cached on nodes
+    void computeStepLength(bool backtracking_enabled = true); // Algorithm 1, lines 1–2: BkTrk + gradient step
+    void stepAllNodes(bool momentum_enabled);         // Algorithm 1, lines 3–4: Nesterov momentum
+    void updateDensityWeight();
 
     // Bookkeeping and visualization
     void recordIterationResults();
-    void printIterationResults();
     void plotHistories();
 
     // Post run analysis
     void computeStatistics();
 
     // Print functions
+    void printIterationResults();
     void printFinalResults();
     void initializeFocus();
 };

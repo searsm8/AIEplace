@@ -78,7 +78,7 @@ void Placer::performIteration()
     computeStepLength(bool backtracking);
 
     // Algorithm 1, lines 3–4: a_{k+1} and v_{k+1} = u_{k+1} + (a_k-1)/a_{k+1} * (u_{k+1} - u_k)
-    performMomentumStep();               // nesterov_ak updated; m_probe_pos ← v_{k+1}
+    stepAllNodes();               // nesterov_ak updated; m_probe_pos ← v_{k+1}
 
     // Adaptively update λ (density penalty weight) based on HPWL trend
     updateDensityWeight();
@@ -532,7 +532,7 @@ void Placer::initializeDensityWeight()
     for(auto item : db.getComponents()) {
         Node* node_p = item.second;
 
-        XY partials = getNodePartials(node_p);
+        XY& partials = node_p->getProbeGrad();
         HPWL_L1_norm += fabs(partials.x) + fabs(partials.y);
 
         XY electro_force = computeElectrostaticForce(node_p);
@@ -676,11 +676,18 @@ void Placer::computeAllProbeGradients()
 
 
 /**
- * @brief Recomputes the step length (alpha in ePlace) for the current iteration using backtracking line search if enabled.
+ * @brief Recomputes the step length (alpha in ePlace) for the current iteration.
+ * Uses Backtracking search if enabled (ePlace MS algorithm 2)
  * 
  */
 void Placer::computeStepLength(bool backtracking_enabled)
 {
+    // If backtracking is disabled, we can just use the step length without modification
+
+    // else, check the epsilon condition
+
+    // If the step is too long, we need to recompute the step length using the new gradients 
+    // at the trial position (v_{k+1} = v_k - alpha * grad(v_k)) and the old gradients at v_k
 }
 
 /** 
@@ -689,7 +696,7 @@ void Placer::computeStepLength(bool backtracking_enabled)
  * and caches the new gradients at u_{k+1} for the next iteration's momentum step.
  * 
  */
-void Placer::performMomentumStep()
+void Placer::stepAllNodes(bool momentum_enabled)
 {
 }
 

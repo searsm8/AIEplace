@@ -212,8 +212,8 @@ void Placer::computeAllPartials_simple()
                 simple_partial.y = 0;
             }
 
-            nodes[i]->terms_cpu.partials.x += simple_partial.x ;
-            nodes[i]->terms_cpu.partials.y += simple_partial.y ;
+            nodes[i]->getProbeGrad().x += simple_partial.x ;
+            nodes[i]->getProbeGrad().y += simple_partial.y ;
         }
     }
 
@@ -311,8 +311,8 @@ void Placer::computeAllPartials_CPU()
                 exit(1);
             }
 
-            nodes[i]->terms_cpu.partials.x += partial.x ;
-            nodes[i]->terms_cpu.partials.y += partial.y ;
+            nodes[i]->getProbeGrad().x += partial.x ;
+            nodes[i]->getProbeGrad().y += partial.y ;
         }
     }
 
@@ -496,14 +496,6 @@ void Placer::comparePartialResults()
     std::stringstream ss;
     ss << "errors: " << error_count << "\ttotal: " << total << "\tproportion: " << float(error_count)/float(total) << endl;
     Logger::log_error(ss.str());
-}
-
-XY Placer::getNodePartials(Node* node_p)
-{
-    if(partials_method == "aie")
-        return node_p->partials_aie;
-    else
-        return node_p->terms_cpu.partials;
 }
 
 AIEPLACE_NAMESPACE_END

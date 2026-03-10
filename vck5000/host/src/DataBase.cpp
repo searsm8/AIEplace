@@ -448,8 +448,8 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             Logger::log_debug("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
             //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8 + 1]));
             float partial = output_data[base_addr + 2*net_idx + n*8 + 1];
-            nodes[n]->partials_aie.y += partial;
-            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: partials_aie.y += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->partials_aie.y));
+            nodes[n]->getProbeGrad().y += partial;
+            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: probe_grad.y += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->getProbeGrad().y));
 
             //debugging
             float y_size = net->getBoundingBox().getYsize();
@@ -479,8 +479,8 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             Logger::log_debug("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
             //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8]));
             float partial = output_data[base_addr + 2*net_idx + n*8 + 0];
-            nodes[n]->partials_aie.x += partial;
-            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: partials_aie.x += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->partials_aie.x));
+            nodes[n]->getProbeGrad().x += partial;
+            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: probe_grad.x += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->getProbeGrad().x));
 
             //debugging
             float x_size = net->getBoundingBox().getXsize();

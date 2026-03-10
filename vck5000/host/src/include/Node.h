@@ -104,6 +104,10 @@ public:
     std::vector<Net*>& getNets() { return mv_nets; }
     std::vector<BinOverlap>& getBinOverlaps() { return mv_bin_overlaps; }
 
+    // TODO: This clears previous gradients, but computeStepLength() needs
+    // gradients from the previous iteration for the BB step estimate.
+    // Once computeStepLength is fully implemented, revisit what should be
+    // cleared here vs preserved across iterations.
     void iterationReset()
     {
         mv_bin_overlaps.clear();

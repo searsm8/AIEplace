@@ -118,7 +118,8 @@ struct XY
 
 };
 
-typedef XY Point; // alias for XY
+typedef XY Position;    // alias for XY
+typedef XY Gradient; // alias for XY
 
 struct Term
 {
