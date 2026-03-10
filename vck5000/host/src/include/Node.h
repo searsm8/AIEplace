@@ -49,7 +49,8 @@ private:
     string m_name;
     string m_orient;
     std::mutex m_mutex;
-    Position<position_type> m_pos; // u_k, actual location of the node
+    Position<position_type> m_pos; // u_k, actual position of the node
+    Position<position_type> m_prev_pos; // u_{k-1}, previous position of the node
     Position<position_type> m_probe_pos;  // v_k, used as a "lookahead" or "probe" to test the optimiazation landscape
     Position<position_type> m_prev_probe_pos;  // v_{k-1}
     XY m_probe_grad; // ∇(v_k)
@@ -76,27 +77,32 @@ public:
     // Need virtual destructor for proper dynamic_cast
     virtual ~Node() {} // Destructor
 
-    // Member Functions
-    // Getters
+    // Member Getter Functions
     const string& getName() { return m_name; }
     const PlacementStatus& getStatus() { return m_status; }
     Position<position_type>& getPosition() { return m_pos; } // return a reference to avoid copying
+    Position<position_type>& getPrevPosition() { return m_prev_pos; }
     Position<position_type>& getProbePosition() { return m_probe_pos; }
     Position<position_type>& getPrevProbePosition() { return m_prev_probe_pos; }
     XY& getProbeGrad() { return m_probe_grad; }
     XY& getPrevProbeGrad() { return m_prev_probe_grad; }
+
     void translate(float move_x, float move_y) { m_pos.translate(move_x, move_y); }
     void translate(XY move) { m_pos.translate(move.x, move.y); }
     const string& getOrientation() { return m_orient; }
     const position_type& getX() { return m_pos.getX(); }
     const position_type& getY() { return m_pos.getY(); }
+    const position_type& getProbeX() { return m_probe_pos.getX(); }
+    const position_type& getProbeY() { return m_probe_pos.getY(); }
+    XY getProbeXY() { return XY(m_probe_pos.getX(), m_probe_pos.getY()); }
+
     void setX(float x) { m_pos.setX(x); }
     void setY(float y) { m_pos.setY(y); }
     void lock() {  m_mutex.lock(); }
     void unlock() {  m_mutex.unlock();  }
 
-    std::vector<Net*> getNets() { return mv_nets; }
-    std::vector<BinOverlap> getBinOverlaps() { return mv_bin_overlaps; }
+    std::vector<Net*>& getNets() { return mv_nets; }
+    std::vector<BinOverlap>& getBinOverlaps() { return mv_bin_overlaps; }
 
     void iterationReset()
     {

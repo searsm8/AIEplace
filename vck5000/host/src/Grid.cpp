@@ -44,9 +44,9 @@ void Grid::computeBinOverlaps(Node* node_p)
 
     //If node is small compared to bin size, we assume the entire node is inside the bin
     if(!node_p->isLarge()) {
-        int col_index = node_p->getPosition().getX() / m_bin_width;
+        int col_index = node_p->getProbeX() / m_bin_width;
         if(col_index < 0 || col_index > m_bins_per_row-1) return;
-        int row_index = node_p->getPosition().getY() / m_bin_height; 
+        int row_index = node_p->getProbeY() / m_bin_height;
         if(row_index < 0 || row_index > m_bins_per_col-1) return;
 
         float overlap = node_p->getArea();
@@ -63,11 +63,11 @@ void Grid::computeBinOverlaps(Node* node_p)
     exit(2); // for now, just exit. TODO: handle large nodes properly!
 
     // find indices in m_bins that this node overlaps
-    int col_index_start = node_p->getPosition().getX() / m_bin_width;
-    int col_index_final = std::min<int>(m_bins_per_row-1, (node_p->getPosition().getX() + node_p->getXsize()) / m_bin_width);
+    int col_index_start = node_p->getProbeX() / m_bin_width;
+    int col_index_final = std::min<int>(m_bins_per_row-1, (node_p->getProbeX() + node_p->getXsize()) / m_bin_width);
 
-    int row_index_start = node_p->getPosition().getY() / m_bin_height; 
-    int row_index_final = std::min<int>(m_bins_per_col-1, (node_p->getPosition().getY() + node_p->getYsize()) / m_bin_height); 
+    int row_index_start = node_p->getProbeY() / m_bin_height;
+    int row_index_final = std::min<int>(m_bins_per_col-1, (node_p->getProbeY() + node_p->getYsize()) / m_bin_height);
 
     // DEBUGGING
     //cout << "\ncomputeBinOverlaps() for Node " << node_p->getName() << node_p->getPosition().to_string() << " : " << node_p->getXsize() << ", " << node_p->getYsize() << endl;

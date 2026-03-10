@@ -180,18 +180,18 @@ void Placer::computeAllPartials_simple()
         // Skip further processing for very small nets
         if (net_size <= 1) continue;
 
-        // find max and min x and y positions
+        // find max and min x and y probe positions
         float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = 0, max_y = 0;
         for (Node* node_p : nodes) {
-            min_x = std::min(min_x, node_p->getX());
-            min_y = std::min(min_y, node_p->getY());
-            max_x = std::max(max_x, node_p->getX());
-            max_y = std::max(max_y, node_p->getY());
+            min_x = std::min(min_x, node_p->getProbeX());
+            min_y = std::min(min_y, node_p->getProbeY());
+            max_x = std::max(max_x, node_p->getProbeX());
+            max_y = std::max(max_y, node_p->getProbeY());
         }
 
         for(size_t i = 0; i < net_size; i++) {
-            float x = nodes[i]->getX();
-            float y = nodes[i]->getY();
+            float x = nodes[i]->getProbeX();
+            float y = nodes[i]->getProbeY();
 
             // Compute partials using shortcut
             const int THRESHOLD = 10; // distance threshold for partials
@@ -240,22 +240,22 @@ void Placer::computeAllPartials_CPU()
         // Record starting index for this net's results
         size_t start_idx = all_partials.size();
 
-        // find max and min x and y positions
+        // find max and min x and y probe positions
         float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = 0, max_y = 0;
         for (Node* node_p : nodes) {
-            min_x = std::min(min_x, node_p->getX());
-            min_y = std::min(min_y, node_p->getY());
-            max_x = std::max(max_x, node_p->getX());
-            max_y = std::max(max_y, node_p->getY());
+            min_x = std::min(min_x, node_p->getProbeX());
+            min_y = std::min(min_y, node_p->getProbeY());
+            max_x = std::max(max_x, node_p->getProbeX());
+            max_y = std::max(max_y, node_p->getProbeY());
         }
 
         // Compute A terms directly into our flat vector
         std::vector<Term> A(net_size);
         for (size_t i = 0; i < net_size; i++) {
-            A[i].plus.x  = exp((nodes[i]->getX() - max_x) * inv_gamma);
-            A[i].minus.x = exp((min_x - nodes[i]->getX()) * inv_gamma);
-            A[i].plus.y  = exp((nodes[i]->getY() - max_y) * inv_gamma);
-            A[i].minus.y = exp((min_y - nodes[i]->getY()) * inv_gamma);
+            A[i].plus.x  = exp((nodes[i]->getProbeX() - max_x) * inv_gamma);
+            A[i].minus.x = exp((min_x - nodes[i]->getProbeX()) * inv_gamma);
+            A[i].plus.y  = exp((nodes[i]->getProbeY() - max_y) * inv_gamma);
+            A[i].minus.y = exp((min_y - nodes[i]->getProbeY()) * inv_gamma);
         }
 
         // Compute B and C terms
@@ -266,10 +266,10 @@ void Placer::computeAllPartials_CPU()
             B.minus.x += A[i].minus.x;
             B.plus.y  += A[i].plus.y;
             B.minus.y += A[i].minus.y;
-            C.plus.x  += A[i].plus.x  * nodes[i]->getX();
-            C.minus.x += A[i].minus.x * nodes[i]->getX();
-            C.plus.y  += A[i].plus.y  * nodes[i]->getY();
-            C.minus.y += A[i].minus.y * nodes[i]->getY();
+            C.plus.x  += A[i].plus.x  * nodes[i]->getProbeX();
+            C.minus.x += A[i].minus.x * nodes[i]->getProbeX();
+            C.plus.y  += A[i].plus.y  * nodes[i]->getProbeY();
+            C.minus.y += A[i].minus.y * nodes[i]->getProbeY();
         }
 
         // Pre-compute common terms
@@ -285,8 +285,8 @@ void Placer::computeAllPartials_CPU()
 
         // Compute partials and store in our flat vector
         for (size_t i = 0; i < net_size; i++) {
-            float x = nodes[i]->getX();
-            float y = nodes[i]->getY();
+            float x = nodes[i]->getProbeX();
+            float y = nodes[i]->getProbeY();
 
             Point partial;
             partial.x = ((1 + x * inv_gamma) * B.plus.x - (C.plus.x * inv_gamma))

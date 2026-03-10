@@ -367,7 +367,7 @@ void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
         auto &nodes = net->getNodes(); // reference to avoid copy
         net->sortPositionsMaxMinX(); // This sort might be redundant? 
         for(int j = 0; j < net_size; j++) {
-            input_data[base_addr + 2*net_idx + j*8] = nodes[j]->getX();
+            input_data[base_addr + 2*net_idx + j*8] = nodes[j]->getProbeX();
 
             // check for correct ordering
             if(j > 0) if(input_data[base_addr + 2*net_idx + 0*8] < input_data[base_addr + 2*net_idx + j*8])  {
@@ -393,7 +393,7 @@ void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
         // prep y data
         net->sortPositionsMaxMinY();
         for(int j = 0; j < net_size; j++) {
-            input_data[base_addr + 2*net_idx + j*8 + 1] = nodes[j]->getY();
+            input_data[base_addr + 2*net_idx + j*8 + 1] = nodes[j]->getProbeY();
             //if(nodes[j]->getY() != nodes[j]->getY()) // check for nan
             //{
             //    Logger::log_warning(string("NaN detected:\n" + net->to_string() + "\n"));

@@ -46,7 +46,7 @@
     "warmup_iterations": 5,
     "backtrack_enabled": true,
     "backtrack_max_tries": 10,
-    "backtrack_epsilon": 1.05,
+    "backtrack_epsilon": 0.95,
 
     // Convergence criteria (adaptive algorithm will stop early if met)
     "convergence_min_iterations": 50,

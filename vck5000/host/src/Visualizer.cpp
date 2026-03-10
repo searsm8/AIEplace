@@ -151,7 +151,7 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     // Draw die boundary in black
     cairo_set_source_rgb (cr, 0.0, 0.0, 0.0);
     cairo_set_line_width (cr, 0.004);
-    cairo_rectangle (cr, DIE_START, DIE_START, 1-2*DIE_START, 1-2*DIE_START);
+    cairo_rectangle (cr, DIE_START, DIE_START, 1-2*DIE_START, 1-2*DIE_START); // always a square!~
     cairo_stroke(cr);
     
     // Draw Fillers

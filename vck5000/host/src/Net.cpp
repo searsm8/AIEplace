@@ -9,28 +9,28 @@ AIEPLACE_NAMESPACE_BEGIN
 struct Xgreater
 {
     bool operator()( Node* l, Node* r ) {
-        return l->getPosition().getX() > r->getPosition().getX();
+        return l->getProbeX() > r->getProbeX();
     }
 };
 
 struct Xlesser
 {
     bool operator()( Node* l, Node* r ) {
-        return l->getPosition().getX() < r->getPosition().getX();
+        return l->getProbeX() < r->getProbeX();
     }
 };
 
 struct Ygreater
 {
     bool operator()( Node* l, Node* r ) {
-        return l->getPosition().getY() > r->getPosition().getY();
+        return l->getProbeY() > r->getProbeY();
     }
 };
 
 struct Ylesser
 {
     bool operator()( Node* l, Node* r ) {
-        return l->getPosition().getY() < r->getPosition().getY();
+        return l->getProbeY() < r->getProbeY();
     }
 };
 
