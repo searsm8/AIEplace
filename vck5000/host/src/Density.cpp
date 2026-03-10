@@ -424,9 +424,9 @@ void Placer::computeOverlaps()
     //Logger::log("overlap", t);
 }
 
-XY Placer::computeElectrostaticForce(Node* node_p)
+Gradient Placer::computeElectrostaticForce(Node* node_p)
 {
-    XY electro_force;
+    Gradient electro_force;
 
     // for each bin that this node overlaps,
     // compute electric force based on bin overlaps

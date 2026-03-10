@@ -12,7 +12,7 @@ class Grid
 {
 private:
     // Grid data members
-    Box<position_type> m_die_area;
+    Box m_die_area;
     int m_bins_per_row;
     int m_bins_per_col;
     float m_bin_width, m_bin_height;
@@ -22,9 +22,9 @@ public:
     // Constructors
     Grid() {}
 
-    Grid(Box<position_type> die_area) : m_die_area(die_area), m_bins_per_row(1024), m_bins_per_col(1024) { init(); }
+    Grid(Box die_area) : m_die_area(die_area), m_bins_per_row(1024), m_bins_per_col(1024) { init(); }
 
-    Grid(Box<position_type> die_area, int bins_per_row, int bins_per_col) : 
+    Grid(Box die_area, int bins_per_row, int bins_per_col) : 
         m_die_area(die_area), m_bins_per_row(bins_per_row), m_bins_per_col(bins_per_col) { init(); }
 
     void init();

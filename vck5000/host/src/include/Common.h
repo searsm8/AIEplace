@@ -89,13 +89,6 @@ struct XY
         return close_x && close_y;
     }
 
-    string toString()
-    {
-        std::ostringstream ss;
-        ss << "(" << x << ", " << y << ")";
-        return ss.str();
-    }
-
     XY operator+(const XY& other) const {
         return XY{x + other.x, y + other.y};
     }
@@ -116,6 +109,19 @@ struct XY
         return *this;
     }
 
+    void setXY(float new_x, float new_y) { x = new_x; y = new_y; }
+    void setXY(XY other) { x = other.x; y = other.y; }
+
+    void translate(float dx, float dy) { x += dx; y += dy; }
+    void translate(XY move) { x += move.x; y += move.y; }
+
+    string to_string() {
+        std::ostringstream ss;
+        ss << std::setprecision(2) << std::fixed;
+        ss << "@(" << x << ", " << y << ")";
+        return ss.str();
+    }
+
 };
 
 typedef XY Position;    // alias for XY
@@ -129,7 +135,7 @@ struct Term
     string to_string()
     {
         std::ostringstream ss;
-        ss << "Term(+" << plus.toString() << ", -" << minus.toString() << ")";
+        ss << "Term(+" << plus.to_string() << ", -" << minus.to_string() << ")";
         return ss.str();
     }
 };

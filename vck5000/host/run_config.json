@@ -26,8 +26,9 @@
     "partials_compute_method": "cpu", // choose: aie, cpu, simple, hybrid, threaded
     "density_compute_method": "cpu",  // choose: aie, cpu
     "wirelength_method": "HPWL",      // choose: HPWL
-
-    "use_filler": true,               // whether to include filler cells in placement
+    "enable_backtracking": true,      // whether to use backtracking line search for step length selection
+    "enable_momentum": true,          // whether to use momentum in the optimization (Nesterov Accelerated Gradient)
+    "enable_filler": true,            // whether to include filler cells in placement
 
     // Hyperparameters
     "gamma": 4,

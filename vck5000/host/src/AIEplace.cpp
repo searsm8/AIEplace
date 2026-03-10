@@ -21,8 +21,7 @@ void Placer::run()
     algo_start = getTime();
     std::srand(std::time(nullptr)); // use current time as seed for random generator
     // Set the center point of die area as initial placement target
-    Position<position_type> target =
-                Position<position_type>(grid.getDieWidth()/2, grid.getDieHeight()/2);
+    Position target = Position(grid.getDieWidth()/2, grid.getDieHeight()/2);
 
     initializePlacement(target, 0, grid.getDieWidth()/4); // even spread around center
     //initializePlacement(target, 0, 500); // Close placement for testing purposes
@@ -58,10 +57,10 @@ void Placer::performIteration()
     {
         // Bootstrap v_1 ← u_1 (probe positions ← current positions)
         for (auto item : db.getComponents())
-            item.second->getProbePosition().setPosition(item.second->getPosition());
+            item.second->getProbePosition().setXY(item.second->getPosition());
         // TODO: merge filler list into db.getComponents() so we don't need separate loops
         for (auto filler : db.getFillers())
-            filler->getProbePosition().setPosition(filler->getPosition());
+            filler->getProbePosition().setXY(filler->getPosition());
 
 
         // Initialize solver state
@@ -73,12 +72,12 @@ void Placer::performIteration()
     // For k > 1: ∇f(v_k) was cached by last iteration's performGradientStep()
     // as a free byproduct of the backtracking check — no recomputation needed here.
 
-    // Algorithm 1, lines 1–2: steplength via BkTrk, then u_{k+1} = v_k - α_k ∇f(v_k)
+    // Compute new step_length via BkTrk (Algorithm 2 in ePlace-MS)
     // Uses cached ∇f(v_k). Produces u_{k+1} in m_pos AND caches ∇f(v_{k+1}) for next iteration.
-    computeStepLength(bool backtracking);
+    computeStepLength(enable_backtracking);
 
     // Algorithm 1, lines 3–4: a_{k+1} and v_{k+1} = u_{k+1} + (a_k-1)/a_{k+1} * (u_{k+1} - u_k)
-    stepAllNodes();               // nesterov_ak updated; m_probe_pos ← v_{k+1}
+    stepAllNodes(enable_momentum); // nesterov_ak updated; m_probe_pos ← v_{k+1}
 
     // Adaptively update λ (density penalty weight) based on HPWL trend
     updateDensityWeight();
@@ -167,6 +166,8 @@ Placer::Placer(std::string config_filepath)
             hpwl_improvement_threshold = cfg["params"]["convergence_hpwl_improvement_threshold"];
             overflow_threshold = cfg["params"]["convergence_overflow_threshold"];
             target_density = cfg["params"]["convergence_target_density"];
+            enable_backtracking = cfg["params"]["enable_backtracking"];
+            enable_momentum = cfg["params"]["enable_momentum"];
 
             // Read other stuff
             MAX_THREADS = cfg["params"]["max_threads"];
@@ -215,7 +216,7 @@ Placer::Placer(std::string config_filepath)
             // Initialize database by reading LEF and DEF design files
             db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
 
-            if(cfg["params"]["use_filler"])   
+            if(cfg["params"]["enable_filler"])   
                 db.addFillers(target_density);
 
             db_IO_time = getInterval(pgrm_start_time, getTime());
@@ -463,13 +464,13 @@ void Placer::iterationReset()
  * @param min_dist Minimum distance from target_pos a node can appear
  * @param max_dist Maximum distance from target_pos a node can appear
  */
-void Placer::initializePlacement(Position<position_type> target_pos, int min_dist, int max_dist)
+void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist)
 {
     Logger::log_trace("Begin initializePlacement()");
     Table top;
     top.add_row(RowStream{} << "Initial Placement");
     Table data;
-    data.add_row(RowStream{} << "Center" << target_pos.getX() << target_pos.getY());
+    data.add_row(RowStream{} << "Center" << target_pos.x << target_pos.y);
     data.add_row(RowStream{} << "Min dist" << min_dist);
     data.add_row(RowStream{} << "Max dist" << max_dist); 
     top.add_row({data});
@@ -488,7 +489,7 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
         if(rand()%2 == 1) y_offset *= -1; // 50% chance to negate
         //int x_offset = rand()%(grid.getDieWidth()) - grid.getDieWidth()/2; // Even Spread
         //int y_offset = rand()%(grid.getDieWidth()) - grid.getDieWidth()/2; // Even Spread
-        Position<position_type> init_pos = target_pos + Position<position_type>(x_offset, y_offset);
+        Position init_pos = target_pos + Position(x_offset, y_offset);
         item.second->setPosition(init_pos);
 
         // if this component is bigger than 1/16th of bin area, set member bool
@@ -501,7 +502,7 @@ void Placer::initializePlacement(Position<position_type> target_pos, int min_dis
         if(rand()%2 == 1) x_offset *= -1; // 50% chance to negate
         int y_offset = min_dist + rand()%(grid.getDieHeight()/2); // clustered around target
         if(rand()%2 == 1) y_offset *= -1; // 50% chance to negate
-        Position<position_type> init_pos = target_pos + Position<position_type>(x_offset, y_offset);
+        Position init_pos = target_pos + Position(x_offset, y_offset);
         filler->setPosition(init_pos);
     }
 
@@ -532,10 +533,10 @@ void Placer::initializeDensityWeight()
     for(auto item : db.getComponents()) {
         Node* node_p = item.second;
 
-        XY& partials = node_p->getProbeGrad();
+        Gradient& partials = node_p->getProbeGrad();
         HPWL_L1_norm += fabs(partials.x) + fabs(partials.y);
 
-        XY electro_force = computeElectrostaticForce(node_p);
+        Gradient electro_force = computeElectrostaticForce(node_p);
         density_L1_norm += fabs(electro_force.x) + fabs(electro_force.y);
     }
 
@@ -682,12 +683,17 @@ void Placer::computeAllProbeGradients()
  */
 void Placer::computeStepLength(bool backtracking_enabled)
 {
+    // Gradients at v_k are cached in node fields from computeAllProbeGradients()
     // If backtracking is disabled, we can just use the step length without modification
 
-    // else, check the epsilon condition
+    // else, take a tentative step using the cached gradients at v_k and the current step_length 
+    
+    // then check the epsilon condition
 
-    // If the step is too long, we need to recompute the step length using the new gradients 
-    // at the trial position (v_{k+1} = v_k - alpha * grad(v_k)) and the old gradients at v_k
+    // If the step is too long, we need to back track
+    // Recompute the step length using the new gradients at v_{k+1} and the old gradients at v_k, 
+    // and check the condition again until it is satisfied or we reach the max number of backtracking steps
+
 }
 
 /** 
@@ -698,6 +704,12 @@ void Placer::computeStepLength(bool backtracking_enabled)
  */
 void Placer::stepAllNodes(bool momentum_enabled)
 {
+    // backtracking step complete, now perform the committed step to update positions to:
+    // u_{k+1} = v_k - α_k ∇f(v_k)
+
+    // If momentum is enabled, also update the probe positions to:
+    // v_{k+1} = u_{k+1} + (a_k-1)/a_{k+1} * (u_{k+1} - u_k)
+    
 }
 
 AIEPLACE_NAMESPACE_END

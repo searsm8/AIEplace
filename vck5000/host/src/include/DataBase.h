@@ -2,7 +2,6 @@
 #ifndef AIEPLACE_DATABASE_H
 #define AIEPLACE_DATABASE_H
 #include "Common.h"
-#include "Position.h"
 #include "MacroClass.h"
 #include "Component.h"
 #include "Pin.h"
@@ -89,7 +88,7 @@ private:
     vector<Net *> mv_focus_nets; // list of nets to be highlighted with visualizer
     vector<Node *> mv_focus_nodes; // list of nodes to be highlighted with visualizer
 
-    Box<position_type> m_die_area;
+    Box m_die_area;
     int m_max_x, m_max_y; // used when reading Bookshelf format to find die_area
     string m_design_name;
     int m_units_per_micron; 
@@ -119,7 +118,7 @@ public:
     const map<int, std::vector<Net *>> &getNetsByDegree() { return mmv_nets_by_degree; }
     int getNetCountOfDegree(int degree) { return mmv_nets_by_degree[degree].size(); }
     int getTotalNetDegree() { return m_total_net_degree; }
-    Box<position_type> &getDieArea() { return m_die_area; }
+    Box &getDieArea() { return m_die_area; }
     string getBenchmarkName() { return m_input_dir.filename().string(); }
 
     // Parse functions

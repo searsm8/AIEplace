@@ -25,7 +25,7 @@ class Visualizer
     private:
 
     // Member Data
-    Box<position_type> m_die_area;
+    Box m_die_area;
     float m_die_width, m_die_height;
     float m_canvas_width, m_canvas_height;
 
@@ -41,7 +41,7 @@ class Visualizer
     // Constructor
     Visualizer() {};
     
-    void init(Box<position_type> die_area);
+    void init(Box die_area);
     float scale(float f);
     void drawComponent(Component* c);
     void drawPin(Pin* p);

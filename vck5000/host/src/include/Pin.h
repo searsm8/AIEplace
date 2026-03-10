@@ -11,7 +11,7 @@ AIEPLACE_NAMESPACE_BEGIN
 class Pin : public Node
 {
 private:
-    Box<position_type> m_bounding_box;
+    Box m_bounding_box;
     string m_direction;
     string m_layer;
 
@@ -26,12 +26,12 @@ public:
     float getArea()  { return m_bounding_box.getArea();  }
     string getDirection() { return m_direction; }
     string getLayer() { return m_layer; }
-    Box<position_type> & getBoundingBox() { return m_bounding_box; }
+    Box & getBoundingBox() { return m_bounding_box; }
 
     // Setters
     void setDirection(string dir) { m_direction = dir; }
     void setBoundingBox(position_type llx, position_type lly, position_type urx, position_type ury)
-    { m_bounding_box = Box<position_type>(Position(llx, lly), Position(urx, ury)); }
+    { m_bounding_box = Box(Position(llx, lly), Position(urx, ury)); }
 
 };
 

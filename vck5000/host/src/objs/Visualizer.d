@@ -1,7 +1,7 @@
 objs/Visualizer.o: Visualizer.cpp include/Visualizer.h include/Common.h \
- include/DataBase.h include/Position.h include/MacroClass.h \
- include/Component.h include/Node.h include/Pin.h include/Bin.h \
- include/Net.h include/Logger.h include/Grid.h \
+ include/DataBase.h include/MacroClass.h include/Component.h \
+ include/Node.h include/Pin.h include/Bin.h include/Net.h \
+ include/Logger.h include/Grid.h \
  ../../../third_party/tabulate/include/tabulate/table.hpp \
  ../../../third_party/tabulate/include/tabulate/table_internal.hpp \
  ../../../third_party/tabulate/include/tabulate/column.hpp \
@@ -82,8 +82,6 @@ include/Visualizer.h:
 include/Common.h:
 
 include/DataBase.h:
-
-include/Position.h:
 
 include/MacroClass.h:
 

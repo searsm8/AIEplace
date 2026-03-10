@@ -162,15 +162,15 @@ position_type Net::computeWirelength_RSMT()
     return RSMT;
 }
 
-Box<position_type> Net::getBoundingBox()
+Box Net::getBoundingBox()
 {
     sortPositionsByX();
-    int max_x = mv_nodes.front()->getX();
-    int min_x = mv_nodes.back()->getX();
+    float max_x = mv_nodes.front()->getX();
+    float min_x = mv_nodes.back()->getX();
     sortPositionsByY();
-    int max_y = mv_nodes.front()->getY();
-    int min_y = mv_nodes.back()->getY();
-    return Box<position_type>(min_x, min_y, max_x, max_y);
+    float max_y = mv_nodes.front()->getY();
+    float min_y = mv_nodes.back()->getY();
+    return Box(min_x, min_y, max_x, max_y);
 }
 
 bool Net::hasPin()

@@ -195,7 +195,7 @@ void Placer::computeAllPartials_simple()
 
             // Compute partials using shortcut
             const int THRESHOLD = 10; // distance threshold for partials
-            Point simple_partial;
+            Gradient simple_partial;
             if (x < min_x + THRESHOLD) {
                 simple_partial.x = (int(x - min_x) * 0.1f) - 1;
             } else if (x > max_x - THRESHOLD) {
@@ -288,7 +288,7 @@ void Placer::computeAllPartials_CPU()
             float x = nodes[i]->getProbeX();
             float y = nodes[i]->getProbeY();
 
-            Point partial;
+            Gradient partial;
             partial.x = ((1 + x * inv_gamma) * B.plus.x - (C.plus.x * inv_gamma))
                       * (A[i].plus.x * bpx_sq_inv)
                     - ((1 - x * inv_gamma) * B.minus.x + (C.minus.x * inv_gamma))
@@ -379,7 +379,7 @@ void Placer::computeNetPartials_CPU(Net* net_p)
             float x = node_p->getX();
             float y = node_p->getY();
 
-            Point partial;
+            Gradient partial;
             partial.x = ((1 + x * inv_gamma) * net_p->terms_cpu.b.plus.x - (net_p->terms_cpu.c.plus.x * inv_gamma))
                       * (node_p->terms_cpu.a.plus.x * bpx_sq_inv)
                     - ((1 - x * inv_gamma) * net_p->terms_cpu.b.minus.x + (net_p->terms_cpu.c.minus.x * inv_gamma))
@@ -488,8 +488,8 @@ void Placer::comparePartialResults()
         {
             error_count++;
             Logger::log_error("Terms DO NOT match for node " + np->getName()
-                    + " -- CPU result: " + np->terms_cpu.partials.toString()
-                    + " -- AIE result: " + np->partials_aie.toString());
+                    + " -- CPU result: " + np->terms_cpu.partials.to_string()
+                    + " -- AIE result: " + np->partials_aie.to_string());
         }
     }
 

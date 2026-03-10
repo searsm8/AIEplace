@@ -4,7 +4,7 @@
 
 AIEPLACE_NAMESPACE_BEGIN 
 
-void Visualizer::init(Box<position_type> die_area)
+void Visualizer::init(Box die_area)
 {
     m_die_area = die_area;
     m_die_width = die_area.getXsize();
@@ -45,12 +45,12 @@ void Visualizer::drawPin(Pin* p)
 
 void Visualizer::highlightNet(Net* net)
 {
-    Box<float> bb = net->getBoundingBox();
+    Box bb = net->getBoundingBox();
     // draw a rect around the net
     cairo_set_source_rgb (cr, 1.0, 1.0, 0.0); // bright yellow
     cairo_set_line_width (cr, 0.002);
-    cairo_rectangle (cr, DIE_START + bb.getPosBottomLeft().getX() * DIE_SCALE / m_die_width, // x
-                         DIE_START + bb.getPosBottomLeft().getY() * DIE_SCALE / m_die_height,// y
+    cairo_rectangle (cr, DIE_START + bb.getPosBottomLeft().x * DIE_SCALE / m_die_width, // x
+                         DIE_START + bb.getPosBottomLeft().y * DIE_SCALE / m_die_height,// y
                          bb.getXsize() * DIE_SCALE / m_die_width,   // width
                          bb.getYsize() * DIE_SCALE / m_die_height); // height
     cairo_stroke(cr);

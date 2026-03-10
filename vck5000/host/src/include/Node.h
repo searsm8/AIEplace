@@ -3,7 +3,6 @@
 #define AIEPLACE_NODE_H
 
 #include "Common.h"
-#include "Position.h"
 #include "MacroClass.h"
 //#include "Logger.h"
 
@@ -49,12 +48,12 @@ private:
     string m_name;
     string m_orient;
     std::mutex m_mutex;
-    Position<position_type> m_pos; // u_k, actual position of the node
-    Position<position_type> m_prev_pos; // u_{k-1}, previous position of the node
-    Position<position_type> m_probe_pos;  // v_k, used as a "lookahead" or "probe" to test the optimiazation landscape
-    Position<position_type> m_prev_probe_pos;  // v_{k-1}
-    XY m_probe_grad; // ∇(v_k)
-    XY m_prev_probe_grad; // ∇(v_{k-1})
+    Position m_pos; // u_k, actual position of the node
+    Position m_prev_pos; // u_{k-1}, previous position of the node
+    Position m_probe_pos;  // v_k, used as a "lookahead" or "probe" to test the optimiazation landscape
+    Position m_prev_probe_pos;  // v_{k-1}
+    Gradient m_probe_grad; // ∇(v_k)
+    Gradient m_prev_probe_grad; // ∇(v_{k-1})
 
     PlacementStatus m_status;
     bool m_is_large; // True if the area of the node is at least 1/16th the area of a bin
@@ -63,9 +62,9 @@ private:
 
 public:
 
-    XY partials_aie; // Computed on AIE by default 
+    Gradient partials_aie; // Computed on AIE by default
     Terms terms_cpu; // DEBUG: used to compare AIE with CPU results
-    XY combined_force; // electro_force - partials for BB denominator
+    Gradient combined_force; // electro_force - partials for BB denominator
 
     // Constructors
     Node() : m_name("") {}
@@ -80,24 +79,24 @@ public:
     // Member Getter Functions
     const string& getName() { return m_name; }
     const PlacementStatus& getStatus() { return m_status; }
-    Position<position_type>& getPosition() { return m_pos; } // return a reference to avoid copying
-    Position<position_type>& getPrevPosition() { return m_prev_pos; }
-    Position<position_type>& getProbePosition() { return m_probe_pos; }
-    Position<position_type>& getPrevProbePosition() { return m_prev_probe_pos; }
-    XY& getProbeGrad() { return m_probe_grad; }
-    XY& getPrevProbeGrad() { return m_prev_probe_grad; }
+    Position& getPosition() { return m_pos; } // return a reference to avoid copying
+    Position& getPrevPosition() { return m_prev_pos; }
+    Position& getProbePosition() { return m_probe_pos; }
+    Position& getPrevProbePosition() { return m_prev_probe_pos; }
+    Gradient& getProbeGrad() { return m_probe_grad; }
+    Gradient& getPrevProbeGrad() { return m_prev_probe_grad; }
 
     void translate(float move_x, float move_y) { m_pos.translate(move_x, move_y); }
     void translate(XY move) { m_pos.translate(move.x, move.y); }
     const string& getOrientation() { return m_orient; }
-    const position_type& getX() { return m_pos.getX(); }
-    const position_type& getY() { return m_pos.getY(); }
-    const position_type& getProbeX() { return m_probe_pos.getX(); }
-    const position_type& getProbeY() { return m_probe_pos.getY(); }
-    XY getProbeXY() { return XY(m_probe_pos.getX(), m_probe_pos.getY()); }
+    float getX() { return m_pos.x; }
+    float getY() { return m_pos.y; }
+    float getProbeX() { return m_probe_pos.x; }
+    float getProbeY() { return m_probe_pos.y; }
+    XY getProbeXY() { return XY(m_probe_pos.x, m_probe_pos.y); }
 
-    void setX(float x) { m_pos.setX(x); }
-    void setY(float y) { m_pos.setY(y); }
+    void setX(float x) { m_pos.x = x; }
+    void setY(float y) { m_pos.y = y; }
     void lock() {  m_mutex.lock(); }
     void unlock() {  m_mutex.unlock();  }
 
@@ -140,7 +139,7 @@ public:
     bool isLarge() { return m_is_large; }
     bool isPlaced() { return m_status == PLACED; }
 
-    void setPosition(Position<position_type> pos) { m_pos = pos; }
+    void setPosition(Position pos) { m_pos = pos; }
     void setPlacementStatus(PlacementStatus status) { m_status = status; }
     void setOrientation(string orient) { m_orient = orient; }
     void setPlacementStatus(string status) 
@@ -166,8 +165,7 @@ public:
 
 // TODO: remove unused function?
     void printXY() {
-        cout << "Node " << m_name << ": (" << m_pos.getX() << ", " << m_pos.getY() << ")" << endl;
-
+        cout << "Node " << m_name << ": (" << m_pos.x << ", " << m_pos.y << ")" << endl;
     }
 
     void printTerms() {

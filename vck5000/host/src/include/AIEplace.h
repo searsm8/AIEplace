@@ -56,7 +56,7 @@ public:
     // Flat data structure for results (same as before)
     struct NodePartial {
         Node* node;
-        Point partial;
+        Gradient partial;
     };
 
     std::map<Net*, NodePartial> all_partials;
@@ -73,7 +73,10 @@ public:
     float density_weight; // λ (lambda) in eplace
     float gamma, inv_gamma; // smoothness factor for estimations;
                        // larger means less smooth but more accurate
+
     int backtrack_steps = 0;
+    bool enable_backtracking;
+    bool enable_momentum;
 
     int die_size; // minimum of width and height of the die area
     int bins_per_row; // grid size
@@ -110,7 +113,7 @@ public:
     void printWelcomeBanner(bool show_info = true);
 
     // Pre-run preparation
-    void initializePlacement(Position<position_type> target_pos, int min_dist, int max_dist);
+    void initializePlacement(Position target_pos, int min_dist, int max_dist);
     void recordInitialHPWL();
     void iterationReset();
     void initializeDensityWeight();
@@ -135,7 +138,7 @@ public:
     void computeElectricFields_CPU();
     void computeElectricFields_DCT();
     void normalizeElectricFields();
-    XY computeElectrostaticForce(Node* node_p);
+    Gradient computeElectrostaticForce(Node* node_p);
 
     void compute_a_terms_CPU (Net* net_p);
     void compute_bc_terms_CPU (Net* net_p);
