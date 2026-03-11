@@ -48,82 +48,33 @@ void Placer::performIteration()
 {
     Logger::log_detail("BEGIN iteration " + std::to_string(iteration));
 
-    // Clear per-iteration state (bin overlaps, partials, etc.)
-    iterationReset();
-
-    // Iteration 1 only: bootstrap v_1 = u_1, compute first gradients, initialize solver state.
-    // ∇f(v_1) is cached inside performGradientStep() for reuse — not recomputed next iteration.
+    // Iteration 1: bootstrap v_1 = u_1, compute first gradients, initialize solver state.
     if (iteration == 1)
     {
+        iterationReset();
+
         // Bootstrap v_1 ← u_1 (probe positions ← current positions)
         for (auto item : db.getComponents())
-            item.second->getProbePos().setXY(item.second->getNodePos());
+            item.second->next.probe_pos.setXY(item.second->next.node_pos);
         // TODO: merge filler list into db.getComponents() so we don't need separate loops
         for (auto filler : db.getFillers())
-            filler->getProbePos().setXY(filler->getNodePos());
+            filler->next.probe_pos.setXY(filler->next.node_pos);
 
-
-        // Initialize solver state
-        computeAllProbeGradients();      // ∇HPWL and ∇D at v_1; result cached on nodes
+        computeAllProbeGradients();  // ∇HPWL, ∇D, and combined ∇f at v_1
         recordInitialHPWL();
         initializeDensityWeight();
     }
 
-    // For iteration > 1: ∇f(v_k) was cached by last iteration's performGradientStep()
-    // as a free byproduct of the backtracking check — no recomputation needed here.
+    // Algorithm 1 + Algorithm 2: step with backtracking line search.
+    // On exit: positions at u_{k+1}, v_{k+1}; gradients at v_{k+1} already computed;
+    // nesterov_ak advanced.
+    computeStepLength(enable_backtracking);
 
-    // Implement Algorithm 2 from ePlace-MS: 
-
-    // Line 1: step_length (alpha) is already available from previous iteration.
-
-    // Line 2-3: perform a trial step 
-    // u_{k+1} = v_k - step_length * ∇f(v_k)
-    // v_{k+1} = u_{k+1} + (a_k-1)/a_{k+1} * (u_{k+1} - u_k)
-    stepAllNodes(enable_momentum);
-
-    // Cache the node positions and probe gradeints from the previous iteration
-    // use setPrevProbeGrad()
-    cachePreviousIterationState();
-
-
-    // Lines 4-5: Using the new gradients, recompute the step_length (alpha), then check epsilon condition 
-    computeStepLength(enable_backtracking); 
-
-    stepAllNodes(enable_momentum); // nesterov_ak updated; m_probe_pos ← v_{k+1}
-
-    // Adaptively update λ (density penalty weight) based on HPWL trend
     updateDensityWeight();
 
     recordIterationResults();
     printIterationResults();
 }
-
-//void Placer::performIteration()
-//{
-//    Logger::log_detail("BEGIN iteration " + std::to_string(iteration));
-//
-//    iterationReset(); // Resets variables expected to be updated each iteration 
-//                      // (gradients from previous iteration may be reused!)
-//
-//    // Bootstrapping needed on first iteration
-//    if(iteration == 1)
-//    {
-//        computeAllPartials(); // initializes ∇(v_k)
-//        recordInitialHPWL();
-//        initializeDensityWeight();
-//        computeOverlaps(); // Should be moved into computeElectricFields() as step 0
-//        computeElectricFields(); // Should this also compute gradients at v_k?
-//    }
-//
-//    // Take the iteration step
-//    // Includes Nesterov Momentum and backtracking line search for step length
-//    stepAllNodes();
-//
-//    updateDensityWeight();
-//
-//    recordIterationResults();
-//    printIterationResults();
-//}
 
 
 /**
@@ -182,6 +133,8 @@ Placer::Placer(std::string config_filepath)
             enable_momentum = cfg["params"]["enable_momentum"];
             warmup_iterations = cfg["params"]["warmup_iterations"];
             convergence_window = cfg["params"]["convergence_window"];
+            max_backtracking_attempts = cfg["params"]["backtrack_max_tries"];
+            backtrack_epsilon = cfg["params"]["backtrack_epsilon"];
 
             // Read other stuff
             MAX_THREADS = cfg["params"]["max_threads"];
@@ -269,14 +222,14 @@ float Placer::computeLipshitzEstimate()
     for (auto item : db.getComponents()) {
         Node* node = item.second;
 
-        // ||v_k - v_{k-1}||²
-        float dx = node->getProbePos().x - node->getPrevProbePos().x;
-        float dy = node->getProbePos().y - node->getPrevProbePos().y;
+        // ||v̂_{k+1} - v_k||²
+        float dx = node->next.probe_pos.x - node->current.probe_pos.x;
+        float dy = node->next.probe_pos.y - node->current.probe_pos.y;
         pos_norm_sq += dx*dx + dy*dy;
 
-        // ||∇f(v_k) - ∇f(v_{k-1})||²  (total gradient, not HPWL-only)
-        float dgx = node->getTotalProbeGrad().x - node->getPrevProbeGrad().x;
-        float dgy = node->getTotalProbeGrad().y - node->getPrevProbeGrad().y;
+        // ||∇f(v̂_{k+1}) - ∇f(v_k)||²
+        float dgx = node->next.probe_grad.x - node->current.probe_grad.x;
+        float dgy = node->next.probe_grad.y - node->current.probe_grad.y;
         grad_norm_sq += dgx*dgx + dgy*dgy;
     }
 
@@ -285,147 +238,6 @@ float Placer::computeLipshitzEstimate()
     return std::clamp(estimate, 0.0001f, 4000.0f);
 }
 
-///**
-// * @brief Snapshot current node positions and HPWL partials into lookahead fields.
-// *
-// * Must be called before nudgeAllNodes(). Stores (v_k, ∇f_pre(v_k)) so that
-// * updateBBState() can save the pre-nudge state for the next iteration's BB estimate.
-// */
-//void Placer::snapshotPreNudge()
-//{
-//    for (auto item : db.getComponents()) {
-//        Node* node = item.second;
-//        node->getProbePos() = node->getNodePos();
-//        XY p = getNodePartials(node);
-//        node->getProbeGrad().setX(p.x);
-//        node->getProbeGrad().setY(p.y);
-//    }
-//    for (auto filler : db.getFillers())
-//        filler->getProbePos() = filler->getNodePos();
-//}
-//
-///**
-// * @brief Store the pre-nudge snapshot into prev-lookahead fields for next iteration's BB estimate.
-// *
-// * Must be called after snapshotPreNudge() and after the committed nudge.
-// * Reads from getLookaheadPosition/Grad() (set by snapshotPreNudge()) so that
-// * computeBBStep() next iteration gets: dx = û_k − v_k, dg = ∇f_pre(û_k) − ∇f_pre(v_k).
-// */
-//void Placer::updateBBState()
-//{
-//    for (auto item : db.getComponents()) {
-//        Node* node = item.second;
-//        node->getPrevProbePos() = node->getProbePos();  // v_k
-//        node->getPrevProbeGrad()     = node->getProbeGrad();      // ∇f_pre(v_k)
-//    }
-//}
-//
-///**
-// * @brief Algorithm 2 (BkTrk): backtracking BB step refinement, node nudge, and hyperparameter update.
-// *
-// * During warmup: plain nudge + BB state init, no density weight update.
-// * Post-warmup with backtrack disabled: single nudge with BB step + density weight update.
-// * Post-warmup with backtrack enabled:
-// *   1. Compute initial ᾱ_k (BB estimate, pre-nudge).
-// *   2. Trial nudge û_{k+1} = v_k − ᾱ_k ∇f_pre(v_k).
-// *   3. Compute fresh BB from the trial step.
-// *   4. If ᾱ_k > ε · fresh_BB: replace ᾱ_k with fresh BB, retry from v_k.
-// *   5. Repeat until consistent or max_tries reached.
-// *   Density field is held fixed throughout the loop.
-// */
-//void Placer::nudgeAndUpdate()
-//{
-//    const bool in_warmup = (iteration <= (int)cfg["params"]["warmup_iterations"]);
-//
-//    // ── Warmup path: plain nudge, initialize BB state ────────────────────
-//    if (in_warmup) {
-//        snapshotPreNudge();
-//        nudgeAllNodes();
-//        updateBBState();
-//        return;
-//    }
-//
-//    // ── Algorithm 2: BkTrk ───────────────────────────────────────────────
-//
-//    // Line 1: compute initial ᾱ_k from previous iteration data (pre-nudge)
-//    step_length = computeBBStep();
-//
-//    backtrack_steps = 0;
-//    const bool  enabled   = cfg["params"]["backtrack_enabled"];
-//    const int   max_tries = cfg["params"]["backtrack_max_tries"];
-//    const float epsilon   = cfg["params"]["backtrack_epsilon"];
-//
-//    if (!enabled) {
-//        snapshotPreNudge();
-//        nudgeAllNodes();
-//        updateBBState();
-//        updateDensityWeight();
-//        return;
-//    }
-//
-//    // Snapshot v_k into node-local lookahead fields
-//    snapshotPreNudge();
-//
-//    for (int t = 0; t < max_tries; t++)
-//    {
-//        // Lines 2/6: û_{k+1} = v_k − ᾱ_k ∇f_pre(v_k)
-//        nudgeAllNodes();
-//
-//        // Compute ∇f_pre(û_{k+1}) at trial positions (density field held fixed)
-//        computeAllPartials();
-//
-//        // Compute fresh BB estimate: ‖û − v_k‖ / ‖∇f_pre(û) − ∇f_pre(v_k)‖
-//        float num_sq = 0.0f, den_sq = 0.0f;
-//        for (auto item : db.getComponents()) {
-//            Node* node = item.second;
-//            float dx = node->getX() - node->getProbePos().x;
-//            float dy = node->getY() - node->getProbePos().y;
-//            num_sq += dx*dx + dy*dy;
-//
-//            XY p = getNodePartials(node);
-//            float dgx = p.x - node->getProbeGrad().getX();
-//            float dgy = p.y - node->getProbeGrad().getY();
-//            den_sq += dgx*dgx + dgy*dgy;
-//        }
-//        float fresh_bb = sqrtf(num_sq) / sqrtf(den_sq + 1e-8f);
-//
-//        // Line 4: accept if ᾱ_k ≤ ε · fresh_BB
-//        if (step_length <= epsilon * fresh_bb)
-//            break;
-//
-//        // Condition failed (Lines 5–7): update ᾱ_k and restore to v_k
-//        backtrack_steps++;
-//        step_length = std::clamp(fresh_bb, 0.0001f, 400.0f);
-//
-//        if (t < max_tries - 1) {
-//            for (auto item : db.getComponents()) {
-//                Node* node = item.second;
-//                node->setX(node->getProbePos().x);
-//                node->setY(node->getProbePos().y);
-//            }
-//            for (auto filler : db.getFillers()) {
-//                filler->setX(filler->getProbePos().x);
-//                filler->setY(filler->getProbePos().y);
-//            }
-//            // Restore ∇f_pre(v_k) from snapshot (avoids full recomputation)
-//            for (auto item : db.getComponents()) {
-//                Node* node = item.second;
-//                if (partials_method == "aie") {
-//                    node->partials_aie.x = node->getProbeGrad().getX();
-//                    node->partials_aie.y = node->getProbeGrad().getY();
-//                } else {
-//                    node->terms_cpu.partials.x = node->getProbeGrad().getX();
-//                    node->terms_cpu.partials.y = node->getProbeGrad().getY();
-//                }
-//            }
-//        }
-//        // On the last try: accept whatever position we have (ensure progress)
-//    }
-//    Logger::log_detail("BkTrk steps taken: " + std::to_string(backtrack_steps));
-//
-//    // Committed position is set; partials at committed position are in memory
-//    updateBBState();
-//}
 
 /**
  * @brief Update density_weight to increase density force over time.
@@ -548,7 +360,7 @@ void Placer::initializeDensityWeight()
     for(auto item : db.getComponents()) {
         Node* node_p = item.second;
 
-        Gradient& partials = node_p->getHpwlProbeGrad();
+        Gradient& partials = node_p->next.probe_grad;  // HPWL-only (before combineGradients)
         HPWL_L1_norm += fabs(partials.x) + fabs(partials.y);
 
         Gradient electro_force = computeElectrostaticForce(node_p);
@@ -561,61 +373,6 @@ void Placer::initializeDensityWeight()
 }
 
 
-/**
- * @brief Nudge all movable nodes based on computed forces
- *
- * Iterates through all components in the database and calls nudgeNode()
- * for each one to update their positions.
- */
-//void Placer::nudgeAllNodes()
-//{
-//    //Logger::log_detail("Begin nudgeAllNodes()");
-//    for (auto item : db.getComponents())
-//        nudgeNode(item.second);
-//    
-//    // Also nudge fillers if they exist
-//    for (auto filler : db.getFillers())
-//        nudgeNode(filler);
-//}
-//
-///**
-// * @brief Update the position of a single node based on electric field and HPWL forces
-// *
-// * Computes the electric force from density (bin overlaps) and combines it with
-// * HPWL partial derivatives to calculate a move vector. The node position is updated
-// * and clamped to die boundaries.
-// *
-// * @param node_p Pointer to the node to be nudged
-// */
-//void Placer::nudgeNode(Node* node_p)
-//{
-//    XY partials = getNodePartials(node_p);
-//    XY electro_force = computeElectrostaticForce(node_p);
-//
-//    node_p->combined_force.x = electro_force.x - partials.x; // negate partials to move down the gradient
-//    node_p->combined_force.y = electro_force.y - partials.y;
-//
-//    XY move;
-//    move.x = step_length * node_p->combined_force.x;
-//    move.y = step_length * node_p->combined_force.y;
-//
-//
-//    // Update the position of this node
-//    node_p->translate(move);
-//
-//    // Enforce die boundaries
-//    if (node_p->getX() < 0) node_p->setX(0);
-//    if (node_p->getY() < 0) node_p->setY(0);
-//    float max_x = db.getDieArea().getXsize();
-//    float max_y = db.getDieArea().getYsize();
-//    if (node_p->getX() > max_x) node_p->setX(max_x);
-//    if (node_p->getY() > max_y) node_p->setY(max_y);
-//
-//    // DEBUGGING
-//    //cout << "NudgeNode(): "<< node_p->getName() 
-//    //    << " grad(" << wirelen_gradient.x << ", " << wirelen_gradient.y << ")"
-//    //    << "\telectro(" << electro_force.x << ", " << electro_force.y << ")" << endl;
-//}
 
 /**
  * @brief Check if the placement algorithm has converged
@@ -685,86 +442,122 @@ bool Placer::checkConvergence()
  */
 void Placer::computeAllProbeGradients()
 {
-    // Clear m_probe_grad before accumulation — Partials.cpp uses += into this field.
+    // Clear probe_grad before accumulation — Partials.cpp uses += into this field.
     // Without this, gradients compound across iterations.
     for (auto item : db.getComponents())
-        item.second->clearHpwlProbeGrad();
+        item.second->next.clear_grad();
     for (auto filler : db.getFillers())
-        filler->clearHpwlProbeGrad();
+        filler->next.clear_grad();
 
-    computeAllPartials();       // ∇HPWL at probe positions → m_hpwl_probe_grad
-    computeOverlaps();          // density ρ at probe positions
+    computeAllPartials();       // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
     computeElectricFields();    // ∇D from ρ → bin eFields
+    combineGradients();         // subtract electro in-place: next.probe_grad becomes total ∇f
 }
 
 
 /**
- * @brief Combines HPWL and density gradients into the total preconditioned gradient.
+ * @brief Subtract electrostatic force from probe_grad in-place to form total gradient.
  *
- * For each node: ∇f(v_k) = ∇HPWL(v_k) - electro_force(v_k)
- * The sign convention: electro_force ≈ -λ·∇D, so subtracting it adds density repulsion.
- * Result stored in m_total_probe_grad for use by stepAllNodes().
+ * Called after computeAllPartials() which accumulates HPWL into next.probe_grad.
+ * For components: next.probe_grad -= electro (electro already includes λ weighting)
+ * For fillers: next.probe_grad = -electro (no HPWL partials)
  */
 void Placer::combineGradients()
 {
     for (auto item : db.getComponents()) {
-        Node* node = item.second;
-        Gradient ef = computeElectrostaticForce(node);
-        // ∇f_pre = ∇HPWL - electro  (electro already includes λ weighting)
-        node->getTotalProbeGrad().x = node->getHpwlProbeGrad().x - ef.x;
-        node->getTotalProbeGrad().y = node->getHpwlProbeGrad().y - ef.y;
+        item.second->next.probe_grad -= computeElectrostaticForce(item.second);
     }
-    // Fillers have no HPWL partials, only density force
     for (auto filler : db.getFillers()) {
-        Gradient ef = computeElectrostaticForce(filler);
-        filler->getTotalProbeGrad().x = -ef.x;
-        filler->getTotalProbeGrad().y = -ef.y;
+        filler->next.probe_grad -= computeElectrostaticForce(filler);
     }
 }
 
 
 /**
- * @brief Recomputes the step length (alpha in ePlace) for the current iteration.
- * Uses Backtracking search if enabled (ePlace MS algorithm 2)
+ * @brief Clamp node's actual position (m_node_pos) to the die area boundaries.
+ */
+void Placer::enforceDieBoundaries(Node* node_p)
+{
+    node_p->next.node_pos.x = std::clamp(node_p->next.node_pos.x, 0.0f, (float)grid.getDieWidth());
+    node_p->next.node_pos.y = std::clamp(node_p->next.node_pos.y, 0.0f, (float)grid.getDieHeight());
+}
+
+
+/**
+ * @brief Save current positions and gradients as "previous" for BB estimate and backtracking.
+ * Must be called before stepAllNodes() so prev fields serve as the restore point.
+ */
+void Placer::cachePreviousIterationState()
+{
+    for (auto item : db.getComponents()) item.second->cacheState();
+    for (auto filler : db.getFillers())  filler->cacheState();
+}
+
+/**
+ * @brief Perform Nesterov gradient step for all nodes (Algorithm 1, Lines 2 & 4).
  *
+ * Delegates to Node::step() which reads from current state and writes to next.
+ * The momentum coefficient is computed by the caller (computeStepLength owns Nesterov state).
+ *
+ * @param mom_coeff Momentum coefficient: (a_k - 1) / a_{k+1}, or 0 if momentum disabled.
+ */
+void Placer::stepAllNodes(float mom_coeff)
+{
+    for (auto item : db.getComponents()) {
+        item.second->step(step_length, mom_coeff);
+        enforceDieBoundaries(item.second);
+    }
+    for (auto filler : db.getFillers()) {
+        filler->step(step_length, mom_coeff);
+        enforceDieBoundaries(filler);
+    }
+}
+
+/**
+ * @brief Algorithm 2 (BkTrk): Backtracking line search for step length.
+ *
+ * Uses the Barzilai-Borwein (Lipschitz) estimate to validate the step length.
+ * The do-while loop takes trial steps with the current step_length, recomputes
+ * gradients at the trial position, and checks if α̂ ≤ ε · fresh_bb.
+ * If rejected, positions are restored and step_length is updated to the fresh estimate.
+ *
+ * After the loop, the accepted trial step is committed (positions already at u_{k+1}, v_{k+1})
+ * and the Nesterov coefficient is advanced.
  */
 void Placer::computeStepLength(bool backtracking_enabled)
 {
-    // Gradients at v_k are cached in node fields from computeAllProbeGradients()
-    // If backtracking is disabled, we can just use the step length without modification
+    // Algorithm 1, Line 3: compute momentum coefficient for this iteration
+    float a_next = (1.0f + sqrtf(4.0f * nesterov_ak * nesterov_ak + 1.0f)) / 2.0f;
+    float mom_coeff = enable_momentum ? (nesterov_ak - 1.0f) / a_next : 0.0f;
 
-    // Line 4: Using the trial step v_{k+1}, recompute the gradients ∇f(v_{k+1}) 
-    // This is the computationally intensive part that we accelerate on the AIEs,
-    // and also provides the necessary information to perform backtracking for step_length.
+    // step_length (α̂) carries over from previous iteration (or warmup default)
+    cachePreviousIterationState();  // save current state to prev state
+
+    int tries = 0;
     do {
-        computeAllProbeGradients();
+        // Lines 2 & 4: trial step using current step_length
+        stepAllNodes(mom_coeff);
 
-        computeLipshitzEstimate(); // recompute the BB step based on the new gradients at v_{k+1} and the old gradients at v_k
+        // Recompute gradients at trial v̂ (the expensive part, accelerated on AIEs)
+        iterationReset(); // TODO: is this the correct reset?
+        computeAllProbeGradients();  // includes combineGradients()
 
-        // TODO: This function must be executed using local variables, not the true u_k and v_k 
-        stepAllNodes(enable_momentum); // take the step using the new step_length and the new gradients at v_k,
-    } while(); // epsilon condition
+        // Fresh BB estimate: ||v̂ - v_k|| / ||∇f(v̂) - ∇f(v_k)||
+        float new_step_length = computeLipshitzEstimate();
 
-    // If the step is too long, we need to back track
-    // Recompute the step length using the new gradients at v_{k+1} and the old gradients at v_k, 
-    // and check the condition again until it is satisfied or we reach the max number of backtracking steps
+        // Accept if α̂ ≤ ε · fresh_bb (step is not too aggressive)
+        if (step_length <= backtrack_epsilon * new_step_length) break;
 
-}
+        // Reject: step() will overwrite next from current on retry
+        step_length = new_step_length;
+        tries++;
 
-/** 
- * @brief Perform the gradient step to compute the new positions u_{k+1} = v_k - α_k ∇f(v_k).
- * Reads the cached gradients at v_k and the current step length, updates node positions to u_{k+1},
- * and caches the new gradients at u_{k+1} for the next iteration's momentum step.
- * 
- */
-void Placer::stepAllNodes(bool momentum_enabled)
-{
-    // backtracking step complete, now perform the committed step to update positions to:
-    // u_{k+1} = v_k - α_k ∇f(v_k)
+    } while (backtracking_enabled && tries < max_backtracking_attempts);
 
-    // If momentum is enabled, also update the probe positions to:
-    // v_{k+1} = u_{k+1} + (a_k-1)/a_{k+1} * (u_{k+1} - u_k)
-    
+    backtrack_steps = tries;
+
+    // Commit Nesterov coefficient only after step is accepted
+    nesterov_ak = a_next;
 }
 
 AIEPLACE_NAMESPACE_END

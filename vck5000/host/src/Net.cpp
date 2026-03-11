@@ -88,7 +88,7 @@ string Net::to_string()
             cout << "nullptr found!" << endl;
             exit(1);
         }
-        s += "\t" + node->getName() + " (Pin " + mm_net_pins[node] + ") : " + node->getNodePos().to_string() + "\n";
+        s += "\t" + node->getName() + " (Pin " + mm_net_pins[node] + ") : " + node->next.node_pos.to_string() + "\n";
     }
 
     return s;

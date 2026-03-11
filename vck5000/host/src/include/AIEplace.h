@@ -71,12 +71,14 @@ public:
     // Hyperparameters
     float step_length; // α (alpha) in eplace
     float density_weight; // λ (lambda) in eplace
+    float nesterov_ak = 1.0f; // a_k in Algorithm 1; controls momentum coefficient
     float gamma, inv_gamma; // smoothness factor for estimations;
                        // larger means less smooth but more accurate
 
-    float nesterov_a = 1.0f; // a_k in Algorithm 1; controls momentum coefficient
     int warmup_iterations;   // iterations before BB step estimation kicks in
     int backtrack_steps = 0;
+    int max_backtracking_attempts;
+    float backtrack_epsilon;
     bool enable_backtracking;
     bool enable_momentum;
 
@@ -163,11 +165,12 @@ public:
 
     // Main algorithm iteration functions
     void computeAllProbeGradients();    // ∇HPWL and ∇D at probe positions; cached on nodes
-    void combineGradients();            // m_total_probe_grad = electro - HPWL for each node
+    void combineGradients();            // subtract electro from probe_grad in-place
     float computeLipshitzEstimate();    // BB step estimate: ||Δv|| / ||Δ∇f||
     void computeStepLength(bool backtracking_enabled = true); // Algorithm 2: BkTrk
-    void cachePreviousIterationState(); // save v_k, u_k, ∇f(v_k) as prev
-    void stepAllNodes(bool momentum_enabled);         // Algorithm 1, lines 2–4
+    void cachePreviousIterationState(); // promote next → current for all nodes
+    void stepAllNodes(float mom_coeff);                // Algorithm 1, lines 2–4
+    void enforceDieBoundaries(Node* node_p);           // clamp next.node_pos to die area
     void updateDensityWeight();
 
     // Bookkeeping and visualization

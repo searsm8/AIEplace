@@ -448,8 +448,8 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             Logger::log_debug("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
             //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8 + 1]));
             float partial = output_data[base_addr + 2*net_idx + n*8 + 1];
-            nodes[n]->getHpwlProbeGrad().y += partial;
-            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: probe_grad.y += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->getHpwlProbeGrad().y));
+            nodes[n]->next.probe_grad.y += partial;
+            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: probe_grad.y += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->next.probe_grad.y));
 
             //debugging
             float y_size = net->getBoundingBox().getYsize();
@@ -479,8 +479,8 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             Logger::log_debug("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
             //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8]));
             float partial = output_data[base_addr + 2*net_idx + n*8 + 0];
-            nodes[n]->getHpwlProbeGrad().x += partial;
-            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: probe_grad.x += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->getHpwlProbeGrad().x));
+            nodes[n]->next.probe_grad.x += partial;
+            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: probe_grad.x += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->next.probe_grad.x));
 
             //debugging
             float x_size = net->getBoundingBox().getXsize();
@@ -778,7 +778,7 @@ void DataBase::printPins() const
     for(auto item : mm_pins)
     {
         Pin* pin_p = item.second;
-        cout << pin_p->getName() << pin_p->getNodePos().to_string() << endl;
+        cout << pin_p->getName() << pin_p->next.node_pos.to_string() << endl;
         cout << "\tArea: " << pin_p->getArea() << "\tStatus: " << pin_p->getStatus() << endl;
     }
 }
@@ -788,7 +788,7 @@ void DataBase::printComponents() const
     for(auto item : mm_components)
     {
         Component* comp_p = item.second;
-        cout << comp_p->getName() << comp_p->getNodePos().to_string() << endl;
+        cout << comp_p->getName() << comp_p->next.node_pos.to_string() << endl;
         cout << "\t" << comp_p->getMacro()->getName() << "\tArea: " << comp_p->getArea() << "\tStatus: " << comp_p->getStatus() << endl;
     }
 }
@@ -804,13 +804,13 @@ void DataBase::printNets()
         sortPositionsByX();
         cout << "X descending: ";
         for(auto node : net_p->getNodes())
-            cout << node->getNodePos().x << '\t';
+            cout << node->next.node_pos.x << '\t';
         cout << endl;
 
         sortPositionsByY();
         cout << "Y descending: ";
         for(auto node : net_p->getNodes())
-            cout << node->getNodePos().y << '\t';
+            cout << node->next.node_pos.y << '\t';
         cout << endl;
         cout << endl;
 
@@ -859,7 +859,7 @@ void DataBase::printOverlaps()
         Node* node_p = item.second;
         Table header;
         header.add_row(RowStream{} << std::setprecision(2) << "Bin Overlaps for " << name);
-        header.add_row(RowStream{} << "Position" << node_p->getNodePos().to_string());
+        header.add_row(RowStream{} << "Position" << node_p->next.node_pos.to_string());
         header.add_row(RowStream{} << "Area" << node_p->getArea());
         header.column(0).format().font_align(FontAlign::right);
 

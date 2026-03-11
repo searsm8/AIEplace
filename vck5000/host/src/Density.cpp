@@ -10,6 +10,8 @@ AIEPLACE_NAMESPACE_BEGIN
 
 void Placer::computeElectricFields()
 {
+    computeOverlaps();          // update the density ρ at probe positions
+
     if(density_method == "aie") {
         #ifdef USE_XILINX_XRT
             computeElectricFields_AIE(); // Accelerated compute on AIEs
