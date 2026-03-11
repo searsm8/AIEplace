@@ -74,6 +74,8 @@ public:
     float gamma, inv_gamma; // smoothness factor for estimations;
                        // larger means less smooth but more accurate
 
+    float nesterov_a = 1.0f; // a_k in Algorithm 1; controls momentum coefficient
+    int warmup_iterations;   // iterations before BB step estimation kicks in
     int backtrack_steps = 0;
     bool enable_backtracking;
     bool enable_momentum;
@@ -159,19 +161,13 @@ public:
     void run();
     void performIteration();
 
-    // TODO: DELETE THESE FUNCS
-    //void oldPerformIteration(); // TODO: REMOVE. Legacy func to compare with new performIteration that has backtracking
-    //float computeBBStep();     // pure BB computation, no side-effects
-    //void  snapshotPreNudge();  // snapshot (v_k, ∇(v_k)) into lookahead fields before nudge
-    //void  updateBBState();     // stores pre-nudge snapshot into prev-lookahead for next BB estimate
-    //void  nudgeAndUpdate();    // BkTrk loop + nudge + BB state update + density weight
-    //void nudgeAllNodes();
-    //void nudgeNode(Node*);
-
     // Main algorithm iteration functions
-    void computeAllProbeGradients();    // ∇W and ∇N at v_1; result cached on nodes
-    void computeStepLength(bool backtracking_enabled = true); // Algorithm 1, lines 1–2: BkTrk + gradient step
-    void stepAllNodes(bool momentum_enabled);         // Algorithm 1, lines 3–4: Nesterov momentum
+    void computeAllProbeGradients();    // ∇HPWL and ∇D at probe positions; cached on nodes
+    void combineGradients();            // m_total_probe_grad = electro - HPWL for each node
+    float computeLipshitzEstimate();    // BB step estimate: ||Δv|| / ||Δ∇f||
+    void computeStepLength(bool backtracking_enabled = true); // Algorithm 2: BkTrk
+    void cachePreviousIterationState(); // save v_k, u_k, ∇f(v_k) as prev
+    void stepAllNodes(bool momentum_enabled);         // Algorithm 1, lines 2–4
     void updateDensityWeight();
 
     // Bookkeeping and visualization

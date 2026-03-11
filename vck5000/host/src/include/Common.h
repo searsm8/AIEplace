@@ -109,6 +109,15 @@ struct XY
         return *this;
     }
 
+    XY operator*(float s) const {
+        return XY{x * s, y * s};
+    }
+
+    // friend: defines a free function so float*XY works (member operator only handles XY*float)
+    friend XY operator*(float s, const XY& v) {
+        return XY{s * v.x, s * v.y};
+    }
+
     void setXY(float new_x, float new_y) { x = new_x; y = new_y; }
     void setXY(XY other) { x = other.x; y = other.y; }
 

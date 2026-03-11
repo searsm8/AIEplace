@@ -212,8 +212,8 @@ void Placer::computeAllPartials_simple()
                 simple_partial.y = 0;
             }
 
-            nodes[i]->getProbeGrad().x += simple_partial.x ;
-            nodes[i]->getProbeGrad().y += simple_partial.y ;
+            nodes[i]->getHpwlProbeGrad().x += simple_partial.x ;
+            nodes[i]->getHpwlProbeGrad().y += simple_partial.y ;
         }
     }
 
@@ -311,8 +311,8 @@ void Placer::computeAllPartials_CPU()
                 exit(1);
             }
 
-            nodes[i]->getProbeGrad().x += partial.x ;
-            nodes[i]->getProbeGrad().y += partial.y ;
+            nodes[i]->getHpwlProbeGrad().x += partial.x ;
+            nodes[i]->getHpwlProbeGrad().y += partial.y ;
         }
     }
 

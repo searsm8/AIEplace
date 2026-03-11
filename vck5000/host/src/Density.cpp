@@ -430,11 +430,11 @@ Gradient Placer::computeElectrostaticForce(Node* node_p)
 
     // for each bin that this node overlaps,
     // compute electric force based on bin overlaps
-    for (BinOverlap b : node_p->getBinOverlaps()) {
-        Bin* bin = b.bin;
-        float coeff = density_weight * bin->local_density_weight;
-        electro_force.x += coeff * bin->eField.x;
-        electro_force.y += coeff * bin->eField.y;
+    for (BinOverlap bo : node_p->getBinOverlaps()) {
+        //Bin* bin = bo.bin;
+        float coeff = density_weight * bo.bin->local_density_weight;
+        electro_force += coeff * bo.bin->eField;
+        //electro_force.y += coeff * bin->eField.y;
     }
 
     return electro_force;

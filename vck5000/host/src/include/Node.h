@@ -48,12 +48,15 @@ private:
     string m_name;
     string m_orient;
     std::mutex m_mutex;
-    Position m_pos; // u_k, actual position of the node
-    Position m_prev_pos; // u_{k-1}, previous position of the node
+    Position m_node_pos; // u_k, actual position of the node
+    Position m_prev_node_pos; // u_{k-1}, previous position of the node
+    // TODO: Can we remove m_prev_node_pos and just use delta_position when stepping nodes?
+
     Position m_probe_pos;  // v_k, used as a "lookahead" or "probe" to test the optimiazation landscape
-    Position m_prev_probe_pos;  // v_{k-1}
-    Gradient m_probe_grad; // ∇(v_k)
-    Gradient m_prev_probe_grad; // ∇(v_{k-1})
+    Position m_prev_probe_pos;  // v_{k-1}, previous probe position for Lipshitz estimate
+    Gradient m_hpwl_probe_grad;  // ∇HPWL(v_k), HPWL-only gradient at probe position
+    Gradient m_total_probe_grad; // ∇f(v_k) = ∇HPWL(v_k) - electro(v_k), full preconditioned gradient
+    Gradient m_prev_probe_grad;  // ∇f(v_{k-1}), previous iteration's total gradient
 
     PlacementStatus m_status;
     bool m_is_large; // True if the area of the node is at least 1/16th the area of a bin
@@ -64,13 +67,12 @@ public:
 
     Gradient partials_aie; // Computed on AIE by default
     Terms terms_cpu; // DEBUG: used to compare AIE with CPU results
-    Gradient combined_force; // electro_force - partials for BB denominator
 
     // Constructors
     Node() : m_name("") {}
-    Node(string name) : m_name(name), m_orient("N"), m_pos(0, 0),
-            m_probe_pos(0, 0), m_probe_grad(0, 0),
-            m_prev_probe_pos(0, 0), m_prev_probe_grad(0, 0), combined_force()
+    Node(string name) : m_name(name), m_orient("N"), m_node_pos(0, 0),
+            m_probe_pos(0, 0), m_hpwl_probe_grad(0, 0),
+            m_prev_probe_pos(0, 0), m_total_probe_grad(0, 0), m_prev_probe_grad(0, 0)
             {}
 
     // Need virtual destructor for proper dynamic_cast
@@ -79,24 +81,24 @@ public:
     // Member Getter Functions
     const string& getName() { return m_name; }
     const PlacementStatus& getStatus() { return m_status; }
-    Position& getPosition() { return m_pos; } // return a reference to avoid copying
-    Position& getPrevPosition() { return m_prev_pos; }
-    Position& getProbePosition() { return m_probe_pos; }
-    Position& getPrevProbePosition() { return m_prev_probe_pos; }
-    Gradient& getProbeGrad() { return m_probe_grad; }
+    Position& getNodePos() { return m_node_pos; } // return a reference to avoid copying
+    Position& getPrevNodePos() { return m_prev_node_pos; }
+    Position& getProbePos() { return m_probe_pos; }
+    Position& getPrevProbePos() { return m_prev_probe_pos; }
+    Gradient& getHpwlProbeGrad() { return m_hpwl_probe_grad; }
+    Gradient& getTotalProbeGrad() { return m_total_probe_grad; }
     Gradient& getPrevProbeGrad() { return m_prev_probe_grad; }
 
-    void translate(float move_x, float move_y) { m_pos.translate(move_x, move_y); }
-    void translate(XY move) { m_pos.translate(move.x, move.y); }
+    void translate(float move_x, float move_y) { m_node_pos.translate(move_x, move_y); }
+    void translate(XY move) { m_node_pos.translate(move.x, move.y); }
     const string& getOrientation() { return m_orient; }
-    float getX() { return m_pos.x; }
-    float getY() { return m_pos.y; }
+    float getX() { return m_node_pos.x; }
+    float getY() { return m_node_pos.y; }
     float getProbeX() { return m_probe_pos.x; }
     float getProbeY() { return m_probe_pos.y; }
-    XY getProbeXY() { return XY(m_probe_pos.x, m_probe_pos.y); }
 
-    void setX(float x) { m_pos.x = x; }
-    void setY(float y) { m_pos.y = y; }
+    void setX(float x) { m_node_pos.x = x; }
+    void setY(float y) { m_node_pos.y = y; }
     void lock() {  m_mutex.lock(); }
     void unlock() {  m_mutex.unlock();  }
 
@@ -120,6 +122,8 @@ public:
         partials_aie.clear();
     }
 
+    void clearHpwlProbeGrad() { m_hpwl_probe_grad.clear(); }
+
     void addNet(Net* net_p) { mv_nets.push_back(net_p); }
 
     void addBinOverlap(Bin* bin_p, double node_overlap) 
@@ -139,7 +143,7 @@ public:
     bool isLarge() { return m_is_large; }
     bool isPlaced() { return m_status == PLACED; }
 
-    void setPosition(Position pos) { m_pos = pos; }
+    void setNodePos(Position pos) { m_node_pos = pos; }
     void setPlacementStatus(PlacementStatus status) { m_status = status; }
     void setOrientation(string orient) { m_orient = orient; }
     void setPlacementStatus(string status) 
@@ -165,7 +169,7 @@ public:
 
 // TODO: remove unused function?
     void printXY() {
-        cout << "Node " << m_name << ": (" << m_pos.x << ", " << m_pos.y << ")" << endl;
+        cout << "Node " << m_name << ": (" << m_node_pos.x << ", " << m_node_pos.y << ")" << endl;
     }
 
     void printTerms() {

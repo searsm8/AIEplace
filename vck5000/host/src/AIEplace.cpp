@@ -57,10 +57,10 @@ void Placer::performIteration()
     {
         // Bootstrap v_1 ← u_1 (probe positions ← current positions)
         for (auto item : db.getComponents())
-            item.second->getProbePosition().setXY(item.second->getPosition());
+            item.second->getProbePos().setXY(item.second->getNodePos());
         // TODO: merge filler list into db.getComponents() so we don't need separate loops
         for (auto filler : db.getFillers())
-            filler->getProbePosition().setXY(filler->getPosition());
+            filler->getProbePos().setXY(filler->getNodePos());
 
 
         // Initialize solver state
@@ -69,14 +69,26 @@ void Placer::performIteration()
         initializeDensityWeight();
     }
 
-    // For k > 1: ∇f(v_k) was cached by last iteration's performGradientStep()
+    // For iteration > 1: ∇f(v_k) was cached by last iteration's performGradientStep()
     // as a free byproduct of the backtracking check — no recomputation needed here.
 
-    // Compute new step_length via BkTrk (Algorithm 2 in ePlace-MS)
-    // Uses cached ∇f(v_k). Produces u_{k+1} in m_pos AND caches ∇f(v_{k+1}) for next iteration.
-    computeStepLength(enable_backtracking);
+    // Implement Algorithm 2 from ePlace-MS: 
 
-    // Algorithm 1, lines 3–4: a_{k+1} and v_{k+1} = u_{k+1} + (a_k-1)/a_{k+1} * (u_{k+1} - u_k)
+    // Line 1: step_length (alpha) is already available from previous iteration.
+
+    // Line 2-3: perform a trial step 
+    // u_{k+1} = v_k - step_length * ∇f(v_k)
+    // v_{k+1} = u_{k+1} + (a_k-1)/a_{k+1} * (u_{k+1} - u_k)
+    stepAllNodes(enable_momentum);
+
+    // Cache the node positions and probe gradeints from the previous iteration
+    // use setPrevProbeGrad()
+    cachePreviousIterationState();
+
+
+    // Lines 4-5: Using the new gradients, recompute the step_length (alpha), then check epsilon condition 
+    computeStepLength(enable_backtracking); 
+
     stepAllNodes(enable_momentum); // nesterov_ak updated; m_probe_pos ← v_{k+1}
 
     // Adaptively update λ (density penalty weight) based on HPWL trend
@@ -168,6 +180,8 @@ Placer::Placer(std::string config_filepath)
             target_density = cfg["params"]["convergence_target_density"];
             enable_backtracking = cfg["params"]["enable_backtracking"];
             enable_momentum = cfg["params"]["enable_momentum"];
+            warmup_iterations = cfg["params"]["warmup_iterations"];
+            convergence_window = cfg["params"]["convergence_window"];
 
             // Read other stuff
             MAX_THREADS = cfg["params"]["max_threads"];
@@ -239,7 +253,7 @@ Placer::Placer(std::string config_filepath)
 
         
 /**
- * @brief Pure BB step. Estimate ᾱ_k from current positions vs stored prev-iteration data.
+ * @brief Estimate ᾱ_k from current positions vs stored prev-iteration data.
  *
  * Reads: node positions, prev_lookahead_pos (v_{k-1}), HPWL partials ∇f_pre(v_k),
  *        prev_lookahead_grad (∇f_pre(v_{k-1})).
@@ -247,29 +261,30 @@ Placer::Placer(std::string config_filepath)
  *
  * @return Clamped BB step estimate [0.0001, 4000].
  */
-//float Placer::computeBBStep()
-//{
-//    float total_pos_change  = 0.0f;
-//    float total_grad_change = 0.0f;
-//
-//    for (auto item : db.getComponents()) {
-//        Node* node = item.second;
-//
-//        float dx = node->getX() - node->getPrevProbePosition().x;
-//        float dy = node->getY() - node->getPrevProbePosition().y;
-//        total_pos_change += dx*dx + dy*dy; // ||v_k − v_{k-1}||
-//
-//        XY p = getNodePartials(node);                          // ∇f_pre(v_k)
-//        float dgx = p.x - node->getPrevProbeGrad().getX(); // ∇f_pre(v_k) − ∇f_pre(v_{k-1})
-//        float dgy = p.y - node->getPrevProbeGrad().getY();
-//        total_grad_change += dgx*dgx + dgy*dgy; // ||∇f_pre(v_k) − ∇f_pre(v_{k-1})||
-//    }
-//
-//    float new_step_length = sqrtf(total_pos_change) / sqrtf(total_grad_change + 1e-8f);
-//    Logger::log_detail("New step (pre-nudge): " + PREC(new_step_length));
-//    return std::clamp(new_step_length, 0.0001f, 4000.0f);
-//}
-//
+float Placer::computeLipshitzEstimate()
+{
+    float pos_norm_sq  = 0.0f;
+    float grad_norm_sq = 0.0f;
+
+    for (auto item : db.getComponents()) {
+        Node* node = item.second;
+
+        // ||v_k - v_{k-1}||²
+        float dx = node->getProbePos().x - node->getPrevProbePos().x;
+        float dy = node->getProbePos().y - node->getPrevProbePos().y;
+        pos_norm_sq += dx*dx + dy*dy;
+
+        // ||∇f(v_k) - ∇f(v_{k-1})||²  (total gradient, not HPWL-only)
+        float dgx = node->getTotalProbeGrad().x - node->getPrevProbeGrad().x;
+        float dgy = node->getTotalProbeGrad().y - node->getPrevProbeGrad().y;
+        grad_norm_sq += dgx*dgx + dgy*dgy;
+    }
+
+    float estimate = sqrtf(pos_norm_sq) / sqrtf(grad_norm_sq + 1e-8f);
+    Logger::log_detail("BB step estimate: " + PREC(estimate));
+    return std::clamp(estimate, 0.0001f, 4000.0f);
+}
+
 ///**
 // * @brief Snapshot current node positions and HPWL partials into lookahead fields.
 // *
@@ -280,13 +295,13 @@ Placer::Placer(std::string config_filepath)
 //{
 //    for (auto item : db.getComponents()) {
 //        Node* node = item.second;
-//        node->getProbePosition() = node->getPosition();
+//        node->getProbePos() = node->getNodePos();
 //        XY p = getNodePartials(node);
 //        node->getProbeGrad().setX(p.x);
 //        node->getProbeGrad().setY(p.y);
 //    }
 //    for (auto filler : db.getFillers())
-//        filler->getProbePosition() = filler->getPosition();
+//        filler->getProbePos() = filler->getNodePos();
 //}
 //
 ///**
@@ -300,7 +315,7 @@ Placer::Placer(std::string config_filepath)
 //{
 //    for (auto item : db.getComponents()) {
 //        Node* node = item.second;
-//        node->getPrevProbePosition() = node->getProbePosition();  // v_k
+//        node->getPrevProbePos() = node->getProbePos();  // v_k
 //        node->getPrevProbeGrad()     = node->getProbeGrad();      // ∇f_pre(v_k)
 //    }
 //}
@@ -363,8 +378,8 @@ Placer::Placer(std::string config_filepath)
 //        float num_sq = 0.0f, den_sq = 0.0f;
 //        for (auto item : db.getComponents()) {
 //            Node* node = item.second;
-//            float dx = node->getX() - node->getProbePosition().x;
-//            float dy = node->getY() - node->getProbePosition().y;
+//            float dx = node->getX() - node->getProbePos().x;
+//            float dy = node->getY() - node->getProbePos().y;
 //            num_sq += dx*dx + dy*dy;
 //
 //            XY p = getNodePartials(node);
@@ -385,12 +400,12 @@ Placer::Placer(std::string config_filepath)
 //        if (t < max_tries - 1) {
 //            for (auto item : db.getComponents()) {
 //                Node* node = item.second;
-//                node->setX(node->getProbePosition().x);
-//                node->setY(node->getProbePosition().y);
+//                node->setX(node->getProbePos().x);
+//                node->setY(node->getProbePos().y);
 //            }
 //            for (auto filler : db.getFillers()) {
-//                filler->setX(filler->getProbePosition().x);
-//                filler->setY(filler->getProbePosition().y);
+//                filler->setX(filler->getProbePos().x);
+//                filler->setY(filler->getProbePos().y);
 //            }
 //            // Restore ∇f_pre(v_k) from snapshot (avoids full recomputation)
 //            for (auto item : db.getComponents()) {
@@ -490,7 +505,7 @@ void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist
         //int x_offset = rand()%(grid.getDieWidth()) - grid.getDieWidth()/2; // Even Spread
         //int y_offset = rand()%(grid.getDieWidth()) - grid.getDieWidth()/2; // Even Spread
         Position init_pos = target_pos + Position(x_offset, y_offset);
-        item.second->setPosition(init_pos);
+        item.second->setNodePos(init_pos);
 
         // if this component is bigger than 1/16th of bin area, set member bool
         item.second->checkIfLarge(bin_area_16th);
@@ -503,7 +518,7 @@ void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist
         int y_offset = min_dist + rand()%(grid.getDieHeight()/2); // clustered around target
         if(rand()%2 == 1) y_offset *= -1; // 50% chance to negate
         Position init_pos = target_pos + Position(x_offset, y_offset);
-        filler->setPosition(init_pos);
+        filler->setNodePos(init_pos);
     }
 
 
@@ -533,7 +548,7 @@ void Placer::initializeDensityWeight()
     for(auto item : db.getComponents()) {
         Node* node_p = item.second;
 
-        Gradient& partials = node_p->getProbeGrad();
+        Gradient& partials = node_p->getHpwlProbeGrad();
         HPWL_L1_norm += fabs(partials.x) + fabs(partials.y);
 
         Gradient electro_force = computeElectrostaticForce(node_p);
@@ -670,25 +685,65 @@ bool Placer::checkConvergence()
  */
 void Placer::computeAllProbeGradients()
 {
-    computeAllPartials();       // ∇HPWL at probe positions
+    // Clear m_probe_grad before accumulation — Partials.cpp uses += into this field.
+    // Without this, gradients compound across iterations.
+    for (auto item : db.getComponents())
+        item.second->clearHpwlProbeGrad();
+    for (auto filler : db.getFillers())
+        filler->clearHpwlProbeGrad();
+
+    computeAllPartials();       // ∇HPWL at probe positions → m_hpwl_probe_grad
     computeOverlaps();          // density ρ at probe positions
-    computeElectricFields();    // ∇D from ρ
+    computeElectricFields();    // ∇D from ρ → bin eFields
+}
+
+
+/**
+ * @brief Combines HPWL and density gradients into the total preconditioned gradient.
+ *
+ * For each node: ∇f(v_k) = ∇HPWL(v_k) - electro_force(v_k)
+ * The sign convention: electro_force ≈ -λ·∇D, so subtracting it adds density repulsion.
+ * Result stored in m_total_probe_grad for use by stepAllNodes().
+ */
+void Placer::combineGradients()
+{
+    for (auto item : db.getComponents()) {
+        Node* node = item.second;
+        Gradient ef = computeElectrostaticForce(node);
+        // ∇f_pre = ∇HPWL - electro  (electro already includes λ weighting)
+        node->getTotalProbeGrad().x = node->getHpwlProbeGrad().x - ef.x;
+        node->getTotalProbeGrad().y = node->getHpwlProbeGrad().y - ef.y;
+    }
+    // Fillers have no HPWL partials, only density force
+    for (auto filler : db.getFillers()) {
+        Gradient ef = computeElectrostaticForce(filler);
+        filler->getTotalProbeGrad().x = -ef.x;
+        filler->getTotalProbeGrad().y = -ef.y;
+    }
 }
 
 
 /**
  * @brief Recomputes the step length (alpha in ePlace) for the current iteration.
  * Uses Backtracking search if enabled (ePlace MS algorithm 2)
- * 
+ *
  */
 void Placer::computeStepLength(bool backtracking_enabled)
 {
     // Gradients at v_k are cached in node fields from computeAllProbeGradients()
     // If backtracking is disabled, we can just use the step length without modification
 
-    // else, take a tentative step using the cached gradients at v_k and the current step_length 
-    
-    // then check the epsilon condition
+    // Line 4: Using the trial step v_{k+1}, recompute the gradients ∇f(v_{k+1}) 
+    // This is the computationally intensive part that we accelerate on the AIEs,
+    // and also provides the necessary information to perform backtracking for step_length.
+    do {
+        computeAllProbeGradients();
+
+        computeLipshitzEstimate(); // recompute the BB step based on the new gradients at v_{k+1} and the old gradients at v_k
+
+        // TODO: This function must be executed using local variables, not the true u_k and v_k 
+        stepAllNodes(enable_momentum); // take the step using the new step_length and the new gradients at v_k,
+    } while(); // epsilon condition
 
     // If the step is too long, we need to back track
     // Recompute the step length using the new gradients at v_{k+1} and the old gradients at v_k, 

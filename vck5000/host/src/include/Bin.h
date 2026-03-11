@@ -76,17 +76,17 @@ struct Bin
     void computeOverlap(Node* node_p)
     {
         double overlap_width =
-            min((double)bb.getPosTopRight().x, ((double)node_p->getPosition().x + (double)node_p->getXsize()))
-            - max((double)bb.getPosBottomLeft().x, (double)node_p->getPosition().x) ;
+            min((double)bb.getPosTopRight().x, ((double)node_p->getNodePos().x + (double)node_p->getXsize()))
+            - max((double)bb.getPosBottomLeft().x, (double)node_p->getNodePos().x) ;
         double overlap_height =
-            min((double)bb.getPosTopRight().y, ((double)node_p->getPosition().y + (double)node_p->getYsize()))
-            - max((double)bb.getPosBottomLeft().y, (double)node_p->getPosition().y);
+            min((double)bb.getPosTopRight().y, ((double)node_p->getNodePos().y + (double)node_p->getYsize()))
+            - max((double)bb.getPosBottomLeft().y, (double)node_p->getNodePos().y);
 
         //cout << "overlap_width: " << overlap_width << "\n";
         //cout << "bb.getPosTopRight().y = " << (float)bb.getPosTopRight().y << endl;
-        //cout << "node top right Y = " << (float)node_p->getPosition().y + (float)node_p->getYsize() << endl;
+        //cout << "node top right Y = " << (float)node_p->getNodePos().y + (float)node_p->getYsize() << endl;
         //cout << "bb.getPosBottomLeft().y =" << (float)bb.getPosBottomLeft().y << endl;
-        //cout << "node bottom left Y = " << (float)node_p->getPosition().y << endl;
+        //cout << "node bottom left Y = " << (float)node_p->getNodePos().y << endl;
         //cout << "overlap_height: " << overlap_height<< "\n";
 
         //assert(abs(overlap_width)  > node_p->getXsize() && "abs(overlap) exceeds node width!");

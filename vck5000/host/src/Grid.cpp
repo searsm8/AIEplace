@@ -70,7 +70,7 @@ void Grid::computeBinOverlaps(Node* node_p)
     int row_index_final = std::min<int>(m_bins_per_col-1, (node_p->getProbeY() + node_p->getYsize()) / m_bin_height);
 
     // DEBUGGING
-    //cout << "\ncomputeBinOverlaps() for Node " << node_p->getName() << node_p->getPosition().to_string() << " : " << node_p->getXsize() << ", " << node_p->getYsize() << endl;
+    //cout << "\ncomputeBinOverlaps() for Node " << node_p->getName() << node_p->getNodePos().to_string() << " : " << node_p->getXsize() << ", " << node_p->getYsize() << endl;
     //cout << "bin_height: " << bin_height << "\t";
     //cout << "die_area Ysize: " << m_die_area.getYsize() << "\t";
     //cout << "y_index_start: " <<y_index_start<< "\t";

@@ -205,7 +205,7 @@ bool DataBase::addFillers(float target_utilization)
         Component* filler = new Component("filler_" + stringify(i));
         filler->setMacroClass(filler_macro);
         filler->setPlacementStatus(PlacementStatus::UNPLACED);
-        filler->setPosition(Position(0.0f, 0.0f)); // position will be updated during placement
+        filler->setNodePos(Position(0.0f, 0.0f)); // position will be updated during placement
         mv_fillers.push_back(filler);
     }
     Logger::log_info("Total fillers added: " + stringify(fillers_needed));
@@ -448,8 +448,8 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             Logger::log_debug("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
             //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8 + 1]));
             float partial = output_data[base_addr + 2*net_idx + n*8 + 1];
-            nodes[n]->getProbeGrad().y += partial;
-            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: probe_grad.y += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->getProbeGrad().y));
+            nodes[n]->getHpwlProbeGrad().y += partial;
+            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: probe_grad.y += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->getHpwlProbeGrad().y));
 
             //debugging
             float y_size = net->getBoundingBox().getYsize();
@@ -479,8 +479,8 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             Logger::log_debug("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
             //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8]));
             float partial = output_data[base_addr + 2*net_idx + n*8 + 0];
-            nodes[n]->getProbeGrad().x += partial;
-            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: probe_grad.x += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->getProbeGrad().x));
+            nodes[n]->getHpwlProbeGrad().x += partial;
+            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: probe_grad.x += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->getHpwlProbeGrad().x));
 
             //debugging
             float x_size = net->getBoundingBox().getXsize();
@@ -570,7 +570,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             Component* new_comp = new Component(c.comp_name);
             new_comp->setMacroClass(mm_macros[c.macro_name]);
             new_comp->setPlacementStatus(c.status);
-            new_comp->setPosition(Position((float)c.origin[0], (float)c.origin[1]));
+            new_comp->setNodePos(Position((float)c.origin[0], (float)c.origin[1]));
             // TODO: assert component is created correctly
             mm_components.emplace(std::make_pair(new_comp->getName(), new_comp));
         }
@@ -582,7 +582,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             std::vector<int> bb = p.vBbox.front();
             new_pin->setBoundingBox(bb[0], bb[1], bb[2], bb[3]);
             new_pin->setPlacementStatus(p.status);
-            new_pin->setPosition(Position((float)p.origin[0], (float)p.origin[1]));
+            new_pin->setNodePos(Position((float)p.origin[0], (float)p.origin[1]));
             new_pin->setDirection(p.direct); // primary input or output
             // TODO: assert pin is created correctly
 
@@ -658,7 +658,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             Pin* new_pin = new Pin(name);
             new_pin->setBoundingBox(0, 0, width, height);
             new_pin->setPlacementStatus(PlacementStatus::FIXED);
-            new_pin->setPosition(Position(0, 0));
+            new_pin->setNodePos(Position(0, 0));
             //cout << "NEW PIN: " << new_pin->getName() << " : " << width << ", " << height << " : " << mm_pins.size() << endl;
             mm_pins.emplace(std::make_pair(new_pin->getName(), new_pin));
         }
@@ -679,7 +679,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             }
             new_comp->setMacroClass(macro_p);
             new_comp->setPlacementStatus(PlacementStatus::UNPLACED);
-            new_comp->setPosition(Position(0, 0)); // default position (0, 0)
+            new_comp->setNodePos(Position(0, 0)); // default position (0, 0)
             mm_components.emplace(std::make_pair(new_comp->getName(), new_comp));
         }
         /// @brief add net 
@@ -725,8 +725,8 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                 Pin* pin = mm_pins[name];
                 //cout << "pin found: " << name << " (" << x << ", " << y << ") " << orientation << " " << placement_status << "\tmm_pins.size(): " << mm_pins.size() << endl;
                 assert(pin != NULL && "invalid pin name!");
-                //cout << pin->getName() << " pin->setPosition(" << x << ", " << y << ")\n";
-                pin->setPosition(Position(x, y));
+                //cout << pin->getName() << " pin->setNodePos(" << x << ", " << y << ")\n";
+                pin->setNodePos(Position(x, y));
                 pin->setPlacementStatus(PlacementStatus::FIXED);
                 pin->setOrientation(orientation);
                 // Bookshelf format doesn't seem to explicitly give die area?
@@ -737,7 +737,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                 //cout << "component found: " << name << " (" << x << ", " << y << ") " << orientation << " " << placement_status << endl;
                 Component* comp = mm_components[name];
                 assert(comp != NULL && "invalid component name!");
-                comp->setPosition(Position(x, y));
+                comp->setNodePos(Position(x, y));
                 comp->setOrientation(orientation);
             }
 
@@ -778,7 +778,7 @@ void DataBase::printPins() const
     for(auto item : mm_pins)
     {
         Pin* pin_p = item.second;
-        cout << pin_p->getName() << pin_p->getPosition().to_string() << endl;
+        cout << pin_p->getName() << pin_p->getNodePos().to_string() << endl;
         cout << "\tArea: " << pin_p->getArea() << "\tStatus: " << pin_p->getStatus() << endl;
     }
 }
@@ -788,7 +788,7 @@ void DataBase::printComponents() const
     for(auto item : mm_components)
     {
         Component* comp_p = item.second;
-        cout << comp_p->getName() << comp_p->getPosition().to_string() << endl;
+        cout << comp_p->getName() << comp_p->getNodePos().to_string() << endl;
         cout << "\t" << comp_p->getMacro()->getName() << "\tArea: " << comp_p->getArea() << "\tStatus: " << comp_p->getStatus() << endl;
     }
 }
@@ -804,13 +804,13 @@ void DataBase::printNets()
         sortPositionsByX();
         cout << "X descending: ";
         for(auto node : net_p->getNodes())
-            cout << node->getPosition().x << '\t';
+            cout << node->getNodePos().x << '\t';
         cout << endl;
 
         sortPositionsByY();
         cout << "Y descending: ";
         for(auto node : net_p->getNodes())
-            cout << node->getPosition().y << '\t';
+            cout << node->getNodePos().y << '\t';
         cout << endl;
         cout << endl;
 
@@ -859,7 +859,7 @@ void DataBase::printOverlaps()
         Node* node_p = item.second;
         Table header;
         header.add_row(RowStream{} << std::setprecision(2) << "Bin Overlaps for " << name);
-        header.add_row(RowStream{} << "Position" << node_p->getPosition().to_string());
+        header.add_row(RowStream{} << "Position" << node_p->getNodePos().to_string());
         header.add_row(RowStream{} << "Area" << node_p->getArea());
         header.column(0).format().font_align(FontAlign::right);
 
