@@ -1,36 +1,25 @@
 # File: generate_link_cfg.py
 # Builds the config file link.cfg which specifies connections between PL and AIE
-# reads from "Common.h" the number of Partials Graphs exist in the design
-import re# regular expressions
+import re
+import argparse
 
-def read_partials_graph_count(header_file):
-    with open(header_file, 'r') as f:
-        content = f.read()
-        match = re.search(r'constexpr\s+int\s+PARTIALS_GRAPH_COUNT\s*=\s*(\d+)', content)
-        if match:
-            return int(match.group(1))
-        else:
-            raise ValueError("PARTIALS_GRAPH_COUNT not found in the header file.")
-
-def generate_link_cfg(file_path):
+def generate_link_cfg(file_path, partials_instances, density_instances):
     with open(file_path, 'w') as f:
-        f.write("platform=xilinx_vck5000_gen4x8_xdma_2_202210_1\n\n")
         f.write("[connectivity]\n")
         f.write("### Partials Kernel connections ###\n")
 
-        partials_graph_count = read_partials_graph_count("../host/src/include/Common.h")
         mm2s_name = "partials_mm2s"
         s2mm_name = "partials_s2mm"
 
-        mm2s_nk =  f"nk={mm2s_name}:{partials_graph_count}:"
-        s2mm_nk =  f"nk={s2mm_name}:{partials_graph_count}:"
-        for i in range(partials_graph_count):
-            mm2s_nk += f"{mm2s_name}_{i}" + ("" if i+1 == partials_graph_count else ".")
-            s2mm_nk += f"{s2mm_name}_{i}" + ("" if i+1 == partials_graph_count else ".")
+        mm2s_nk =  f"nk={mm2s_name}:{partials_instances}:"
+        s2mm_nk =  f"nk={s2mm_name}:{partials_instances}:"
+        for i in range(partials_instances):
+            mm2s_nk += f"{mm2s_name}_{i}" + ("" if i+1 == partials_instances else ".")
+            s2mm_nk += f"{s2mm_name}_{i}" + ("" if i+1 == partials_instances else ".")
         f.write(mm2s_nk + "\n")
         f.write(s2mm_nk + "\n")
         
-        for i in range(partials_graph_count):
+        for i in range(partials_instances):
             f.write(f"stream_connect=partials_mm2s_{i}.stream_pl2aie:ai_engine_0.x_in_{i}\n")
             f.write(f"stream_connect=ai_engine_0.outplio_partials_{i}:partials_s2mm_{i}.stream_aie2pl\n")
 
@@ -66,7 +55,24 @@ def generate_link_cfg(file_path):
         print(f"Generated file: {file_path}")
 
 def main():
-    generate_link_cfg("link.cfg")
+    parser = argparse.ArgumentParser(
+        description="Create link config file to connect PL and AIE"
+    )
+
+    # Positional argument
+    parser.add_argument("path", type=str, help="Path of the link config file to create")
+
+    # Optional arguments
+    parser.add_argument("-p", "--partials_instances", type=int, default=1, help="Number of partials accelerator instances (default: 1)")
+    parser.add_argument("-d", "--density_instances", type=int, default=1, help="Number of density accelerator instances (default: 1)")
+
+    args = parser.parse_args()
+
+    path = args.path
+    partials_instances = args.partials_instances
+    density_instances = args.density_instances
+
+    generate_link_cfg(path, partials_instances, density_instances)
 
 if __name__ == "__main__":
     main()

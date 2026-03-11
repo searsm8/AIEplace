@@ -14,25 +14,21 @@ help:
 #######################################################################################
 
 PROJECT_ROOT ?= $(CURDIR)/..
-TARGET ?= hw
 
-include $(PROJECT_ROOT)/common.mk
-
-#KERNEL_NAME := sum_kernel
+# In each subproject, add the .xo files to the makeflags.mk file
 KERNEL_XO :=
 
-# Kernel compiler & linker global settings
-KRNL_COMPILE_OPTS := --config ../design.cfg --save-temps -j 26 -g --hls.jobs 8
+include $(PROJECT_ROOT)/common.mk
+include $(PL_DIR)/makeflags.mk
 
-.PHONY: pl
-.ONESHELL:
 
-pl: ${KERNEL_XO}
+.PHONY: all
+all: $(PL_KERNELS)
 
 # Building kernel
 $(BUILD_DIR_PL)/%.xo: src/$(PL)/src/%.cpp
 	$(dir_guard)
-	v++ --target $(TARGET) --platform $(PLATFORM) $(KRNL_COMPILE_OPTS) $(KRNL_INTERMEDIATE_FILE_DIRS) -k $* $< -o $@
+	v++ -c --target $(TARGET) --platform $(PLATFORM) $(XO_COMPILE_OPTS) -k $* $< -o $@
 
 .PHONY: emconfig
 emconfig:

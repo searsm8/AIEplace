@@ -12,3 +12,9 @@ misc
 .Xil/
 Map_Report.csv
 build/
+.ipcache/
+*.log
+*.jou
+*core.*
+results/
+temp/

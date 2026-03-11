@@ -1,37 +1,56 @@
 # Top level Makefile which calls subdirectory Makefiles
 
-# Targets: sw_emu, hw_emu, hw
-TARGET ?= hw
-
-AIE ?= mark_v1
-PL ?= mark_v1
-
 PROJECT_ROOT := $(CURDIR)
 
+# Custom config files, to avoid having to put too many varialbes on the cli
+ifdef INPUT_FILE
+include configs/$(INPUT_FILE)
+endif
+
 include $(PROJECT_ROOT)/common.mk
+include $(PL_DIR)/makeflags.mk
 
-.PHONY: help all aie partials density pl repackage host clean
-
+.PHONY: help
 help:
+	@echo ""
 	@echo "*#*# Makefile for vck5000 implementation of AIEplace *#*#"
-	@echo You can build the different parts of the application with these commands:
-	@echo -e '\t"make aie"':'\t' Build the AIE graph configuration. Output: libadf.a
-	@echo -e '\t"make partials"': Build the AIE graph for only partials computation.
-	@echo -e '\t"make density"':'\t' Build the AIE graph for only density computation.
-	@echo -e '\t"make pl"':'\t' Build HLS kernels for the PL. Output: xilinx objects [.xo] in pl/reference_files_hw
-	@echo -e '\t"make repackage"':'\t' Package the previously built PL kernels and libadf.a into finished hardware configuration. Output: bin/aieplace.hw.xclbin
-	@echo -e '\t"make host"':'\t' Builds the host code which runs on a host x86 machine.
-	@echo -e '\t"make all"':'\t' Builds the the entire application (aie, pl, and host).
+	@echo ""
+	@echo "Current configuration of variables:"
+	@echo -e '\tTARGET=$(TARGET)\t\t\t The build target: sw_emu, hw_emu or hw'
+	@echo -e '\tAIE=$(AIE)\t\t\t The AIE code version selected from aie/src/'
+	@echo -e '\tPL=$(PL)\t\t\t The PL code version selected from pl/src/'
+	@echo -e '\tHOST=$(HOST)\t\t\t The HOST code version selected from host/src/'
+	@echo -e '\tAIE_PARTIALS_INSTANCES=$(AIE_PARTIALS_INSTANCES)\t The number of Partials accelerator instances in the AIE Graph.'
+	@echo -e '\tAIE_DENSITY_INSTANCES=$(AIE_DENSITY_INSTANCES)\t The number of Density accelerator instances in the AIE Graph.'
+	@echo ""
+	@echo 'You can build the different parts of the application with these commands:'
+	@echo -e '\tmake aie:\t Build the AIE graph configuration.'
+	@echo -e '\tmake pl:\t Build HLS kernels for the PL.'
+	@echo -e '\tmake xsa:\t Link PL kernels and AIE Graph into XSA file.'
+	@echo -e '\tmake xclbin:\t Package XSA for use on VCK5000.'
+	@echo -e '\tmake host:\t Builds the host code which runs on a host x86 machine.'
+	@echo -e '\tmake all:\t Builds the the entire application (xclbin and host).'
+	@echo ""
 
+.PHONY: all xclbin xsa aie pl host
 all: xclbin host
 xclbin: $(XCLBIN)
 xsa: $(XSA)
+aie: $(AIE_LIBADF)
+pl: $(PL_KERNELS)
+host: $(HOST_EXE)
 
-aie:
-	$(MAKE) -C aie PROJECT_ROOT=$(PROJECT_ROOT) TARGET=$(TARGET) AIE=$(AIE)
+$(AIE_LIBADF):
+	$(MAKE) -C aie all \
+		TARGET=$(TARGET) AIE=$(AIE) \
+		PROJECT_ROOT=$(PROJECT_ROOT) \
+		DEBUG=$(DEBUG)
 
-pl:
-	$(MAKE) -C pl PROJECT_ROOT=$(PROJECT_ROOT) TARGET=$(TARGET) PL=$(PL)
+%.xo:
+	$(MAKE) -C pl all \
+		TARGET=$(TARGET) PL=$(PL) \
+		PROJECT_ROOT=$(PROJECT_ROOT) \
+		DEBUG=$(DEBUG)
 
 $(XSA): $(AIE_LIBADF) $(PL_KERNELS) | config
 	$(dir_guard)
@@ -41,8 +60,8 @@ $(XCLBIN): $(XSA) $(AIE_LIBADF)
 	$(dir_guard)
 	v++ --package --target $(TARGET) --platform $(PLATFORM) $(XCLBIN_PACKAGE_OPTS) $^ -o $@
 
-host:
-	$(MAKE) -C host
+$(HOST_EXE):
+	$(MAKE) -C host PROJECT_ROOT=$(PROJECT_ROOT) HOST=$(HOST)
 
 %emconfig.json:
 	emconfigutil --platform $(PLATFORM) --nd 1 --od $(@D)
@@ -50,14 +69,25 @@ host:
 # Generates the link.cfg file which specifies connections between PL and AIE
 .PHONY: config
 config:
-	python3 $(PL_DIR)/generate_link_cfg.py
+	python3 $(PL_DIR)/generate_link_cfg.py \
+		$(BUILD_DIR_XSA)/link_$(INSTANCES_CONFIG).cfg \
+		-p $(AIE_PARTIALS_INSTANCES) -d $(AIE_DENSITY_INSTANCES)
 
 
 .PHONY: clean clean_all
 clean:
-	$(MAKE) -C aie clean
-	$(MAKE) -C pl clean
-	$(MAKE) -C host clean
+	$(MAKE) -C aie clean \
+		TARGET=$(TARGET) PL=$(PL) AIE=$(AIE) \
+		AIE_PARTIALS_INSTANCES=$(AIE_PARTIALS_INSTANCES) \
+		AIE_DENSITY_INSTANCES=$(AIE_DENSITY_INSTANCES)
+	$(MAKE) -C pl clean \
+		TARGET=$(TARGET) PL=$(PL) AIE=$(AIE) \
+		AIE_PARTIALS_INSTANCES=$(AIE_PARTIALS_INSTANCES) \
+		AIE_DENSITY_INSTANCES=$(AIE_DENSITY_INSTANCES)
+	$(MAKE) -C host clean \
+		TARGET=$(TARGET) PL=$(PL) AIE=$(AIE) \
+		AIE_PARTIALS_INSTANCES=$(AIE_PARTIALS_INSTANCES) \
+		AIE_DENSITY_INSTANCES=$(AIE_DENSITY_INSTANCES)
 
 clean_all:
 	rm -rf $(BUILD_DIR)
@@ -102,5 +132,6 @@ cpplines:
 
 # make reset
 # Hot reset VCK5000 device
+.PHONY: reset
 reset:
 	xbutil reset --device

@@ -2,7 +2,11 @@
 // implements a graph to compute hpwl partial derivatives using kernels with STREAMS
 #pragma once
 #include "kernels.h"
-#include "Common.h" // For PARTIALS_GRAPH_COUNT 
+#include <cassert>
+//#include "Common.h" // For PARTIALS_GRAPH_COUNT
+#ifndef PARTIALS_INSTANCES
+#define PARTIALS_INSTANCES 1
+#endif
 
 //#define DEBUG_OUTPUT // output files for a+, a-, b+, b-, c+, c-
 #define FIFO_SIZE 7000
@@ -10,16 +14,16 @@
 
 class PartialsGraph : public adf::graph {
 private:
-  adf::kernel my_abc_kernel[PARTIALS_GRAPH_COUNT]; // a plus/minus
-  adf::kernel my_partials_kernel[PARTIALS_GRAPH_COUNT];
+  adf::kernel my_abc_kernel[PARTIALS_INSTANCES]; // a plus/minus
+  adf::kernel my_partials_kernel[PARTIALS_INSTANCES];
 public:
-  adf::input_plio x_in[PARTIALS_GRAPH_COUNT];
-  adf::output_plio outplio_partials[PARTIALS_GRAPH_COUNT];
+  adf::input_plio x_in[PARTIALS_INSTANCES];
+  adf::output_plio outplio_partials[PARTIALS_INSTANCES];
 
   PartialsGraph(){
     // create a packet splitter/merger for every `4` streams going out
-    int packet_stream_count = PARTIALS_GRAPH_COUNT / PACKET_CLUSTER_SIZE;
-    assert(packet_stream_count * PACKET_CLUSTER_SIZE == PARTIALS_GRAPH_COUNT && "PARTIALS_GRAPH_COUNT should be divisible by 4");
+    int packet_stream_count = PARTIALS_INSTANCES / PACKET_CLUSTER_SIZE;
+    assert(packet_stream_count * PACKET_CLUSTER_SIZE == PARTIALS_INSTANCES && "PARTIALS_INSTANCES should be divisible by 4");
 
     for(int i = 0; i < packet_stream_count; i++) // iterate over number of packet streams
     {
@@ -65,7 +69,7 @@ public:
 
         #ifdef DEBUG_OUTPUT
             // Optional outputs for debugging intermediate terms
-            //adf::output_plio outplio_xa[PARTIALS_GRAPH_COUNT], outplio_bc[PARTIALS_GRAPH_COUNT];
+            //adf::output_plio outplio_xa[PARTIALS_INSTANCES], outplio_bc[PARTIALS_INSTANCES];
             //outplio_xa[i] = adf::output_plio::create("outplio_xa"+std::to_string(i), adf::plio_32_bits, "simdata/xa"+std::to_string(i)+".dat");
             //outplio_bc[i] = adf::output_plio::create("outplio_bc"+std::to_string(i), adf::plio_32_bits, "simdata/bc"+std::to_string(i)+".dat");
             

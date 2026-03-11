@@ -1,5 +1,0 @@
-bin/
-pl/src/*/link.cfg
-*.log
-*core.*
-results/
