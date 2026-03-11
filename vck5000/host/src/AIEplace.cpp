@@ -1,9 +1,6 @@
 #include "DCT.h"
 #include "AIEplace.h"
 #include "JsonUtils.h"
-#ifdef USE_TBB
-#include <tbb/tbb.h>
-#endif
 #include <cmath>
 #include <cassert>
 
@@ -278,9 +275,6 @@ void Placer::iterationReset()
 {
     grid.iterationReset();
     db.iterationReset();
-
-    all_partials.clear();
-    simple_partials.clear();
 }
 
 

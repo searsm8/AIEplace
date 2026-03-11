@@ -27,11 +27,8 @@ EXE := ${TOP_DIR}/vck5000/bin/AIEplace.exe
 THIRD_PARTY := ${TOP_DIR}/third_party
 LIMBO_DIR := ${THIRD_PARTY}/Limbo
 TABLE_DIR := ${THIRD_PARTY}/tabulate/include
-TBB_INCLUDE := ${HOME}/.local/include
-TBB_LIB := ${HOME}/.local/lib64
-
 INCLUDES := -I ./include
-INCLUDES += -I${LIMBO_DIR} -I${TABLE_DIR} #-I${TBB_INCLUDE}  # TBB disabled for WSL
+INCLUDES += -I${LIMBO_DIR} -I${TABLE_DIR}
 INCLUDES += -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/ -I/lustre/home/nx08/shared/fpga/xilinx/include/ 
 INCLUDES += -I${HOME}/local/boost_1_82_0/
 
@@ -50,7 +47,6 @@ LINK_FLAGS := -Llib
 # Conditional XRT linking
 ifdef BUILD_XRT
     COMPILE_FLAGS += -DUSE_XILINX_XRT
-    #LINK_FLAGS += -L${TBB_LIB}
     LINK_FLAGS += -L$(XILINX_XRT)/lib/
     LINK_FLAGS += -lxrt_coreutil -lxrt++ -lxilinxopencl
 endif
@@ -63,7 +59,6 @@ LINK_FLAGS += -lgzstream -lz
 LINK_FLAGS += -lstdc++fs
 LINK_FLAGS += -lpthread -lrt -lstdc++
 
-#LINK_FLAGS += -ltbb  # Disabled for WSL build - enable with -DUSE_TBB if needed
 # Cairo is used for generating images, but disabled now because it causes compile errors:
 # warning: libnvidia-tls.so.430.50, needed by //usr/lib64/libGL.so.1, not found
 ifdef BUILD_DEBUG

@@ -53,15 +53,6 @@ public:
     DensityGraphDriver density_driver[3];
 #endif
 
-    // Flat data structure for results (same as before)
-    struct NodePartial {
-        Node* node;
-        Gradient partial;
-    };
-
-    std::map<Net*, NodePartial> all_partials;
-    std::map<Net*, NodePartial> simple_partials;
-
     // Configuration object
     json cfg;
     fs::path input_dir;
@@ -133,19 +124,11 @@ public:
     void computeAllPartials();
     void computeAllPartials_CPU();
     void computeAllPartials_simple();
-#ifdef USE_TBB
-    void computeAllPartials_CPU_orig();
-#endif
-    void computeNetPartials_CPU(Net* net_p);
-    void computeNetPartials_ThreadSafe(Net* net_p);
     void computeElectricFields();
     void computeElectricFields_CPU();
     void computeElectricFields_DCT();
     void normalizeElectricFields();
     Gradient computeElectrostaticForce(Node* node_p);
-
-    void compute_a_terms_CPU (Net* net_p);
-    void compute_bc_terms_CPU (Net* net_p);
 
     void compute_a_uv_naive();
     void compute_eField_naive();
@@ -156,7 +139,6 @@ public:
     
 
     // Comparison functions for verification
-    void comparePartialResults();
     void compareDensityResults();
 
     // Main algorithm loop functions

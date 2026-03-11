@@ -220,15 +220,6 @@ void DataBase::iterationReset()
         item.second->iterationReset();
     for (auto item : mm_pins)
         item.second->iterationReset();
-
-    for (auto item : mm_nets)
-        item.second->iterationReset();
-}
-
-void DataBase::clearPartials()
-{
-    for (auto item : mm_components)
-        item.second->clearPartials();
 }
 
 

@@ -4,7 +4,6 @@
 
 #include "Common.h"
 #include "MacroClass.h"
-//#include "Logger.h"
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -30,21 +29,6 @@ struct BinOverlap
 class Node
 {
 private:
-    // For use in computations
-    struct Term
-    {
-        XY plus;
-        XY minus;
-        void clear() { plus.clear(); minus.clear(); }
-    };
-
-    struct Terms
-    {
-        Term a;
-        XY partials;
-        void clear() { a.clear(); partials.clear(); }
-    };
-
     // Data members
     string m_name;
     string m_orient;
@@ -67,9 +51,6 @@ public:
 
     State current;  // iteration k (frozen during backtracking)
     State next;     // iteration k+1 (trial during backtracking)
-
-    Gradient partials_aie; // Computed on AIE by default
-    Terms terms_cpu; // DEBUG: used to compare AIE with CPU results
 
     // Constructors
     Node() : m_name("") {}
@@ -103,14 +84,6 @@ public:
     void iterationReset()
     {
         mv_bin_overlaps.clear();
-        terms_cpu.clear();
-        partials_aie.clear();
-    }
-
-    void clearPartials()
-    {
-        terms_cpu.clear();
-        partials_aie.clear();
     }
 
     // Promote next → current for the new iteration
@@ -170,17 +143,6 @@ public:
 
     void printXY() {
         cout << "Node " << m_name << ": (" << next.node_pos.x << ", " << next.node_pos.y << ")" << endl;
-    }
-
-    void printTerms() {
-        cout << "Node " << m_name << ":";
-        cout << "\ta+x: " << terms_cpu.a.plus.x;
-        cout << "\ta-x: " << terms_cpu.a.minus.x;
-        cout << "\ta+y: " << terms_cpu.a.plus.y;
-        cout << "\ta-y: " << terms_cpu.a.minus.y;
-        cout << "\tpartial_x: " << terms_cpu.partials.x;
-        cout << "\tpartial_y: " << terms_cpu.partials.y;
-        cout << endl;
     }
 
 }; // End of class Node
