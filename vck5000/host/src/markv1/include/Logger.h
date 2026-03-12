@@ -11,19 +11,30 @@
 #include <variant>
 #include <tabulate/table.hpp>
 #include <tabulate/markdown_exporter.hpp>
+#include <sstream>
+#include <iomanip>
 
 using namespace tabulate;
 using std::string;
 
-// Macros for convenient logging in scientific notation
-#define SCI(val) \
-    (static_cast<std::ostringstream&>(std::ostringstream() << std::scientific << std::setprecision(3) << val)).str()
+//// Macros for convenient logging in scientific notation
+inline std::string SCI(double val) {
+    std::ostringstream oss;
+    oss << std::scientific << std::setprecision(3) << val;
+    return oss.str();
+}
 
-#define SCI_P(val, prec) \
-    (static_cast<std::ostringstream&>(std::ostringstream() << std::scientific << std::setprecision(prec) << val)).str()
+inline std::string SCI_P(double val, int prec) {
+    std::ostringstream oss;
+    oss << std::scientific << std::setprecision(prec) << val;
+    return oss.str();
+}
 
-#define PREC(val) \
-    (static_cast<std::ostringstream&>(std::ostringstream() << std::setprecision(3) << val)).str()
+inline std::string PREC(double val) {
+    std::ostringstream oss;
+    oss << std::setprecision(3) << val;
+    return oss.str();
+}
 
 // Forward declarations
 class Timer;

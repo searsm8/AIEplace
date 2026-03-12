@@ -36,17 +36,17 @@ help:
 all: xclbin host
 xclbin: $(XCLBIN)
 xsa: $(XSA)
-aie: $(AIE_LIBADF)
-pl: $(PL_KERNELS)
-host: $(HOST_EXE)
 
-$(AIE_LIBADF):
+host:
+	$(MAKE) -C host PROJECT_ROOT=$(PROJECT_ROOT) HOST=$(HOST)
+
+aie:
 	$(MAKE) -C aie all \
 		TARGET=$(TARGET) AIE=$(AIE) \
 		PROJECT_ROOT=$(PROJECT_ROOT) \
 		DEBUG=$(DEBUG)
 
-%.xo:
+pl:
 	$(MAKE) -C pl all \
 		TARGET=$(TARGET) PL=$(PL) \
 		PROJECT_ROOT=$(PROJECT_ROOT) \
@@ -60,9 +60,6 @@ $(XCLBIN): $(XSA) $(AIE_LIBADF)
 	$(dir_guard)
 	v++ --package --target $(TARGET) --platform $(PLATFORM) $(XCLBIN_PACKAGE_OPTS) $^ -o $@
 
-$(HOST_EXE):
-	$(MAKE) -C host PROJECT_ROOT=$(PROJECT_ROOT) HOST=$(HOST)
-
 %emconfig.json:
 	emconfigutil --platform $(PLATFORM) --nd 1 --od $(@D)
 
@@ -74,6 +71,14 @@ $(LINK_CONNECTIONS_FILE):
 	$(dir_guard)
 	python3 $(PL_DIR)/generate_link_cfg.py $@ \
 		-p $(AIE_PARTIALS_INSTANCES) -d $(AIE_DENSITY_INSTANCES)
+
+# Link backs to trigger PHONY targets if artifacts don't exist
+# Those recipes have to have PHONY target so that their respecitve
+# makefiles handle the rebuild always. This keeps the dependency
+# chain intact.
+$(AIE_LIBADF): aie
+$(PL_KERNELS): pl
+$(HOST_EXE): host
 
 
 .PHONY: clean clean_all
@@ -107,7 +112,7 @@ run:
 	@clear
 	@echo "make run"
 #perf record #use this for perf profiler
-	time -p bin/AIEplace.exe
+	time -p $(HOST_EXE) $(HOST_RUN_CONFIG)
 
 
 # make dse
