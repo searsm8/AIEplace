@@ -52,7 +52,7 @@ $(AIE_LIBADF):
 		PROJECT_ROOT=$(PROJECT_ROOT) \
 		DEBUG=$(DEBUG)
 
-$(XSA): $(AIE_LIBADF) $(PL_KERNELS) | config
+$(XSA): $(AIE_LIBADF) $(PL_KERNELS) | link_config
 	$(dir_guard)
 	v++ --link --target $(TARGET) --platform $(PLATFORM) $(XSA_LINK_OPTS) $^ -o $@
 
@@ -67,10 +67,12 @@ $(HOST_EXE):
 	emconfigutil --platform $(PLATFORM) --nd 1 --od $(@D)
 
 # Generates the link.cfg file which specifies connections between PL and AIE
-.PHONY: config
-config:
-	python3 $(PL_DIR)/generate_link_cfg.py \
-		$(BUILD_DIR_XSA)/link_$(INSTANCES_CONFIG).cfg \
+.PHONY: link_config
+link_config: $(LINK_CONNECTIONS_FILE)
+
+$(LINK_CONNECTIONS_FILE):
+	$(dir_guard)
+	python3 $(PL_DIR)/generate_link_cfg.py $@ \
 		-p $(AIE_PARTIALS_INSTANCES) -d $(AIE_DENSITY_INSTANCES)
 
 
