@@ -20,8 +20,8 @@ void Placer::computeElectricFields()
             exit(1);
         #endif
     } else if(density_method == "cpu") {
-        //computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
         computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
+        //computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
     } else { 
         Logger::log_error("Invalid density_compute_method specified in config file"); 
         exit(1);
@@ -237,11 +237,13 @@ void Placer::computeElectricFields_CPU()
 **/
 void Placer::computeElectricFields_DCT()
 {
+    TIME_FUNCTION();
     //Logger::log_detail("Begin computeElectricFields_DCT()");
     compute_a_uv_DCT();
     compute_eField_DCT();
 }
 
+// TODO: function not used? Marked for deletion
 void Placer::normalizeElectricFields()
 {
     float max_abs = 0;

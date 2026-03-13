@@ -20,5 +20,8 @@ int main(int argc, char *argv[])
     // Run the placer 
     placer.run();
 
+    placer.plotHistories();
+    placer.printFinalResults();
+
     return 0;
 }

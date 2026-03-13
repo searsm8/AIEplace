@@ -1,18 +1,18 @@
 {
   "input": {
-    "benchmark": "host/benchmarks/ispd2005/bigblue1",
+    "benchmark": "host/benchmarks/ispd2015/mgc_superblue12",
     "xclbin": "bin/aieplace.hw.xclbin"
   },
   "params": {
     "partials_compute_method": "cpu",
     "density_compute_method": "cpu",
     "wirelength_method": "HPWL",
-    "enable_backtracking": true,      
-    "enable_momentum": true,          
-    "enable_filler": true,            
+    "enable_backtracking": true,
+    "enable_momentum": true,
+    "enable_filler": false,
     "gamma": 4,
     "max_threads": 1,
-    "init_step_length": 200,
+    "init_step_length": 0.001,
     "density_weight_init_multiplier": 0.01,
     "density_weight_min_step": 0.95,
     "density_weight_max_step": 1.05,
@@ -20,7 +20,6 @@
     "slow_improvement_threshold": 0.02,
     "high_overflow_threshold": 0.1,
     "warmup_iterations": 5,
-    "backtrack_enabled": true,
     "backtrack_max_tries": 10,
     "backtrack_epsilon": 1.05,
     "convergence_min_iterations": 50,
@@ -34,7 +33,7 @@
     "decay_factor": 0.9
   },
   "output": {
-    "results_dir": "results/DSE_20260305_120409",
+    "results_dir": "results/DSE_20260313_112039",
     "log_file": "logs/aieplace.log",
     "performance_jsonl": "results/aieplace_performance.jsonl",
     "visualize": false,
@@ -43,6 +42,6 @@
     "rand_focus_IO": 0,
     "rand_focus_nets": 0,
     "rand_focus_nodes": 0,
-    "DSE_info": "DSE run progress=18 of 18\nbenchmark=bigblue1\npartials_compute_method=cpu\ninit_step_length=200"
+    "DSE_info": "DSE sweep progress=129 of 224\nbenchmark=mgc_superblue12\nenable_backtracking=True\ninit_step_length=0.001"
   }
 }

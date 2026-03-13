@@ -72,7 +72,7 @@ struct XY
 {
     float x;
     float y;
-    void clear() { x = 0; y = 0;}
+    void clear() { x = 0.0f; y = 0.0f;}
 
     // default constructor initializes to 0,0
     XY () { clear(); }

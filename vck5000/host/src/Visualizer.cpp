@@ -208,12 +208,12 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     std::string ovfw_str = "OVFW: " + PREC_P(info.overflow, 2);
     cairo_show_text (cr, ovfw_str.c_str());
 
-    cairo_move_to (cr, .52, .99);
-    std::string lr_str = "Step: " + SCI(info.step_length);
-    cairo_show_text (cr, lr_str.c_str());
+    cairo_move_to (cr, .54, .99);
+    std::string alpha_str = "alpha: " + SCI(info.step_length);
+    cairo_show_text (cr, alpha_str.c_str());
 
-    cairo_move_to (cr, .75, .99);
-    std::string lambda_str = "DW: " + SCI(info.density_weight);
+    cairo_move_to (cr, .78, .99);
+    std::string lambda_str = "lambda: " + SCI(info.density_weight);
     cairo_show_text (cr, lambda_str.c_str());
 
     cairo_stroke(cr);

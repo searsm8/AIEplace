@@ -46,7 +46,6 @@ public:
         Position node_pos;   // u — actual/committed position
         Position probe_pos;  // v — lookahead/probe position
         Gradient probe_grad; // ∇f(v) — starts as HPWL-only, becomes total after combineGradients()
-        void clear_grad() { probe_grad.clear(); }
     };
 
     State current;  // iteration k (frozen during backtracking)
@@ -118,6 +117,8 @@ public:
     bool isPlaced() { return m_status == PLACED; }
 
     void setNodePos(Position pos) { next.node_pos = pos; }
+    void initializeState(Position pos) { current.node_pos = pos; current.probe_pos = pos; 
+                                         next.node_pos = pos; next.probe_pos = pos; }
     void setPlacementStatus(PlacementStatus status) { m_status = status; }
     void setOrientation(string orient) { m_orient = orient; }
     void setPlacementStatus(string status)

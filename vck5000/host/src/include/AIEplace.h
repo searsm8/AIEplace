@@ -63,6 +63,7 @@ public:
     float step_length; // α (alpha) in eplace
     float density_weight; // λ (lambda) in eplace
     float nesterov_ak = 1.0f; // a_k in Algorithm 1; controls momentum coefficient
+    float momentum_coeff; // (a_k - 1) / a_{k+1} in Algorithm 1; computed each iteration if momentum enabled
     float gamma, inv_gamma; // smoothness factor for estimations;
                        // larger means less smooth but more accurate
 
@@ -93,8 +94,7 @@ public:
     int iteration = 0;
     long double pgrm_start_time;
     long double db_IO_time;
-    long double algo_start;
-    long double algo_time;
+    double algo_time = 0.0;
     std::vector<float> hpwl_history; // history of HPWL values for each iteration
     std::vector<float> ovfw_history; // history of overflow values for each iteration
     std::vector<float> step_length_history;
@@ -121,9 +121,9 @@ public:
     void computeElectricFields_AIE();
 
     // Functions implemented on CPU
-    void computeAllPartials();
-    void computeAllPartials_CPU();
-    void computeAllPartials_simple();
+    void computeHpwlPartials();
+    void computeHpwlPartials_CPU();
+    void computeHpwlPartials_simple();
     void computeElectricFields();
     void computeElectricFields_CPU();
     void computeElectricFields_DCT();
@@ -149,11 +149,14 @@ public:
     void computeAllProbeGradients();    // ∇HPWL and ∇D at probe positions; cached on nodes
     void combineGradients();            // subtract electro from probe_grad in-place
     float computeLipshitzEstimate();    // BB step estimate: ||Δv|| / ||Δ∇f||
-    void computeStepLength(bool backtracking_enabled = true); // Algorithm 2: BkTrk
-    void cachePreviousIterationState(); // promote next → current for all nodes
-    void stepAllNodes(float mom_coeff);                // Algorithm 1, lines 2–4
+    void performNextStep(bool backtracking_enabled = true); // Algorithm 2: BkTrk
+    void advanceIterationState();       // promote next → current for all nodes
+    void stepAllNodes();                // Algorithm 1, lines 2–4
     void enforceDieBoundaries(Node* node_p);           // clamp next.node_pos to die area
     void updateDensityWeight();
+
+    // Diagnostics
+    void logStepDiagnostics();
 
     // Bookkeeping and visualization
     void recordIterationResults();

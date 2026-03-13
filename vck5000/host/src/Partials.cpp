@@ -9,8 +9,19 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-void Placer::computeAllPartials()
+void Placer::computeHpwlPartials()
 {
+    // Clear probe_grad before accumulation, otherwise gradients compound across iterations.
+    for (auto item : db.getComponents()) {
+        item.second->next.probe_grad.clear();
+    }
+    for (auto filler : db.getFillers()) {
+        filler->next.probe_grad.clear();
+    }
+    for (auto item : db.getPins()) {
+        item.second->next.probe_grad.clear();
+    }
+
     if(partials_method == "aie") {
         #ifdef USE_XILINX_XRT
             computeAllPartials_AIE();
@@ -20,10 +31,10 @@ void Placer::computeAllPartials()
         #endif
     }
     else if(partials_method == "cpu") {
-        computeAllPartials_CPU();
+        computeHpwlPartials_CPU();
     }
     else if(partials_method == "simple") {
-        computeAllPartials_simple();
+        computeHpwlPartials_simple();
     }
     else {
         Logger::log_error("Invalid partials_compute_method specified in config file"); 
@@ -42,7 +53,7 @@ void Placer::computeAllPartials()
 
 #define GROUP_SIZE 1 // Size of the group of nets sent before waiting to receive results
 
-void Placer::computeAllPartials_AIE()
+void Placer::computeHpwlPartials_AIE()
 {
     TIME_FUNCTION();
     Logger::log_trace("BEGIN computeAllPartials_AIE()");
@@ -147,7 +158,7 @@ void Placer::receivePartials(Packet* p)
 // Compute all partials using a table-based approach
 // nodes far enough away are assigned partials of 1 or -1
 // nodes in between are table look up
-void Placer::computeAllPartials_simple()
+void Placer::computeHpwlPartials_simple()
 {
     TIME_FUNCTION();
     Logger::log_trace("BEGIN computeAllPartials_simple()");
@@ -162,7 +173,7 @@ void Placer::computeAllPartials_simple()
         if (net_size <= 1) continue;
 
         // find max and min x and y probe positions
-        float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = 0, max_y = 0;
+        float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
         for (Node* node_p : nodes) {
             min_x = std::min(min_x, node_p->getProbeX());
             min_y = std::min(min_y, node_p->getProbeY());
@@ -200,7 +211,7 @@ void Placer::computeAllPartials_simple()
 
 }
 
-void Placer::computeAllPartials_CPU()
+void Placer::computeHpwlPartials_CPU()
 {
     TIME_FUNCTION();
     for (Net* net_p : db.getNetsVector()) {
@@ -211,7 +222,7 @@ void Placer::computeAllPartials_CPU()
         if (net_size <= 1) continue;
 
         // find max and min x and y probe positions
-        float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = 0, max_y = 0;
+        float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
         for (Node* node_p : nodes) {
             min_x = std::min(min_x, node_p->getProbeX());
             min_y = std::min(min_y, node_p->getProbeY());
@@ -248,6 +259,21 @@ void Placer::computeAllPartials_CPU()
         float bpy_sq_inv = 1.0f / (B.plus.y * B.plus.y);
         float bmy_sq_inv = 1.0f / (B.minus.y * B.minus.y);
 
+        if(B.plus.x == 0 || B.minus.x == 0 || B.plus.y == 0 || B.minus.y == 0) {
+            Logger::log_error("Zero value detected in B terms, cannot compute partials for net " + net_p->getName());
+            Logger::log_error("B: " + B.to_string());
+            Logger::log_error(net_p->to_string());
+            for (size_t i = 0; i < net_size; i++) 
+                Logger::log_error("A[" + std::to_string(i) + "]: " + A[i].to_string() + " node: " + nodes[i]->getName());
+            Logger::log_error("max_x: " + std::to_string(max_x) + " min_x: " + std::to_string(min_x) + " max_y: " + std::to_string(max_y) + " min_y: " + std::to_string(min_y));
+            Logger::log_error("Probe positions:");
+            for (size_t i = 0; i < net_size; i++) 
+                Logger::log_error("Node " + nodes[i]->getName() + " probe_x: " + std::to_string(nodes[i]->getProbeX()) + " probe_y: " + std::to_string(nodes[i]->getProbeY()));
+                
+            Logger::log_error("Node positions:");
+            for (size_t i = 0; i < net_size; i++) 
+                Logger::log_error("Node " + nodes[i]->getName() + " x: " + std::to_string(nodes[i]->getX()) + " y: " + std::to_string(nodes[i]->getY()));
+        }
         assert(B.plus.x  != 0 && "B.plus.x is zero, cannot compute partials");
         assert(B.minus.x != 0 && "B.minus.x is zero, cannot compute partials");
         assert(B.plus.y  != 0 && "B.plus.y is zero, cannot compute partials");

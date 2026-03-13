@@ -51,7 +51,6 @@ void Placer::printIterationResults()
     printWelcomeBanner(false);
     if (cfg["output"].contains("DSE_info"))
     {
-    //    Logger::log_info("DSE parameters:\n" + cfg["output"]["DSE_info"].get<std::string>());
         Table DSE_info;
         std::string dse_info_str = cfg["output"]["DSE_info"].get<std::string>();
         std::istringstream stream(dse_info_str);
@@ -106,7 +105,7 @@ void Placer::printIterationResults()
     // Append the HPWL value to a file for later analysis
     std::ofstream hpwl_file;
     fs::path dir = output_dir;
-    hpwl_file.open(dir.append("hpwl.dat"), std::ios_base::app);
+    hpwl_file.open(dir.append("iterations.dat"), std::ios_base::app);
 
     // Add header if this is the first iteration
     if(iteration == 1)
@@ -202,17 +201,16 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
         out_file << "HPWL_Graph,";
         out_file << "Combined_Graph,";
         out_file << "Placement_GIF,";
-        out_file << "Total Runtime Sec,";
-        out_file << "DB IO Time Sec,";
-        out_file << "Algorithm Time Sec,";
-        out_file << "Iteration Avg Sec,";
-        out_file << "Partials AIE Time,";
-        out_file << "Memory Usage MB,";
+        out_file << "Total Runtime (sec),";
+        out_file << "DB IO Time (sec),";
+        out_file << "Algorithm Time (sec),";
+        out_file << "Iteration Avg (sec),";
+        out_file << "Partials AIE Time (sec),";
+        out_file << "Memory Usage (MB),";
         out_file << "Init Step Length,";
         out_file << "Output Dir,";
-        out_file << "Success,";
-        out_file << "Error Message,";
-        out_file << "Timestamp";
+        out_file << "Timestamp,";
+        out_file << "DSE Config";
         out_file << endl;
     }
 
@@ -223,8 +221,8 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
     std::string out_str = output_dir.string();
     std::string results_prefix = results_dir.string() + "/";
     std::string rel_str = (out_str.rfind(results_prefix, 0) == 0) ? out_str.substr(results_prefix.size()) : out_str;
-    std::string hpwl_path    = rel_str + "/data/hpwl_history.png";
-    std::string combined_path = rel_str + "/data/combined_history.png";
+    std::string hpwl_path    = rel_str + "/graphs/hpwl_history.png";
+    std::string combined_path = rel_str + "/graphs/combined_history.png";
     std::string gif_path      = rel_str + "/full_placement.gif";
     hpwl_graph_cell     = "\"=HYPERLINK(\"\"" + hpwl_path     + "\"\",\"\"view\"\")\"";
     combined_graph_cell = "\"=HYPERLINK(\"\"" + combined_path + "\"\",\"\"view\"\")\"";
@@ -259,9 +257,18 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
     out_file << getMemoryUsageMB() << ",";
     out_file << cfg["params"]["init_step_length"].get<float>() << ",";
     out_file << "\"" << output_dir.string() << "\",";
-    out_file << "TRUE,";
-    out_file << "\"\",";
-    out_file << "\"" << timestamp.str() << "\"";
+    out_file << "\"" << timestamp.str() << "\",";
+    // DSE Config — flatten the multi-line DSE_info string into a single cell
+    if (cfg["output"].contains("DSE_info")) {
+        std::string dse_str = cfg["output"]["DSE_info"].get<std::string>();
+        // Replace newlines with " | " so it fits in one CSV cell
+        std::string flat;
+        for (char c : dse_str) {
+            if (c == '\n') flat += " | ";
+            else flat += c;
+        }
+        out_file << "\"" << flat << "\"";
+    }
     out_file << endl;
     out_file.close();
 }
@@ -276,6 +283,7 @@ void Placer::printFinalResults()
     std::string run_id = generateRunId();
 
     // Calculate final metrics
+    algo_time = Logger::getFunctionTime("run");
     float final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
     float final_overflow = grid.computeTotalOverflow(
                             cfg["params"]["convergence_target_density"],

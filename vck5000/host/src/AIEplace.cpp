@@ -15,8 +15,8 @@ AIEPLACE_NAMESPACE_BEGIN
  */
 void Placer::run()
 {
-    algo_start = getTime();
-    std::srand(std::time(nullptr)); // use current time as seed for random generator
+    TIME_FUNCTION();
+
     // Set the center point of die area as initial placement target
     Position target = Position(grid.getDieWidth()/2, grid.getDieHeight()/2);
 
@@ -26,8 +26,6 @@ void Placer::run()
     bool converged = false;
     while( !converged )
     {
-        TIME_BLOCK("Algorithm Block");
-
         performIteration();
 
         converged = checkConvergence();
@@ -35,42 +33,34 @@ void Placer::run()
         iteration++;
     }
 
-    plotHistories();
-    printFinalResults();
-
-    algo_time = getInterval(algo_start, getTime());
 }
 
 void Placer::performIteration()
 {
     Logger::log_detail("BEGIN iteration " + std::to_string(iteration));
 
-    // Iteration 1: bootstrap v_1 = u_1, compute first gradients, initialize solver state.
+    // Iteration 1: compute first gradients and initialize solver state.
+    // Probe positions (v_1 = u_1) are already set by initializePlacement().
     if (iteration == 1)
     {
-        iterationReset();
+        iterationReset(); // is this needed?
 
-        // Bootstrap v_1 ← u_1 (probe positions ← current positions)
-        for (auto item : db.getComponents())
-            item.second->next.probe_pos.setXY(item.second->next.node_pos);
-        // TODO: merge filler list into db.getComponents() so we don't need separate loops
-        for (auto filler : db.getFillers())
-            filler->next.probe_pos.setXY(filler->next.node_pos);
+        computeHpwlPartials();      // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
+        computeElectricFields();    // ∇D from ρ → bin eFields
 
-        computeAllProbeGradients();  // ∇HPWL, ∇D, and combined ∇f at v_1
-        recordInitialHPWL();
         initializeDensityWeight();
+        recordInitialHPWL();
     }
 
     // Algorithm 1 + Algorithm 2: step with backtracking line search.
     // On exit: positions at u_{k+1}, v_{k+1}; gradients at v_{k+1} already computed;
     // nesterov_ak advanced.
-    computeStepLength(enable_backtracking);
-
-    updateDensityWeight();
+    performNextStep(enable_backtracking);
 
     recordIterationResults();
     printIterationResults();
+
+    updateDensityWeight();
 }
 
 
@@ -216,6 +206,8 @@ float Placer::computeLipshitzEstimate()
     float pos_norm_sq  = 0.0f;
     float grad_norm_sq = 0.0f;
 
+    // TODO: Add fillers to this estimate?
+
     for (auto item : db.getComponents()) {
         Node* node = item.second;
 
@@ -231,7 +223,7 @@ float Placer::computeLipshitzEstimate()
     }
 
     float estimate = sqrtf(pos_norm_sq) / sqrtf(grad_norm_sq + 1e-8f);
-    Logger::log_detail("BB step estimate: " + PREC(estimate));
+    Logger::log_detail("New steplength estimate: " + PREC_P(estimate, 4));
     return std::clamp(estimate, 0.0001f, 4000.0f);
 }
 
@@ -245,7 +237,7 @@ float Placer::computeLipshitzEstimate()
  */
 void Placer::updateDensityWeight()
 {
-    if(iteration % 3 != 0) // only update density_weight every few iterations since HPWL can be noisy
+    if(iteration % 1 != 0) // only update density_weight every few iterations since HPWL can be noisy
     {
         //Logger::log_detail("Skipping density_weight update on iteration " + std::to_string(iteration));
         return;
@@ -288,6 +280,8 @@ void Placer::iterationReset()
 void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist)
 {
     Logger::log_trace("Begin initializePlacement()");
+    std::srand(std::time(nullptr)); // use current time as seed for random generator
+
     Table top;
     top.add_row(RowStream{} << "Initial Placement");
     Table data;
@@ -311,7 +305,7 @@ void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist
         //int x_offset = rand()%(grid.getDieWidth()) - grid.getDieWidth()/2; // Even Spread
         //int y_offset = rand()%(grid.getDieWidth()) - grid.getDieWidth()/2; // Even Spread
         Position init_pos = target_pos + Position(x_offset, y_offset);
-        item.second->setNodePos(init_pos);
+        item.second->initializeState(init_pos);
 
         // if this component is bigger than 1/16th of bin area, set member bool
         item.second->checkIfLarge(bin_area_16th);
@@ -324,8 +318,12 @@ void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist
         int y_offset = min_dist + rand()%(grid.getDieHeight()/2); // clustered around target
         if(rand()%2 == 1) y_offset *= -1; // 50% chance to negate
         Position init_pos = target_pos + Position(x_offset, y_offset);
-        filler->setNodePos(init_pos);
+        filler->initializeState(init_pos);
     }
+
+    // Initialize pin State (pins are fixed, but need valid probe_pos for gradient computation)
+    for (auto item : db.getPins())
+        item.second->initializeState(item.second->next.node_pos);
 
 
     //printIterationResults(); // Prints "iteration 0" starting statistics
@@ -363,6 +361,9 @@ void Placer::initializeDensityWeight()
 
     float initial_multiplier = cfg["params"]["density_weight_init_multiplier"];
     density_weight = (HPWL_L1_norm / (density_L1_norm + 1e-8f)) * initial_multiplier;
+
+    Logger::log_info("Initial HPWL gradient L1 norm: " + std::to_string(HPWL_L1_norm));
+    Logger::log_info("Initial density gradient L1 norm: " + std::to_string(density_L1_norm));
     Logger::log_info("Initialized density_weight: " + std::to_string(density_weight));
 }
 
@@ -413,15 +414,15 @@ bool Placer::checkConvergence()
     float current_hpwl = hpwl_history.back();
     float hpwl_improvement = (old_hpwl - current_hpwl) / old_hpwl;
 
-    bool hpwl_converged = (hpwl_improvement < hpwl_improvement_threshold)
-                            && (hpwl_improvement > 0.0f);
+    bool hpwl_converged = (hpwl_improvement < hpwl_improvement_threshold);
+                            //&& (hpwl_improvement > 0.0f);
 
+    Logger::log_detail("HPWL improvement from previous "+ std::to_string(convergence_window) +
+                    " iterations: " + std::to_string(100*hpwl_improvement) +"%");
     // Combined convergence: both criteria must be met
     if(overflow_converged && hpwl_converged) {
         Logger::log_info("CONVERGENCE ACHIEVED at iteration " + std::to_string(iteration));
 
-        Logger::log_info("HPWL improvement from previous "+ std::to_string(convergence_window) +
-                        " iterations: " + std::to_string(100*hpwl_improvement) +"%");
         return true;
     }
     else return false;
@@ -434,17 +435,14 @@ bool Placer::checkConvergence()
  * Can be computed on CPU or offloaded to AIE depending on configuration. 
  * Results are cached in node-local fields for reuse.
  */
+
+ // TODO: NOT USED, REMOVE?
 void Placer::computeAllProbeGradients()
 {
-    // Clear probe_grad before accumulation — Partials.cpp uses += into this field.
-    // Without this, gradients compound across iterations.
-    for (auto item : db.getComponents())
-        item.second->next.clear_grad();
-    for (auto filler : db.getFillers())
-        filler->next.clear_grad();
-
-    computeAllPartials();       // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
+    // Should be non-blocking and multithreaded, as partials and eFields are independent
+    computeHpwlPartials();      // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
     computeElectricFields();    // ∇D from ρ → bin eFields
+
     combineGradients();         // subtract electro in-place: next.probe_grad becomes total ∇f
 }
 
@@ -472,8 +470,13 @@ void Placer::combineGradients()
  */
 void Placer::enforceDieBoundaries(Node* node_p)
 {
+    // Clamp node_pos
     node_p->next.node_pos.x = std::clamp(node_p->next.node_pos.x, 0.0f, (float)grid.getDieWidth());
     node_p->next.node_pos.y = std::clamp(node_p->next.node_pos.y, 0.0f, (float)grid.getDieHeight());
+    
+    // Clamp probe_pos
+    node_p->next.probe_pos.x = std::clamp(node_p->next.probe_pos.x, 0.0f, (float)grid.getDieWidth());
+    node_p->next.probe_pos.y = std::clamp(node_p->next.probe_pos.y, 0.0f, (float)grid.getDieHeight());
 }
 
 
@@ -481,7 +484,7 @@ void Placer::enforceDieBoundaries(Node* node_p)
  * @brief Save current positions and gradients as "previous" for BB estimate and backtracking.
  * Must be called before stepAllNodes() so prev fields serve as the restore point.
  */
-void Placer::cachePreviousIterationState()
+void Placer::advanceIterationState()
 {
     for (auto item : db.getComponents()) item.second->cacheState();
     for (auto filler : db.getFillers())  filler->cacheState();
@@ -491,18 +494,18 @@ void Placer::cachePreviousIterationState()
  * @brief Perform Nesterov gradient step for all nodes (Algorithm 1, Lines 2 & 4).
  *
  * Delegates to Node::step() which reads from current state and writes to next.
- * The momentum coefficient is computed by the caller (computeStepLength owns Nesterov state).
+ * The momentum coefficient is computed by the caller (computeNextStep owns Nesterov state).
  *
  * @param mom_coeff Momentum coefficient: (a_k - 1) / a_{k+1}, or 0 if momentum disabled.
  */
-void Placer::stepAllNodes(float mom_coeff)
+void Placer::stepAllNodes()
 {
     for (auto item : db.getComponents()) {
-        item.second->step(step_length, mom_coeff);
+        item.second->step(step_length, momentum_coeff);
         enforceDieBoundaries(item.second);
     }
     for (auto filler : db.getFillers()) {
-        filler->step(step_length, mom_coeff);
+        filler->step(step_length, momentum_coeff);
         enforceDieBoundaries(filler);
     }
 }
@@ -518,40 +521,103 @@ void Placer::stepAllNodes(float mom_coeff)
  * After the loop, the accepted trial step is committed (positions already at u_{k+1}, v_{k+1})
  * and the Nesterov coefficient is advanced.
  */
-void Placer::computeStepLength(bool backtracking_enabled)
+void Placer::performNextStep(bool backtracking_enabled)
 {
     // Algorithm 1, Line 3: compute momentum coefficient for this iteration
     float a_next = (1.0f + sqrtf(4.0f * nesterov_ak * nesterov_ak + 1.0f)) / 2.0f;
-    float mom_coeff = enable_momentum ? (nesterov_ak - 1.0f) / a_next : 0.0f;
+    momentum_coeff = enable_momentum ? (nesterov_ak - 1.0f) / a_next : 0.0f;
+    nesterov_ak = a_next;
 
     // step_length (α̂) carries over from previous iteration (or warmup default)
-    cachePreviousIterationState();  // save current state to prev state
+    advanceIterationState();  // copy next state into current state
 
+    // Algorithm 2: Backtracking
     int tries = 0;
+    float prev_step_length;
     do {
-        // Lines 2 & 4: trial step using current step_length
-        stepAllNodes(mom_coeff);
+        // Lines 2 & 3: trial step using existing step_length from previous iteration
+        stepAllNodes();
 
+        iterationReset();
         // Recompute gradients at trial v̂ (the expensive part, accelerated on AIEs)
-        iterationReset(); // TODO: is this the correct reset?
-        computeAllProbeGradients();  // includes combineGradients()
+        computeHpwlPartials();      // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
+        computeElectricFields();    // ∇D from ρ → bin eFields
+        combineGradients();         // subtract electro in-place: next.probe_grad becomes total ∇f
 
-        // Fresh BB estimate: ||v̂ - v_k|| / ||∇f(v̂) - ∇f(v_k)||
-        float new_step_length = computeLipshitzEstimate();
+        prev_step_length = step_length;
+
+        // new steplength estimate at probe position: 
+        // α = 1 / L = ||v̂ - v_k|| / ||∇f(v̂) - ∇f(v_k)||
+        step_length = computeLipshitzEstimate();
 
         // Accept if α̂ ≤ ε · fresh_bb (step is not too aggressive)
-        if (step_length <= backtrack_epsilon * new_step_length) break;
+    } while(backtracking_enabled &&
+            prev_step_length > backtrack_epsilon * step_length && // epsilon condition
+            ++tries < max_backtracking_attempts);
 
-        // Reject: step() will overwrite next from current on retry
-        step_length = new_step_length;
-        tries++;
+    backtrack_steps = tries; // for logging
 
-    } while (backtracking_enabled && tries < max_backtracking_attempts);
+    // DEBUG
+    //if (iteration <= 3) logStepDiagnostics();
+}
 
-    backtrack_steps = tries;
+void Placer::logStepDiagnostics()
+{
+    Logger::log_info("=== Step Diagnostics (iteration " + std::to_string(iteration) + ") ===");
+    Logger::log_info("  step_length (α̂):  " + PREC_P(step_length, 6));
+    Logger::log_info("  momentum_coeff:    " + PREC_P(momentum_coeff, 6));
+    Logger::log_info("  nesterov_ak:       " + PREC_P(nesterov_ak, 6));
+    Logger::log_info("  backtrack_steps:   " + std::to_string(backtrack_steps));
 
-    // Commit Nesterov coefficient only after step is accepted
-    nesterov_ak = a_next;
+    // Gradient statistics (from current state used for stepping)
+    float grad_L1 = 0.0f, max_grad = 0.0f;
+    for (auto item : db.getComponents()) {
+        Node* n = item.second;
+        grad_L1 += fabs(n->current.probe_grad.x) + fabs(n->current.probe_grad.y);
+        max_grad = std::max(max_grad, std::max(fabs(n->current.probe_grad.x), fabs(n->current.probe_grad.y)));
+    }
+    Logger::log_info("  grad L1 norm:      " + SCI(grad_L1));
+    Logger::log_info("  max |grad|:        " + SCI(max_grad));
+    Logger::log_info("  α̂ * max|grad|:     " + SCI(step_length * max_grad) + "  (max single-step displacement)");
+
+    // Position delta statistics
+    float max_node_delta = 0.0f, max_probe_overshoot = 0.0f;
+    int clamped_count = 0;
+    float die_w = (float)grid.getDieWidth(), die_h = (float)grid.getDieHeight();
+    for (auto item : db.getComponents()) {
+        Node* n = item.second;
+        float dx = fabs(n->next.node_pos.x - n->current.node_pos.x);
+        float dy = fabs(n->next.node_pos.y - n->current.node_pos.y);
+        max_node_delta = std::max(max_node_delta, std::max(dx, dy));
+
+        float ox = fabs(n->next.probe_pos.x - n->next.node_pos.x);
+        float oy = fabs(n->next.probe_pos.y - n->next.node_pos.y);
+        max_probe_overshoot = std::max(max_probe_overshoot, std::max(ox, oy));
+
+        if (n->next.node_pos.x <= 0 || n->next.node_pos.x >= die_w ||
+            n->next.node_pos.y <= 0 || n->next.node_pos.y >= die_h)
+            clamped_count++;
+    }
+    Logger::log_info("  max |Δnode_pos|:   " + SCI(max_node_delta));
+    Logger::log_info("  max probe overshoot: " + SCI(max_probe_overshoot));
+    Logger::log_info("  nodes at boundary: " + std::to_string(clamped_count));
+
+    // Sample trace: first 3 components
+    int count = 0;
+    for (auto item : db.getComponents()) {
+        if (count >= 3) break;
+        Node* n = item.second;
+        Logger::log_info("  --- Sample node: " + n->getName() + " ---");
+        Logger::log_info("    current.node_pos (u_k):   (" + PREC_P(n->current.node_pos.x, 2) + ", " + PREC_P(n->current.node_pos.y, 2) + ")");
+        Logger::log_info("    current.probe_pos (v_k):  (" + PREC_P(n->current.probe_pos.x, 2) + ", " + PREC_P(n->current.probe_pos.y, 2) + ")");
+        Logger::log_info("    current.probe_grad:       (" + SCI(n->current.probe_grad.x) + ", " + SCI(n->current.probe_grad.y) + ")");
+        Logger::log_info("    α̂ * grad:                 (" + SCI(step_length * n->current.probe_grad.x) + ", " + SCI(step_length * n->current.probe_grad.y) + ")");
+        Logger::log_info("    next.node_pos (u_{k+1}):  (" + PREC_P(n->next.node_pos.x, 2) + ", " + PREC_P(n->next.node_pos.y, 2) + ")");
+        Logger::log_info("    next.probe_pos (v_{k+1}): (" + PREC_P(n->next.probe_pos.x, 2) + ", " + PREC_P(n->next.probe_pos.y, 2) + ")");
+        Logger::log_info("    next.probe_grad:          (" + SCI(n->next.probe_grad.x) + ", " + SCI(n->next.probe_grad.y) + ")");
+        count++;
+    }
+    Logger::log_info("=== End Step Diagnostics ===");
 }
 
 AIEPLACE_NAMESPACE_END

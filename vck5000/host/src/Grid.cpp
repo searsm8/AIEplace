@@ -43,7 +43,8 @@ void Grid::computeBinOverlaps(Node* node_p)
     // But small nodes should be simpilified!!!!
 
     //If node is small compared to bin size, we assume the entire node is inside the bin
-    if(!node_p->isLarge()) {
+    //if(!node_p->isLarge()) 
+    {
         int col_index = node_p->getProbeX() / m_bin_width;
         if(col_index < 0 || col_index > m_bins_per_row-1) return;
         int row_index = node_p->getProbeY() / m_bin_height;

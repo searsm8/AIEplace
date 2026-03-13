@@ -11,13 +11,12 @@ class Node;
 
 class Net
 {
-private:
+public:
     // Data members
     string m_name;
     int m_degree;
 
 
-public:
     std::vector<Node*> mv_nodes; // List of all nodes on this net, sorted by descending X or Y positions
     std::map<Node*, string> mm_net_pins; // which pins are used for this net
 
