@@ -218,6 +218,8 @@ void DataBase::iterationReset()
 {
     for (auto item : mm_components)
         item.second->iterationReset();
+    for (auto filler : mv_fillers)
+        filler->iterationReset();
     for (auto item : mm_pins)
         item.second->iterationReset();
 }

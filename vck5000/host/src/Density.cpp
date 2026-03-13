@@ -406,9 +406,8 @@ void Placer::computeOverlaps()
     for (auto item : db.getComponents())
         grid.computeBinOverlaps(item.second);
 
-    // Fillers should NOT contribute to bin overlaps.
-    //for (auto filler : db.getFillers())
-    //    grid.computeBinOverlaps(filler);
+    for (auto filler : db.getFillers())
+        grid.computeBinOverlaps(filler);
 
     // DEBUGGING
     //double total_node_area = 0;

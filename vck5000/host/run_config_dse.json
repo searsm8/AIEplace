@@ -1,18 +1,18 @@
 {
   "input": {
-    "benchmark": "host/benchmarks/ispd2015/mgc_superblue12",
+    "benchmark": "host/benchmarks/ispd2005/bigblue4",
     "xclbin": "bin/aieplace.hw.xclbin"
   },
   "params": {
     "partials_compute_method": "cpu",
     "density_compute_method": "cpu",
     "wirelength_method": "HPWL",
-    "enable_backtracking": true,
+    "enable_backtracking": false,
     "enable_momentum": true,
     "enable_filler": false,
     "gamma": 4,
     "max_threads": 1,
-    "init_step_length": 0.001,
+    "init_step_length": 1.0,
     "density_weight_init_multiplier": 0.01,
     "density_weight_min_step": 0.95,
     "density_weight_max_step": 1.05,
@@ -42,6 +42,6 @@
     "rand_focus_IO": 0,
     "rand_focus_nets": 0,
     "rand_focus_nodes": 0,
-    "DSE_info": "DSE sweep progress=129 of 224\nbenchmark=mgc_superblue12\nenable_backtracking=True\ninit_step_length=0.001"
+    "DSE_info": "DSE sweep progress=224 of 224\nbenchmark=bigblue4\nenable_backtracking=False\ninit_step_length=1.0"
   }
 }

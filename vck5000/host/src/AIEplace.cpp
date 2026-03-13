@@ -206,11 +206,7 @@ float Placer::computeLipshitzEstimate()
     float pos_norm_sq  = 0.0f;
     float grad_norm_sq = 0.0f;
 
-    // TODO: Add fillers to this estimate?
-
-    for (auto item : db.getComponents()) {
-        Node* node = item.second;
-
+    auto accumulate = [&](Node* node) {
         // ||v̂_{k+1} - v_k||²
         float dx = node->next.probe_pos.x - node->current.probe_pos.x;
         float dy = node->next.probe_pos.y - node->current.probe_pos.y;
@@ -220,7 +216,12 @@ float Placer::computeLipshitzEstimate()
         float dgx = node->next.probe_grad.x - node->current.probe_grad.x;
         float dgy = node->next.probe_grad.y - node->current.probe_grad.y;
         grad_norm_sq += dgx*dgx + dgy*dgy;
-    }
+    };
+
+    for (auto item : db.getComponents())
+        accumulate(item.second);
+    for (auto filler : db.getFillers())
+        accumulate(filler);
 
     float estimate = sqrtf(pos_norm_sq) / sqrtf(grad_norm_sq + 1e-8f);
     Logger::log_detail("New steplength estimate: " + PREC_P(estimate, 4));
