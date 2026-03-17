@@ -76,6 +76,9 @@ public:
     static inline void deactivate_logging_key(string key)
     { Logger::keys.erase(key); }
 
+    static inline bool isKeyActive(const string& key)
+    { return Logger::keys.count(key) > 0; }
+
 
     // Primary logging fucntions
     static bool log(string key, MsgType msg);

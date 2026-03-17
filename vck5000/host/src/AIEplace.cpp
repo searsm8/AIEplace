@@ -238,7 +238,7 @@ float Placer::computeLipshitzEstimate()
  */
 void Placer::updateDensityWeight()
 {
-    if(iteration % 1 != 0) // only update density_weight every few iterations since HPWL can be noisy
+    if(iteration % 3 != 0) // only update density_weight every few iterations since HPWL can be noisy
     {
         //Logger::log_detail("Skipping density_weight update on iteration " + std::to_string(iteration));
         return;
@@ -558,8 +558,7 @@ void Placer::performNextStep(bool backtracking_enabled)
 
     backtrack_steps = tries; // for logging
 
-    // DEBUG
-    //if (iteration <= 3) logStepDiagnostics();
+    if (Logger::isKeyActive("DEBUG")) logStepDiagnostics();
 }
 
 void Placer::logStepDiagnostics()

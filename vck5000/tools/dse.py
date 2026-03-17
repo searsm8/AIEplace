@@ -55,10 +55,15 @@ dse_sweep = OrderedDict([
         "ispd2005/bigblue3",
         "ispd2005/bigblue4",
     ])),
+
     # Uncomment to sweep additional parameters:
+    # (<param_name>, ([section_path], [values_to_sweep]))
+    ################################################################
     # ("partials_compute_method", (["params"], ["cpu", "aie"])),
-     ("enable_backtracking",     (["params"], [True, False])),
-     ("init_step_length",        (["params"], [0.001, 0.01, 0.1, 1.0])),
+    # ("enable_backtracking",     (["params"], [True, False])),
+    # ("enable_filler",     (["params"], [True, False])),
+    # ("init_step_length",        (["params"], [0.001, 0.01, 0.1, 1.0])),
+     ("convergence_min_iterations", (["params"], [50, 100, 200])),
 ])
 
 

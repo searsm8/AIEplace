@@ -28,12 +28,12 @@
     "wirelength_method": "HPWL",      // choose: HPWL
     "enable_backtracking": true,      // whether to use backtracking line search for step length selection
     "enable_momentum": true,          // whether to use momentum in the optimization (Nesterov Accelerated Gradient)
-    "enable_filler": false,            // whether to include filler cells in placement
+    "enable_filler": true,            // whether to include filler cells in placement
 
     // Hyperparameters
     "gamma": 4,
     "max_threads": 1, // multithreading not yet implemented
-    "init_step_length": 0.01, // small first step 
+    "init_step_length": 0.1, // small first step 
     "density_weight_init_multiplier": 0.01, // multiplier used to set density penalty
                                             // 0.01 means that density will contribute about 1% as much
                                             // as wirelength to the cost function at the start of placement
