@@ -3,8 +3,6 @@
 int main(int argc, char *argv[])
 {
 
-    Logger::setup_logging();
-
     std::string config_filepath = (argc > 1) ? argv[1] : "host/run_config.json"; // default
 
     // Instantiate the placer

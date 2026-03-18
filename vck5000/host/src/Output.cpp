@@ -13,6 +13,9 @@ AIEPLACE_NAMESPACE_BEGIN
 
 void Placer::printWelcomeBanner(bool show_info)
 {
+    if (!Logger::isKeyActive("INFO"))
+        return;
+
     // Raw string logo
     string logo = R"(
 ╔══════════════════════════════════════════════════════╗
@@ -47,8 +50,8 @@ void Placer::printWelcomeBanner(bool show_info)
 
 void Placer::printIterationResults()
 {
-    system("clear"); // Clear console for cleaner output each iteration
-    printWelcomeBanner(false);
+    //system("clear"); // Clear console for cleaner output each iteration
+    //printWelcomeBanner(false);
     if (cfg["output"].contains("DSE_info"))
     {
         Table DSE_info;
@@ -87,7 +90,6 @@ void Placer::printIterationResults()
         top.column(2).format().font_align(FontAlign::left);
         //top.format().hide_border();
         Logger::log_data(top);
-        cout << endl;
     }
 
     // every 10 iterations, export an image
@@ -207,7 +209,6 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
         out_file << "Iteration Avg (sec),";
         out_file << "Partials AIE Time (sec),";
         out_file << "Memory Usage (MB),";
-        out_file << "Init Step Length,";
         out_file << "Output Dir,";
         out_file << "Timestamp,";
         out_file << "DSE Config";
@@ -255,7 +256,6 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
     out_file << iteration_avg << ",";
     out_file << Logger::getFunctionTime("computeAllPartials_AIE") << ",";
     out_file << getMemoryUsageMB() << ",";
-    out_file << cfg["params"]["init_step_length"].get<float>() << ",";
     out_file << "\"" << output_dir.string() << "\",";
     out_file << "\"" << timestamp.str() << "\",";
     // DSE Config — flatten the multi-line DSE_info string into a single cell
@@ -357,7 +357,8 @@ void Placer::printFinalResults()
             viz.drawPlacement(db, run_output_dir, info);
 
             // use python script to create gif from generated pngs in run directory
-            std::string gif_command = "python3 tools/gif_builder.py " + run_output_dir + "/placement" + " -d 100 -o " + run_output_dir + "/full_placement.gif";
+            std::string quiet_flag = cfg["output"].value("quiet", false) ? " --quiet" : "";
+            std::string gif_command = "python3 tools/gif_builder.py " + run_output_dir + "/placement" + " -d 100 -o " + run_output_dir + "/full_placement.gif" + quiet_flag;
             system(gif_command.c_str());
         }
     #endif

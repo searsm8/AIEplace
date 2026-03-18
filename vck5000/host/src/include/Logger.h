@@ -68,7 +68,7 @@ public:
     static Logger& getMutex();
 
     // Setup functions
-    static void setup_logging();
+    static void setup_logging(bool quiet = false);
 
     static inline void activate_logging_key(string key)
     { Logger::keys.insert(key); }

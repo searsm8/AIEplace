@@ -74,9 +74,7 @@ void Placer::performIteration()
 Placer::Placer(std::string config_filepath) 
         { 
             m_config_filepath = config_filepath;
-            printWelcomeBanner();
             // Read configuration file (supports JSON with comments)
-            Logger::log_info("Reading runtime configuration from: " + config_filepath);
             std::ifstream config_file(config_filepath);
             // check if config file was found
             if (!config_file.is_open()) {
@@ -95,6 +93,12 @@ Placer::Placer(std::string config_filepath)
 
             // Parse JSON
             cfg = json::parse(json_content);
+
+            // Setup logging (quiet mode suppresses all output except errors)
+            bool quiet = cfg["output"].value("quiet", false);
+            Logger::setup_logging(quiet);
+            printWelcomeBanner();
+            Logger::log_info("Reading runtime configuration from: " + config_filepath);
 
             // Read hyperparameters
             gamma = cfg["params"]["gamma"];
@@ -116,7 +120,6 @@ Placer::Placer(std::string config_filepath)
             target_density = cfg["params"]["convergence_target_density"];
             enable_backtracking = cfg["params"]["enable_backtracking"];
             enable_momentum = cfg["params"]["enable_momentum"];
-            warmup_iterations = cfg["params"]["warmup_iterations"];
             convergence_window = cfg["params"]["convergence_window"];
             max_backtracking_attempts = cfg["params"]["backtrack_max_tries"];
             backtrack_epsilon = cfg["params"]["backtrack_epsilon"];
@@ -413,7 +416,6 @@ bool Placer::checkConvergence()
                     target_density, 
                     db.computeTotalComponentArea());
 
-    Logger::log_detail("Current overflow: " + std::to_string(overflow));
     if (overflow < overflow_threshold) {
         overflow_converged = true;
         Logger::log_info("OVERFLOW CONVERGED (Less than: " + std::to_string(overflow_threshold) + ")");

@@ -19,8 +19,26 @@ Logger& Logger::getLogger() {
     }
     return *iLogger;
 }
-void Logger::setup_logging()
+void Logger::setup_logging(bool quiet)
 {
+    // Logging colors (always set, even in quiet mode)
+    Logger::string_colors["TRACE"] = Color::grey;
+    Logger::string_colors["DETAIL"] = Color::cyan;
+    Logger::string_colors["DEBUG"] = Color::magenta;
+    Logger::string_colors["INFO"] = Color::green;
+    Logger::string_colors["DATA"] = Color::blue;
+    Logger::string_colors["WARNING"] = Color::yellow;
+    Logger::string_colors["ERROR"] = Color::red;
+    Logger::string_colors["CRITICAL"] = Color::red;
+    Logger::string_colors["profiling"] = Color::yellow;
+
+    // In quiet mode, only enable error-level logging
+    if (quiet) {
+        Logger::activate_logging_key("ERROR");
+        Logger::activate_logging_key("CRITICAL");
+        return;
+    }
+
     // DEFAULT LOGGING KEYS
     //Logger::activate_logging_key("TRACE");  // For program execution tracing, e.g. function calls
     Logger::activate_logging_key("DETAIL"); // Used to give detail on things that most people won't care about. Usually off.
@@ -35,20 +53,9 @@ void Logger::setup_logging()
     //Logger::activate_logging_key("packets"); // Used in DataBase.cpp for packet initialization
     Logger::activate_logging_key("dbinfo");
     Logger::activate_logging_key("profiling");
-    Logger::string_colors["profiling"] = Color::yellow;
     //Logger::activate_logging_key("bins");
     //Logger::activate_logging_key("overlap");
     //Logger::activate_logging_key("function"); // Used to log when important functions are called
-
-    // Logging colors
-    Logger::string_colors["TRACE"] = Color::grey;
-    Logger::string_colors["DETAIL"] = Color::cyan;
-    Logger::string_colors["DEBUG"] = Color::magenta;
-    Logger::string_colors["INFO"] = Color::green;
-    Logger::string_colors["DATA"] = Color::blue;
-    Logger::string_colors["WARNING"] = Color::yellow;
-    Logger::string_colors["ERROR"] = Color::red;
-    Logger::string_colors["CRITICAL"] = Color::red;
 }
 
 bool Logger::log(string key, MsgType msg)

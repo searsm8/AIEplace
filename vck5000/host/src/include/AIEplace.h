@@ -67,7 +67,6 @@ public:
     float gamma, inv_gamma; // smoothness factor for estimations;
                        // larger means less smooth but more accurate
 
-    int warmup_iterations;   // iterations before BB step estimation kicks in
     int backtrack_steps = 0;
     int max_backtracking_attempts;
     float backtrack_epsilon;
