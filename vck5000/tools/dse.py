@@ -2,15 +2,98 @@
 # Design Space Exploration python script
 # Runs bin/AIEplace.exe while modifying host/runtime_config.json between runs
 
+import datetime
+import itertools
 import json
-import sys
-import subprocess
 import os
-from typing import Any, Union
-
-import json
+import subprocess
 import sys
-from typing import Any, Union, List
+from collections import OrderedDict
+from typing import Any, Union, List, Tuple
+
+
+# =============================================================================
+# DSE Sweep Configuration
+# =============================================================================
+# Each entry maps a parameter name to (section_path, [values_to_sweep]).
+# The Cartesian product of all value lists is computed automatically.
+# To add a new parameter sweep, add one line. To remove, delete or comment out.
+#
+# "benchmark" is special: values are prefixed with benchmark_path automatically.
+# =============================================================================
+
+benchmark_path = "host/benchmarks/"
+
+dse_sweep = OrderedDict([
+    ("benchmark", (["input"], [
+        "ispd2015/mgc_fft_1",
+        "ispd2015/mgc_fft_2",
+        "ispd2015/mgc_fft_a",
+        "ispd2015/mgc_fft_b",
+        "ispd2015/mgc_des_perf_1",
+        "ispd2015/mgc_des_perf_a",
+        "ispd2015/mgc_des_perf_b",
+        "ispd2015/mgc_edit_dist_a",
+        "ispd2015/mgc_matrix_mult_1",
+        "ispd2015/mgc_matrix_mult_2",
+        "ispd2015/mgc_matrix_mult_a",
+        "ispd2015/mgc_matrix_mult_b",
+        "ispd2015/mgc_matrix_mult_c",
+        "ispd2015/mgc_pci_bridge32_a",
+        "ispd2015/mgc_pci_bridge32_b",
+        "ispd2015/mgc_superblue11_a",
+        "ispd2015/mgc_superblue12",
+        "ispd2015/mgc_superblue14",
+        "ispd2015/mgc_superblue16_a",
+        "ispd2015/mgc_superblue19",
+        "ispd2005/adaptec1",
+        "ispd2005/adaptec2",
+        "ispd2005/adaptec3",
+        "ispd2005/adaptec4",
+        "ispd2005/bigblue1",
+        "ispd2005/bigblue2",
+        "ispd2005/bigblue3",
+        "ispd2005/bigblue4",
+    ])),
+
+    # Uncomment to sweep additional parameters:
+    # (<param_name>, ([section_path], [values_to_sweep]))
+    ################################################################
+    # ("partials_compute_method", (["params"], ["cpu", "aie"])),
+    # ("enable_backtracking",     (["params"], [True, False])),
+    # ("enable_filler",     (["params"], [True, False])),
+    # ("init_step_length",        (["params"], [0.001, 0.01, 0.1, 1.0])),
+     ("convergence_min_iterations", (["params"], [50, 100, 200])),
+])
+
+
+# =============================================================================
+# Utility Functions
+# =============================================================================
+
+def update_info_string(config: dict, config_path: str, run_num: int, total_runs: int) -> None:
+    """
+    Build a DSE_info string from the current config values of all swept parameters
+    and write it into config["output"]["DSE_info"], then save the config file.
+    """
+    if "output" not in config:
+        return
+
+    parts = [f"DSE sweep progress={run_num} of {total_runs}"]
+    for param_name, (section_list, _) in dse_sweep.items():
+        section = config
+        for key in section_list:
+            section = section.get(key, {})
+        if isinstance(section, dict) and param_name in section:
+            value = section[param_name]
+            if param_name == "benchmark":
+                value = str(value).rsplit('/', 1)[-1]
+            parts.append(f"{param_name}={value}")
+
+    config["output"]["DSE_info"] = "\n".join(parts)
+
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
 
 
 def modify_config_parameter(
@@ -22,7 +105,7 @@ def modify_config_parameter(
 ) -> None:
     """
     Modify a parameter in a JSON config file at any nested level.
-    
+
     Args:
         config_path (str): Path to the input config file
         param_name (str): Name of the parameter to modify
@@ -32,83 +115,49 @@ def modify_config_parameter(
                                                  Can be a string like "params" or "settings.database"
                                                  or a list like ["settings", "database"].
                                                  If None, defaults to "params" for backward compatibility.
-    
-    Raises:
-        FileNotFoundError: If config file doesn't exist
-        KeyError: If parameter name or section path not found in config
-        json.JSONDecodeError: If config file is not valid JSON
-    
-    Examples:
-        # Original usage (backward compatible)
-        modify_config_parameter("config.json", "timeout", 30)
-        
-        # Modify in different section
-        modify_config_parameter("config.json", "host", "localhost", section_path="database")
-        
-        # Modify in nested section
-        modify_config_parameter("config.json", "port", 5432, section_path="database.connection")
-        modify_config_parameter("config.json", "port", 5432, section_path=["database", "connection"])
-        
-        # Modify at root level
-        modify_config_parameter("config.json", "version", "1.2.0", section_path="")
     """
     try:
-        # Read the config file
         with open(config_path, 'r') as f:
             config = json.load(f)
-        
+
         # Handle section path
         if section_path is None:
-            # Default to "params" for backward compatibility
             section_path = ["params"]
         elif isinstance(section_path, str):
-            # Convert string path to list
             if section_path == "":
-                section_path = []  # Root level
+                section_path = []
             else:
                 section_path = section_path.split('.')
         elif not isinstance(section_path, list):
             raise ValueError("section_path must be a string, list, or None")
-        
+
         # Navigate to the target section
         current_section = config
         section_path_str = "root"
-        
+
         for i, section_name in enumerate(section_path):
             if not isinstance(current_section, dict):
                 raise KeyError(f"Cannot navigate to section '{section_name}' - parent is not a dictionary")
-            
             if section_name not in current_section:
                 raise KeyError(f"Section '{section_name}' not found in {section_path_str}")
-            
             current_section = current_section[section_name]
             section_path_str = f"{section_path_str}.{section_name}" if section_path_str != "root" else section_name
-        
-        # Check if the current section is a dictionary
+
         if not isinstance(current_section, dict):
             raise KeyError(f"Target section '{section_path_str}' is not a dictionary and cannot contain parameters")
-        
-        # Check if parameter exists in the target section
+
         if param_name not in current_section:
             raise KeyError(f"Parameter '{param_name}' not found in section '{section_path_str}'")
-            
-        # Update the parameter
+
         current_section[param_name] = new_value
-        
-        # Determine output path
         save_path = output_path if output_path else config_path
-        
-        # Save the modified config
+
         with open(save_path, 'w') as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
-        
-        # Create a display path for logging
+
         display_path = ".".join(section_path) if section_path else "root"
-        if display_path:
-            print(f"DSE: Updated param '{param_name}' in section '{display_path}' to {new_value}")
-        else:
-            print(f"DSE: Updated param '{param_name}' at root level to {new_value}")
-        
+        print(f"DSE: Updated '{param_name}' in '{display_path}' to {new_value}")
+
     except FileNotFoundError:
         print(f"Error: Config file '{config_path}' not found")
         sys.exit(1)
@@ -120,135 +169,74 @@ def modify_config_parameter(
         sys.exit(1)
 
 
-# Convenience function for backward compatibility
-def modify_params_parameter(config_path: str, param_name: str, new_value: Any, output_path: Union[str, None] = None) -> None:
-    """
-    Legacy function for modifying parameters in the 'params' section.
-    This is just a wrapper around the main function for backward compatibility.
-    """
-    modify_config_parameter(config_path, param_name, new_value, output_path, section_path="params")
-
-
-# @brief: Run the compiled program using a subprocess
 def run_AIEplace(args=None):
+    """Run the compiled program using a subprocess."""
     if args is None:
         args = []
-    
-    try:
-        # Create the command with executable and any arguments
-        command = ['bin/AIEplace.exe'] + args
-        
-        # Run the program with additional configurations
-        print(f"DSE: {command}")
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,  # This is the older equivalent of text=True
-            bufsize=1  # Line buffered
-        )
-        
-        # Capture output in real-time
-        output = []
-        error_output = []
-        
-        # Read both stdout and stderr simultaneously
-        print(f"DSE: Reading stdout and stderr in real-time...")
-        while True:
-            stdout_line = process.stdout.readline()
-            stderr_line = process.stderr.readline()
-            
-            if stdout_line:
-                output.append(stdout_line)
-                sys.stdout.flush()  # Ensure immediate console output
-            
-            if stderr_line:
-                error_output.append(stderr_line)
-                sys.stderr.flush()  # Ensure immediate console output
-            
-            # Check if process has finished
-            if process.poll() is not None and not stdout_line and not stderr_line:
-                break
-        
-        # Wait for the process to complete
-        print(f"DSE: Waiting for process to finish...")
-        return_code = process.wait()
-        
-        if return_code != 0:
-            error_message = ''.join(error_output)
-            print(f"Runtime error (code {return_code}):\n{error_message}")
-            return None
-        
-        return ''.join(output)
-        
-    except Exception as e:
-        print(f"Error running program: {str(e)}")
-        return None
+
+    command = ['bin/AIEplace.exe'] + args
+    print(f"DSE: Running {command}")
+
+    result = subprocess.run(command)
+
+    if result.returncode != 0:
+        print(f"DSE: ERROR — process exited with code {result.returncode}")
+        return False
+    return True
 
 
+# =============================================================================
+# DSE Main Loop
+# =============================================================================
 
-benchmark_path = "host/benchmarks/"
-benchmark_list = [  
-                #"ispd2015/mgc_fft_1", 
-                #"ispd2015/mgc_fft_2", 
-                #"ispd2015/mgc_fft_a", 
-                #"ispd2015/mgc_fft_b", 
-                #"ispd2015/mgc_des_perf_1",
-                #"ispd2015/mgc_des_perf_a",
-                #"ispd2015/mgc_des_perf_b",
-                #"ispd2015/mgc_edit_dist_a",
-                #"ispd2015/mgc_matrix_mult_1",
-                #"ispd2015/mgc_matrix_mult_2",
-                #"ispd2015/mgc_matrix_mult_a",
-                #"ispd2015/mgc_matrix_mult_b",
-                #"ispd2015/mgc_matrix_mult_c",
-                #"ispd2015/mgc_pci_bridge32_a",
-                #"ispd2015/mgc_pci_bridge32_b",
-                #"ispd2015/mgc_superblue11_a",
-                #"ispd2015/mgc_superblue12",
-                #"ispd2015/mgc_superblue14",
-                #"ispd2015/mgc_superblue16_a",
-                #"ispd2015/mgc_superblue19",
-                "ispd2005/adaptec1",
-                #"ispd2005/adaptec2",
-                #"ispd2005/adaptec3",
-                #"ispd2005/adaptec4",
-                #"ispd2005/bigblue1",
-                #"ispd2005/bigblue2",
-                #"ispd2005/bigblue3",
-                #"ispd2005/bigblue4"
-                ]
-learning_rates = [10, 50, 100, 200, 300, 400, 500, 800, 1000]
-
-def run_all_benchmarks(config_path):
-    for benchmark in benchmark_list:
-        modify_config_parameter(config_path, "input_filepath", benchmark_path+benchmark)
-        run_AIEplace()
-
-# TODO: expand DSE to use SA or ant colony optimization
-# Design Space Exploration algorithm
 def dse():
+    """
+    Design Space Exploration — exhaustive sweep over all parameter combinations.
+
+    Computes the Cartesian product of all value lists in dse_sweep and runs
+    AIEplace once for each configuration.
+    """
     config_path = "host/run_config_dse.json"
 
-    # Run all benchmarks with simple and cpu partials_compute_method
-    for benchmark in benchmark_list:
-        for lr in learning_rates:
-            modify_config_parameter(config_path, "benchmark", benchmark_path+benchmark, section_path="input")
-            modify_config_parameter(config_path, "partials_compute_method", "cpu", section_path="params")
-            modify_config_parameter(config_path, "init_learning_rate", lr, section_path="params")
-            run_AIEplace()
-            run_AIEplace()
-            run_AIEplace()
+    # Extract param names, sections, and value lists from the sweep config
+    param_names = list(dse_sweep.keys())
+    sections = [dse_sweep[p][0] for p in param_names]
+    value_lists = [dse_sweep[p][1] for p in param_names]
 
-            #modify_config_parameter(config_path, "partials_compute_method", "simple", section_path="params")
-            #run_AIEplace()
-            #modify_config_parameter(config_path, "partials_compute_method", "orig", section_path="params")
-            #run_AIEplace()
-    
+    # Cartesian product of all parameter value lists
+    all_combos = list(itertools.product(*value_lists))
+    total_runs = len(all_combos)
+
+    print(f"DSE: {len(param_names)} parameters, {total_runs} total configurations")
+    for p in param_names:
+        n = len(dse_sweep[p][1])
+        print(f"  {p}: {n} value{'s' if n != 1 else ''}")
+
+    # Give every DSE sweep its own subdirectory so runs never collide
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    modify_config_parameter(config_path, "results_dir", f"results/DSE_{timestamp}", section_path="output")
+
+    for run_num, combo in enumerate(all_combos, 1):
+        # Apply each parameter value to the config
+        for param_name, section, value in zip(param_names, sections, combo):
+            actual_value = value
+            if param_name == "benchmark":
+                actual_value = benchmark_path + value
+            modify_config_parameter(config_path, param_name, actual_value,
+                                    section_path=section)
+
+        # Update DSE_info and run
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        update_info_string(config, config_path, run_num, total_runs)
+
+        combo_str = "  ".join(f"{p}={v}" for p, v in zip(param_names, combo))
+        print(f"\n=== DSE run {run_num}/{total_runs}:  {combo_str} ===")
+        run_AIEplace([config_path])
+
 
 def main():
     dse()
 
-
-if __name__=="__main__":
+if __name__ == "__main__":
     main()

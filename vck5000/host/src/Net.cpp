@@ -9,28 +9,28 @@ AIEPLACE_NAMESPACE_BEGIN
 struct Xgreater
 {
     bool operator()( Node* l, Node* r ) {
-        return l->getPosition().getX() > r->getPosition().getX();
+        return l->getProbeX() > r->getProbeX();
     }
 };
 
 struct Xlesser
 {
     bool operator()( Node* l, Node* r ) {
-        return l->getPosition().getX() < r->getPosition().getX();
+        return l->getProbeX() < r->getProbeX();
     }
 };
 
 struct Ygreater
 {
     bool operator()( Node* l, Node* r ) {
-        return l->getPosition().getY() > r->getPosition().getY();
+        return l->getProbeY() > r->getProbeY();
     }
 };
 
 struct Ylesser
 {
     bool operator()( Node* l, Node* r ) {
-        return l->getPosition().getY() < r->getPosition().getY();
+        return l->getProbeY() < r->getProbeY();
     }
 };
 
@@ -88,24 +88,10 @@ string Net::to_string()
             cout << "nullptr found!" << endl;
             exit(1);
         }
-        s += "\t" + node->getName() + " (Pin " + mm_net_pins[node] + ") : " + node->getPosition().to_string() + "\n";
+        s += "\t" + node->getName() + " (Pin " + mm_net_pins[node] + ") : " + node->next.probe_pos.to_string() + "\n";
     }
 
     return s;
-}
-
-// TODO: remove unused function?
-void Net::printTerms()
-{
-    cout << "Terms of net " << m_name << ":" << endl;
-    cout << "\tb+x: " << terms_cpu.b.plus.x;
-    cout << "\tb-x: " << terms_cpu.b.minus.x;
-    cout << "\tc+x: " << terms_cpu.c.plus.x;
-    cout << "\tc-x: " << terms_cpu.c.minus.x;
-    cout << endl;
-
-    for(Node* np : mv_nodes)
-        np->printTerms();
 }
 
 /**
@@ -162,15 +148,15 @@ position_type Net::computeWirelength_RSMT()
     return RSMT;
 }
 
-Box<position_type> Net::getBoundingBox()
+Box Net::getBoundingBox()
 {
     sortPositionsByX();
-    int max_x = mv_nodes.front()->getX();
-    int min_x = mv_nodes.back()->getX();
+    float max_x = mv_nodes.front()->getX();
+    float min_x = mv_nodes.back()->getX();
     sortPositionsByY();
-    int max_y = mv_nodes.front()->getY();
-    int min_y = mv_nodes.back()->getY();
-    return Box<position_type>(min_x, min_y, max_x, max_y);
+    float max_y = mv_nodes.front()->getY();
+    float min_y = mv_nodes.back()->getY();
+    return Box(min_x, min_y, max_x, max_y);
 }
 
 bool Net::hasPin()

@@ -28,15 +28,14 @@ AIEPLACE_NAMESPACE_BEGIN
 class Placer
 {
 private:
-    float initial_hpwl = 0.0f;
+    float m_initial_hpwl = 0.0f;
+    std::string m_config_filepath;
     
     // Helper functions for DSE integration and output organization
-    void createRunOutputStructure(std::string& run_output_dir, std::string& run_id);
-    void populateStatsBlock(Logger::ProgramStatBlock& stats, 
-                           float final_hpwl, float final_overflow, 
-                           float total_runtime, float iteration_avg,
-                           float hpwl_improvement, bool has_improvement,
-                           const std::string& run_id);
+    void createRunOutputStructure();
+    void writeResultsCSV(float final_hpwl, float final_overflow,
+                         float total_runtime, float iteration_avg,
+                         float hpwl_improvement, const std::string& run_id);
     
     // Helper functions
     std::string escapeJsonString(const std::string& input);
@@ -48,49 +47,57 @@ private:
 public:
     DataBase db;
     Grid grid;
+
 #ifdef USE_XILINX_XRT
     PartialsGraphDriver partials_drivers[PARTIALS_GRAPH_COUNT];
     DensityGraphDriver density_driver[3];
 #endif
 
-    // Flat data structure for results (same as before)
-    struct NodePartial {
-        Node* node;
-        Point partial;
-    };
-
-    std::map<Net*, NodePartial> all_partials;
-    std::map<Net*, NodePartial> simple_partials;
-
     // Configuration object
     json cfg;
-
-    fs::path input_dir; // parameter loaded from json config file
+    fs::path input_dir;
     fs::path output_dir;
-    std::string result_csv;
+    fs::path results_dir;
 
-    // hyper parameters
-    float gamma, inv_gamma; // smoothness factor for estimations; 
+    // Hyperparameters
+    float step_length; // α (alpha) in eplace
+    float density_weight; // λ (lambda) in eplace
+    float nesterov_ak = 1.0f; // a_k in Algorithm 1; controls momentum coefficient
+    float momentum_coeff; // (a_k - 1) / a_{k+1} in Algorithm 1; computed each iteration if momentum enabled
+    float gamma, inv_gamma; // smoothness factor for estimations;
                        // larger means less smooth but more accurate
-    float learning_rate;
-    float global_lambda;
+
+    int warmup_iterations;   // iterations before BB step estimation kicks in
+    int backtrack_steps = 0;
+    int max_backtracking_attempts;
+    float backtrack_epsilon;
+    bool enable_backtracking;
+    bool enable_momentum;
 
     int die_size; // minimum of width and height of the die area
     int bins_per_row; // grid size
     int MAX_THREADS; // max number of threads to use
 
+    // Methods of computation, loaded from config file
     std::string partials_method;
     std::string density_method;
+
+    // Convergence Criteria, loaded from config file
+    int min_iterations;
+    int max_iterations;
+    float hpwl_improvement_threshold;
+    float overflow_threshold;
+    int convergence_window;
+    float target_density;
 
     // Execution tracking
     int iteration = 0;
     long double pgrm_start_time;
     long double db_IO_time;
-    long double algo_start;
-    long double algo_time;
+    double algo_time = 0.0;
     std::vector<float> hpwl_history; // history of HPWL values for each iteration
     std::vector<float> ovfw_history; // history of overflow values for each iteration
-    std::vector<float> learning_coeff_history; 
+    std::vector<float> step_length_history;
 
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;
@@ -98,35 +105,30 @@ public:
     // Constructor
     Placer(std::string);
 
-    static void printWelcomeBanner();
+    void printWelcomeBanner(bool show_info = true);
 
     // Pre-run preparation
-    void initializePlacement(Position<position_type> target_pos, int min_dist, int max_dist);
+    void initializePlacement(Position target_pos, int min_dist, int max_dist);
     void recordInitialHPWL();
     void iterationReset();
+    void initializeDensityWeight();
 
-    // Functions which may be accelerated on AIEs
+    // Functions to be accelerated on AIEs
     void prepareInputDataPacket(float * input_data, int net_size);
-    void computeAllPartials_AIE ();
+    void computeAllPartials_AIE();
     void computePartials(Packet* p); 
     void receivePartials(Packet* p);
-    void computeElectricFields_AIE ();
+    void computeElectricFields_AIE();
 
     // Functions implemented on CPU
-    void computeAllPartials_CPU ();
-    void computeAllPartials_simple();
-#ifdef USE_TBB
-    void computeAllPartials_CPU_orig();
-#endif
-    void computeNetPartials_CPU (Net* net_p);
-    void computeNetPartials_ThreadSafe(Net* net_p);
-    void computeElectricFields_CPU ();
+    void computeHpwlPartials();
+    void computeHpwlPartials_CPU();
+    void computeHpwlPartials_simple();
+    void computeElectricFields();
+    void computeElectricFields_CPU();
     void computeElectricFields_DCT();
     void normalizeElectricFields();
-
-    // CPU only computations
-    void compute_a_terms_CPU (Net* net_p);
-    void compute_bc_terms_CPU (Net* net_p);
+    Gradient computeElectrostaticForce(Node* node_p);
 
     void compute_a_uv_naive();
     void compute_eField_naive();
@@ -134,24 +136,37 @@ public:
     void compute_eField_DCT();
 
     void computeOverlaps();
+    
 
     // Comparison functions for verification
-    void comparePartialResults();
     void compareDensityResults();
 
-    // Run functions
-    void nudgeAllNodes();
-    void updateHyperparameters();
-    void nudgeNode(Node*);
-    void performIteration();
-    void printIterationResults();
-    void plotHistories();
+    // Main algorithm loop functions
     void run();
+    void performIteration();
+
+    // Main algorithm iteration functions
+    void computeAllProbeGradients();    // ∇HPWL and ∇D at probe positions; cached on nodes
+    void combineGradients();            // subtract electro from probe_grad in-place
+    float computeLipshitzEstimate();    // BB step estimate: ||Δv|| / ||Δ∇f||
+    void performNextStep(bool backtracking_enabled = true); // Algorithm 2: BkTrk
+    void advanceIterationState();       // promote next → current for all nodes
+    void stepAllNodes();                // Algorithm 1, lines 2–4
+    void enforceDieBoundaries(Node* node_p);           // clamp next.node_pos to die area
+    void updateDensityWeight();
+
+    // Diagnostics
+    void logStepDiagnostics();
+
+    // Bookkeeping and visualization
+    void recordIterationResults();
+    void plotHistories();
 
     // Post run analysis
     void computeStatistics();
 
     // Print functions
+    void printIterationResults();
     void printFinalResults();
     void initializeFocus();
 };

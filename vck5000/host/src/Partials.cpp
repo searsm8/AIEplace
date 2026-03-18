@@ -9,6 +9,39 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
+void Placer::computeHpwlPartials()
+{
+    // Clear probe_grad before accumulation, otherwise gradients compound across iterations.
+    for (auto item : db.getComponents()) {
+        item.second->next.probe_grad.clear();
+    }
+    for (auto filler : db.getFillers()) {
+        filler->next.probe_grad.clear();
+    }
+    for (auto item : db.getPins()) {
+        item.second->next.probe_grad.clear();
+    }
+
+    if(partials_method == "aie") {
+        #ifdef USE_XILINX_XRT
+            computeAllPartials_AIE();
+        #else
+            Logger::log_error("partials_method 'aie' requires XRT. Recompile with BUILD_XRT=1 or use 'cpu'/'simple'");
+            exit(1);
+        #endif
+    }
+    else if(partials_method == "cpu") {
+        computeHpwlPartials_CPU();
+    }
+    else if(partials_method == "simple") {
+        computeHpwlPartials_simple();
+    }
+    else {
+        Logger::log_error("Invalid partials_compute_method specified in config file"); 
+        exit(1);
+    }
+}
+
 /***************
  * XRT/AIE ACCELERATION FUNCTIONS - VCK5000 only
  *
@@ -20,7 +53,7 @@ AIEPLACE_NAMESPACE_BEGIN
 
 #define GROUP_SIZE 1 // Size of the group of nets sent before waiting to receive results
 
-void Placer::computeAllPartials_AIE()
+void Placer::computeHpwlPartials_AIE()
 {
     TIME_FUNCTION();
     Logger::log_trace("BEGIN computeAllPartials_AIE()");
@@ -125,16 +158,13 @@ void Placer::receivePartials(Packet* p)
 // Compute all partials using a table-based approach
 // nodes far enough away are assigned partials of 1 or -1
 // nodes in between are table look up
-void Placer::computeAllPartials_simple()
+void Placer::computeHpwlPartials_simple()
 {
     TIME_FUNCTION();
     Logger::log_trace("BEGIN computeAllPartials_simple()");
 
     auto& nets = db.getNetsVector();
-    // Single-threaded computation - test baseline performance
-    auto start_single = std::chrono::high_resolution_clock::now();
 
-    // Process all nets sequentially
     for (Net* net_p : nets) {
         const std::vector<Node*>& nodes = net_p->getNodes();
         int net_size = net_p->getDegree();
@@ -142,22 +172,22 @@ void Placer::computeAllPartials_simple()
         // Skip further processing for very small nets
         if (net_size <= 1) continue;
 
-        // find max and min x and y positions
-        float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = 0, max_y = 0;
+        // find max and min x and y probe positions
+        float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
         for (Node* node_p : nodes) {
-            min_x = std::min(min_x, node_p->getX());
-            min_y = std::min(min_y, node_p->getY());
-            max_x = std::max(max_x, node_p->getX());
-            max_y = std::max(max_y, node_p->getY());
+            min_x = std::min(min_x, node_p->getProbeX());
+            min_y = std::min(min_y, node_p->getProbeY());
+            max_x = std::max(max_x, node_p->getProbeX());
+            max_y = std::max(max_y, node_p->getProbeY());
         }
 
         for(size_t i = 0; i < net_size; i++) {
-            float x = nodes[i]->getX();
-            float y = nodes[i]->getY();
+            float x = nodes[i]->getProbeX();
+            float y = nodes[i]->getProbeY();
 
             // Compute partials using shortcut
             const int THRESHOLD = 10; // distance threshold for partials
-            Point simple_partial;
+            Gradient simple_partial;
             if (x < min_x + THRESHOLD) {
                 simple_partial.x = (int(x - min_x) * 0.1f) - 1;
             } else if (x > max_x - THRESHOLD) {
@@ -174,50 +204,39 @@ void Placer::computeAllPartials_simple()
                 simple_partial.y = 0;
             }
 
-            nodes[i]->terms_cpu.partials.x += simple_partial.x ;
-            nodes[i]->terms_cpu.partials.y += simple_partial.y ;
+            nodes[i]->next.probe_grad.x += simple_partial.x ;
+            nodes[i]->next.probe_grad.y += simple_partial.y ;
         }
     }
 
-    auto end_single = std::chrono::high_resolution_clock::now();
-    auto duration_single = std::chrono::duration_cast<std::chrono::milliseconds>(end_single - start_single).count();
 }
 
-// Memory optimized computeAllPartials function
-void Placer::computeAllPartials_CPU()
+void Placer::computeHpwlPartials_CPU()
 {
     TIME_FUNCTION();
-    auto& nets = db.getNetsVector();
-
-    auto start_single = std::chrono::high_resolution_clock::now();
-
-    // Process all nets sequentially
-    for (Net* net_p : nets) {
+    for (Net* net_p : db.getNetsVector()) {
         const std::vector<Node*>& nodes = net_p->getNodes();
         int net_size = net_p->getDegree();
 
         // Skip further processing for very small nets
         if (net_size <= 1) continue;
 
-        // Record starting index for this net's results
-        size_t start_idx = all_partials.size();
-
-        // find max and min x and y positions
-        float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = 0, max_y = 0;
+        // find max and min x and y probe positions
+        float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
         for (Node* node_p : nodes) {
-            min_x = std::min(min_x, node_p->getX());
-            min_y = std::min(min_y, node_p->getY());
-            max_x = std::max(max_x, node_p->getX());
-            max_y = std::max(max_y, node_p->getY());
+            min_x = std::min(min_x, node_p->getProbeX());
+            min_y = std::min(min_y, node_p->getProbeY());
+            max_x = std::max(max_x, node_p->getProbeX());
+            max_y = std::max(max_y, node_p->getProbeY());
         }
 
         // Compute A terms directly into our flat vector
         std::vector<Term> A(net_size);
         for (size_t i = 0; i < net_size; i++) {
-            A[i].plus.x  = exp((nodes[i]->getX() - max_x) * inv_gamma);
-            A[i].minus.x = exp((min_x - nodes[i]->getX()) * inv_gamma);
-            A[i].plus.y  = exp((nodes[i]->getY() - max_y) * inv_gamma);
-            A[i].minus.y = exp((min_y - nodes[i]->getY()) * inv_gamma);
+            A[i].plus.x  = exp((nodes[i]->getProbeX() - max_x) * inv_gamma);
+            A[i].minus.x = exp((min_x - nodes[i]->getProbeX()) * inv_gamma);
+            A[i].plus.y  = exp((nodes[i]->getProbeY() - max_y) * inv_gamma);
+            A[i].minus.y = exp((min_y - nodes[i]->getProbeY()) * inv_gamma);
         }
 
         // Compute B and C terms
@@ -228,10 +247,10 @@ void Placer::computeAllPartials_CPU()
             B.minus.x += A[i].minus.x;
             B.plus.y  += A[i].plus.y;
             B.minus.y += A[i].minus.y;
-            C.plus.x  += A[i].plus.x  * nodes[i]->getX();
-            C.minus.x += A[i].minus.x * nodes[i]->getX();
-            C.plus.y  += A[i].plus.y  * nodes[i]->getY();
-            C.minus.y += A[i].minus.y * nodes[i]->getY();
+            C.plus.x  += A[i].plus.x  * nodes[i]->getProbeX();
+            C.minus.x += A[i].minus.x * nodes[i]->getProbeX();
+            C.plus.y  += A[i].plus.y  * nodes[i]->getProbeY();
+            C.minus.y += A[i].minus.y * nodes[i]->getProbeY();
         }
 
         // Pre-compute common terms
@@ -240,6 +259,21 @@ void Placer::computeAllPartials_CPU()
         float bpy_sq_inv = 1.0f / (B.plus.y * B.plus.y);
         float bmy_sq_inv = 1.0f / (B.minus.y * B.minus.y);
 
+        if(B.plus.x == 0 || B.minus.x == 0 || B.plus.y == 0 || B.minus.y == 0) {
+            Logger::log_error("Zero value detected in B terms, cannot compute partials for net " + net_p->getName());
+            Logger::log_error("B: " + B.to_string());
+            Logger::log_error(net_p->to_string());
+            for (size_t i = 0; i < net_size; i++) 
+                Logger::log_error("A[" + std::to_string(i) + "]: " + A[i].to_string() + " node: " + nodes[i]->getName());
+            Logger::log_error("max_x: " + std::to_string(max_x) + " min_x: " + std::to_string(min_x) + " max_y: " + std::to_string(max_y) + " min_y: " + std::to_string(min_y));
+            Logger::log_error("Probe positions:");
+            for (size_t i = 0; i < net_size; i++) 
+                Logger::log_error("Node " + nodes[i]->getName() + " probe_x: " + std::to_string(nodes[i]->getProbeX()) + " probe_y: " + std::to_string(nodes[i]->getProbeY()));
+                
+            Logger::log_error("Node positions:");
+            for (size_t i = 0; i < net_size; i++) 
+                Logger::log_error("Node " + nodes[i]->getName() + " x: " + std::to_string(nodes[i]->getX()) + " y: " + std::to_string(nodes[i]->getY()));
+        }
         assert(B.plus.x  != 0 && "B.plus.x is zero, cannot compute partials");
         assert(B.minus.x != 0 && "B.minus.x is zero, cannot compute partials");
         assert(B.plus.y  != 0 && "B.plus.y is zero, cannot compute partials");
@@ -247,10 +281,10 @@ void Placer::computeAllPartials_CPU()
 
         // Compute partials and store in our flat vector
         for (size_t i = 0; i < net_size; i++) {
-            float x = nodes[i]->getX();
-            float y = nodes[i]->getY();
+            float x = nodes[i]->getProbeX();
+            float y = nodes[i]->getProbeY();
 
-            Point partial;
+            Gradient partial;
             partial.x = ((1 + x * inv_gamma) * B.plus.x - (C.plus.x * inv_gamma))
                       * (A[i].plus.x * bpx_sq_inv)
                     - ((1 - x * inv_gamma) * B.minus.x + (C.minus.x * inv_gamma))
@@ -273,191 +307,9 @@ void Placer::computeAllPartials_CPU()
                 exit(1);
             }
 
-            nodes[i]->terms_cpu.partials.x += partial.x ;
-            nodes[i]->terms_cpu.partials.y += partial.y ;
+            nodes[i]->next.probe_grad += partial;
         }
     }
-
-    auto end_single = std::chrono::high_resolution_clock::now();
-    auto duration_single = std::chrono::duration_cast<std::chrono::milliseconds>(end_single - start_single).count();
-    Logger::log_detail("Sequential computation of partials on CPU took " + std::to_string(duration_single) + " ms");
-}
-
-void Placer::compute_a_terms_CPU(Net* net_p)
-{
-    // X positions
-    net_p->sortPositionsByX();
-    std::vector<Node*> nodes = net_p->getNodes();
-    for (Node* node_p : nodes) {
-        node_p->terms_cpu.a.plus.x  = exp( (node_p->getX() - nodes.front()->getX()) / gamma);
-        node_p->terms_cpu.a.minus.x = exp( (nodes.back()->getX() - node_p->getX()) / gamma);
-        assert(node_p->terms_cpu.a.plus.x <= 1 && "Invalid a+ computed!");
-        assert(node_p->terms_cpu.a.minus.x <= 1 && "Invalid a- computed!");
-    }
-
-    // Y positions
-    net_p->sortPositionsByY();
-    nodes = net_p->getNodes();
-    for (Node* node_p : nodes) {
-        node_p->terms_cpu.a.plus.y  = exp( (node_p->getY() - nodes.front()->getY()) / gamma);
-        node_p->terms_cpu.a.minus.y = exp( (nodes.back()->getY() - node_p->getY()) / gamma);
-    }
-}
-
-void Placer::compute_bc_terms_CPU(Net* net_p)
-{
-    compute_a_terms_CPU(net_p);
-    for (Node* node_p : net_p->getNodes()) {
-        // compute b terms
-        net_p->terms_cpu.b.plus.x  += node_p->terms_cpu.a.plus.x;
-        net_p->terms_cpu.b.minus.x += node_p->terms_cpu.a.minus.x;
-        net_p->terms_cpu.b.plus.y  += node_p->terms_cpu.a.plus.y;
-        net_p->terms_cpu.b.minus.y += node_p->terms_cpu.a.minus.y;
-
-        // compute c terms
-        net_p->terms_cpu.c.plus.x  += node_p->terms_cpu.a.plus.x  * node_p->getX();
-        net_p->terms_cpu.c.minus.x += node_p->terms_cpu.a.minus.x * node_p->getX();
-        net_p->terms_cpu.c.plus.y  += node_p->terms_cpu.a.plus.y  * node_p->getY();
-        net_p->terms_cpu.c.minus.y += node_p->terms_cpu.a.minus.y * node_p->getY();
-    }
-}
-
-/* @brief: For each node on net_p, compute partial derivative with respect to the net.
- *         Add result to the node's partials term
- */
-void Placer::computeNetPartials_CPU(Net* net_p)
-{
-    try {
-        compute_bc_terms_CPU(net_p);
-        // Pre-compute common terms
-        float inv_gamma = 1.0f / gamma;
-        float bpx_sq_inv = 1.0f / (net_p->terms_cpu.b.plus.x * net_p->terms_cpu.b.plus.x);
-        float bmx_sq_inv = 1.0f / (net_p->terms_cpu.b.minus.x * net_p->terms_cpu.b.minus.x);
-        float bpy_sq_inv = 1.0f / (net_p->terms_cpu.b.plus.y * net_p->terms_cpu.b.plus.y);
-        float bmy_sq_inv = 1.0f / (net_p->terms_cpu.b.minus.y * net_p->terms_cpu.b.minus.y);
-
-        // Compute partials and store in our flat vector
-        for (Node* node_p : net_p->mv_nodes) {
-            float x = node_p->getX();
-            float y = node_p->getY();
-
-            Point partial;
-            partial.x = ((1 + x * inv_gamma) * net_p->terms_cpu.b.plus.x - (net_p->terms_cpu.c.plus.x * inv_gamma))
-                      * (node_p->terms_cpu.a.plus.x * bpx_sq_inv)
-                    - ((1 - x * inv_gamma) * net_p->terms_cpu.b.minus.x + (net_p->terms_cpu.c.minus.x * inv_gamma))
-                      * (node_p->terms_cpu.a.minus.x * bmx_sq_inv);
-
-            partial.y = ((1 + y * inv_gamma) * net_p->terms_cpu.b.plus.y - (net_p->terms_cpu.c.plus.y * inv_gamma))
-                      * (node_p->terms_cpu.a.plus.y * bpy_sq_inv)
-                    - ((1 - y * inv_gamma) * net_p->terms_cpu.b.minus.y + (net_p->terms_cpu.c.minus.y * inv_gamma))
-                      * (node_p->terms_cpu.a.minus.y * bmy_sq_inv);
-
-            node_p->terms_cpu.partials.x += partial.x;
-            node_p->terms_cpu.partials.y += partial.y;
-        }
-
-        for (Node* node_p : net_p->mv_nodes) {
-            Logger::log_debug(node_p->getName() + " total partial_x: " + std::to_string(node_p->terms_cpu.partials.x));
-            Logger::log_debug(node_p->getName() + " total partial_y: " + std::to_string(node_p->terms_cpu.partials.y));
-        }
-        net_p->unlockNodes();
-    } catch (std::exception& e) {
-        Logger::log_critical("Exception in computeNetPartials_CPU: " + std::string(e.what()));
-    } catch (...) {
-        Logger::log_critical("Unknown exception in computeNetPartials_CPU");
-    }
-}
-
-
-/* @brief: For each node on net_p, compute partial derivative with respect to the net.
- *         Function written to be inherently thread-safe without the need for mutexes
- *         Results are written to the partials map
- */
-void Placer::computeNetPartials_ThreadSafe(Net* net_p)
-{
-    int net_size = net_p->getDegree();
-    const std::vector<Node*> &nodes = net_p->getNodes();
-
-    // find max and min x and y positions
-    float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = 0, max_y = 0;
-    for(Node* node_p : net_p->getNodes()) {
-        if(node_p->getX() < min_x) min_x = node_p->getX();
-        if(node_p->getY() < min_y) min_y = node_p->getY();
-        if(node_p->getX() > max_x) max_x = node_p->getX();
-        if(node_p->getY() > max_y) max_y = node_p->getY();
-    }
-
-    // compute A terms for each node in the net
-    vector<Term> A(net_size);
-    for(size_t i = 0; i < net_size; i++) {
-        A[i].plus.x  = exp( (nodes[i]->getX() - max_x) / gamma);
-        A[i].minus.x = exp( (min_x - nodes[i]->getX()) / gamma);
-        A[i].plus.y  = exp( (nodes[i]->getY() - max_y) / gamma);
-        A[i].minus.y = exp( (min_y - nodes[i]->getY()) / gamma);
-    }
-
-    // compute B and C terms for this net
-    Term B, C;
-    B.clear(); C.clear();
-    for(size_t i = 0; i < net_size; i++) {
-        B.plus.x  += A[i].plus.x;
-        B.minus.x += A[i].minus.x;
-        B.plus.y  += A[i].plus.y;
-        B.minus.y += A[i].minus.y;
-
-        C.plus.x  += A[i].plus.x  * nodes[i]->getX();
-        C.minus.x += A[i].minus.x * nodes[i]->getX();
-        C.plus.y  += A[i].plus.y  * nodes[i]->getY();
-        C.minus.y += A[i].minus.y * nodes[i]->getY();
-    }
-
-    // compute partials, store result in Net object
-    for(size_t i = 0; i < net_size; i++) {
-        net_p->mm_partials_by_node[nodes[i]].x = (( 1 + nodes[i]->getX()/gamma) * B.plus.x - (C.plus.x / gamma))
-                                    * (A[i].plus.x / (B.plus.x * B.plus.x))
-                             - (( 1 - nodes[i]->getX()/gamma) * B.minus.x + (C.minus.x / gamma))
-                                    * (A[i].minus.x / (B.minus.x * B.minus.x));
-
-        net_p->mm_partials_by_node[nodes[i]].y = (( 1 + nodes[i]->getY()/gamma) * B.plus.y - (C.plus.y / gamma))
-                                    * (A[i].plus.y / (B.plus.y * B.plus.y))
-                             - (( 1 - nodes[i]->getY()/gamma) * B.minus.y + (C.minus.y / gamma))
-                                    * (A[i].minus.y / (B.minus.y * B.minus.y));
-    }
-    // partials will be accumulated with other nodes elsewhere
-}
-
-
-/* To confirm that the AIE has performed a correct computation, this function
- * compares the results to the CPU computation result
- */
-void Placer::comparePartialResults()
-{
-    int print_count = 0;
-    Logger::log_info("#############################");
-    Logger::log_info("Comparing Partial Results (Iteration " + std::to_string(iteration) + ")");
-    auto nodes_map = db.getComponents();
-    long error_count = 0, total = 0;
-    for (auto const& item: nodes_map)
-    {
-        Table top;
-        Node* np = item.second;
-        total++;
-        if(np->terms_cpu.partials.isClose(np->partials_aie))
-        {
-            continue;
-        }
-        else
-        {
-            error_count++;
-            Logger::log_error("Terms DO NOT match for node " + np->getName()
-                    + " -- CPU result: " + np->terms_cpu.partials.toString()
-                    + " -- AIE result: " + np->partials_aie.toString());
-        }
-    }
-
-    std::stringstream ss;
-    ss << "errors: " << error_count << "\ttotal: " << total << "\tproportion: " << float(error_count)/float(total) << endl;
-    Logger::log_error(ss.str());
 }
 
 AIEPLACE_NAMESPACE_END

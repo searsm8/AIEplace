@@ -15,7 +15,7 @@ void Grid::init()
         {
             Bin b = Bin(x_index*m_bin_width, y_index*m_bin_height, 
                    (x_index+1)*m_bin_width, (y_index+1)*m_bin_height);
-            b.lambda = INITIAL_LAMBDA;
+            b.local_density_weight = INITIAL_LOCAL_DENSITY_WEIGHT;
             m_bins[x_index].push_back(b);
         }
     }
@@ -43,10 +43,11 @@ void Grid::computeBinOverlaps(Node* node_p)
     // But small nodes should be simpilified!!!!
 
     //If node is small compared to bin size, we assume the entire node is inside the bin
-    if(!node_p->isLarge()) {
-        int col_index = node_p->getPosition().getX() / m_bin_width;
+    //if(!node_p->isLarge()) 
+    {
+        int col_index = node_p->getProbeX() / m_bin_width;
         if(col_index < 0 || col_index > m_bins_per_row-1) return;
-        int row_index = node_p->getPosition().getY() / m_bin_height; 
+        int row_index = node_p->getProbeY() / m_bin_height;
         if(row_index < 0 || row_index > m_bins_per_col-1) return;
 
         float overlap = node_p->getArea();
@@ -63,14 +64,14 @@ void Grid::computeBinOverlaps(Node* node_p)
     exit(2); // for now, just exit. TODO: handle large nodes properly!
 
     // find indices in m_bins that this node overlaps
-    int col_index_start = node_p->getPosition().getX() / m_bin_width;
-    int col_index_final = std::min<int>(m_bins_per_row-1, (node_p->getPosition().getX() + node_p->getXsize()) / m_bin_width);
+    int col_index_start = node_p->getProbeX() / m_bin_width;
+    int col_index_final = std::min<int>(m_bins_per_row-1, (node_p->getProbeX() + node_p->getXsize()) / m_bin_width);
 
-    int row_index_start = node_p->getPosition().getY() / m_bin_height; 
-    int row_index_final = std::min<int>(m_bins_per_col-1, (node_p->getPosition().getY() + node_p->getYsize()) / m_bin_height); 
+    int row_index_start = node_p->getProbeY() / m_bin_height;
+    int row_index_final = std::min<int>(m_bins_per_col-1, (node_p->getProbeY() + node_p->getYsize()) / m_bin_height);
 
     // DEBUGGING
-    //cout << "\ncomputeBinOverlaps() for Node " << node_p->getName() << node_p->getPosition().to_string() << " : " << node_p->getXsize() << ", " << node_p->getYsize() << endl;
+    //cout << "\ncomputeBinOverlaps() for Node " << node_p->getName() << node_p->next.node_pos.to_string() << " : " << node_p->getXsize() << ", " << node_p->getYsize() << endl;
     //cout << "bin_height: " << bin_height << "\t";
     //cout << "die_area Ysize: " << m_die_area.getYsize() << "\t";
     //cout << "y_index_start: " <<y_index_start<< "\t";
@@ -147,16 +148,16 @@ std::vector< std::vector<float> > Grid::get_a_uv()
     return a_uv;
 }
 
-float Grid::computeTotalOverflow()
+float Grid::computeTotalOverflow(float target_density, float total_movable_area)
 {
-    float total = 0;
+    float overflow_area = 0;
     for (int col = 0; col < m_bins_per_row; col++)
         for (int row = 0; row < m_bins_per_col; row++) {
-            auto bin_overflow = m_bins[col][row].getOverflowRatio();
-            //if(bin_overflow > 0)
-            total += m_bins[col][row].getOverflowRatio();
+            float bin_capacity = m_bins[col][row].bb.getArea() * target_density;
+            float excess = m_bins[col][row].total_overlap - bin_capacity;
+            overflow_area += std::max(0.0f, excess);
         }
-    return total;
+    return overflow_area / (total_movable_area + 1e-8f);
 }
 
 /*****************

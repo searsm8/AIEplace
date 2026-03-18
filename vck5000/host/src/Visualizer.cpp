@@ -4,7 +4,7 @@
 
 AIEPLACE_NAMESPACE_BEGIN 
 
-void Visualizer::init(Box<position_type> die_area)
+void Visualizer::init(Box die_area)
 {
     m_die_area = die_area;
     m_die_width = die_area.getXsize();
@@ -45,12 +45,12 @@ void Visualizer::drawPin(Pin* p)
 
 void Visualizer::highlightNet(Net* net)
 {
-    Box<float> bb = net->getBoundingBox();
+    Box bb = net->getBoundingBox();
     // draw a rect around the net
     cairo_set_source_rgb (cr, 1.0, 1.0, 0.0); // bright yellow
     cairo_set_line_width (cr, 0.002);
-    cairo_rectangle (cr, DIE_START + bb.getPosBottomLeft().getX() * DIE_SCALE / m_die_width, // x
-                         DIE_START + bb.getPosBottomLeft().getY() * DIE_SCALE / m_die_height,// y
+    cairo_rectangle (cr, DIE_START + bb.getPosBottomLeft().x * DIE_SCALE / m_die_width, // x
+                         DIE_START + bb.getPosBottomLeft().y * DIE_SCALE / m_die_height,// y
                          bb.getXsize() * DIE_SCALE / m_die_width,   // width
                          bb.getYsize() * DIE_SCALE / m_die_height); // height
     cairo_stroke(cr);
@@ -142,6 +142,8 @@ void Visualizer::drawArrow(float x, float y, float x_mag, float y_mag)
 
 void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
 {
+    Logger::log_info("Exporting placement visualization to PNG...");
+    // Draw items from back to front in order of Fillers, Components, Pins, Nets, Focus Nets, Focus Nodes
     // Start with a white background
     cairo_set_source_rgb (cr, 1.0, 1.0, 1.0); // white
     cairo_paint(cr);
@@ -149,9 +151,16 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     // Draw die boundary in black
     cairo_set_source_rgb (cr, 0.0, 0.0, 0.0);
     cairo_set_line_width (cr, 0.004);
-    cairo_rectangle (cr, DIE_START, DIE_START, 1-2*DIE_START, 1-2*DIE_START);
+    cairo_rectangle (cr, DIE_START, DIE_START, 1-2*DIE_START, 1-2*DIE_START); // always a square!~
     cairo_stroke(cr);
     
+    // Draw Fillers
+    for (auto item : db.getFillers()) {
+       drawComponent(item);
+    }
+    cairo_set_source_rgb (cr, 0.9, 0.9, 0.9);  // grey 
+    cairo_fill(cr);
+
     // Draw Components
     for (auto item : db.getComponents()) {
        drawComponent(item.second);
@@ -163,7 +172,7 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     for (auto item : db.getPins()) 
         drawPin(item.second);
 
-    cairo_set_source_rgb (cr, 0.0, 1.0, 0.0); // green
+    cairo_set_source_rgb (cr, 1.0, 0.64, 0.0); // orange 
     cairo_fill(cr);
 
     // Highlight Focus Nets
@@ -178,23 +187,35 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     cairo_set_source_rgb (cr, 0.0, 0.0, 0.0); // black
     drawReticle(0.5, 0.5);
 
-    // print current iteration to bottom right corner
+    // print current iteration and other info at bottom of image
     cairo_select_font_face (cr, "Sans", CAIRO_FONT_SLANT_NORMAL,
                                CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size (cr, .02);
 
-    cairo_move_to (cr, .8, .99);
+    cairo_move_to (cr, .01, .04);
+    std::string bench_str = "Benchmark: " + info.benchmark_name; 
+    cairo_show_text (cr, bench_str.c_str());
+
+    cairo_move_to (cr, .01, .99);
     std::string iter_str = "Iter: " + std::to_string(info.iteration);
     cairo_show_text (cr, iter_str.c_str());
-    cairo_move_to (cr, .6, .99);
-    std::string lr_str = "LR: " + PREC(info.learning_rate);
-    cairo_show_text (cr, lr_str.c_str());
-    cairo_move_to (cr, .3, .99);
-    std::string lambda_str = "Lambda: " + PREC(info.global_lambda);
-    cairo_show_text (cr, lambda_str.c_str());
-    cairo_move_to (cr, .05, .99);
-    std::string hpwl_str = "HPWL: " + PREC(info.hpwl);
+
+    cairo_move_to (cr, .12, .99);
+    std::string hpwl_str = "HPWL: " + SCI(info.hpwl);
     cairo_show_text (cr, hpwl_str.c_str());
+
+    cairo_move_to (cr, .35, .99);
+    std::string ovfw_str = "OVFW: " + PREC_P(info.overflow, 2);
+    cairo_show_text (cr, ovfw_str.c_str());
+
+    cairo_move_to (cr, .54, .99);
+    std::string alpha_str = "alpha: " + SCI(info.step_length);
+    cairo_show_text (cr, alpha_str.c_str());
+
+    cairo_move_to (cr, .78, .99);
+    std::string lambda_str = "lambda: " + SCI(info.density_weight);
+    cairo_show_text (cr, lambda_str.c_str());
+
     cairo_stroke(cr);
 
 

@@ -24,6 +24,21 @@ DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
         }
     }
 
+    // Add IO pins as focus nets for visualizer
+    //int focus_nets_added = 0;
+    //const int FOCUS_IO_LIMIT = 2;
+    //for (auto item : mm_pins) {
+    //    if(focus_nets_added >= FOCUS_IO_LIMIT)
+    //        break;
+    //    Pin* pin = item.second;
+    //    for(auto net : pin->getNets()) {
+    //        addFocusNet(net);
+    //        Logger::log_info("Adding IO pin net to visualizer focus nets: " + net->to_string());
+    //        if(++focus_nets_added >= FOCUS_IO_LIMIT)
+    //            break;
+    //    }
+    //}
+
     initializePacketContents();
 
     m_total_net_degree = 0;
@@ -156,16 +171,56 @@ bool DataBase::readBookshelf()
 }
 
 
+/* @brief: Add fillers to design 
+* Computes the total area of all components in the design and adds enough filler cells
+* to bring the filled area to target utilization.
+*/
+bool DataBase::addFillers(float target_utilization) 
+{
+    // find the smallest macro in the design to use as the filler cell
+    float min_macro_xsize = std::numeric_limits<float>::max();
+    float min_macro_ysize = std::numeric_limits<float>::max();
+
+    for(auto item : mm_macros)
+    {
+        MacroClass* macro_p = item.second;
+        if(macro_p->getXsize() < min_macro_xsize && macro_p->getYsize() < min_macro_ysize) {
+            min_macro_xsize = macro_p->getXsize();
+            min_macro_ysize = macro_p->getYsize();
+        }
+    }
+
+    MacroClass* filler_macro = new MacroClass("filler", min_macro_xsize, min_macro_ysize);
+    mm_macros.emplace(std::make_pair("filler_macroclass", filler_macro));
+
+    Logger::log_info("Adding filler cells to database...");
+
+    float unfilled_area = getDieArea().getArea() * target_utilization - computeTotalComponentArea();
+    Logger::log_info("Total area to fill: " + PREC(unfilled_area));
+
+    int fillers_needed = unfilled_area / filler_macro->getArea();
+
+    for (int i = 0; i < fillers_needed; i++)
+    {
+        Component* filler = new Component("filler_" + stringify(i));
+        filler->setMacroClass(filler_macro);
+        filler->setPlacementStatus(PlacementStatus::UNPLACED);
+        filler->setNodePos(Position(0.0f, 0.0f)); // position will be updated during placement
+        mv_fillers.push_back(filler);
+    }
+    Logger::log_info("Total fillers added: " + stringify(fillers_needed));
+    return true;
+}
+
 /* @brief: Reset all nodes and nets in preparation for the next iteration.
 */
 void DataBase::iterationReset()
 {
     for (auto item : mm_components)
         item.second->iterationReset();
+    for (auto filler : mv_fillers)
+        filler->iterationReset();
     for (auto item : mm_pins)
-        item.second->iterationReset();
-
-    for (auto item : mm_nets)
         item.second->iterationReset();
 }
 
@@ -213,8 +268,7 @@ float DataBase::computeTotalComponentArea()
     double total_area = 0;
     for(auto item : mm_components)
     {
-        Component* comp_p = item.second;
-        total_area += comp_p->getArea();
+        total_area += item.second->getArea();
     }
     return total_area;
 }
@@ -306,7 +360,7 @@ void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
         auto &nodes = net->getNodes(); // reference to avoid copy
         net->sortPositionsMaxMinX(); // This sort might be redundant? 
         for(int j = 0; j < net_size; j++) {
-            input_data[base_addr + 2*net_idx + j*8] = nodes[j]->getX();
+            input_data[base_addr + 2*net_idx + j*8] = nodes[j]->getProbeX();
 
             // check for correct ordering
             if(j > 0) if(input_data[base_addr + 2*net_idx + 0*8] < input_data[base_addr + 2*net_idx + j*8])  {
@@ -332,7 +386,7 @@ void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
         // prep y data
         net->sortPositionsMaxMinY();
         for(int j = 0; j < net_size; j++) {
-            input_data[base_addr + 2*net_idx + j*8 + 1] = nodes[j]->getY();
+            input_data[base_addr + 2*net_idx + j*8 + 1] = nodes[j]->getProbeY();
             //if(nodes[j]->getY() != nodes[j]->getY()) // check for nan
             //{
             //    Logger::log_warning(string("NaN detected:\n" + net->to_string() + "\n"));
@@ -387,8 +441,8 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             Logger::log_debug("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
             //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8 + 1]));
             float partial = output_data[base_addr + 2*net_idx + n*8 + 1];
-            nodes[n]->partials_aie.y += partial;
-            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: partials_aie.y += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->partials_aie.y));
+            nodes[n]->next.probe_grad.y += partial;
+            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: probe_grad.y += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->next.probe_grad.y));
 
             //debugging
             float y_size = net->getBoundingBox().getYsize();
@@ -418,8 +472,8 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             Logger::log_debug("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
             //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8]));
             float partial = output_data[base_addr + 2*net_idx + n*8 + 0];
-            nodes[n]->partials_aie.x += partial;
-            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: partials_aie.x += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->partials_aie.x));
+            nodes[n]->next.probe_grad.x += partial;
+            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: probe_grad.x += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->next.probe_grad.x));
 
             //debugging
             float x_size = net->getBoundingBox().getXsize();
@@ -496,8 +550,8 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
 
         void DataBase::set_def_diearea(int xl, int yl, int xh, int yh)
         {
-            m_die_area = Box<position_type>(Position((position_type)xl, (position_type)yl), 
-                                  Position((position_type)xh, (position_type)yh));
+            m_die_area = Box(Position((position_type)xl, (position_type)yl),
+                             Position((position_type)xh, (position_type)yh));
         }
 
         void DataBase::add_def_row(DefParser::Row const& r) {}
@@ -509,7 +563,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             Component* new_comp = new Component(c.comp_name);
             new_comp->setMacroClass(mm_macros[c.macro_name]);
             new_comp->setPlacementStatus(c.status);
-            new_comp->setPosition(Position((position_type)c.origin[0], (position_type)c.origin[1]));
+            new_comp->setNodePos(Position((float)c.origin[0], (float)c.origin[1]));
             // TODO: assert component is created correctly
             mm_components.emplace(std::make_pair(new_comp->getName(), new_comp));
         }
@@ -521,7 +575,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             std::vector<int> bb = p.vBbox.front();
             new_pin->setBoundingBox(bb[0], bb[1], bb[2], bb[3]);
             new_pin->setPlacementStatus(p.status);
-            new_pin->setPosition(Position((position_type)p.origin[0], (position_type)p.origin[1]));
+            new_pin->setNodePos(Position((float)p.origin[0], (float)p.origin[1]));
             new_pin->setDirection(p.direct); // primary input or output
             // TODO: assert pin is created correctly
 
@@ -597,7 +651,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             Pin* new_pin = new Pin(name);
             new_pin->setBoundingBox(0, 0, width, height);
             new_pin->setPlacementStatus(PlacementStatus::FIXED);
-            new_pin->setPosition(Position<position_type>(0, 0));
+            new_pin->setNodePos(Position(0, 0));
             //cout << "NEW PIN: " << new_pin->getName() << " : " << width << ", " << height << " : " << mm_pins.size() << endl;
             mm_pins.emplace(std::make_pair(new_pin->getName(), new_pin));
         }
@@ -618,7 +672,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             }
             new_comp->setMacroClass(macro_p);
             new_comp->setPlacementStatus(PlacementStatus::UNPLACED);
-            new_comp->setPosition(Position((position_type)0, (position_type)0)); // default position (0, 0)
+            new_comp->setNodePos(Position(0, 0)); // default position (0, 0)
             mm_components.emplace(std::make_pair(new_comp->getName(), new_comp));
         }
         /// @brief add net 
@@ -664,8 +718,8 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                 Pin* pin = mm_pins[name];
                 //cout << "pin found: " << name << " (" << x << ", " << y << ") " << orientation << " " << placement_status << "\tmm_pins.size(): " << mm_pins.size() << endl;
                 assert(pin != NULL && "invalid pin name!");
-                //cout << pin->getName() << " pin->setPosition(" << x << ", " << y << ")\n";
-                pin->setPosition(Position<position_type>(x, y));
+                //cout << pin->getName() << " pin->setNodePos(" << x << ", " << y << ")\n";
+                pin->setNodePos(Position(x, y));
                 pin->setPlacementStatus(PlacementStatus::FIXED);
                 pin->setOrientation(orientation);
                 // Bookshelf format doesn't seem to explicitly give die area?
@@ -676,7 +730,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                 //cout << "component found: " << name << " (" << x << ", " << y << ") " << orientation << " " << placement_status << endl;
                 Component* comp = mm_components[name];
                 assert(comp != NULL && "invalid component name!");
-                comp->setPosition(Position<position_type>(x, y));
+                comp->setNodePos(Position(x, y));
                 comp->setOrientation(orientation);
             }
 
@@ -700,8 +754,8 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
 
         /// @brief a callback when a bookshelf file reaches to the end 
         void DataBase::bookshelf_end() { 
-            m_die_area = Box<position_type>(Position((position_type)0, (position_type)0), 
-                                  Position((position_type)m_max_x, (position_type)m_max_y));
+            m_die_area = Box(Position(0, 0),
+                             Position((float)m_max_x, (float)m_max_y));
             Logger::log_info("End of Bookshelf design reading.");
         }
         
@@ -717,7 +771,7 @@ void DataBase::printPins() const
     for(auto item : mm_pins)
     {
         Pin* pin_p = item.second;
-        cout << pin_p->getName() << pin_p->getPosition().to_string() << endl;
+        cout << pin_p->getName() << pin_p->next.node_pos.to_string() << endl;
         cout << "\tArea: " << pin_p->getArea() << "\tStatus: " << pin_p->getStatus() << endl;
     }
 }
@@ -727,7 +781,7 @@ void DataBase::printComponents() const
     for(auto item : mm_components)
     {
         Component* comp_p = item.second;
-        cout << comp_p->getName() << comp_p->getPosition().to_string() << endl;
+        cout << comp_p->getName() << comp_p->next.node_pos.to_string() << endl;
         cout << "\t" << comp_p->getMacro()->getName() << "\tArea: " << comp_p->getArea() << "\tStatus: " << comp_p->getStatus() << endl;
     }
 }
@@ -743,13 +797,13 @@ void DataBase::printNets()
         sortPositionsByX();
         cout << "X descending: ";
         for(auto node : net_p->getNodes())
-            cout << node->getPosition().getX() << '\t';
+            cout << node->next.node_pos.x << '\t';
         cout << endl;
 
         sortPositionsByY();
         cout << "Y descending: ";
         for(auto node : net_p->getNodes())
-            cout << node->getPosition().getY() << '\t';
+            cout << node->next.node_pos.y << '\t';
         cout << endl;
         cout << endl;
 
@@ -798,7 +852,7 @@ void DataBase::printOverlaps()
         Node* node_p = item.second;
         Table header;
         header.add_row(RowStream{} << std::setprecision(2) << "Bin Overlaps for " << name);
-        header.add_row(RowStream{} << "Position" << node_p->getPosition().to_string());
+        header.add_row(RowStream{} << "Position" << node_p->next.node_pos.to_string());
         header.add_row(RowStream{} << "Area" << node_p->getArea());
         header.column(0).format().font_align(FontAlign::right);
 
@@ -851,8 +905,8 @@ void DataBase::writeHeader(std::ofstream& out) const {
 
 void DataBase::writeDieArea(std::ofstream& out) const {
     out << "DIEAREA ( "
-        << m_die_area.getPosBottomLeft().getX() << " " << m_die_area.getPosBottomLeft().getY() << " ) ( "
-        << m_die_area.getPosTopRight().getX() << " " << m_die_area.getPosTopRight().getY() << " ) ;\n\n";
+        << m_die_area.getPosBottomLeft().x << " " << m_die_area.getPosBottomLeft().y << " ) ( "
+        << m_die_area.getPosTopRight().x << " " << m_die_area.getPosTopRight().y << " ) ;\n\n";
 }
 
 void DataBase::writeComponents(std::ofstream& out) const {

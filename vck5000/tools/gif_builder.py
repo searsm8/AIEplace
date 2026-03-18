@@ -151,6 +151,7 @@ Examples:
     resize = tuple(args.resize) if args.resize else None
     
     try:
+        #output_path = Path(args.input_dir) / Path('full_placement_' + str(int(1000 / args.duration)) + 'fps.gif')
         create_gif(
             input_dir=args.input_dir,
             output_file=args.output,

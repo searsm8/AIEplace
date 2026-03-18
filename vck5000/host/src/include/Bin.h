@@ -3,33 +3,31 @@
 #define AIEPLACE_BOX_H
 
 #include "Common.h"
-#include "Position.h"
 #include "Node.h"
 #include <sstream>
 
 AIEPLACE_NAMESPACE_BEGIN
 
-template<typename T>
-class Box 
+class Box
 {
 private:
-    Position<T> m_ll; // Lower left corner of Box
-    Position<T> m_ur; // Upper right corner of Box
+    Position m_ll; // Lower left corner of Box
+    Position m_ur; // Upper right corner of Box
 
 public:
     // Constructors
     Box() {}
-    Box(Position<T> a, Position<T> b) : m_ll(a), m_ur(b) {}
-    Box(T xl, T yl, T xh, T yh) : m_ll(Position<T>(xl, yl)), m_ur(Position<T>(xh, yh)) {}
+    Box(Position a, Position b) : m_ll(a), m_ur(b) {}
+    Box(float xl, float yl, float xh, float yh) : m_ll(Position(xl, yl)), m_ur(Position(xh, yh)) {}
 
     // Member Functions
     // Getters
-    Position<T> getPos() { return m_ll; }
-    Position<T> getPosBottomLeft() const { return m_ll; }
-    Position<T> getPosTopRight() const { return m_ur; }
-    T getXsize() { return abs(m_ll.getX() - m_ur.getX()); }
-    T getYsize() { return abs(m_ll.getY() - m_ur.getY()); }
-    T getArea()  { return getXsize() * getYsize(); }
+    Position getPos() { return m_ll; }
+    Position getPosBottomLeft() const { return m_ll; }
+    Position getPosTopRight() const { return m_ur; }
+    float getXsize() { return abs(m_ll.x - m_ur.x); }
+    float getYsize() { return abs(m_ll.y - m_ur.y); }
+    float getArea()  { return getXsize() * getYsize(); }
 
     string to_string() {
         std::stringstream s;
@@ -40,8 +38,8 @@ public:
 
     string getDEFstring() {
         std::stringstream s;
-        s << " ( " << m_ll.getX() << " " << m_ll.getY() << " ) ( " 
-          << m_ur.getX() << " " << m_ur.getY() << " ) ";
+        s << " ( " << m_ll.x << " " << m_ll.y << " ) ( "
+          << m_ur.x << " " << m_ur.y << " ) ";
         return s.str();
     }
 
@@ -54,13 +52,13 @@ public:
 // This struct collects useful data within the area of the Bounding Box
 struct Bin
 {
-    Box<float> bb; // Bounding Box
+    Box bb; // Bounding Box
     float total_overlap; // Total Node overlap within this bin
     float a_uv;
-    XY eField; // Computed eField in this Bin
+    Gradient eField; // Computed eField in this Bin
     std::vector<Node*> overlapping_nodes; // list of nodes overlapping this bin
-    float lambda; // Local Weight parameter for density in this bin. 
-                    // Bigger lambda means the eField will push harder in this bin.
+    float local_density_weight; // Local weight parameter for density in this bin.
+                    // Bigger local_density_weight means the eField will push harder in this bin.
 
     Bin(float xl, float yl, float xh, float yh) : bb(xl, yl, xh, yh) {}
 
@@ -77,18 +75,18 @@ struct Bin
         */
     void computeOverlap(Node* node_p)
     {
-        double overlap_width = 
-            min((double)bb.getPosTopRight().getX(), ((double)node_p->getPosition().getX() + (double)node_p->getXsize()))
-            - max(bb.getPosBottomLeft().getX(), node_p->getPosition().getX()) ;
-        double overlap_height = 
-            min((double)bb.getPosTopRight().getY(), ((double)node_p->getPosition().getY() + (double)node_p->getYsize()))
-            - max(bb.getPosBottomLeft().getY(), node_p->getPosition().getY());
+        double overlap_width =
+            min((double)bb.getPosTopRight().x, ((double)node_p->next.node_pos.x + (double)node_p->getXsize()))
+            - max((double)bb.getPosBottomLeft().x, (double)node_p->next.node_pos.x) ;
+        double overlap_height =
+            min((double)bb.getPosTopRight().y, ((double)node_p->next.node_pos.y + (double)node_p->getYsize()))
+            - max((double)bb.getPosBottomLeft().y, (double)node_p->next.node_pos.y);
 
         //cout << "overlap_width: " << overlap_width << "\n";
-        //cout << "bb.getPosTopRight().getY() = " << (float)bb.getPosTopRight().getY() << endl;
-        //cout << "node top right Y = " << (float)node_p->getPosition().getY() + (float)node_p->getYsize() << endl;
-        //cout << "bb.getPosBottomLeft().getY() =" << (float)bb.getPosBottomLeft().getY() << endl;
-        //cout << "node bottom left Y = " << (float)node_p->getPosition().getY()<< endl;
+        //cout << "bb.getPosTopRight().y = " << (float)bb.getPosTopRight().y << endl;
+        //cout << "node top right Y = " << (float)node_p->next.node_pos.y + (float)node_p->getYsize() << endl;
+        //cout << "bb.getPosBottomLeft().y =" << (float)bb.getPosBottomLeft().y << endl;
+        //cout << "node bottom left Y = " << (float)node_p->next.node_pos.y << endl;
         //cout << "overlap_height: " << overlap_height<< "\n";
 
         //assert(abs(overlap_width)  > node_p->getXsize() && "abs(overlap) exceeds node width!");

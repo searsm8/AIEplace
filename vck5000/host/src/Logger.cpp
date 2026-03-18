@@ -60,7 +60,7 @@ bool Logger::log(string key, MsgType msg)
         Table top;
         //top.add_row({"key", "msg"});
         top.add_row({key, msg});
-        top.format().hide_border().font_align(FontAlign::center);
+        top.format().hide_border().font_align(FontAlign::left);
         top.column(0).format()
             .width(12)
             .font_style({FontStyle::bold, FontStyle::italic})
@@ -182,111 +182,11 @@ void Logger::export_eField(AIEplace::Grid& grid, fs::path dir, int iter)
 
 }
 
-// Enhanced Logger::append_csv function with comprehensive metrics
-void Logger::append_csv(ProgramStatBlock &stats, string filename)
-{
-    // Create results directory if it doesn't exist
-    fs::path results_dir("results");
-    if (!fs::exists(results_dir)) {
-        fs::create_directories(results_dir);
-    }
-    
-    fs::path csv_path = results_dir / filename;
-    
-    // Open file for appending
-    std::ofstream out_file;
-    bool need_header = !fs::exists(csv_path);
-    out_file.open(csv_path, std::ios_base::app);
-    out_file.imbue(std::locale::classic());  // Prevent comma thousands separators
-    
-    // If file doesn't exist, create and write comprehensive header
-    if(need_header) {
-        // Basic run information
-        out_file << "Design,";
-        
-        // Configuration
-        out_file << "Output_Dir,";
-        out_file << "Gamma,";
-        out_file << "Init_Learning_Rate,";
-        
-        // Results
-        out_file << "Iterations,";
-        out_file << "Final_HPWL,";
-        out_file << "Initial_HPWL,";
-        out_file << "HPWL_Improvement_Percent,";
-        out_file << "Final_Overflow,";
-        out_file << "Final_Learning_Rate,";
-        
-        // Timing (high-level)
-        out_file << "Benchmark_Size,";
-        out_file << "Total_Runtime_Sec,";
-        out_file << "DB_IO_Time_Sec,";
-        out_file << "Algorithm_Time_Sec,";
-        out_file << "Iteration_Avg_Sec,";
-        
-        // Detailed function timing
-        out_file << "Partials_AIE_Time,";
-        //out_file << "Density_Compute_Time,";
-        //out_file << "Placement_Update_Time,";
-        
-        // System metrics
-        out_file << "Memory_Usage_MB,";
-        
-        // Status
-        out_file << "Success,";
-        out_file << "Error_Message,";
-        out_file << "Timestamp";
-        out_file << endl;
-    }
-    
-    // Write data row
-    out_file << "\"" << stats.design_name << "\",";
-    
-    // Configuration
-    out_file << "\"" << stats.output_dir << "\",";
-    out_file << stats.gamma << ",";
-    out_file << stats.init_learning_rate << ",";
-    
-    // Results
-    out_file << stats.iteration_count << ",";
-    out_file << std::scientific << stats.final_hpwl << ",";
-    out_file << std::scientific << stats.initial_hpwl << ",";
-    out_file << std::fixed << std::setprecision(2) << stats.hpwl_improvement << ",";
-    out_file << std::scientific << stats.final_overflow << ",";
-    out_file << std::fixed << std::setprecision(6) << stats.final_learning_rate << ",";
-    
-    // Timing (high-level)
-    out_file << "\"" << stats.benchmark_size << "\",";
-    out_file << std::fixed << std::setprecision(3);
-    out_file << stats.prgm_runtime << ",";
-    out_file << stats.db_IO_time << ",";
-    out_file << stats.algo_time << ",";
-    out_file << stats.iteration_avg_time << ",";
-    
-    // Detailed function timing (with safety checks)
-    auto safe_get_time = [](const std::string& func_name) -> double {
-        if (function_stats_map.find(func_name) != function_stats_map.end()) {
-            return function_stats_map[func_name].total_time;
-        }
-        return 0.0;
-    };
-    
-    out_file << safe_get_time("computeAllPartials_AIE") << ",";
-    //out_file << safe_get_time("computeDensity") << ",";
-    //out_file << safe_get_time("updatePlacements") << ",";
-    
-    // System metrics
-    out_file << stats.memory_usage_mb << ",";
-    
-    // Status
-    out_file << (stats.success ? "TRUE" : "FALSE") << ",";
-    out_file << "\"" << stats.error_message << "\",";
-    out_file << "\"" << stats.timestamp << "\"";
-    
-    out_file << endl;
-    out_file.close();
+double Logger::getFunctionTime(const std::string& func_name) {
+    if (function_stats_map.find(func_name) != function_stats_map.end())
+        return function_stats_map[func_name].total_time;
+    return 0.0;
 }
-
 
 void Logger::updateFunctionStats(string func_name, long long func_time)
 {
