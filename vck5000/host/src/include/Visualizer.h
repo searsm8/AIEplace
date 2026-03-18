@@ -29,7 +29,8 @@ class Visualizer
     float m_die_width, m_die_height;
     float m_canvas_width, m_canvas_height;
 
-    const int CANVAS_PIXELS = 2048;//1024; // reasonable trade off between image size and detail shown.
+    const int MAX_CANVAS_PX = 2048; // longest dimension in pixels
+    int m_canvas_px_w, m_canvas_px_h; // computed from die aspect ratio in init()
     const float DIE_START = 0.05; // boundary 
     const float DIE_SCALE = 1 - 2*DIE_START; // scale for drawing components on the die
     const float MIN_SIZE = 0.001; // Minimum size to be visible

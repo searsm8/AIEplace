@@ -278,6 +278,10 @@ void Placer::printFinalResults()
 {
     Logger::log_info("AIEplace algorithm complete.");
 
+    restoreBestPlacement();
+    Logger::log_info("Restored best placement from iteration " +
+        std::to_string(best_iteration) + " (HPWL: " + std::to_string(best_hpwl) + ")");
+
     // Use the output directory created in constructor
     std::string run_output_dir = output_dir.string();
     std::string run_id = generateRunId();
@@ -466,6 +470,12 @@ void Placer::recordIterationResults()
 {
     float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
     hpwl_history.push_back(hpwl);
+
+    if (hpwl < best_hpwl) {
+        best_hpwl = hpwl;
+        best_iteration = iteration;
+        snapshotBestPlacement();
+    }
 
     step_length_history.push_back(step_length);
 

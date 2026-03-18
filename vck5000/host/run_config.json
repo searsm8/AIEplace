@@ -25,6 +25,7 @@
     // Computation method selection
     "partials_compute_method": "cpu", // choose: aie, cpu, simple, hybrid, threaded
     "density_compute_method": "cpu",  // choose: aie, cpu
+    "bins_per_row": 64,               // grid resolution
     "wirelength_method": "HPWL",      // choose: HPWL
     "enable_backtracking": true,      // whether to use backtracking line search for step length selection
     "enable_momentum": true,          // whether to use momentum in the optimization (Nesterov Accelerated Gradient)
@@ -34,7 +35,7 @@
     "gamma": 4,
     "max_threads": 1, // multithreading not yet implemented
     "init_step_length": 0.1, // small first step 
-    "density_weight_init_multiplier": 0.01, // multiplier used to set density penalty
+    "density_weight_init_multiplier": 8e-5, // multiplier used to set density penalty
                                             // 0.01 means that density will contribute about 1% as much
                                             // as wirelength to the cost function at the start of placement
     "density_weight_min_step": 0.95,   // minimum step size for density_weight updates to prevent stagnation

@@ -13,9 +13,18 @@ void Visualizer::init(Box die_area)
     m_canvas_width = m_die_width * 1.2;
     m_canvas_height = m_die_height * 1.2;
 
-    surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, CANVAS_PIXELS, CANVAS_PIXELS);
+    // Scale canvas pixels to match die aspect ratio
+    if (m_die_width >= m_die_height) {
+        m_canvas_px_w = MAX_CANVAS_PX;
+        m_canvas_px_h = std::max(1, (int)(MAX_CANVAS_PX * m_die_height / m_die_width));
+    } else {
+        m_canvas_px_h = MAX_CANVAS_PX;
+        m_canvas_px_w = std::max(1, (int)(MAX_CANVAS_PX * m_die_width / m_die_height));
+    }
+
+    surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, m_canvas_px_w, m_canvas_px_h);
     cr = cairo_create (surface);
-	cairo_scale (cr, CANVAS_PIXELS, CANVAS_PIXELS);
+    cairo_scale (cr, m_canvas_px_w, m_canvas_px_h);
 }
 
 float Visualizer::scale(float f) {
@@ -151,7 +160,7 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     // Draw die boundary in black
     cairo_set_source_rgb (cr, 0.0, 0.0, 0.0);
     cairo_set_line_width (cr, 0.004);
-    cairo_rectangle (cr, DIE_START, DIE_START, 1-2*DIE_START, 1-2*DIE_START); // always a square!~
+    cairo_rectangle (cr, DIE_START, DIE_START, 1-2*DIE_START, 1-2*DIE_START); // aspect ratio from canvas dims
     cairo_stroke(cr);
     
     // Draw Fillers
@@ -240,29 +249,31 @@ void Visualizer::drawElectricField(Grid& grid, fs::path dir, int iteration)
     //cairo_paint(cr);
 
     // Draw bin reticles
+    int bpr = grid.getBinsPerRow();
+    int bpc = grid.getBinsPerCol();
     cairo_set_source_rgb (cr, 0.75, 0.75, 0.75); // grey
-    for(int i = 1; i < BINS_PER_COL; i++) {
-        for(int j = 1; j < BINS_PER_ROW; j++) {
-            drawReticle(scale(float(j)/BINS_PER_ROW), scale(float(i)/BINS_PER_COL), 0.004);
+    for(int i = 1; i < bpc; i++) {
+        for(int j = 1; j < bpr; j++) {
+            drawReticle(scale(float(j)/bpr), scale(float(i)/bpc), 0.004);
         }
     }
 
     // Draw arrows in middle of bins
     cairo_set_source_rgb (cr, 0.05, 0.05, 0.05); // black
     float max_eField = 0;
-    for(int i = 0; i < BINS_PER_COL; i++) {
-        for(int j = 0; j < BINS_PER_ROW; j++) {
+    for(int i = 0; i < bpc; i++) {
+        for(int j = 0; j < bpr; j++) {
             Bin bin = grid.getBin(i, j);
             if(bin.eField.x > max_eField) max_eField = bin.eField.x;
             if(bin.eField.y > max_eField) max_eField = bin.eField.y;
         }
     }
-    for(int i = 0; i < BINS_PER_COL; i++) {
-        for(int j = 0; j < BINS_PER_ROW; j++) {
+    for(int i = 0; i < bpc; i++) {
+        for(int j = 0; j < bpr; j++) {
             Bin bin = grid.getBin(i, j);
-            float x_mag = (0.2/BINS_PER_ROW) * std::atan(bin.eField.x / max_eField ); // use arctan function for asymptotes
-            float y_mag = (0.2/BINS_PER_ROW) * std::atan(bin.eField.y / max_eField );
-            drawArrow(scale((j+.5)/BINS_PER_ROW), scale((i+.5)/BINS_PER_COL), x_mag, y_mag);
+            float x_mag = (0.2f/bpr) * std::atan(bin.eField.x / max_eField ); // use arctan function for asymptotes
+            float y_mag = (0.2f/bpr) * std::atan(bin.eField.y / max_eField );
+            drawArrow(scale((j+.5f)/bpr), scale((i+.5f)/bpc), x_mag, y_mag);
         }
     }
 

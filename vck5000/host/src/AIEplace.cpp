@@ -27,10 +27,7 @@ void Placer::run()
     while( !converged )
     {
         performIteration();
-
         converged = checkConvergence();
-
-        iteration++;
     }
 
 }
@@ -38,6 +35,7 @@ void Placer::run()
 void Placer::performIteration()
 {
     Logger::log_detail("BEGIN iteration " + std::to_string(iteration));
+    ++iteration;
 
     // Iteration 1: compute first gradients and initialize solver state.
     // Probe positions (v_1 = u_1) are already set by initializePlacement().
@@ -128,6 +126,20 @@ Placer::Placer(std::string config_filepath)
             input_dir = fs::path(cfg["input"]["benchmark"]);
             results_dir = fs::path(cfg["output"]["results_dir"].get<std::string>());
 
+            // Grid resolution (default to compile-time BINS_PER_ROW if not specified)
+            if (cfg["params"].contains("bins_per_row")) {
+                bins_per_row = cfg["params"]["bins_per_row"];
+            } else {
+                bins_per_row = BINS_PER_ROW;
+            }
+            if (density_method == "aie" && bins_per_row != BINS_PER_ROW) {
+                Logger::log_error("bins_per_row=" + std::to_string(bins_per_row)
+                    + " but density_method='aie' requires bins_per_row=" + std::to_string(BINS_PER_ROW)
+                    + " (hardware constraint)");
+                exit(1);
+            }
+            Logger::log_info("Grid resolution: " + std::to_string(bins_per_row) + " x " + std::to_string(bins_per_row));
+
 // AI Summary:
 // The following section initializes the Xilinx Runtime (XRT) and AI Engine (AIE) drivers if hardware acceleration
 // is requested in the config file. It checks the specified compute methods for partials and density, 
@@ -180,7 +192,7 @@ Placer::Placer(std::string config_filepath)
             // Must be after database initialization to get benchmark name
             createRunOutputStructure();
 
-            grid = Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_ROW); 
+            grid = Grid(db.getDieArea(), bins_per_row, bins_per_row);
 
             die_size = min( grid.getDieWidth(), grid.getDieHeight() );
 
@@ -328,7 +340,7 @@ void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist
 
 
     //printIterationResults(); // Prints "iteration 0" starting statistics
-    iteration = 1;
+    iteration = 0;
 
     // TODO
     // Wild and Crazy Idea: wouldn't this have the same effect as slowly increasing the bin's lambda?
@@ -419,7 +431,7 @@ bool Placer::checkConvergence()
                             //&& (hpwl_improvement > 0.0f);
 
     Logger::log_detail("HPWL improvement from previous "+ std::to_string(convergence_window) +
-                    " iterations: " + std::to_string(100*hpwl_improvement) +"%");
+                    " iterations: " + PREC(100*hpwl_improvement) +"%");
     // Combined convergence: both criteria must be met
     if(overflow_converged && hpwl_converged) {
         Logger::log_info("CONVERGENCE ACHIEVED at iteration " + std::to_string(iteration));
@@ -618,6 +630,22 @@ void Placer::logStepDiagnostics()
         count++;
     }
     Logger::log_info("=== End Step Diagnostics ===");
+}
+
+void Placer::snapshotBestPlacement()
+{
+    for (auto item : db.getComponents())
+        item.second->best_solution_pos = item.second->next.node_pos;
+    for (auto filler : db.getFillers())
+        filler->best_solution_pos = filler->next.node_pos;
+}
+
+void Placer::restoreBestPlacement()
+{
+    for (auto item : db.getComponents())
+        item.second->next.node_pos = item.second->best_solution_pos;
+    for (auto filler : db.getFillers())
+        filler->next.node_pos = filler->best_solution_pos;
 }
 
 AIEPLACE_NAMESPACE_END

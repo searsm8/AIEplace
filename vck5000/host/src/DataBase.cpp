@@ -14,6 +14,19 @@ DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
     bool LEF_success = readLEF();
     bool DEF_success = readDEF();
 
+    // LEF macro sizes are in microns; DEF coordinates are in database units (dbu).
+    // Scale macro sizes to match DEF coordinate system.
+    if (LEF_success && DEF_success && m_units_per_micron > 0) {
+        float scale = (float)m_units_per_micron;
+        for (auto& item : mm_macros) {
+            MacroClass* macro = item.second;
+            macro->setSize(macro->getXsize() * scale, macro->getYsize() * scale);
+        }
+        Logger::log_info("Scaled " + std::to_string(mm_macros.size()) +
+                        " LEF macro sizes by " + std::to_string(m_units_per_micron) +
+                        " (microns -> dbu)");
+    }
+
     // else look for bookshelf
     if (!LEF_success || !DEF_success)
     {

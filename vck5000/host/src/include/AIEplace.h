@@ -92,6 +92,8 @@ public:
 
     // Execution tracking
     int iteration = 0;
+    float best_hpwl = std::numeric_limits<float>::max();
+    int best_iteration = 0;
     long double pgrm_start_time;
     long double db_IO_time;
     double algo_time = 0.0;
@@ -160,6 +162,8 @@ public:
 
     // Bookkeeping and visualization
     void recordIterationResults();
+    void snapshotBestPlacement();
+    void restoreBestPlacement();
     void plotHistories();
 
     // Post run analysis

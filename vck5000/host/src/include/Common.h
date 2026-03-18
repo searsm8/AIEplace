@@ -53,6 +53,7 @@ constexpr int INITIAL_LOCAL_DENSITY_WEIGHT = 1; // initial local density weight 
 //#define WIRELENGTH_COMPUTE_METHOD "HPWL"
 
 // granularity of bin grid
+// LEGACY CODE. Moved grid size to config.json file, keeping this for now to support PL/AIE legacy code.
 #define BINS_PER_ROW 64 //32 // Should be scaled up to 512 or 1024 for final application
 #define BINS_PER_COL BINS_PER_ROW // Unless otherwise noted, grid of bins is square.
 

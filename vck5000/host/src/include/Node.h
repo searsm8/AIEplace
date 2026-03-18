@@ -50,6 +50,7 @@ public:
 
     State current;  // iteration k (frozen during backtracking)
     State next;     // iteration k+1 (trial during backtracking)
+    Position best_solution_pos;  // stored best solution found, prevents divergence regret
 
     // Constructors
     Node() : m_name("") {}
