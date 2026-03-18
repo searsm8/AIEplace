@@ -481,17 +481,24 @@ void Placer::combineGradients()
 
 
 /**
- * @brief Clamp node's actual position (m_node_pos) to the die area boundaries.
+ * @brief Clamp node positions so the entire cell stays within the die area.
+ *
+ * The node position is the lower-left corner of the cell, so the upper bound
+ * must account for the cell's width/height to prevent the right/top edge from
+ * extending past the die boundary.
  */
 void Placer::enforceDieBoundaries(Node* node_p)
 {
+    float max_x = (float)grid.getDieWidth()  - node_p->getXsize();
+    float max_y = (float)grid.getDieHeight() - node_p->getYsize();
+
     // Clamp node_pos
-    node_p->next.node_pos.x = std::clamp(node_p->next.node_pos.x, 0.0f, (float)grid.getDieWidth());
-    node_p->next.node_pos.y = std::clamp(node_p->next.node_pos.y, 0.0f, (float)grid.getDieHeight());
-    
+    node_p->next.node_pos.x = std::clamp(node_p->next.node_pos.x, 0.0f, max_x);
+    node_p->next.node_pos.y = std::clamp(node_p->next.node_pos.y, 0.0f, max_y);
+
     // Clamp probe_pos
-    node_p->next.probe_pos.x = std::clamp(node_p->next.probe_pos.x, 0.0f, (float)grid.getDieWidth());
-    node_p->next.probe_pos.y = std::clamp(node_p->next.probe_pos.y, 0.0f, (float)grid.getDieHeight());
+    node_p->next.probe_pos.x = std::clamp(node_p->next.probe_pos.x, 0.0f, max_x);
+    node_p->next.probe_pos.y = std::clamp(node_p->next.probe_pos.y, 0.0f, max_y);
 }
 
 

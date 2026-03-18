@@ -14,7 +14,7 @@
     "gamma": 4,
     "max_threads": 1,
     "init_step_length": 0.1,
-    "density_weight_init_multiplier": 8e-05,
+    "density_weight_init_multiplier": 8e-03,
     "density_weight_min_step": 0.95,
     "density_weight_max_step": 1.05,
     "adaptation_window": 5,
@@ -35,15 +35,15 @@
   },
   "output": {
     "quiet": true,
-    "results_dir": "results/DSE_20260317_130938",
+    "results_dir": "results/DSE",
     "log_file": "logs/aieplace.log",
     "performance_jsonl": "results/aieplace_performance.jsonl",
-    "visualize": true,
+    "visualize": false,
     "iterations_per_export": 10,
     "focus_nets": [],
     "rand_focus_IO": 0,
     "rand_focus_nets": 0,
     "rand_focus_nodes": 1,
-    "DSE_info": "DSE sweep progress=39 of 39\nbenchmark=bigblue3\ndensity_weight_max_step=1.1"
+    "DSE_info": ""
   }
 }

@@ -16,7 +16,7 @@ from typing import Any, Union, List, Tuple
 # Maximum number of parallel AIEplace processes.
 # Set to 1 for sequential execution (original behavior).
 # A good default 4 or 8 to speed up DSE on a typical multi-core machine without overwhelming it.
-MAX_PARALLEL = 4
+MAX_PARALLEL = 8
 
 
 # =============================================================================
@@ -69,16 +69,16 @@ dse_sweep = OrderedDict([
         "ispd2015/mgc_fft_1",
         "ispd2015/mgc_fft_a",
         "ispd2015/mgc_des_perf_1",
-        #"ispd2015/mgc_edit_dist_a",
-        #"ispd2015/mgc_matrix_mult_1",
-        #"ispd2015/mgc_matrix_mult_b",
-        #"ispd2015/mgc_pci_bridge32_a",
-        #"ispd2015/mgc_superblue11_a",
-        #"ispd2015/mgc_superblue14",
-        #"ispd2005/adaptec1",
-        #"ispd2005/adaptec4",
-        #"ispd2005/bigblue1",
-        #"ispd2005/bigblue3",
+        "ispd2015/mgc_edit_dist_a",
+        "ispd2015/mgc_matrix_mult_1",
+        "ispd2015/mgc_matrix_mult_b",
+        "ispd2015/mgc_pci_bridge32_a",
+        "ispd2015/mgc_superblue11_a",
+        "ispd2015/mgc_superblue14",
+        "ispd2005/adaptec1",
+        "ispd2005/adaptec4",
+        "ispd2005/bigblue1",
+        "ispd2005/bigblue3",
     ])),
 
     # Uncomment to sweep additional parameters:
@@ -90,7 +90,8 @@ dse_sweep = OrderedDict([
     #("init_step_length",        (["params"], [0.001, 0.01, 0.1, 1.0])),
     #("convergence_min_iterations", (["params"], [50, 100, 200])),
     #("density_weight_max_step", (["params"], [1.02, 1.05, 1.1])),
-    ("bins_per_row",            (["params"], [64, 128])),
+    ("density_weight_init_multiplier", (["params"], [8e-05, 8e-04, 8e-03])),
+    #("bins_per_row",            (["params"], [64, 128, 256])),
 ])
 
 
@@ -334,7 +335,7 @@ def dse():
                 status = "OK" if success else "FAIL"
                 if not success:
                     failed += 1
-                print(f"  [{completed}/{total_runs}] {status}  {elapsed:6.1f}s  {combo_str}")
+                print(f"DSE: ({(completed/total_runs)*100:4.1f}%) [{completed}/{total_runs}] {status}  {elapsed:6.1f}s  {combo_str}")
             else:
                 still_active.append(run)
         active = still_active
