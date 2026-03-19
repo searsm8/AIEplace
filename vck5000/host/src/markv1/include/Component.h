@@ -9,6 +9,11 @@ AIEPLACE_NAMESPACE_BEGIN
 
 class MacroClass;
 
+// Component class represents an instance of a macro in the design. 
+// It inherits from Node, which contains all the information about 
+// the position, nets, and overlaps of this component. 
+// The Component class adds a pointer to its MacroClass, 
+// which contains information about the size of this component.
 class Component : public Node
 {
 private:

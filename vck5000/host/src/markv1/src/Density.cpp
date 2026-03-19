@@ -8,6 +8,26 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
+void Placer::computeElectricFields()
+{
+    computeOverlaps();          // update the density ρ at probe positions
+
+    if(density_method == "aie") {
+        #ifdef USE_XILINX_XRT
+            computeElectricFields_AIE(); // Accelerated compute on AIEs
+        #else
+            Logger::log_error("density_method 'aie' requires XRT. Recompile with BUILD_XRT=1 or use 'cpu'");
+            exit(1);
+        #endif
+    } else if(density_method == "cpu") {
+        computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
+        //computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
+    } else { 
+        Logger::log_error("Invalid density_compute_method specified in config file"); 
+        exit(1);
+    }
+}
+
 /***************
  * XRT/AIE ACCELERATION FUNCTIONS - VCK5000 only
  ****************/
@@ -217,11 +237,13 @@ void Placer::computeElectricFields_CPU()
 **/
 void Placer::computeElectricFields_DCT()
 {
+    TIME_FUNCTION();
     //Logger::log_detail("Begin computeElectricFields_DCT()");
     compute_a_uv_DCT();
     compute_eField_DCT();
 }
 
+// TODO: function not used? Marked for deletion
 void Placer::normalizeElectricFields()
 {
     float max_abs = 0;
@@ -384,24 +406,41 @@ void Placer::computeOverlaps()
     for (auto item : db.getComponents())
         grid.computeBinOverlaps(item.second);
 
-    // DEBUG
-    double total_node_area = 0;
-    for (auto item : db.getComponents())
-        total_node_area += item.second->getArea();
-    //for (auto item : db.getPins())
+    for (auto filler : db.getFillers())
+        grid.computeBinOverlaps(filler);
+
+    // DEBUGGING
+    //double total_node_area = 0;
+    //for (auto item : db.getComponents())
     //    total_node_area += item.second->getArea();
-    double total_overlap = 0;
-    for (int col = 0; col < grid.getBinsPerRow(); col++) {
-        for (int row = 0; row < grid.getBinsPerCol(); row++) {
-            total_overlap += grid.getBin(col, row).getOverlap();
-        }
+    //double total_overlap = 0;
+    //for (int col = 0; col < grid.getBinsPerRow(); col++) {
+    //    for (int row = 0; row < grid.getBinsPerCol(); row++) {
+    //        total_overlap += grid.getBin(col, row).getOverlap();
+    //    }
+    //}
+
+    //Table t;
+    //t.add_row(RowStream{} << "total_node_area" << total_node_area<< ""<<"");
+    //t.add_row(RowStream{} << "total_overlap" << total_overlap);
+    //t.add_row(RowStream{} << "single bin area" << grid.getBin(0,0).bb.getArea() << grid.getBin(7,8).bb.getArea() );
+    //Logger::log("overlap", t);
+}
+
+Gradient Placer::computeElectrostaticForce(Node* node_p)
+{
+    Gradient electro_force;
+
+    // for each bin that this node overlaps,
+    // compute electric force based on bin overlaps
+    for (BinOverlap bo : node_p->getBinOverlaps()) {
+        //Bin* bin = bo.bin;
+        float coeff = density_weight * bo.bin->local_density_weight;
+        electro_force += coeff * bo.bin->eField;
+        //electro_force.y += coeff * bin->eField.y;
     }
 
-    Table t;
-    t.add_row(RowStream{} << "total_node_area" << total_node_area<< ""<<"");
-    t.add_row(RowStream{} << "total_overlap" << total_overlap);
-    t.add_row(RowStream{} << "single bin area" << grid.getBin(0,0).bb.getArea() << grid.getBin(7,8).bb.getArea() );
-    Logger::log("overlap", t);
+    return electro_force;
 }
 
 AIEPLACE_NAMESPACE_END

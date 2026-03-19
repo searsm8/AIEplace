@@ -11,7 +11,7 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-void Placer::printWelcomeBanner()
+void Placer::printWelcomeBanner(bool show_info)
 {
     // Raw string logo
     string logo = R"(
@@ -32,42 +32,60 @@ void Placer::printWelcomeBanner()
         .font_color(Color::white)
         .font_align(FontAlign::left);
 
-    Table info;
-    info.add_row({"Version:", AIEPLACE_VERSION});
-    info.format().hide_border();
-    banner.add_row({info});
-    banner.add_row({"VLSI global placement algorithm accelerated on AI Engines"});
-    banner.add_row({}); // This line intentionally left blank
+    if(show_info)
+    {
+        Table info;
+        info.add_row({"Version:", AIEPLACE_VERSION});
+        info.format().hide_border();
+        banner.add_row({info});
+        banner.add_row({"VLSI global placement algorithm accelerated on AI Engines"});
+        banner.add_row({}); // This line intentionally left blank
+    }
 
     banner.print(cout);
 }
 
 void Placer::printIterationResults()
 {
-    float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
-    hpwl_history.push_back(hpwl);
+    system("clear"); // Clear console for cleaner output each iteration
+    printWelcomeBanner(false);
+    if (cfg["output"].contains("DSE_info"))
+    {
+        Table DSE_info;
+        std::string dse_info_str = cfg["output"]["DSE_info"].get<std::string>();
+        std::istringstream stream(dse_info_str);
+        std::string line;
 
-    //float learning_coeff = learning_rate * die_size;
-    float learning_coeff = learning_rate * 1;
-    learning_coeff_history.push_back(learning_coeff);
+        while (std::getline(stream, line)) {
+            auto eq = line.find('=');
+            if (eq != std::string::npos)
+                DSE_info.add_row(RowStream{} << line.substr(0, eq) << line.substr(eq + 1));
+            else
+                DSE_info.add_row(RowStream{} << line);
+        }
+        DSE_info.column(0).format().font_align(FontAlign::right);
+        DSE_info.column(1).format().font_align(FontAlign::left);
+        //DSE_info.format().hide_border();
+        Logger::log_info(DSE_info);
+    }
 
-    float overflow = grid.computeTotalOverflow();
-    //if(iteration >=10)
-    ovfw_history.push_back(overflow);
-
-    //Logger::log_data("HPWL = " + std::to_string(hpwl));
-    // every 10 iterations, export a table in markdown
-    if (iteration % 1 == 0)
+    // every X iterations, export a table in markdown
+    int X = 1;
+    float hpwl = hpwl_history.back();
+    float overflow = ovfw_history.back();
+    if (iteration % X == 0)
     {
         Table top;
-        top.add_row(RowStream{} << "Iteration" << iteration);
-        top.add_row(RowStream{} << "HPWL" << SCI(hpwl));
-        top.add_row(RowStream{} << "Overflow" << (overflow));
-        top.add_row(RowStream{} << "Learning Rate" << PREC(learning_rate));
-        top.add_row(RowStream{} << "Learning Coeff" << PREC(learning_coeff));
-        top.add_row(RowStream{} << "Global Lambda" << PREC(global_lambda));
-        top.column(0).format().font_align(FontAlign::right);
-        top.column(1).format().font_align(FontAlign::left);
+        top.add_row(RowStream{} << "   " << "Benchmark" << db.getBenchmarkName() << "    ");
+        top.add_row(RowStream{} << "   " << "Iteration" << iteration << "   ");
+        top.add_row(RowStream{} << "   " << "HPWL" << SCI(hpwl) << "   ");
+        top.add_row(RowStream{} << "   " << "Overflow" << PREC(overflow) << "   ");
+        top.add_row(RowStream{} << "   " << "Step Length" << SCI(step_length) << "   ");
+        top.add_row(RowStream{} << "   " << "Density Weight" << SCI(density_weight) << "   ");
+        top.add_row(RowStream{} << "   " << "BkTrk steps" << std::to_string(backtrack_steps) << "   ");
+        top.column(1).format().font_align(FontAlign::right);
+        top.column(2).format().font_align(FontAlign::left);
+        //top.format().hide_border();
         Logger::log_data(top);
         cout << endl;
     }
@@ -76,9 +94,9 @@ void Placer::printIterationResults()
     #ifdef CREATE_VISUALIZATION
         if(cfg["output"]["visualize"])
         if (iteration < 10 || iteration % int(cfg["output"]["iterations_per_export"]) == 0) {
-            PlotInfo info = {iteration, learning_rate, hpwl_history.back(), global_lambda, overflow};
+            PlotInfo info = {iteration, hpwl_history.back(), overflow, step_length, density_weight, db.getBenchmarkName()};
             viz.drawPlacement(db, output_dir / "placement", info);
-            viz.drawElectricField(grid, output_dir / "efield", iteration);
+            //viz.drawElectricField(grid, output_dir / "efield", iteration);
         }
     #endif
 
@@ -87,48 +105,51 @@ void Placer::printIterationResults()
     // Append the HPWL value to a file for later analysis
     std::ofstream hpwl_file;
     fs::path dir = output_dir;
-    hpwl_file.open(dir.append("hpwl.dat"), std::ios_base::app);
-    if(iteration == 0) {
-        hpwl_file << "Iter, HPWL, OVFW, LR, LAMBDA" << endl; // Write header only for the first iteration
-    }
+    hpwl_file.open(dir.append("iterations.dat"), std::ios_base::app);
+
+    // Add header if this is the first iteration
+    if(iteration == 1)
+        hpwl_file << "Iter, HPWL, OVFW, step_len, density_weight, BkSteps" << endl;
+
     hpwl_file << std::setfill('0') << std::setw(3) << iteration << ", "
-              << std::setprecision(2) << std::scientific << hpwl << ", "
-              << std::setprecision(2) << std::scientific << overflow << ", "
-              << std::setprecision(2) << std::scientific << learning_rate << ", "
-              << std::setprecision(2) << std::scientific << global_lambda << endl;
+              << SCI(hpwl) << ", "
+              << SCI(overflow) << ", "
+              << SCI(step_length) << ", "
+              << SCI(density_weight) << ", "
+              << backtrack_steps << endl;
     hpwl_file.close();
 }
 
 void Placer::plotHistories() {
 #ifdef CREATE_VISUALIZATION
-    fs::path data_dir = output_dir / "data";
-    if (!fs::exists(data_dir))
-        fs::create_directories(data_dir);
+    fs::path graph_dir = output_dir / "graphs";
+    if (!fs::exists(graph_dir))
+        fs::create_directories(graph_dir);
 
     // Create individual plots
     CairoPlotter hpwl_plotter(800, 600);
     hpwl_plotter.plotHistory(hpwl_history, "HPWL Convergence", "HPWL Value", 0.0, 0.5, 1.0);
-    hpwl_plotter.savePNG(data_dir / "hpwl_history.png");
+    hpwl_plotter.savePNG(graph_dir / "hpwl_history.png");
 
     CairoPlotter ovfw_plotter(800, 600);
     ovfw_plotter.plotHistory(ovfw_history, "Overflow", "OVFW Value", 0.0, 0.5, 1.0);
-    ovfw_plotter.savePNG(data_dir / "ovfw_history.png");
+    ovfw_plotter.savePNG(graph_dir / "ovfw_history.png");
 
     CairoPlotter coeff_plotter(800, 600);
-    coeff_plotter.plotHistory(learning_coeff_history, "Learning Coefficient History", "Learning Coefficient", 1.0, 0.2, 0.2);
-    coeff_plotter.savePNG(data_dir / "learning_coeff_history.png");
+    coeff_plotter.plotHistory(step_length_history, "Step Length History", "Step Length", 1.0, 0.2, 0.2);
+    coeff_plotter.savePNG(graph_dir / "step_length_history.png");
 
     // Create combined plot
     CairoPlotter dual_plotter(800, 600);
     dual_plotter.plotDualHistory(hpwl_history, ovfw_history,
                                 "HPWL and Overflow History",
                                 "HPWL (normalized)", "Overflow (normalized)");
-    dual_plotter.savePNG(data_dir / "combined_history.png");
+    dual_plotter.savePNG(graph_dir / "combined_history.png");
 #endif
 }
 
 // Enhanced function to create organized output structure
-void Placer::createRunOutputStructure(std::string& run_output_dir, std::string& run_id)
+void Placer::createRunOutputStructure()
 {
     // Generate run ID and timestamp
     auto now = std::chrono::system_clock::now();
@@ -142,23 +163,114 @@ void Placer::createRunOutputStructure(std::string& run_output_dir, std::string& 
     timestamp_ss << "_" << std::setfill('0') << std::setw(3) << ms.count();
     std::string timestamp = timestamp_ss.str();
 
-    // Generate run ID
-    run_id = db.getBenchmarkName() + "_" + timestamp;
-
-    // Create directory structure: ./results/<benchmark_name>/<timestamped_run_name>/
-    fs::path results_base("results");
-    fs::path benchmark_dir = results_base / db.getBenchmarkName();
-    fs::path run_dir = benchmark_dir / (timestamp + "_" +
+    // Create directory structure: <results_dir>/<benchmark_name>/<timestamped_run_name>/
+    output_dir = results_dir / db.getBenchmarkName() / (timestamp + "_" +
                                        cfg["params"]["partials_compute_method"].get<std::string>() + "_" +
                                        cfg["params"]["density_compute_method"].get<std::string>());
 
-    if (!fs::exists(run_dir)) {
-        fs::create_directories(run_dir);
+    fs::create_directories(output_dir);
+
+    Logger::log_info("Created output directory: " + output_dir.string());
+}
+
+void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
+                              float total_runtime, float iteration_avg,
+                              float hpwl_improvement, const std::string& run_id)
+{
+    if (!fs::exists(results_dir))
+        fs::create_directories(results_dir);
+
+    fs::path csv_path = results_dir / "results.csv";
+
+    std::ofstream out_file;
+    bool need_header = !fs::exists(csv_path);
+    out_file.open(csv_path, std::ios_base::app);
+    out_file.imbue(std::locale::classic());  // Prevent comma thousands separators
+
+    if (need_header) {
+        out_file << "Design,";
+        out_file << "Iterations,";
+        out_file << "Final HPWL,";
+        out_file << "Initial HPWL,";
+        out_file << "Improvement %,";
+        out_file << "Final Overflow,";
+        out_file << "Final Step Length,";
+        out_file << "Gamma,";
+        out_file << "Net Count,";
+        out_file << "Node Count,";
+        out_file << "HPWL_Graph,";
+        out_file << "Combined_Graph,";
+        out_file << "Placement_GIF,";
+        out_file << "Total Runtime (sec),";
+        out_file << "DB IO Time (sec),";
+        out_file << "Algorithm Time (sec),";
+        out_file << "Iteration Avg (sec),";
+        out_file << "Partials AIE Time (sec),";
+        out_file << "Memory Usage (MB),";
+        out_file << "Init Step Length,";
+        out_file << "Output Dir,";
+        out_file << "Timestamp,";
+        out_file << "DSE Config";
+        out_file << endl;
     }
 
-    run_output_dir = run_dir.string();
+    // Graph hyperlinks (only populated when visualization is built)
+    std::string hpwl_graph_cell, combined_graph_cell, placement_gif_cell;
+#ifdef CREATE_VISUALIZATION
+    // Strip results_dir prefix so hyperlinks are relative to the CSV's location
+    std::string out_str = output_dir.string();
+    std::string results_prefix = results_dir.string() + "/";
+    std::string rel_str = (out_str.rfind(results_prefix, 0) == 0) ? out_str.substr(results_prefix.size()) : out_str;
+    std::string hpwl_path    = rel_str + "/graphs/hpwl_history.png";
+    std::string combined_path = rel_str + "/graphs/combined_history.png";
+    std::string gif_path      = rel_str + "/full_placement.gif";
+    hpwl_graph_cell     = "\"=HYPERLINK(\"\"" + hpwl_path     + "\"\",\"\"view\"\")\"";
+    combined_graph_cell = "\"=HYPERLINK(\"\"" + combined_path + "\"\",\"\"view\"\")\"";
+    placement_gif_cell  = "\"=HYPERLINK(\"\"" + gif_path      + "\"\",\"\"view\"\")\"";
+#endif
 
-    Logger::log_info("Created run directory: " + run_output_dir);
+    // Timestamp
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    std::stringstream timestamp;
+    timestamp << std::put_time(std::gmtime(&time_t), "%Y-%m-%d %H:%M:%S");
+
+    out_file << "\"" << db.getBenchmarkName() << "\",";
+    out_file << iteration << ",";
+    out_file << std::scientific << SCI(final_hpwl) << ",";
+    out_file << std::scientific << SCI(m_initial_hpwl) << ",";
+    out_file << std::fixed << std::setprecision(2) << hpwl_improvement << ",";
+    out_file << std::scientific << SCI(final_overflow) << ",";
+    out_file << std::fixed << SCI(step_length) << ",";
+    out_file << PREC(gamma) << ",";
+    out_file << db.getNetsVector().size() << ",";
+    out_file << db.getComponents().size() << ",";
+    out_file << hpwl_graph_cell << ",";
+    out_file << combined_graph_cell << ",";
+    out_file << placement_gif_cell << ",";
+    out_file << std::fixed << std::setprecision(3);
+    out_file << total_runtime << ",";
+    out_file << db_IO_time << ",";
+    out_file << algo_time << ",";
+    out_file << iteration_avg << ",";
+    out_file << Logger::getFunctionTime("computeAllPartials_AIE") << ",";
+    out_file << getMemoryUsageMB() << ",";
+    out_file << cfg["params"]["init_step_length"].get<float>() << ",";
+    out_file << "\"" << output_dir.string() << "\",";
+    out_file << "\"" << timestamp.str() << "\",";
+    // DSE Config — flatten the multi-line DSE_info string into a single cell
+    if (cfg["output"].contains("DSE_info")) {
+        std::string dse_str = cfg["output"]["DSE_info"].get<std::string>();
+        // Replace newlines with " | " so it fits in one CSV cell
+        std::string flat;
+        for (char c : dse_str) {
+            if (c == '\n') flat += " | ";
+            else flat += c;
+        }
+        out_file << "\"" << flat << "\"";
+    }
+    out_file << endl;
+    out_file.close();
 }
 
 // Enhanced printFinalResults with organized output structure
@@ -171,16 +283,19 @@ void Placer::printFinalResults()
     std::string run_id = generateRunId();
 
     // Calculate final metrics
+    algo_time = Logger::getFunctionTime("run");
     float final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
-    float final_overflow = grid.computeTotalOverflow();
+    float final_overflow = grid.computeTotalOverflow(
+                            cfg["params"]["convergence_target_density"],
+                            db.computeTotalComponentArea());
     float total_runtime = getInterval(pgrm_start_time, getTime());
     float iteration_avg = (iteration > 0) ? total_runtime / iteration : 0.0f;
 
     // Calculate HPWL improvement if initial HPWL was recorded
     float hpwl_improvement = 0.0f;
     bool has_improvement = false;
-    if (initial_hpwl > 0) {
-        hpwl_improvement = ((initial_hpwl - final_hpwl) / initial_hpwl) * 100.0f;
+    if (m_initial_hpwl > 0) {
+        hpwl_improvement = ((m_initial_hpwl - final_hpwl) / m_initial_hpwl) * 100.0f;
         has_improvement = true;
     }
 
@@ -197,7 +312,7 @@ void Placer::printFinalResults()
     results.add_row(RowStream{} << "Avg iteration time (s)" << std::fixed << std::setprecision(3) << iteration_avg);
     results.add_row(RowStream{} << "Final HPWL" << std::scientific << std::setprecision(3) << final_hpwl);
     if (has_improvement) {
-        results.add_row(RowStream{} << "Initial HPWL" << std::scientific << std::setprecision(3) << initial_hpwl);
+        results.add_row(RowStream{} << "Initial HPWL" << std::scientific << std::setprecision(3) << m_initial_hpwl);
         results.add_row(RowStream{} << "HPWL improvement (%)" << std::fixed << std::setprecision(2) << hpwl_improvement);
     }
     results.add_row(RowStream{} << "Final Overflow" << std::scientific << std::setprecision(3) << final_overflow);
@@ -207,7 +322,7 @@ void Placer::printFinalResults()
     Table hyperparams;
     hyperparams.add_row({"Hyperparameter", "Final Value"});
     hyperparams.add_row(RowStream{} << "gamma" << gamma);
-    hyperparams.add_row(RowStream{} << "learning rate" << learning_rate);
+    hyperparams.add_row(RowStream{} << "step_length" << step_length);
     hyperparams.add_row(RowStream{} << "partials method" << cfg["params"]["partials_compute_method"]);
     hyperparams.add_row(RowStream{} << "density method" << cfg["params"]["density_compute_method"]);
     hyperparams.add_row(RowStream{} << "wirelength method" << cfg["params"]["wirelength_method"]);
@@ -227,18 +342,19 @@ void Placer::printFinalResults()
     Table function_stats = Logger::printFunctionStats();
     Logger::export_markdown(function_stats, run_output_dir, "function_statistics");
 
-    // Enhanced CSV export to global results.csv
-    Logger::ProgramStatBlock stats;
-    populateStatsBlock(stats, final_hpwl, final_overflow, total_runtime,
-                      iteration_avg, hpwl_improvement, has_improvement, run_id);
-
-    Logger::append_csv(stats, cfg["output"]["result_csv"]);
+    // Write run record to global results CSV
+    writeResultsCSV(final_hpwl, final_overflow, total_runtime,
+                    iteration_avg, hpwl_improvement, run_id);
 
     // Generate visualization in run-specific directory
     #ifdef CREATE_VISUALIZATION
         if(cfg["output"]["visualize"]) {
-            PlotInfo info = {iteration, learning_rate, final_hpwl, global_lambda, final_overflow};
+            PlotInfo info = {iteration, final_hpwl, final_overflow, step_length, density_weight, db.getBenchmarkName()};
             viz.drawPlacement(db, run_output_dir, info);
+
+            // use python script to create gif from generated pngs in run directory
+            std::string gif_command = "python3 tools/gif_builder.py " + run_output_dir + "/placement" + " -d 100 -o " + run_output_dir + "/full_placement.gif";
+            system(gif_command.c_str());
         }
     #endif
 
@@ -246,75 +362,11 @@ void Placer::printFinalResults()
     db.writeDEF(run_output_dir);
 
     // Copy config file to run directory for reproducibility
-    std::string config_backup = run_output_dir + "/config_used.json";
-    std::ifstream src("host/run_config.json");
-    std::ofstream dst(config_backup);
+    std::ifstream src(m_config_filepath);
+    std::ofstream dst(run_output_dir + "/config_used.json");
     dst << src.rdbuf();
 
     Logger::log_info("All outputs saved to: " + run_output_dir);
-}
-
-// Helper function to populate the comprehensive stats block
-void Placer::populateStatsBlock(Logger::ProgramStatBlock& stats,
-                               float final_hpwl, float final_overflow,
-                               float total_runtime, float iteration_avg,
-                               float hpwl_improvement, bool has_improvement,
-                               const std::string& run_id)
-{
-    // Generate timestamp
-    auto now = std::chrono::system_clock::now();
-    auto time_t = std::chrono::system_clock::to_time_t(now);
-    std::stringstream timestamp_ss;
-    timestamp_ss << std::put_time(std::gmtime(&time_t), "%Y-%m-%d %H:%M:%S");
-
-    // Basic information
-    stats.timestamp = timestamp_ss.str();
-    stats.run_id = run_id;
-    stats.design_name = db.getBenchmarkName();
-    int net_count = db.getNetsVector().size();
-    std::string category;
-    if (net_count < 100000) {
-        category = " (Small)";
-    } else if (net_count < 500000) {
-        category = " (Medium)";
-    } else if (net_count < 1000000) {
-        category = " (Large)";
-    } else {
-        category = " (XLarge)";
-    }
-    stats.benchmark_size = std::to_string(net_count) + category;
-
-    // Configuration
-    stats.partials_method = cfg["params"]["partials_compute_method"];
-    stats.density_method = cfg["params"]["density_compute_method"];
-    stats.output_dir = output_dir.string();
-    stats.wirelength_method = cfg["params"]["wirelength_method"];
-    stats.gamma = gamma;
-    stats.init_learning_rate = cfg["params"]["init_learning_rate"];
-    stats.max_iterations = cfg["params"]["max_iterations"];
-
-    // Results
-    stats.iteration_count = iteration;
-    stats.final_hpwl = final_hpwl;
-    stats.initial_hpwl = initial_hpwl;
-    stats.hpwl_improvement = hpwl_improvement;
-    stats.has_improvement = has_improvement;
-    stats.final_overflow = final_overflow;
-    stats.final_learning_rate = learning_rate;
-    stats.convergence_reached = checkConvergence();
-
-    // Timing
-    stats.prgm_runtime = total_runtime;
-    stats.db_IO_time = db_IO_time;
-    stats.algo_time = algo_time;
-    stats.iteration_avg_time = iteration_avg;
-
-    // System metrics
-    stats.memory_usage_mb = getMemoryUsageMB();
-
-    // Status
-    stats.success = true;  // If we got here, it succeeded
-    stats.error_message = "";
 }
 
 // Helper function to escape JSON strings
@@ -388,8 +440,8 @@ float Placer::getMemoryUsageMB()
 // Additional function to track initial HPWL (call this at the start of placement)
 void Placer::recordInitialHPWL()
 {
-    initial_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
-    Logger::log_info("Initial HPWL recorded: " + std::to_string(initial_hpwl));
+    m_initial_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
+    Logger::log_info("Initial HPWL recorded: " + std::to_string(m_initial_hpwl));
 }
 
 void Placer::initializeFocus()
@@ -408,6 +460,19 @@ void Placer::initializeFocus()
         db.addFocusNet(iter->second);
         std::advance(iter, 1);
     }
+}
+
+void Placer::recordIterationResults()
+{
+    float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
+    hpwl_history.push_back(hpwl);
+
+    step_length_history.push_back(step_length);
+
+    float overflow = grid.computeTotalOverflow(
+            cfg["params"]["convergence_target_density"],
+            db.computeTotalComponentArea());
+    ovfw_history.push_back(overflow);
 }
 
 AIEPLACE_NAMESPACE_END

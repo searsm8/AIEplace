@@ -17,24 +17,37 @@
 using namespace tabulate;
 using std::string;
 
-//// Macros for convenient logging in scientific notation
-inline std::string SCI(double val) {
-    std::ostringstream oss;
-    oss << std::scientific << std::setprecision(3) << val;
-    return oss.str();
-}
+// Macros for convenient logging in scientific notation
+#define SCI(val) \
+    (static_cast<std::ostringstream&>(std::ostringstream() << std::scientific << std::setprecision(2) << val)).str()
+#define SCI_P(val, prec) \
+    (static_cast<std::ostringstream&>(std::ostringstream() << std::scientific << std::setprecision(prec) << val)).str()
+#define PREC(val) \
+    (static_cast<std::ostringstream&>(std::ostringstream() << std::setprecision(2) << val)).str()
+#define PREC_P(val, prec) \
+    (static_cast<std::ostringstream&>(std::ostringstream() << std::setprecision(prec) << val)).str()
 
-inline std::string SCI_P(double val, int prec) {
-    std::ostringstream oss;
-    oss << std::scientific << std::setprecision(prec) << val;
-    return oss.str();
-}
-
-inline std::string PREC(double val) {
-    std::ostringstream oss;
-    oss << std::setprecision(3) << val;
-    return oss.str();
-}
+// NOTE TO MARK: might be better to use this, as the defines sometimes gave issues on the HACC servers
+//inline std::string SCI(double val) {
+//    std::ostringstream oss;
+//    oss << std::scientific << std::setprecision(3) << val;
+//    return oss.str();
+//}
+//inline std::string SCI_P(double val, int prec) {
+//    std::ostringstream oss;
+//    oss << std::scientific << std::setprecision(prec) << val;
+//    return oss.str();
+//}
+//inline std::string PREC(double val) {
+//    std::ostringstream oss;
+//    oss << std::setprecision(3) << val;
+//    return oss.str();
+//}
+//inline std::string PREC_P(double val, int perc) {
+//    std::ostringstream oss;
+//    oss << std::setprecision(prec) << val;
+//    return oss.str();
+//}
 
 // Forward declarations
 class Timer;
@@ -71,47 +84,6 @@ private:
     Logger();
 
 public:
-    struct ProgramStatBlock {
-        // Basic information
-        std::string timestamp;
-        std::string run_id;
-        std::string design_name;
-        std::string benchmark_size;
-        std::string output_dir;
-        
-        // Configuration
-        std::string partials_method;
-        std::string density_method;
-        std::string wirelength_method;
-        float gamma;
-        float init_learning_rate;
-        int max_iterations;
-        
-        // Results
-        int iteration_count;
-        float final_hpwl;
-        float initial_hpwl;
-        float hpwl_improvement;
-        bool has_improvement;
-        float final_overflow;
-        float final_learning_rate;
-        bool convergence_reached;
-        
-        // Timing
-        float prgm_runtime;
-        float db_IO_time;
-        float algo_time;
-        float AIE_time;
-        float iteration_avg_time;
-        
-        // System metrics
-        float memory_usage_mb;
-        
-        // Status
-        bool success;
-        std::string error_message;
-    };
-
     // Singleton access
     static Logger& getLogger();
     static Logger& getMutex();
@@ -124,6 +96,9 @@ public:
 
     static inline void deactivate_logging_key(string key)
     { Logger::keys.erase(key); }
+
+    static inline bool isKeyActive(const string& key)
+    { return Logger::keys.count(key) > 0; }
 
 
     // Primary logging fucntions
@@ -143,10 +118,10 @@ public:
 
     // Report generation functions
     static void export_markdown(Table t, fs::path dir, string filename = "statistics");
-    static void append_csv(ProgramStatBlock &, string filename = "run_statistics.csv");
     static void export_eField(AIEplace::Grid& grid, fs::path dir, int iter);
     static void updateFunctionStats(string func_name, long long func_time);
     static Table printFunctionStats();
+    static double getFunctionTime(const std::string& func_name);
 
 }; // end class Logger
 
