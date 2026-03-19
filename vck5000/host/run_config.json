@@ -41,10 +41,10 @@
     "density_weight_min_step": 0.95,   // minimum step size for density_weight updates to prevent stagnation
     "density_weight_max_step": 1.05,   // maximum step size for density_weight updates to avoid divergence
 
-    // Adaptive hyperparameter schedule parameters
-    "adaptation_window": 5,
-    "slow_improvement_threshold": 0.02,
-    "high_overflow_threshold": 0.1,
+    // Overflow plateau detection for emergency 2x density weight jolt (XPlace-style)
+    "adaptation_window": 25,
+    "slow_improvement_threshold": 0.001,
+    "high_overflow_threshold": 0.9,
     // "warmup_iterations": 5, // not used currently
     "backtrack_enabled": true,
     "backtrack_max_tries": 10,

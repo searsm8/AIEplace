@@ -93,6 +93,7 @@ public:
     int iteration = 0;
     float best_hpwl = std::numeric_limits<float>::max();
     int best_iteration = 0;
+    int last_density_jolt_iter = -1000; // tracks last emergency 2x jolt for cooldown
     long double pgrm_start_time;
     long double db_IO_time;
     double algo_time = 0.0;
@@ -155,6 +156,7 @@ public:
     void stepAllNodes();                // Algorithm 1, lines 2–4
     void enforceDieBoundaries(Node* node_p);           // clamp next.node_pos to die area
     void updateDensityWeight();
+    bool checkOverflowPlateau(int window, float threshold);
 
     // Diagnostics
     void logStepDiagnostics();

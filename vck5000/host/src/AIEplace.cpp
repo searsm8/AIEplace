@@ -3,6 +3,7 @@
 #include "JsonUtils.h"
 #include <cmath>
 #include <cassert>
+#include <numeric>
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -274,7 +275,47 @@ void Placer::updateDensityWeight()
 
     // perform the update
     density_weight *= dw_multiplier;
+
+    // Emergency 2x jolt: if overflow has plateaued at a high value, double density_weight
+    // to break out of the stall. Modeled after XPlace's enlarge_density mechanism.
+    // (param_scheduler.py lines 293-304)
+    int plateau_window = cfg["params"]["adaptation_window"];
+    float plateau_threshold = cfg["params"]["slow_improvement_threshold"];
+    float high_ovfw = cfg["params"]["high_overflow_threshold"];
+    int min_jolt_interval = 1000;
+
+    if (iteration > plateau_window &&
+        iteration - last_density_jolt_iter >= min_jolt_interval &&
+        ovfw_history.back() > high_ovfw &&
+        checkOverflowPlateau(plateau_window, plateau_threshold))
+    {
+        density_weight *= 2.0f;
+        last_density_jolt_iter = iteration;
+        Logger::log_info("Overflow plateau detected (ovfw=" +
+            PREC(ovfw_history.back()) + "), 2x density weight jolt -> " +
+            PREC(density_weight));
+    }
 }
+
+
+/**
+ * @brief Check if overflow has plateaued over a recent window.
+ *
+ * Returns true if the relative range (max - min) / mean of the last
+ * `window` overflow values is below `threshold`. Matches XPlace's
+ * check_plateau() in param_scheduler.py.
+ */
+bool Placer::checkOverflowPlateau(int window, float threshold)
+{
+    if ((int)ovfw_history.size() < window) return false;
+    auto begin = ovfw_history.end() - window;
+    auto end = ovfw_history.end();
+    float min_val = *std::min_element(begin, end);
+    float max_val = *std::max_element(begin, end);
+    float mean_val = std::accumulate(begin, end, 0.0f) / window;
+    return (max_val - min_val) / (mean_val + 1e-8f) < threshold;
+}
+
 
 /**
  * @brief Reset all nodes and nets in preparation for the next iteration
