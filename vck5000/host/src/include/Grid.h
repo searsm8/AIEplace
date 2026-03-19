@@ -43,7 +43,7 @@ public:
 
     void computeBinOverlaps(Node* node_p);
 
-    std::vector< std::vector<float> > getRho();
+    std::vector< std::vector<float> > getBinDensities(); // rho = overlap / bin_area
     std::vector< std::vector<float> > get_a_uv();
 
 

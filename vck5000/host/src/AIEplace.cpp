@@ -121,7 +121,7 @@ Placer::Placer(std::string config_filepath)
             min_iterations = cfg["params"]["convergence_min_iterations"];
             hpwl_improvement_threshold = cfg["params"]["convergence_hpwl_improvement_threshold"];
             overflow_threshold = cfg["params"]["convergence_overflow_threshold"];
-            target_density = cfg["params"]["convergence_target_density"];
+            target_density = cfg["params"].value("maximum_utilization", 0.9f);
             enable_backtracking = cfg["params"]["enable_backtracking"];
             enable_momentum = cfg["params"]["enable_momentum"];
             enable_preconditioning = cfg["params"].value("enable_preconditioning", true);
@@ -190,7 +190,14 @@ Placer::Placer(std::string config_filepath)
             // Initialize database by reading LEF and DEF design files
             db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
 
-            if(cfg["params"]["enable_filler"])   
+            // Benchmark-specified maximum_utilization overrides config default
+            if (db.getMaximumUtilization() > 0.0f) {
+                target_density = db.getMaximumUtilization();
+                Logger::log_info("Using benchmark maximum_utilization: " +
+                                std::to_string(target_density));
+            }
+
+            if(cfg["params"]["enable_filler"])
                 db.addFillers(target_density);
 
             db_IO_time = getInterval(pgrm_start_time, getTime());

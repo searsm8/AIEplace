@@ -295,7 +295,7 @@ void Placer::printFinalResults()
     algo_time = Logger::getFunctionTime("run")/ 1e6; // Convert microseconds to seconds
     float final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
     float final_overflow = grid.computeTotalOverflow(
-                            cfg["params"]["convergence_target_density"],
+                            target_density,
                             db.computeTotalComponentArea());
     float total_runtime = getInterval(pgrm_start_time, getTime());
     float iteration_avg = (iteration > 0) ? total_runtime / iteration : 0.0f;

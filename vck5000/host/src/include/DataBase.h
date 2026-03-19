@@ -91,9 +91,11 @@ private:
     Box m_die_area;
     int m_max_x, m_max_y; // used when reading Bookshelf format to find die_area
     string m_design_name;
-    int m_units_per_micron; 
+    int m_units_per_micron;
     int m_packet_count;
     int m_total_net_degree;
+    float m_maximum_utilization = 0.0f; // 0 = not specified by benchmark
+    float m_total_component_area = 0.0f; // cached after construction
 
 public:
     // each compute graph has a vector of PacketIndex which records what data has been sent
@@ -120,11 +122,13 @@ public:
     int getTotalNetDegree() { return m_total_net_degree; }
     Box &getDieArea() { return m_die_area; }
     string getBenchmarkName() { return m_input_dir.filename().string(); }
+    float getMaximumUtilization() { return m_maximum_utilization; }
 
     // Parse functions
     std::vector<fs::path> findExtensions(fs::path, string);
     bool readLEF();
     bool readDEF();
+    void readPlacementConstraints();
     // bool readVerilog();
     bool readBookshelf();
 

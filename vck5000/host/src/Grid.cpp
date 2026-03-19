@@ -97,22 +97,21 @@ void Grid::computeBinOverlaps(Node* node_p)
     }
 }
 
-std::vector< std::vector<float> > Grid::getRho()
+std::vector< std::vector<float> > Grid::getBinDensities()
 {
-    std::vector< std::vector<float> > rho;
+    // Compute per-bin density (rho = total_overlap / bin_area)
+    std::vector< std::vector<float> > density;
     float bin_area_inv = 1 / m_bins[0][0].bb.getArea();
 
     for (int col = 0; col < m_bins_per_row; col++)
     {
-        rho.push_back(std::vector<float>(m_bins_per_col));
+        density.push_back(std::vector<float>(m_bins_per_col));
         for (int row = 0; row < m_bins_per_col; row++)
         {
-            // Do I need to divide by area?
-            rho[col][row] = m_bins[col][row].total_overlap * bin_area_inv ;
-            //rho[col][row] = m_bins[col][row].overlap;
+            density[col][row] = m_bins[col][row].total_overlap * bin_area_inv;
         }
     }
-    return rho;
+    return density;
 }
 
 std::vector< std::vector<float> > Grid::get_a_uv()

@@ -10,10 +10,10 @@
 {
   "input": {
     //"benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
-    //"benchmark": "host/benchmarks/ispd2005/adaptec1",
+    "benchmark": "host/benchmarks/ispd2005/adaptec1",
     //"benchmark": "host/benchmarks/ispd2005/bigblue1",
     //"benchmark": "host/benchmarks/ispd2005/bigblue4",
-    "benchmark": "host/benchmarks/ispd2015/mgc_superblue11_a",
+    //"benchmark": "host/benchmarks/ispd2015/mgc_superblue11_a",
     //"benchmark": "host/benchmarks/ispd2015/mgc_superblue19",
     //"benchmark": "host/benchmarks/ispd2015/toy",
 
@@ -57,8 +57,8 @@
     "convergence_window": 5,
     "convergence_hpwl_improvement_threshold": 0.01, // If HPWL improvement over window is below this, HPWL convergence is met.
     "convergence_overflow_threshold": 0.07, // If ratio of total overflow to total node area is below this, density convergence is met.
-    "convergence_target_density": 0.9,  // Bin density maximum. If density within a bin exceeds this, 
-                                        // we consider it overflow. Also used for filler insertion.
+    "maximum_utilization": 0.9,  // Default target density. Overridden by benchmark's
+                                // placement.constraints if present (e.g. ISPD2015).
 
     // Simple decay parameters (used for simple hyperparameter schedule, not adaptive)
     "naive_decay": false,

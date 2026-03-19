@@ -37,6 +37,9 @@ DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
         }
     }
 
+    // Read placement constraints (maximum_utilization) if present
+    readPlacementConstraints();
+
     // Add IO pins as focus nets for visualizer
     //int focus_nets_added = 0;
     //const int FOCUS_IO_LIMIT = 2;
@@ -58,11 +61,51 @@ DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
     for (auto* net : mv_nets) {
         m_total_net_degree += net->getDegree();
     }
+
+    // Cache total component area (constant for the lifetime of the design)
+    double area_sum = 0;
+    for (auto item : mm_components) {
+        area_sum += item.second->getArea();
+    }
+    m_total_component_area = (float)area_sum;
 }
 
 /**
+ * Read placement.constraints file if present (ISPD2015 format).
+ * Parses "maximum_utilization=XX%" and stores as a float in [0, 1].
+ */
+void DataBase::readPlacementConstraints()
+{
+    fs::path constraints_path = m_input_dir / "placement.constraints";
+    if (!fs::exists(constraints_path)) return;
+
+    std::ifstream file(constraints_path);
+    if (!file.is_open()) return;
+
+    std::string line;
+    while (std::getline(file, line)) {
+        // Look for "maximum_utilization=XX%"
+        auto pos = line.find("maximum_utilization=");
+        if (pos != std::string::npos) {
+            std::string value_str = line.substr(pos + strlen("maximum_utilization="));
+            // Strip trailing '%' if present
+            if (!value_str.empty() && value_str.back() == '%') {
+                value_str.pop_back();
+                m_maximum_utilization = std::stof(value_str) / 100.0f;
+            } else {
+                m_maximum_utilization = std::stof(value_str);
+            }
+            Logger::log_info("Read placement constraint: maximum_utilization=" +
+                            std::to_string((int)(m_maximum_utilization * 100)) + "%");
+            break;
+        }
+    }
+}
+
+
+/**
  * Search the specified directory path for files with the specified extension.
- * 
+ *
  * @param dir_path: Path to the directory containing all design files
  * @param extension_match: extension which is being searched for e.g. ".lef" or ".def"
  * 
@@ -278,12 +321,7 @@ float DataBase::computeTotalWirelength(string method)
 
 float DataBase::computeTotalComponentArea()
 {
-    double total_area = 0;
-    for(auto item : mm_components)
-    {
-        total_area += item.second->getArea();
-    }
-    return total_area;
+    return m_total_component_area;
 }
 
 /* @brief: Organize data into “groups” to create “packets”.
