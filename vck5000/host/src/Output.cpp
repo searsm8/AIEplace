@@ -283,9 +283,21 @@ void Placer::printFinalResults()
 {
     Logger::log_info("AIEplace algorithm complete.");
 
-    restoreBestPlacement();
-    Logger::log_info("Restored best placement from iteration " +
-        std::to_string(best_iteration) + " (HPWL: " + std::to_string(best_hpwl) + ")");
+    // Select best solution: primary (HPWL-driven, converged) > fallback (Pareto) > last
+    BestSolution& chosen = best_primary.valid ? best_primary
+                         : best_fallback.valid ? best_fallback
+                         : best_primary; // will be invalid, restoreBest is a no-op
+
+    if (chosen.valid) {
+        restoreBestPlacement();
+        std::string type = (&chosen == &best_primary) ? "primary (HPWL-driven)" : "fallback (Pareto)";
+        Logger::log_info("Restored " + type + " best placement from iteration " +
+            std::to_string(chosen.iteration) +
+            " (HPWL: " + std::to_string(chosen.hpwl) +
+            ", overflow: " + std::to_string(chosen.overflow) + ")");
+    } else {
+        Logger::log_info("No best placement saved (solver may not have stabilized). Using last solution.");
+    }
 
     // Use the output directory created in constructor
     std::string run_output_dir = output_dir.string();
@@ -475,22 +487,32 @@ void Placer::initializeFocus()
 void Placer::recordIterationResults()
 {
     float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
-
-    // If better HPWL is found, and below overflow threshold, save this placement as the best
-    float overflow = grid.computeTotalOverflow( 
-                    target_density, 
+    float overflow = grid.computeTotalOverflow(
+                    target_density,
                     db.computeTotalComponentArea());
 
     hpwl_history.push_back(hpwl);
     step_length_history.push_back(step_length);
     ovfw_history.push_back(overflow);
 
-    if ( hpwl < best_hpwl && 
-         overflow < overflow_threshold )
-    {
-        best_hpwl = hpwl;
-        best_iteration = iteration;
+    // Two-tier best solution tracking (XPlace-inspired).
+    // Skip early iterations to let the solver stabilize.
+    if (iteration < BEST_SOL_MIN_ITER) return;
+
+    // Primary: lowest HPWL among solutions that meet the overflow threshold
+    if (overflow < overflow_threshold && hpwl < best_primary.hpwl) {
+        best_primary = {hpwl, overflow, iteration, true};
         snapshotBestPlacement();
+    }
+
+    // Fallback: Pareto-improving — strictly lower overflow AND HPWL within 1%
+    if (overflow < best_fallback.overflow &&
+        hpwl < best_fallback.hpwl * 1.01f)
+    {
+        best_fallback = {hpwl, overflow, iteration, true};
+        // Only snapshot if primary hasn't already saved this iteration
+        if (!best_primary.valid || best_primary.iteration != iteration)
+            snapshotBestPlacement();
     }
 }
 

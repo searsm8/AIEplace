@@ -445,11 +445,6 @@ void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist
     //printIterationResults(); // Prints "iteration 0" starting statistics
     iteration = 0;
 
-    // TODO
-    // Wild and Crazy Idea: wouldn't this have the same effect as slowly increasing the bin's lambda?
-    // Add additional large "phantom" macros for experimentation
-    // Observe what affect they have,
-    // They could be made to have a repulsive affect on the real nodes or macros
     // These macros won't be on any nets, but they will add to the density computation
     // and could be created en masse at hotspot areas to gently push other nodes away.
 }
@@ -646,7 +641,7 @@ void Placer::performNextStep(bool backtracking_enabled)
         // Recompute gradients at trial v̂ (the expensive part, accelerated on AIEs)
         computeHpwlPartials();      // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
         computeElectricFields();    // ∇D from ρ → bin eFields
-        combineGradients();         // subtract electro in-place: next.probe_grad becomes total ∇f
+        combineGradients();         // add electro in-place: next.probe_grad becomes total ∇f
 
         prev_step_length = step_length;
 

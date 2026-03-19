@@ -243,29 +243,6 @@ void Placer::computeElectricFields_DCT()
     compute_eField_DCT();
 }
 
-// TODO: function not used? Marked for deletion
-void Placer::normalizeElectricFields()
-{
-    float max_abs = 0;
-    // find the max absolute value of all eFields
-    for (int x = 0; x < grid.getBinsPerRow(); x++) {
-        for (int y = 0; y < grid.getBinsPerCol(); y++) {
-            if(abs(grid.getBin(x, y).eField.x) > max_abs)
-                max_abs = abs(grid.getBin(x, y).eField.x);
-            if(abs(grid.getBin(x, y).eField.y) > max_abs)
-                max_abs = abs(grid.getBin(x, y).eField.y);
-        }
-    }
-
-    // normalize values
-    for (int x = 0; x < grid.getBinsPerRow(); x++) {
-        for (int y = 0; y < grid.getBinsPerCol(); y++) {
-            grid.getBin(x, y).eField.x = grid.getBin(x, y).eField.x / max_abs;
-            grid.getBin(x, y).eField.y = grid.getBin(x, y).eField.y / max_abs;
-        }
-    }
-
-}
 
 // Compute the intermediate term a_uv for Efields
 // Store results in each bin

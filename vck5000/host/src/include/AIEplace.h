@@ -93,8 +93,19 @@ public:
 
     // Execution tracking
     int iteration = 0;
-    float best_hpwl = std::numeric_limits<float>::max();
-    int best_iteration = 0;
+
+    // Two-tier best solution tracking (XPlace-inspired):
+    //   Primary: lowest HPWL among solutions with overflow < convergence threshold
+    //   Fallback: Pareto-improving (overflow strictly decreasing, HPWL within 1%)
+    struct BestSolution {
+        float hpwl = std::numeric_limits<float>::max();
+        float overflow = std::numeric_limits<float>::max();
+        int iteration = 0;
+        bool valid = false;
+    };
+    BestSolution best_primary;   // HPWL-driven, only when overflow < threshold
+    BestSolution best_fallback;  // Pareto-improving, always available
+    static constexpr int BEST_SOL_MIN_ITER = 50; // don't save before this
     int last_density_jolt_iter = -1000; // tracks last emergency 2x jolt for cooldown
     long double pgrm_start_time;
     long double db_IO_time;
@@ -132,7 +143,6 @@ public:
     void computeElectricFields();
     void computeElectricFields_CPU();
     void computeElectricFields_DCT();
-    void normalizeElectricFields();
     Gradient computeElectrostaticForce(Node* node_p);
 
     void compute_a_uv_naive();
