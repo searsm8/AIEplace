@@ -51,6 +51,9 @@ void Placer::performIteration()
         recordInitialHPWL();
     }
 
+    // Update per-node preconditioner weights (fixed for this iteration, unaffected by backtracking)
+    updatePrecondWeights();
+
     // Algorithm 1 + Algorithm 2: step with backtracking line search.
     // On exit: positions at u_{k+1}, v_{k+1}; gradients at v_{k+1} already computed;
     // nesterov_ak advanced.
@@ -121,6 +124,7 @@ Placer::Placer(std::string config_filepath)
             target_density = cfg["params"]["convergence_target_density"];
             enable_backtracking = cfg["params"]["enable_backtracking"];
             enable_momentum = cfg["params"]["enable_momentum"];
+            enable_preconditioning = cfg["params"].value("enable_preconditioning", true);
             convergence_window = cfg["params"]["convergence_window"];
             max_backtracking_attempts = cfg["params"]["backtrack_max_tries"];
             backtrack_epsilon = cfg["params"]["backtrack_epsilon"];
@@ -295,6 +299,15 @@ void Placer::updateDensityWeight()
             PREC(ovfw_history.back()) + "), 2x density weight jolt -> " +
             PREC(density_weight));
     }
+
+    // Escalate preconditioner: double precond_coef every 20 iterations once overflow < 0.3
+    // This progressively tightens macro movement in late placement (XPlace param_scheduler.py:340-347)
+    if (enable_preconditioning && ovfw_history.back() < 0.3f && precond_coef < 1024.0f) {
+        if (iteration % 20 == 0) {
+            precond_coef *= 2.0f;
+            Logger::log_detail("Preconditioner escalation: precond_coef=" + PREC(precond_coef));
+        }
+    }
 }
 
 
@@ -314,6 +327,37 @@ bool Placer::checkOverflowPlateau(int window, float threshold)
     float max_val = *std::max_element(begin, end);
     float mean_val = std::accumulate(begin, end, 0.0f) / window;
     return (max_val - min_val) / (mean_val + 1e-8f) < threshold;
+}
+
+
+/**
+ * @brief Update per-node preconditioner weights (diagonal preconditioner).
+ *
+ * Each node's gradient is divided by its precond_weight before the Nesterov step.
+ * weight = max(1.0, num_pins + precond_coef * density_weight * area)
+ *
+ * Large macros (many pins, large area) get heavy damping, while standard cells
+ * are barely affected. The precond_coef escalates over time (see updateDensityWeight),
+ * progressively tightening macro movement as placement matures.
+ *
+ * Reference: XPlace param_scheduler.py:349-364, calculator.py:5-8
+ */
+void Placer::updatePrecondWeights()
+{
+    if (!enable_preconditioning) return;
+
+    float lambda_area_coef = precond_coef * density_weight;
+
+    for (auto item : db.getComponents()) {
+        Node* node = item.second;
+        float num_pins = (float)node->getNets().size();
+        float area = node->getArea();
+        node->precond_weight = std::max(1.0f, num_pins + lambda_area_coef * area);
+    }
+    for (auto filler : db.getFillers()) {
+        float area = filler->getArea();
+        filler->precond_weight = std::max(1.0f, lambda_area_coef * area);
+    }
 }
 
 
@@ -350,23 +394,31 @@ void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist
     Logger::log_info(top);
 
     float bin_area_16th = grid.getBinWidth() * grid.getBinHeight() / 16;
-    // For each component that isn't fixed
-    for (auto item : db.getComponents()) {
-        // Choose a random position based on parameters
-        // TODO: Different initial position "shapes" could help with performance?
-        // e.g. maybe a donut shape would be good.
-        int x_offset = min_dist + rand()%(max_dist-min_dist); // clustered around target
-        if(rand()%2 == 1) x_offset *= -1; // 50% chance to negate
-        int y_offset = min_dist + rand()%(max_dist-min_dist); // clustered around target
-        if(rand()%2 == 1) y_offset *= -1; // 50% chance to negate
-        //int x_offset = rand()%(grid.getDieWidth()) - grid.getDieWidth()/2; // Even Spread
-        //int y_offset = rand()%(grid.getDieWidth()) - grid.getDieWidth()/2; // Even Spread
-        Position init_pos = target_pos + Position(x_offset, y_offset);
-        item.second->initializeState(init_pos);
+    int placed_count = 0, randomized_count = 0;
 
-        // if this component is bigger than 1/16th of bin area, set member bool
-        item.second->checkIfLarge(bin_area_16th);
+    for (auto item : db.getComponents()) {
+        Component* comp = item.second;
+
+        // If the benchmark provides an initial placement (PLACED status from DEF),
+        // use it — this gives a much better starting point than random center placement.
+        // Only randomize truly UNPLACED components.
+        if (comp->getStatus() == PLACED || comp->getStatus() == FIXED) {
+            comp->initializeState(comp->next.node_pos); // use position from DEF parser
+            placed_count++;
+        } else {
+            int x_offset = min_dist + rand()%(max_dist-min_dist);
+            if(rand()%2 == 1) x_offset *= -1;
+            int y_offset = min_dist + rand()%(max_dist-min_dist);
+            if(rand()%2 == 1) y_offset *= -1;
+            Position init_pos = target_pos + Position(x_offset, y_offset);
+            comp->initializeState(init_pos);
+            randomized_count++;
+        }
+
+        comp->checkIfLarge(bin_area_16th);
     }
+    Logger::log_info("Initial placement: " + std::to_string(placed_count) +
+                     " from benchmark, " + std::to_string(randomized_count) + " randomized");
 
     // Place Fillers
     for (auto filler : db.getFillers()) {
@@ -482,24 +534,6 @@ bool Placer::checkConvergence()
         return true;
     }
     else return false;
-}
-
-
-/**
- * @brief Computes the gradients of all nodes at their probe positions (v_k).
- * This is a key step that must be performed at the start of each iteration to get the forces.
- * Can be computed on CPU or offloaded to AIE depending on configuration. 
- * Results are cached in node-local fields for reuse.
- */
-
- // TODO: NOT USED, REMOVE?
-void Placer::computeAllProbeGradients()
-{
-    // Should be non-blocking and multithreaded, as partials and eFields are independent
-    computeHpwlPartials();      // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
-    computeElectricFields();    // ∇D from ρ → bin eFields
-
-    combineGradients();         // subtract electro in-place: next.probe_grad becomes total ∇f
 }
 
 

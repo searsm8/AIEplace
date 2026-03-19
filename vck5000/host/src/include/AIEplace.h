@@ -72,6 +72,8 @@ public:
     float backtrack_epsilon;
     bool enable_backtracking;
     bool enable_momentum;
+    bool enable_preconditioning;
+    float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
 
     int die_size; // minimum of width and height of the die area
     int bins_per_row; // grid size
@@ -148,7 +150,6 @@ public:
     void performIteration();
 
     // Main algorithm iteration functions
-    void computeAllProbeGradients();    // ∇HPWL and ∇D at probe positions; cached on nodes
     void combineGradients();            // subtract electro from probe_grad in-place
     float computeLipshitzEstimate();    // BB step estimate: ||Δv|| / ||Δ∇f||
     void performNextStep(bool backtracking_enabled = true); // Algorithm 2: BkTrk
@@ -156,6 +157,7 @@ public:
     void stepAllNodes();                // Algorithm 1, lines 2–4
     void enforceDieBoundaries(Node* node_p);           // clamp next.node_pos to die area
     void updateDensityWeight();
+    void updatePrecondWeights();
     bool checkOverflowPlateau(int window, float threshold);
 
     // Diagnostics

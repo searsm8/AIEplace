@@ -50,8 +50,8 @@ void Placer::printWelcomeBanner(bool show_info)
 
 void Placer::printIterationResults()
 {
-    //system("clear"); // Clear console for cleaner output each iteration
-    //printWelcomeBanner(false);
+    system("clear"); // Clear console for cleaner output each iteration
+    printWelcomeBanner(false);
     if (cfg["output"].contains("DSE_info"))
     {
         Table DSE_info;
@@ -287,7 +287,7 @@ void Placer::printFinalResults()
     std::string run_id = generateRunId();
 
     // Calculate final metrics
-    algo_time = Logger::getFunctionTime("run");
+    algo_time = Logger::getFunctionTime("run")/ 1e6; // Convert microseconds to seconds
     float final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
     float final_overflow = grid.computeTotalOverflow(
                             cfg["params"]["convergence_target_density"],
@@ -470,20 +470,23 @@ void Placer::initializeFocus()
 void Placer::recordIterationResults()
 {
     float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
-    hpwl_history.push_back(hpwl);
 
-    if (hpwl < best_hpwl) {
+    // If better HPWL is found, and below overflow threshold, save this placement as the best
+    float overflow = grid.computeTotalOverflow( 
+                    target_density, 
+                    db.computeTotalComponentArea());
+
+    hpwl_history.push_back(hpwl);
+    step_length_history.push_back(step_length);
+    ovfw_history.push_back(overflow);
+
+    if ( hpwl < best_hpwl && 
+         overflow < overflow_threshold )
+    {
         best_hpwl = hpwl;
         best_iteration = iteration;
         snapshotBestPlacement();
     }
-
-    step_length_history.push_back(step_length);
-
-    float overflow = grid.computeTotalOverflow(
-            cfg["params"]["convergence_target_density"],
-            db.computeTotalComponentArea());
-    ovfw_history.push_back(overflow);
 }
 
 AIEPLACE_NAMESPACE_END

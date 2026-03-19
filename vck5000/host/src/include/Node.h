@@ -51,6 +51,7 @@ public:
     State current;  // iteration k (frozen during backtracking)
     State next;     // iteration k+1 (trial during backtracking)
     Position best_solution_pos;  // stored best solution found, prevents divergence regret
+    float precond_weight = 1.0f; // diagonal preconditioner: grad is divided by this before stepping
 
     // Constructors
     Node() : m_name("") {}
@@ -91,9 +92,12 @@ public:
 
     // Perform Nesterov gradient step (Algorithm 1, Lines 2 & 4)
     // Reads from current (must call cacheState() first), writes to next
+    // Gradient is preconditioned (divided by precond_weight) before stepping
     void step(float step_length, float momentum_coeff) {
-        // Line 2: u_{k+1} = v_k - α · ∇f(v_k)
-        next.node_pos = current.probe_pos - step_length * current.probe_grad;
+        // Precondition: scale gradient by 1/precond_weight (diagonal preconditioner)
+        Gradient precond_grad = (1.0f / precond_weight) * current.probe_grad;
+        // Line 2: u_{k+1} = v_k - α · P·∇f(v_k)
+        next.node_pos = current.probe_pos - step_length * precond_grad;
         // Line 4: v_{k+1} = u_{k+1} + mom · (u_{k+1} - u_k)
         next.probe_pos = next.node_pos + momentum_coeff * (next.node_pos - current.node_pos);
     }

@@ -8,11 +8,11 @@
 
 {
   "input": {
-    "benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
+    //"benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
     //"benchmark": "host/benchmarks/ispd2005/adaptec1",
     //"benchmark": "host/benchmarks/ispd2005/bigblue1",
     //"benchmark": "host/benchmarks/ispd2005/bigblue4",
-    //"benchmark": "host/benchmarks/ispd2015/mgc_superblue11_a",
+    "benchmark": "host/benchmarks/ispd2015/mgc_superblue11_a",
     //"benchmark": "host/benchmarks/ispd2015/mgc_superblue19",
     //"benchmark": "host/benchmarks/ispd2015/toy",
 
@@ -29,13 +29,14 @@
     "wirelength_method": "HPWL",      // choose: HPWL
     "enable_backtracking": true,      // whether to use backtracking line search for step length selection
     "enable_momentum": true,          // whether to use momentum in the optimization (Nesterov Accelerated Gradient)
-    "enable_filler": true,            // whether to include filler cells in placement
+    "enable_filler": false,            // whether to include filler cells in placement
+    "enable_preconditioning": true,   // diagonal preconditioner: damps large macro movement (XPlace-style)
 
     // Hyperparameters
     "gamma": 4,
     "max_threads": 1, // multithreading not yet implemented
     "init_step_length": 0.1, // small first step 
-    "density_weight_init_multiplier": 8e-5, // multiplier used to set density penalty
+    "density_weight_init_multiplier": 8e-4, // multiplier used to set density penalty
                                             // 0.01 means that density will contribute about 1% as much
                                             // as wirelength to the cost function at the start of placement
     "density_weight_min_step": 0.95,   // minimum step size for density_weight updates to prevent stagnation
