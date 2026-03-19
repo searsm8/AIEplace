@@ -50,8 +50,13 @@ void Placer::printWelcomeBanner(bool show_info)
 
 void Placer::printIterationResults()
 {
-    system("clear"); // Clear console for cleaner output each iteration
-    printWelcomeBanner(false);
+    // only print if NOT in quiet mode
+    if(!quiet)
+    {
+        system("clear"); // Clear console for cleaner output each iteration
+        printWelcomeBanner(false);
+    }
+
     if (cfg["output"].contains("DSE_info"))
     {
         Table DSE_info;
@@ -357,7 +362,7 @@ void Placer::printFinalResults()
             viz.drawPlacement(db, run_output_dir, info);
 
             // use python script to create gif from generated pngs in run directory
-            std::string quiet_flag = cfg["output"].value("quiet", false) ? " --quiet" : "";
+            std::string quiet_flag = quiet ? " --quiet" : "";
             std::string gif_command = "python3 tools/gif_builder.py " + run_output_dir + "/placement" + " -d 100 -o " + run_output_dir + "/full_placement.gif" + quiet_flag;
             system(gif_command.c_str());
         }

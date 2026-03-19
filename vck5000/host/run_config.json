@@ -6,6 +6,7 @@
   // input file paths, and hyperparameters for the algorithm.
   // =============================================================================
 
+  // JSON doesn't support comments, but AIEplace strips them out like a compiler
 {
   "input": {
     //"benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
@@ -47,7 +48,6 @@
     "slow_improvement_threshold": 0.001,
     "high_overflow_threshold": 0.9,
     // "warmup_iterations": 5, // not used currently
-    "backtrack_enabled": true,
     "backtrack_max_tries": 10,
     "backtrack_epsilon": 1.05,
 
@@ -67,10 +67,10 @@
   },
 
   "output": {
+    "visualize": false, // if true, will export visualization images
+    "iterations_per_export": 10,
     "quiet": false,    // if true, suppress all console output except errors (for DSE)
     "results_dir": "results/single_runs",
-    "visualize": true, // if true, will export visualization images
-    "iterations_per_export": 10,
     "focus_nets": [], // focus nets are highlighted in visualization exports.
     "rand_focus_IO": 0,
     "rand_focus_nets": 0,

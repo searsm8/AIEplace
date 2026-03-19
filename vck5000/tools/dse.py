@@ -1,12 +1,12 @@
 # dse.py
 # Design Space Exploration python script
-# Runs bin/AIEplace.exe while modifying host/runtime_config.json between runs
+# Runs bin/AIEplace.exe while modifying host/run_config.json between runs
 
+import copy
 import datetime
 import itertools
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -18,6 +18,9 @@ from typing import Any, Union, List, Tuple
 # A good default 4 or 8 to speed up DSE on a typical multi-core machine without overwhelming it.
 MAX_PARALLEL = 8
 
+# Default config file (same one used for single runs — supports // and # comments)
+CONFIG_PATH = "host/run_config.json"
+
 
 # =============================================================================
 # DSE Sweep Configuration
@@ -25,11 +28,8 @@ MAX_PARALLEL = 8
 # Each entry maps a parameter name to (section_path, [values_to_sweep]).
 # The Cartesian product of all value lists is computed automatically.
 # To add a new parameter sweep, add one line. To remove, delete or comment out.
-#
-# "benchmark" is special: values are prefixed with benchmark_path automatically.
 # =============================================================================
 
-benchmark_path = "host/benchmarks/"
 
 dse_sweep = OrderedDict([
     # Full list of benchmarks, ordered largest-first (by node count) so the
@@ -68,14 +68,14 @@ dse_sweep = OrderedDict([
     # Smaller subset, largest-first for efficient parallel scheduling:
     ("benchmark", (["input"], [
         #"ispd2005/bigblue3",           # 1.1M nodes
-        "ispd2015/mgc_superblue11_a",   #  927K nodes
+        #"ispd2015/mgc_superblue11_a",   #  927K nodes
         #"ispd2015/mgc_superblue14",    #  613K nodes
         #"ispd2005/adaptec4",           #  495K nodes
-        "ispd2005/bigblue1",            #  278K nodes
-        "ispd2005/adaptec1",            #  211K nodes
-        "ispd2015/mgc_matrix_mult_b",   #  146K nodes
+        #"ispd2005/bigblue1",            #  278K nodes
+        #"ispd2005/adaptec1",            #  211K nodes
+        #"ispd2015/mgc_matrix_mult_b",   #  146K nodes
         #"ispd2015/mgc_matrix_mult_1",  #  155K nodes
-        "ispd2015/mgc_edit_dist_a",     #  127K nodes
+        #"ispd2015/mgc_edit_dist_a",     #  127K nodes
         "ispd2015/mgc_des_perf_1",      #  113K nodes
         "ispd2015/mgc_fft_1",           #   32K nodes
         "ispd2015/mgc_fft_a",           #   31K nodes
@@ -91,7 +91,7 @@ dse_sweep = OrderedDict([
     #("init_step_length",        (["params"], [0.001, 0.01, 0.1, 1.0])),
     #("convergence_min_iterations", (["params"], [50, 100, 200])),
     #("density_weight_max_step", (["params"], [1.02, 1.05, 1.1])),
-    ("density_weight_init_multiplier", (["params"], [8e-04, 8e-03, 8e-02])),
+    #("density_weight_init_multiplier", (["params"], [8e-04, 8e-03, 8e-02])),
     #("bins_per_row",            (["params"], [64, 128, 256])),
 ])
 
@@ -99,6 +99,53 @@ dse_sweep = OrderedDict([
 # =============================================================================
 # Utility Functions
 # =============================================================================
+
+def strip_json_comments(text: str) -> str:
+    """
+    Strip // and # comments from JSON text, respecting quoted strings.
+    Mirrors the C++ JsonUtils::stripComments() so we can share one config file.
+    """
+    result = []
+    i = 0
+    in_string = False
+    while i < len(text):
+        c = text[i]
+        # Handle escape sequences inside strings
+        if in_string and c == '\\' and i + 1 < len(text):
+            result.append(text[i:i+2])
+            i += 2
+            continue
+        # Toggle string state on unescaped quotes
+        if c == '"':
+            in_string = not in_string
+            result.append(c)
+            i += 1
+            continue
+        # Inside a string, just copy
+        if in_string:
+            result.append(c)
+            i += 1
+            continue
+        # // comment — skip to end of line
+        if c == '/' and i + 1 < len(text) and text[i+1] == '/':
+            while i < len(text) and text[i] != '\n':
+                i += 1
+            continue
+        # # comment — skip to end of line
+        if c == '#':
+            while i < len(text) and text[i] != '\n':
+                i += 1
+            continue
+        result.append(c)
+        i += 1
+    return ''.join(result)
+
+
+def load_config(path: str) -> dict:
+    """Load a JSON config file, stripping // and # comments first."""
+    with open(path, 'r') as f:
+        raw = f.read()
+    return json.loads(strip_json_comments(raw))
 
 def update_info_string(config: dict, config_path: str, run_num: int, total_runs: int) -> None:
     """
@@ -148,8 +195,7 @@ def modify_config_parameter(
         quiet (bool): If True, suppress print output. Default False.
     """
     try:
-        with open(config_path, 'r') as f:
-            config = json.load(f)
+        config = load_config(config_path)
 
         # Handle section path
         if section_path is None:
@@ -258,7 +304,8 @@ def dse():
     AIEplace once for each configuration. Runs up to MAX_PARALLEL processes
     concurrently, each with its own config file copy and log file.
     """
-    config_path = "host/run_config_dse.json"
+    # Load the single config file (strips // and # comments)
+    base_config = load_config(CONFIG_PATH)
 
     # Extract param names, sections, and value lists from the sweep config
     param_names = list(dse_sweep.keys())
@@ -286,27 +333,30 @@ def dse():
     config_dir = os.path.join(sweep_dir, "configs")
     os.makedirs(config_dir, exist_ok=True)
 
+    # DSE overrides applied to every run (quiet mode, DSE_info placeholder)
+    base_config["output"]["quiet"] = True
+    base_config["output"]["results_dir"] = sweep_dir
+    base_config.setdefault("output", {}).setdefault("DSE_info", "")
+
     print(f"DSE: Preparing {total_runs} config files...")
+    benchmark_path = "host/benchmarks/"
     for run_num, combo in enumerate(all_combos, 1):
-        # Copy the base config for this run
-        run_config_path = os.path.join(config_dir, f"run_{run_num:03d}.json")
-        shutil.copy2(config_path, run_config_path)
+        # Deep-copy the base config for this run
+        config = copy.deepcopy(base_config)
 
-        # Set results dir (shared sweep dir — each run writes its own results row)
-        modify_config_parameter(run_config_path, "results_dir", sweep_dir,
-                                section_path="output", quiet=True)
-
-        # Apply each parameter value
+        # Apply each parameter value from the sweep
         for param_name, section, value in zip(param_names, sections, combo):
             actual_value = value
             if param_name == "benchmark":
                 actual_value = benchmark_path + value
-            modify_config_parameter(run_config_path, param_name, actual_value,
-                                    section_path=section, quiet=True)
+            # Navigate to the target section and set the value
+            target = config
+            for key in section:
+                target = target[key]
+            target[param_name] = actual_value
 
-        # Update DSE_info
-        with open(run_config_path, 'r') as f:
-            config = json.load(f)
+        # Write the clean (comment-free) JSON config for this run
+        run_config_path = os.path.join(config_dir, f"run_{run_num:03d}.json")
         update_info_string(config, run_config_path, run_num, total_runs)
 
         combo_str = "  ".join(f"{p}={v}" for p, v in zip(param_names, combo))

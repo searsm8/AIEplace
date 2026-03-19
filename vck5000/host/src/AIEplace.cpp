@@ -99,7 +99,7 @@ Placer::Placer(std::string config_filepath)
             cfg = json::parse(json_content);
 
             // Setup logging (quiet mode suppresses all output except errors)
-            bool quiet = cfg["output"].value("quiet", false);
+            quiet = cfg["output"].value("quiet", false);
             Logger::setup_logging(quiet);
             printWelcomeBanner();
             Logger::log_info("Reading runtime configuration from: " + config_filepath);

@@ -102,6 +102,7 @@ public:
     std::vector<float> hpwl_history; // history of HPWL values for each iteration
     std::vector<float> ovfw_history; // history of overflow values for each iteration
     std::vector<float> step_length_history;
+    bool quiet; // if true, suppress all console output except errors (for DSE runs)
 
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;
