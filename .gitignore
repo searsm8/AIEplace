@@ -7,3 +7,14 @@ results
 *.cfg
 .vscode
 misc
+*.swp
+*.db
+.Xil/
+Map_Report.csv
+build/
+.ipcache/
+*.log
+*.jou
+*core.*
+results/
+temp/
