@@ -18,36 +18,26 @@ using namespace tabulate;
 using std::string;
 
 // Macros for convenient logging in scientific notation
-#define SCI(val) \
-    (static_cast<std::ostringstream&>(std::ostringstream() << std::scientific << std::setprecision(2) << val)).str()
-#define SCI_P(val, prec) \
-    (static_cast<std::ostringstream&>(std::ostringstream() << std::scientific << std::setprecision(prec) << val)).str()
-#define PREC(val) \
-    (static_cast<std::ostringstream&>(std::ostringstream() << std::setprecision(2) << val)).str()
-#define PREC_P(val, prec) \
-    (static_cast<std::ostringstream&>(std::ostringstream() << std::setprecision(prec) << val)).str()
-
-// NOTE TO MARK: might be better to use this, as the defines sometimes gave issues on the HACC servers
-//inline std::string SCI(double val) {
-//    std::ostringstream oss;
-//    oss << std::scientific << std::setprecision(3) << val;
-//    return oss.str();
-//}
-//inline std::string SCI_P(double val, int prec) {
-//    std::ostringstream oss;
-//    oss << std::scientific << std::setprecision(prec) << val;
-//    return oss.str();
-//}
-//inline std::string PREC(double val) {
-//    std::ostringstream oss;
-//    oss << std::setprecision(3) << val;
-//    return oss.str();
-//}
-//inline std::string PREC_P(double val, int perc) {
-//    std::ostringstream oss;
-//    oss << std::setprecision(prec) << val;
-//    return oss.str();
-//}
+inline std::string SCI(double val) {
+    std::ostringstream oss;
+    oss << std::scientific << std::setprecision(3) << val;
+    return oss.str();
+}
+inline std::string SCI_P(double val, int prec) {
+    std::ostringstream oss;
+    oss << std::scientific << std::setprecision(prec) << val;
+    return oss.str();
+}
+inline std::string PREC(double val) {
+    std::ostringstream oss;
+    oss << std::setprecision(3) << val;
+    return oss.str();
+}
+inline std::string PREC_P(double val, int prec) {
+    std::ostringstream oss;
+    oss << std::setprecision(prec) << val;
+    return oss.str();
+}
 
 // Forward declarations
 class Timer;
