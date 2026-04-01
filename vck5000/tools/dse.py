@@ -34,65 +34,69 @@ CONFIG_PATH = "host/run_config.json"
 dse_sweep = OrderedDict([
     # Full list of benchmarks, ordered largest-first (by node count) so the
     # longest-running jobs start first and smaller ones fill in around them.
-    #("benchmark", (["input"], [
-    #    "ispd2005/bigblue4",            # 2.2M nodes
-    #    "ispd2015/mgc_superblue12",     # 1.3M nodes
-    #    "ispd2005/bigblue3",            # 1.1M nodes
-    #    "ispd2015/mgc_superblue11_a",   #  927K nodes
-    #    "ispd2015/mgc_superblue16_a",   #  681K nodes
-    #    "ispd2015/mgc_superblue14",     #  613K nodes
-    #    "ispd2005/bigblue2",            #  535K nodes
-    #    "ispd2015/mgc_superblue19",     #  506K nodes
-    #    "ispd2005/adaptec4",            #  495K nodes
-    #    "ispd2005/adaptec3",            #  451K nodes
-    #    "ispd2005/bigblue1",            #  278K nodes
-    #    "ispd2005/adaptec2",            #  254K nodes
-    #    "ispd2005/adaptec1",            #  211K nodes
-    #    "ispd2015/mgc_matrix_mult_1",   #  155K nodes
-    #    "ispd2015/mgc_matrix_mult_a",   #  150K nodes
-    #    "ispd2015/mgc_matrix_mult_b",   #  146K nodes
-    #    "ispd2015/mgc_matrix_mult_c",   #  146K nodes
-    #    "ispd2015/mgc_matrix_mult_2",   #  155K nodes
-    #    "ispd2015/mgc_edit_dist_a",     #  127K nodes
-    #    "ispd2015/mgc_des_perf_1",      #  113K nodes
-    #    "ispd2015/mgc_des_perf_a",      #  108K nodes
-    #    "ispd2015/mgc_des_perf_b",      #  113K nodes
-    #    "ispd2015/mgc_fft_1",           #   32K nodes
-    #    "ispd2015/mgc_fft_2",           #   32K nodes
-    #    "ispd2015/mgc_fft_a",           #   31K nodes
-    #    "ispd2015/mgc_fft_b",           #   31K nodes
-    #    "ispd2015/mgc_pci_bridge32_a",  #   30K nodes
-    #    "ispd2015/mgc_pci_bridge32_b",  #   29K nodes
-    #])),
+    ("benchmark", (["input"], [
+        "ispd2005/bigblue4",            # 2.2M nodes
+        "ispd2015/mgc_superblue12",     # 1.3M nodes
+        "ispd2005/bigblue3",            # 1.1M nodes
+        "ispd2015/mgc_superblue11_a",   #  927K nodes
+        "ispd2015/mgc_superblue16_a",   #  681K nodes
+        "ispd2015/mgc_superblue14",     #  613K nodes
+        "ispd2005/bigblue2",            #  535K nodes
+        "ispd2015/mgc_superblue19",     #  506K nodes
+        "ispd2005/adaptec4",            #  495K nodes
+        "ispd2005/adaptec3",            #  451K nodes
+        "ispd2005/bigblue1",            #  278K nodes
+        "ispd2005/adaptec2",            #  254K nodes
+        "ispd2005/adaptec1",            #  211K nodes
+        "ispd2015/mgc_matrix_mult_1",   #  155K nodes
+        "ispd2015/mgc_matrix_mult_a",   #  150K nodes
+        "ispd2015/mgc_matrix_mult_b",   #  146K nodes
+        "ispd2015/mgc_matrix_mult_c",   #  146K nodes
+        "ispd2015/mgc_matrix_mult_2",   #  155K nodes
+        "ispd2015/mgc_edit_dist_a",     #  127K nodes
+        "ispd2015/mgc_des_perf_1",      #  113K nodes
+        "ispd2015/mgc_des_perf_a",      #  108K nodes
+        "ispd2015/mgc_des_perf_b",      #  113K nodes
+        "ispd2015/mgc_fft_1",           #   32K nodes
+        "ispd2015/mgc_fft_2",           #   32K nodes
+        "ispd2015/mgc_fft_a",           #   31K nodes
+        "ispd2015/mgc_fft_b",           #   31K nodes
+        "ispd2015/mgc_pci_bridge32_a",  #   30K nodes
+        "ispd2015/mgc_pci_bridge32_b",  #   29K nodes
+    ])),
 
     # Smaller subset, largest-first for efficient parallel scheduling:
-    ("benchmark", (["input"], [
-        #"ispd2005/bigblue3",           # 1.1M nodes
-        #"ispd2015/mgc_superblue11_a",   #  927K nodes
-        #"ispd2015/mgc_superblue14",    #  613K nodes
-        #"ispd2005/adaptec4",           #  495K nodes
-        #"ispd2005/bigblue1",            #  278K nodes
-        #"ispd2005/adaptec1",            #  211K nodes
-        #"ispd2015/mgc_matrix_mult_b",   #  146K nodes
-        #"ispd2015/mgc_matrix_mult_1",  #  155K nodes
-        #"ispd2015/mgc_edit_dist_a",     #  127K nodes
-        "ispd2015/mgc_des_perf_1",      #  113K nodes
-        "ispd2015/mgc_fft_1",           #   32K nodes
-        "ispd2015/mgc_fft_a",           #   31K nodes
-        #"ispd2015/mgc_pci_bridge32_a", #   30K nodes
-    ])),
+    #("benchmark", (["input"], [
+    #    "ispd2005/bigblue4",            # 2.2M nodes
+    #    "ispd2015/mgc_superblue11_a",   #  927K nodes
+    #    "ispd2015/mgc_superblue14",    #  613K nodes
+    #    "ispd2005/adaptec4",           #  495K nodes
+    #    "ispd2005/bigblue1",            #  278K nodes
+    #    "ispd2005/adaptec1",            #  211K nodes
+    #    "ispd2015/mgc_matrix_mult_b",   #  146K nodes
+    #    "ispd2015/mgc_matrix_mult_1",  #  155K nodes
+    #    "ispd2015/mgc_edit_dist_a",     #  127K nodes
+    #    "ispd2015/mgc_des_perf_1",      #  113K nodes
+    #    "ispd2015/mgc_fft_1",           #   32K nodes
+    #    "ispd2015/mgc_fft_a",           #   31K nodes
+    #    "ispd2015/mgc_pci_bridge32_a", #   30K nodes
+    #])),
 
     # Uncomment to sweep additional parameters:
     # (<param_name>, ([section_path], [values_to_sweep]))
     ################################################################
-    #("partials_compute_method", (["params"], ["cpu", "aie"])),
+    #("density_weight_init_multiplier", (["params"], [8e-6, 8e-5])),
     #("enable_backtracking",     (["params"], [True, False])),
+    #("enable_momentum",  (["params"], [True, False])),
+    #("enable_preconditioning",  (["params"], [True, False])),
     #("enable_filler",     (["params"], [True, False])),
+
     #("init_step_length",        (["params"], [0.001, 0.01, 0.1, 1.0])),
+    #("init_spread",              (["params"], [0.5, 0.4, 0.3, 0.25])),
     #("convergence_min_iterations", (["params"], [50, 100, 200])),
     #("density_weight_max_step", (["params"], [1.02, 1.05, 1.1])),
-    #("density_weight_init_multiplier", (["params"], [8e-04, 8e-03, 8e-02])),
     #("bins_per_row",            (["params"], [64, 128, 256])),
+    #("partials_compute_method", (["params"], ["cpu", "aie"])),
 ])
 
 
@@ -142,10 +146,14 @@ def strip_json_comments(text: str) -> str:
 
 
 def load_config(path: str) -> dict:
-    """Load a JSON config file, stripping // and # comments first."""
+    """Load a JSON config file, stripping // and # comments and trailing commas."""
+    import re
     with open(path, 'r') as f:
         raw = f.read()
-    return json.loads(strip_json_comments(raw))
+    stripped = strip_json_comments(raw)
+    # Remove trailing commas before } or ] (invalid JSON but common in hand-edited configs)
+    stripped = re.sub(r',\s*([}\]])', r'\1', stripped)
+    return json.loads(stripped)
 
 def update_info_string(config: dict, config_path: str, run_num: int, total_runs: int) -> None:
     """
@@ -383,10 +391,10 @@ def dse():
             if run.poll() is not None:
                 run_num, combo_str, success, elapsed = run.finish()
                 completed += 1
-                status = "OK" if success else "FAIL"
+                status = "DONE" if success else "FAIL"
                 if not success:
                     failed += 1
-                print(f"DSE: ({(completed/total_runs)*100:4.1f}%) [{completed}/{total_runs}] {status}  {elapsed:6.1f}s  {combo_str}")
+                print(f"DSE: ({(completed/total_runs)*100:4.1f}%) [{completed}/{total_runs}] {status} -- {elapsed:6.1f}s  {combo_str}")
             else:
                 still_active.append(run)
         active = still_active
@@ -396,8 +404,72 @@ def dse():
             time.sleep(0.5)
 
     elapsed_total = time.time() - t0_sweep
-    print(f"\nDSE complete: {completed - failed}/{total_runs} succeeded in {elapsed_total:.1f}s")
-    print(f"Results: {sweep_dir}/")
+
+    # =========================================================================
+    # Summary Banner
+    # =========================================================================
+    print()
+    print("=" * 80)
+    print(f"  DSE COMPLETE — {completed - failed}/{total_runs} succeeded, {failed} failed  ({elapsed_total:.1f}s)")
+    print("=" * 80)
+
+    # Try to read results CSV for a detailed summary table
+    csv_path = os.path.join(sweep_dir, "results.csv")
+    if os.path.exists(csv_path):
+        import csv
+        with open(csv_path) as f:
+            reader = csv.DictReader(f)
+            rows = sorted(list(reader), key=lambda r: (r.get("Design", ""), r.get("Final HPWL", "")))
+
+        if rows:
+            # Detect which DSE parameter columns exist (dynamic — works for any sweep)
+            fixed_cols = {"Design", "Iters", "Final HPWL", "Best Iter", "Best HPWL", "Best OVFW",
+                          "Gamma", "Net Count", "Node Count", "HPWL_Graph", "Combined_Graph",
+                          "Placement_GIF", "Total Runtime (sec)", "DB IO Time (sec)",
+                          "Algorithm Time (sec)", "Iteration Avg (sec)", "Partials AIE Time (sec)",
+                          "Memory Usage (MB)", "Output Dir", "Timestamp"}
+            dse_cols = [k for k in rows[0].keys() if k and k not in fixed_cols]
+
+            # Build format string dynamically
+            col_widths = {"Design": 22, "Iters": 5, "Best HPWL": 10, "Best Iter": 8,
+                          "Best OVFW": 8}
+            for dc in dse_cols:
+                col_widths[dc] = max(len(dc), max(len(str(r.get(dc, ""))) for r in rows)) + 1
+
+            # Header
+            header_parts = []
+            for col in ["Design"] + dse_cols + ["Iters", "Best HPWL", "Best Iter", "Best OVFW"]:
+                w = col_widths.get(col, 12)
+                header_parts.append(f"{col:<{w}}")
+            header_line = "  ".join(header_parts)
+            print()
+            print(f"  {header_line}")
+            print(f"  {'-' * len(header_line)}")
+
+            # Data rows
+            for r in rows:
+                parts = []
+                for col in ["Design"] + dse_cols + ["Iters", "Best HPWL", "Best Iter", "Best OVFW"]:
+                    w = col_widths.get(col, 12)
+                    val = r.get(col, "")
+                    parts.append(f"{val:<{w}}")
+                print(f"  {'  '.join(parts)}")
+
+            # Quick stats
+            hpwls = [float(r["Best HPWL"]) for r in rows if r.get("Best HPWL") not in (None, "", "N/A")]
+            ovfws = [float(r["Best OVFW"]) for r in rows if r.get("Best OVFW") not in (None, "", "N/A")]
+            if hpwls:
+                print()
+                print(f"  HPWL range:     {min(hpwls):.3e} — {max(hpwls):.3e}  ({max(hpwls)/min(hpwls):.1f}x spread)")
+            if ovfws:
+                print(f"  Overflow range:  {min(ovfws):.3f} — {max(ovfws):.3f}")
+    else:
+        print(f"\n  (No results.csv found — all runs may have failed)")
+
+    print()
+    print(f"  Results directory: {sweep_dir}/")
+    print("=" * 80)
+    print()
 
 
 def main():

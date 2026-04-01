@@ -160,7 +160,7 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     // Draw die boundary in black
     cairo_set_source_rgb (cr, 0.0, 0.0, 0.0);
     cairo_set_line_width (cr, 0.004);
-    cairo_rectangle (cr, DIE_START, DIE_START, 1-2*DIE_START, 1-2*DIE_START); // aspect ratio from canvas dims
+    cairo_rectangle (cr, DIE_START, DIE_START, DIE_SCALE, DIE_SCALE);
     cairo_stroke(cr);
     
     // Draw Fillers
@@ -170,9 +170,21 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     cairo_set_source_rgb (cr, 0.9, 0.9, 0.9);  // grey 
     cairo_fill(cr);
 
-    // Draw Components
+    // Draw Fixed Components 
     for (auto item : db.getComponents()) {
-       drawComponent(item.second);
+       if (item.second->getStatus() == FIXED)
+           drawComponent(item.second);
+    }
+    cairo_set_source_rgb (cr, 0.8, 0.0, 0.0); // red for fixed components
+    cairo_fill_preserve(cr);
+    cairo_set_source_rgb (cr, 0.0, 0.0, 0.0); // black border
+    cairo_set_line_width (cr, 0.001);
+    cairo_stroke(cr);
+
+    // Draw Movable Components (blue)
+    for (auto item : db.getComponents()) {
+       if (item.second->getStatus() != FIXED)
+           drawComponent(item.second);
     }
     cairo_set_source_rgb (cr, 0.0, 0.0, 1.0); // blue
     cairo_fill(cr);
@@ -209,31 +221,35 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     std::string iter_str = "Iter: " + std::to_string(info.iteration);
     cairo_show_text (cr, iter_str.c_str());
 
-    cairo_move_to (cr, .12, .99);
+    cairo_move_to (cr, .18, .99);
     std::string hpwl_str = "HPWL: " + SCI(info.hpwl);
     cairo_show_text (cr, hpwl_str.c_str());
 
-    cairo_move_to (cr, .35, .99);
+    cairo_move_to (cr, .40, .99);
     std::string ovfw_str = "OVFW: " + PREC_P(info.overflow, 2);
     cairo_show_text (cr, ovfw_str.c_str());
 
-    cairo_move_to (cr, .54, .99);
-    std::string alpha_str = "alpha: " + SCI(info.step_length);
-    cairo_show_text (cr, alpha_str.c_str());
+    if (info.filename_override.empty()) {
+        cairo_move_to (cr, .60, .99);
+        std::string alpha_str = "alpha: " + SCI(info.step_length);
+        cairo_show_text (cr, alpha_str.c_str());
 
-    cairo_move_to (cr, .78, .99);
-    std::string lambda_str = "lambda: " + SCI(info.density_weight);
-    cairo_show_text (cr, lambda_str.c_str());
+        cairo_move_to (cr, .78, .99);
+        std::string lambda_str = "lambda: " + SCI(info.density_weight);
+        cairo_show_text (cr, lambda_str.c_str());
+    }
 
     cairo_stroke(cr);
 
 
     // export image
-    // index the image based on iteration
     fs::create_directories(dir); // ensure this directory exists
-    string filename = "iter_";
-    filename.append(std::to_string(info.iteration));
-    filename.append(".png");
+    string filename;
+    if (!info.filename_override.empty()) {
+        filename = info.filename_override + ".png";
+    } else {
+        filename = "iter_" + std::to_string(info.iteration) + ".png";
+    }
     dir.append(filename);
     Table t;
     t.add_row(RowStream{} << "VISUALIZER output PNG to ");

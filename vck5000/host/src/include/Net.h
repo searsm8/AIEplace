@@ -56,6 +56,7 @@ public:
     Box getBoundingBox();
 
     bool hasPin();
+    bool hasFixedNode();
 
 }; // End of class Net
 

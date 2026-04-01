@@ -74,6 +74,7 @@ public:
     bool enable_momentum;
     bool enable_preconditioning;
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
+    float avg_node_size = 1.0f; // average cell area; normalizes preconditioner area term
 
     int die_size; // minimum of width and height of the die area
     int bins_per_row; // grid size
@@ -89,10 +90,13 @@ public:
     float hpwl_improvement_threshold;
     float overflow_threshold;
     int convergence_window;
+    int convergence_iterations;             // iterations to continue after overflow < threshold
+    int convergence_iterations_remaining = -1; // countdown; -1 = not yet triggered
     float target_density;
 
     // Execution tracking
     int iteration = 0;
+    bool quiet; // if true, suppress all console output except errors (for DSE runs)
 
     // Two-tier best solution tracking (XPlace-inspired):
     //   Primary: lowest HPWL among solutions with overflow < convergence threshold
@@ -107,13 +111,17 @@ public:
     BestSolution best_fallback;  // Pareto-improving, always available
     static constexpr int BEST_SOL_MIN_ITER = 50; // don't save before this
     int last_density_jolt_iter = -1000; // tracks last emergency 2x jolt for cooldown
+    
+
+    // Legacy timing variables
     long double pgrm_start_time;
     long double db_IO_time;
     double algo_time = 0.0;
+    
+    // Histories for diagnostics and visualization
     std::vector<float> hpwl_history; // history of HPWL values for each iteration
     std::vector<float> ovfw_history; // history of overflow values for each iteration
     std::vector<float> step_length_history;
-    bool quiet; // if true, suppress all console output except errors (for DSE runs)
 
 #ifdef CREATE_VISUALIZATION
     Visualizer viz;

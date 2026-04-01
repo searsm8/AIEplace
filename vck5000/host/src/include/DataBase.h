@@ -95,7 +95,9 @@ private:
     int m_packet_count;
     int m_total_net_degree;
     float m_maximum_utilization = 0.0f; // 0 = not specified by benchmark
-    float m_total_component_area = 0.0f; // cached after construction
+    float m_total_component_area = 0.0f; // all components (movable + fixed), cached after construction
+    float m_total_fixed_area = 0.0f;     // fixed components only
+    float m_total_movable_area = 0.0f;   // movable components only (= total - fixed)
 
 public:
     // each compute graph has a vector of PacketIndex which records what data has been sent
@@ -147,6 +149,8 @@ public:
 
     float computeTotalWirelength(string);
     float computeTotalComponentArea();
+    float getTotalFixedArea() { return m_total_fixed_area; }
+    float getTotalMovableArea() { return m_total_movable_area; }
     float getTotalOverflow();
 
     // Packet loading/unloading

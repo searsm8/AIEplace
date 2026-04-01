@@ -11,8 +11,11 @@ AIEPLACE_NAMESPACE_BEGIN
 
 void Placer::computeHpwlPartials()
 {
+    TIME_FUNCTION();
+
     // Clear probe_grad before accumulation, otherwise gradients compound across iterations.
     for (auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
         item.second->next.probe_grad.clear();
     }
     for (auto filler : db.getFillers()) {

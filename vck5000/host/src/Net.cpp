@@ -168,4 +168,13 @@ bool Net::hasPin()
     return false;
 }
 
+bool Net::hasFixedNode()
+{
+    for(Node* node : mv_nodes) {
+        if (node->getStatus() == FIXED)
+            return true;
+    }
+    return false;
+}
+
 AIEPLACE_NAMESPACE_END

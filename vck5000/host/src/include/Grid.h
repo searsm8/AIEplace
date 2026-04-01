@@ -42,6 +42,7 @@ public:
     void iterationReset();
 
     void computeBinOverlaps(Node* node_p);
+    void clampFixedDensity(float target_density);
 
     std::vector< std::vector<float> > getBinDensities(); // rho = overlap / bin_area
     std::vector< std::vector<float> > get_a_uv();

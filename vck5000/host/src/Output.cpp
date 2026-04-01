@@ -194,20 +194,76 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
     out_file.open(csv_path, std::ios_base::app);
     out_file.imbue(std::locale::classic());  // Prevent comma thousands separators
 
+    // XPlace reference HPWL values (×10^6, from Table II/III of Liu et al. TCAD 2023)
+    // Non-deterministic Xplace column; HPWL after global placement + legalization
+    static const std::map<std::string, float> xplace_hpwl = {
+        {"adaptec1",            7.309e+07f},
+        {"adaptec2",            8.130e+07f},
+        {"adaptec3",            1.9362e+08f},
+        {"adaptec4",            1.7336e+08f},
+        {"bigblue1",            8.908e+07f},
+        {"bigblue2",            1.3691e+08f},
+        {"bigblue3",            3.0308e+08f},
+        {"bigblue4",            7.4219e+08f},
+        {"mgc_des_perf_1",      1.1065e+09f},
+        {"mgc_des_perf_a",      1.9988e+09f},
+        {"mgc_des_perf_b",      1.6118e+09f},
+        {"mgc_edit_dist_a",     4.1983e+09f},
+        {"mgc_fft_1",           4.115e+08f},
+        {"mgc_fft_2",           3.741e+08f},
+        {"mgc_fft_a",           6.258e+08f},
+        {"mgc_fft_b",           8.456e+08f},
+        {"mgc_matrix_mult_1",   2.1163e+09f},
+        {"mgc_matrix_mult_2",   2.1527e+09f},
+        {"mgc_matrix_mult_a",   3.0326e+09f},
+        {"mgc_matrix_mult_b",   2.7626e+09f},
+        {"mgc_matrix_mult_c",   2.6746e+09f},
+        {"mgc_pci_bridge32_a",  3.609e+08f},
+        {"mgc_pci_bridge32_b",  7.140e+08f},
+        {"mgc_superblue11_a",   3.35213e+10f},
+        {"mgc_superblue12",     2.57845e+10f},
+        {"mgc_superblue14",     2.27767e+10f},
+        {"mgc_superblue16_a",   2.54910e+10f},
+        {"mgc_superblue19",     1.55424e+10f},
+    };
+
+    // Lookup XPlace reference for this benchmark
+    std::string bench_name = db.getBenchmarkName();
+    float xplace_ref = 0.0f;
+    auto it = xplace_hpwl.find(bench_name);
+    if (it != xplace_hpwl.end())
+        xplace_ref = it->second;
+
+    // Parse DSE sweep parameters into individual key=value pairs
+    // Skip first two lines (progress counter and benchmark name — redundant with other columns)
+    std::vector<std::pair<std::string, std::string>> dse_params;
+    if (cfg["output"].contains("DSE_info")) {
+        std::string dse_str = cfg["output"]["DSE_info"].get<std::string>();
+        std::istringstream stream(dse_str);
+        std::string line;
+        int line_num = 0;
+        while (std::getline(stream, line)) {
+            if (++line_num <= 2) continue;
+            auto eq = line.find('=');
+            if (eq != std::string::npos)
+                dse_params.push_back({line.substr(0, eq), line.substr(eq + 1)});
+        }
+    }
+
     if (need_header) {
         out_file << "Design,";
-        out_file << "Iterations,";
-        out_file << "Final HPWL,";
-        out_file << "Initial HPWL,";
-        out_file << "Improvement %,";
-        out_file << "Final Overflow,";
-        out_file << "Final Step Length,";
+        out_file << "Iters,";
+        out_file << "Best Iter,";
+        out_file << "Best OVFW,";
+        out_file << "Best HPWL,";
+        out_file << "XPlace HPWL,";
+        out_file << "Ratio,";
+        // DSE sweep parameter columns (one per swept parameter)
+        for (const auto& [key, val] : dse_params)
+            out_file << key << ",";
         out_file << "Gamma,";
         out_file << "Net Count,";
         out_file << "Node Count,";
-        out_file << "HPWL_Graph,";
-        out_file << "Combined_Graph,";
-        out_file << "Placement_GIF,";
         out_file << "Total Runtime (sec),";
         out_file << "DB IO Time (sec),";
         out_file << "Algorithm Time (sec),";
@@ -216,7 +272,9 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
         out_file << "Memory Usage (MB),";
         out_file << "Output Dir,";
         out_file << "Timestamp,";
-        out_file << "DSE Config";
+        out_file << "HPWL_Graph,";
+        out_file << "Combined_Graph,";
+        out_file << "Placement_GIF";
         out_file << endl;
     }
 
@@ -243,17 +301,30 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
 
     out_file << "\"" << db.getBenchmarkName() << "\",";
     out_file << iteration << ",";
-    out_file << std::scientific << SCI(final_hpwl) << ",";
-    out_file << std::scientific << SCI(m_initial_hpwl) << ",";
-    out_file << std::fixed << std::setprecision(2) << hpwl_improvement << ",";
-    out_file << std::scientific << SCI(final_overflow) << ",";
-    out_file << std::fixed << SCI(step_length) << ",";
+    // Best solution info (primary > fallback > N/A)
+    const BestSolution& best = best_primary.valid ? best_primary
+                             : best_fallback.valid ? best_fallback
+                             : best_primary;
+    if (best.valid) {
+        out_file << best.iteration << ","
+                 << std::scientific << PREC(best.overflow) << ","
+                 << std::scientific << SCI(best.hpwl) << ",";
+        // XPlace reference and ratio
+        if (xplace_ref > 0.0f) {
+            out_file << std::scientific << SCI(xplace_ref) << ","
+                     << std::fixed << std::setprecision(2) << (best.hpwl / xplace_ref) << ",";
+        } else {
+            out_file << "N/A,N/A,";
+        }
+    } else {
+        out_file << "N/A,N/A,N/A,N/A,N/A,";
+    }
+    // DSE sweep parameter values (matches header columns)
+    for (const auto& [key, val] : dse_params)
+        out_file << val << ",";
     out_file << PREC(gamma) << ",";
     out_file << db.getNetsVector().size() << ",";
     out_file << db.getComponents().size() << ",";
-    out_file << hpwl_graph_cell << ",";
-    out_file << combined_graph_cell << ",";
-    out_file << placement_gif_cell << ",";
     out_file << std::fixed << std::setprecision(3);
     out_file << total_runtime << ",";
     out_file << db_IO_time << ",";
@@ -263,17 +334,9 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
     out_file << getMemoryUsageMB() << ",";
     out_file << "\"" << output_dir.string() << "\",";
     out_file << "\"" << timestamp.str() << "\",";
-    // DSE Config — flatten the multi-line DSE_info string into a single cell
-    if (cfg["output"].contains("DSE_info")) {
-        std::string dse_str = cfg["output"]["DSE_info"].get<std::string>();
-        // Replace newlines with " | " so it fits in one CSV cell
-        std::string flat;
-        for (char c : dse_str) {
-            if (c == '\n') flat += " | ";
-            else flat += c;
-        }
-        out_file << "\"" << flat << "\"";
-    }
+    out_file << (hpwl_graph_cell.empty() ? "none" : hpwl_graph_cell) << ",";
+    out_file << (combined_graph_cell.empty() ? "none" : combined_graph_cell) << ",";
+    out_file << (placement_gif_cell.empty() ? "none" : placement_gif_cell);
     out_file << endl;
     out_file.close();
 }
@@ -290,7 +353,7 @@ void Placer::printFinalResults()
 
     if (chosen.valid) {
         restoreBestPlacement();
-        std::string type = (&chosen == &best_primary) ? "primary (HPWL-driven)" : "fallback (Pareto)";
+        std::string type = (&chosen == &best_primary) ? "primary (converged)" : "fallback (lowest overflow)";
         Logger::log_info("Restored " + type + " best placement from iteration " +
             std::to_string(chosen.iteration) +
             " (HPWL: " + std::to_string(chosen.hpwl) +
@@ -308,7 +371,7 @@ void Placer::printFinalResults()
     float final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
     float final_overflow = grid.computeTotalOverflow(
                             target_density,
-                            db.computeTotalComponentArea());
+                            db.getTotalMovableArea());
     float total_runtime = getInterval(pgrm_start_time, getTime());
     float iteration_avg = (iteration > 0) ? total_runtime / iteration : 0.0f;
 
@@ -337,6 +400,14 @@ void Placer::printFinalResults()
         results.add_row(RowStream{} << "HPWL improvement (%)" << std::fixed << std::setprecision(2) << hpwl_improvement);
     }
     results.add_row(RowStream{} << "Final Overflow" << std::scientific << std::setprecision(3) << final_overflow);
+    if (chosen.valid) {
+        std::string type = (&chosen == &best_primary) ? "primary" : "fallback";
+        std::ostringstream best_str;
+        best_str << "iter " << chosen.iteration
+                 << " (" << type << ", HPWL=" << std::scientific << std::setprecision(3)
+                 << chosen.hpwl << ", ovfw=" << chosen.overflow << ")";
+        results.add_row(RowStream{} << "Best Solution" << best_str.str());
+    }
     results.column(0).format().font_align(FontAlign::right);
     results.column(1).format().font_align(FontAlign::left);
 
@@ -370,7 +441,14 @@ void Placer::printFinalResults()
     // Generate visualization in run-specific directory
     #ifdef CREATE_VISUALIZATION
         if(cfg["output"]["visualize"]) {
-            PlotInfo info = {iteration, final_hpwl, final_overflow, step_length, density_weight, db.getBenchmarkName()};
+            PlotInfo info;
+            if (chosen.valid) {
+                info = {chosen.iteration, chosen.hpwl, chosen.overflow, 0, 0,
+                        db.getBenchmarkName(), "best_solution"};
+            } else {
+                info = {iteration, final_hpwl, final_overflow, step_length, density_weight,
+                        db.getBenchmarkName(), "best_solution"};
+            }
             viz.drawPlacement(db, run_output_dir, info);
 
             // use python script to create gif from generated pngs in run directory
@@ -471,16 +549,40 @@ void Placer::initializeFocus()
     // add named focus nets
     //for()
 
-    // add random focus nets
-    auto nets = db.getNets();
-    auto iter = nets.begin();
-    for(int i = 0; i < cfg["params"]["rand_focus_nets"]; i++) {
-        // pick a random net to focus which has a pin
-        //std::advance(iter, rand() % nets.size());
-        while(!iter->second->hasPin())
-            std::advance(iter, 1);
-        db.addFocusNet(iter->second);
-        std::advance(iter, 1);
+    // add random focus nets — collect eligible nets first, then sample
+    auto& nets = db.getNets();
+    int num_focus = cfg["output"].value("rand_focus_nets", 0);
+    if (num_focus <= 0) return;
+
+    // Build list of nets that have at least one fixed node (IO pad or fixed macro)
+    std::vector<Net*> eligible;
+    for (auto& [id, net] : nets) {
+        if (net->hasFixedNode())
+            eligible.push_back(net);
+    }
+
+    if (eligible.empty()) {
+        Logger::log_info("No nets with fixed nodes found for focus visualization");
+        return;
+    }
+
+    // Shuffle eligible nets to pick random ones
+    std::srand((unsigned)std::time(nullptr));
+    for (int i = (int)eligible.size() - 1; i > 0; i--) {
+        int j = std::rand() % (i + 1);
+        std::swap(eligible[i], eligible[j]);
+    }
+
+    int count = std::min(num_focus, (int)eligible.size());
+    for (int i = 0; i < count; i++) {
+        db.addFocusNet(eligible[i]);
+        Box bb = eligible[i]->getBoundingBox();
+        Logger::log_info("Focus net " + std::to_string(i) + ": " + eligible[i]->getName()
+            + " (" + std::to_string(eligible[i]->getNodes().size()) + " nodes)"
+            + " BB=[" + std::to_string((int)bb.getPosBottomLeft().x) + ","
+            + std::to_string((int)bb.getPosBottomLeft().y) + " → "
+            + std::to_string((int)bb.getPosTopRight().x) + ","
+            + std::to_string((int)bb.getPosTopRight().y) + "]");
     }
 }
 
@@ -489,25 +591,27 @@ void Placer::recordIterationResults()
     float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
     float overflow = grid.computeTotalOverflow(
                     target_density,
-                    db.computeTotalComponentArea());
+                    db.getTotalMovableArea());
 
     hpwl_history.push_back(hpwl);
     step_length_history.push_back(step_length);
     ovfw_history.push_back(overflow);
 
-    // Two-tier best solution tracking (XPlace-inspired).
+    // Two-tier best solution tracking.
     // Skip early iterations to let the solver stabilize.
     if (iteration < BEST_SOL_MIN_ITER) return;
 
-    // Primary: lowest HPWL among solutions that meet the overflow threshold
+    constexpr float OVFW_EPSILON = 0.005f;
+
+    // Primary: lowest HPWL among solutions that meet the overflow threshold (converged)
     if (overflow < overflow_threshold && hpwl < best_primary.hpwl) {
         best_primary = {hpwl, overflow, iteration, true};
         snapshotBestPlacement();
     }
 
-    // Fallback: Pareto-improving — strictly lower overflow AND HPWL within 1%
-    if (overflow < best_fallback.overflow &&
-        hpwl < best_fallback.hpwl * 1.01f)
+    // Fallback: lowest overflow achieved. Tiebreak on HPWL when overflow is similar.
+    if (overflow < best_fallback.overflow - OVFW_EPSILON ||
+        (overflow < best_fallback.overflow + OVFW_EPSILON && hpwl < best_fallback.hpwl))
     {
         best_fallback = {hpwl, overflow, iteration, true};
         // Only snapshot if primary hasn't already saved this iteration

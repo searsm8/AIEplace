@@ -97,6 +97,18 @@ void Grid::computeBinOverlaps(Node* node_p)
     }
 }
 
+// Clamp each bin's overlap to target_density * bin_area after fixed components
+// have been added. This prevents fixed macros from counting as overflow —
+// only movable cells placed on top of fixed regions will overflow.
+void Grid::clampFixedDensity(float target_density)
+{
+    for (int col = 0; col < m_bins_per_row; col++)
+        for (int row = 0; row < m_bins_per_col; row++) {
+            float cap = m_bins[col][row].bb.getArea() * target_density;
+            m_bins[col][row].total_overlap = std::min(m_bins[col][row].total_overlap, cap);
+        }
+}
+
 std::vector< std::vector<float> > Grid::getBinDensities()
 {
     // Compute per-bin density (rho = total_overlap / bin_area)

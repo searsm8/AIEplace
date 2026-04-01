@@ -62,12 +62,27 @@ DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
         m_total_net_degree += net->getDegree();
     }
 
-    // Cache total component area (constant for the lifetime of the design)
+    // Cache area breakdown (constant for the lifetime of the design)
     double area_sum = 0;
+    double fixed_sum = 0;
+    int fixed_count = 0;
     for (auto item : mm_components) {
-        area_sum += item.second->getArea();
+        float area = item.second->getArea();
+        area_sum += area;
+        if (item.second->getStatus() == FIXED) {
+            fixed_sum += area;
+            fixed_count++;
+        }
     }
     m_total_component_area = (float)area_sum;
+    m_total_fixed_area = (float)fixed_sum;
+    m_total_movable_area = m_total_component_area - m_total_fixed_area;
+
+    Logger::log_info("Fixed components: " + std::to_string(fixed_count)
+        + " (area: " + std::to_string((long long)m_total_fixed_area)
+        + ", " + std::to_string((int)(100.0f * m_total_fixed_area / m_die_area.getArea())) + "% of die)");
+    Logger::log_info("Movable components: " + std::to_string((int)mm_components.size() - fixed_count)
+        + " (area: " + std::to_string((long long)m_total_movable_area) + ")");
 }
 
 /**
@@ -251,7 +266,9 @@ bool DataBase::addFillers(float target_utilization)
 
     Logger::log_info("Adding filler cells to database...");
 
-    float unfilled_area = getDieArea().getArea() * target_utilization - computeTotalComponentArea();
+    float available_area = getDieArea().getArea() - m_total_fixed_area;
+    float unfilled_area = available_area * target_utilization - m_total_movable_area;
+    Logger::log_info("Available area (die - fixed): " + PREC(available_area));
     Logger::log_info("Total area to fill: " + PREC(unfilled_area));
 
     int fillers_needed = unfilled_area / filler_macro->getArea();
@@ -697,14 +714,19 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         /// @brief set number of blockage nodes with layers 
         //void DataBase::resize_bookshelf_blockage_layers(int) {}
 
-        /// @brief add terminal 
+        /// @brief add terminal (fixed macro or IO pad) as a Component with FIXED status
         void DataBase::add_bookshelf_terminal(string& name, int width, int height) {
-            Pin* new_pin = new Pin(name);
-            new_pin->setBoundingBox(0, 0, width, height);
-            new_pin->setPlacementStatus(PlacementStatus::FIXED);
-            new_pin->setNodePos(Position(0, 0));
-            //cout << "NEW PIN: " << new_pin->getName() << " : " << width << ", " << height << " : " << mm_pins.size() << endl;
-            mm_pins.emplace(std::make_pair(new_pin->getName(), new_pin));
+            Component* comp = new Component(name);
+            string macro_name = "macro_" + std::to_string(width) + "_" + std::to_string(height);
+            MacroClass* macro_p = mm_macros[macro_name];
+            if(macro_p == NULL) {
+                macro_p = new MacroClass(macro_name, width, height);
+                mm_macros[macro_name] = macro_p;
+            }
+            comp->setMacroClass(macro_p);
+            comp->setPlacementStatus(PlacementStatus::FIXED);
+            comp->setNodePos(Position(0, 0));
+            mm_components.emplace(std::make_pair(name, comp));
         }
 
         /// @brief add terminal_NI
@@ -762,29 +784,19 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
 
         /// @brief add row 
         void DataBase::add_bookshelf_row(BookshelfParser::Row const&) {  }
-        /// @brief set node position 
+        /// @brief set node position — all bookshelf nodes (terminals + cells) are now Components
         void DataBase::set_bookshelf_node_position(string const& name, double x, double y, string const& orientation, string const& placement_status, bool notsurewhatfor) {
-            //cout << "set_bookshelf_node_position(): " << name << ": (" << x << ", " << y << ") " << orientation << " " << orientation << " " << notsurewhatfor << endl;
-            if(placement_status == "FIXED") { // terminal pin
-                Pin* pin = mm_pins[name];
-                //cout << "pin found: " << name << " (" << x << ", " << y << ") " << orientation << " " << placement_status << "\tmm_pins.size(): " << mm_pins.size() << endl;
-                assert(pin != NULL && "invalid pin name!");
-                //cout << pin->getName() << " pin->setNodePos(" << x << ", " << y << ")\n";
-                pin->setNodePos(Position(x, y));
-                pin->setPlacementStatus(PlacementStatus::FIXED);
-                pin->setOrientation(orientation);
-                // Bookshelf format doesn't seem to explicitly give die area?
-                // Instead we look for the pins with the biggest coordinates
+            Component* comp = mm_components[name];
+            assert(comp != NULL && "invalid component name!");
+            comp->setNodePos(Position(x, y));
+            comp->setOrientation(orientation);
+            if(placement_status == "FIXED") {
+                comp->setPlacementStatus(PlacementStatus::FIXED);
+                // Bookshelf format doesn't explicitly give die area,
+                // so we infer it from the outermost fixed terminal coordinates
                 if(x > m_max_x) m_max_x = x;
                 if(y > m_max_y) m_max_y = y;
-            } else { // non-terminal node
-                //cout << "component found: " << name << " (" << x << ", " << y << ") " << orientation << " " << placement_status << endl;
-                Component* comp = mm_components[name];
-                assert(comp != NULL && "invalid component name!");
-                comp->setNodePos(Position(x, y));
-                comp->setOrientation(orientation);
             }
-
         }
         /// @brief set net weight 
         //void DataBase::set_bookshelf_net_weight(string const& name, double w) {}

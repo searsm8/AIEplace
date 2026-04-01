@@ -10,6 +10,7 @@ AIEPLACE_NAMESPACE_BEGIN
 
 void Placer::computeElectricFields()
 {
+    TIME_FUNCTION();
     computeOverlaps();          // update the density ρ at probe positions
 
     if(density_method == "aie") {
@@ -380,28 +381,22 @@ void Placer::computeOverlaps()
 {
     Logger::log_trace("Begin computeOverlaps()");
 
+    // Pass 1: Fixed components — their density is clamped so bins fully covered
+    // by fixed macros register as "at capacity" but not overflowed.
     for (auto item : db.getComponents())
-        grid.computeBinOverlaps(item.second);
+        if (item.second->getStatus() == FIXED)
+            grid.computeBinOverlaps(item.second);
+
+    grid.clampFixedDensity(target_density);
+
+    // Pass 2: Movable components and fillers — any density on top of
+    // the clamped fixed baseline counts as real overflow.
+    for (auto item : db.getComponents())
+        if (item.second->getStatus() != FIXED)
+            grid.computeBinOverlaps(item.second);
 
     for (auto filler : db.getFillers())
         grid.computeBinOverlaps(filler);
-
-    // DEBUGGING
-    //double total_node_area = 0;
-    //for (auto item : db.getComponents())
-    //    total_node_area += item.second->getArea();
-    //double total_overlap = 0;
-    //for (int col = 0; col < grid.getBinsPerRow(); col++) {
-    //    for (int row = 0; row < grid.getBinsPerCol(); row++) {
-    //        total_overlap += grid.getBin(col, row).getOverlap();
-    //    }
-    //}
-
-    //Table t;
-    //t.add_row(RowStream{} << "total_node_area" << total_node_area<< ""<<"");
-    //t.add_row(RowStream{} << "total_overlap" << total_overlap);
-    //t.add_row(RowStream{} << "single bin area" << grid.getBin(0,0).bb.getArea() << grid.getBin(7,8).bb.getArea() );
-    //Logger::log("overlap", t);
 }
 
 Gradient Placer::computeElectrostaticForce(Node* node_p)
