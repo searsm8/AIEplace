@@ -1,7 +1,7 @@
 
 #include "Net.h"
 #include "Node.h"
-#include "Pin.h"
+#include "IOPad.h"
 
 
 AIEPLACE_NAMESPACE_BEGIN
@@ -159,10 +159,10 @@ Box Net::getBoundingBox()
     return Box(min_x, min_y, max_x, max_y);
 }
 
-bool Net::hasPin()
+bool Net::hasIOPad()
 {
     for(Node* node : mv_nodes) {
-        if (Pin* pin_ptr = dynamic_cast<Pin*>(node))
+        if (IOPad* iopad_ptr = dynamic_cast<IOPad*>(node))
             return true;
     }
     return false;

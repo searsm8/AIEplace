@@ -41,7 +41,7 @@ void Visualizer::drawComponent(Component* c)
     cairo_rectangle (cr, x, y, width, height);
 }
 
-void Visualizer::drawPin(Pin* p)
+void Visualizer::drawIOPad(IOPad* p)
 {
     double start_x = (double) p->getX() ;
     double start_y = (double) p->getY() ;
@@ -189,9 +189,9 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     cairo_set_source_rgb (cr, 0.0, 0.0, 1.0); // blue
     cairo_fill(cr);
 
-    // Draw Pins
-    for (auto item : db.getPins()) 
-        drawPin(item.second);
+    // Draw IO Pads
+    for (auto item : db.getIOPads())
+        drawIOPad(item.second);
 
     cairo_set_source_rgb (cr, 1.0, 0.64, 0.0); // orange 
     cairo_fill(cr);

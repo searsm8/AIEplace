@@ -84,6 +84,16 @@ public:
     std::string partials_method;
     std::string density_method;
 
+    // LUT for simplified HPWL gradient (used by computeHpwlPartials_simple)
+    // Precomputes exp(-d/gamma) for d = 0, LUT_STEP, 2*LUT_STEP, ... up to 5*gamma.
+    // Nodes beyond lut_range from both bounding box edges get gradient = 0.
+    static constexpr float LUT_STEP = 0.5f;
+    static constexpr int LUT_GAMMA_MULTIPLIER = 5;
+    float hpwl_lut_range = 0.0f;
+    int hpwl_lut_size = 0;
+    float inv_lut_step = 1.0f / LUT_STEP;
+    std::vector<float> hpwl_lut;
+
     // Convergence Criteria, loaded from config file
     int min_iterations;
     int max_iterations;
@@ -148,6 +158,8 @@ public:
     void computeHpwlPartials();
     void computeHpwlPartials_CPU();
     void computeHpwlPartials_simple();
+    void initHpwlLut();
+    inline float lutLookup(float d) const;
     void computeElectricFields();
     void computeElectricFields_CPU();
     void computeElectricFields_DCT();

@@ -113,11 +113,14 @@ Placer::Placer(std::string config_filepath)
             step_length = cfg["params"]["init_step_length"];
             density_weight = 1.0f; // will be updated on iteration 1 after computing gradients
 
-            // Read compute methods 
+            // Read compute methods
             partials_method = cfg["params"]["partials_compute_method"];
             density_method = cfg["params"]["density_compute_method"];
             Logger::log_info("Partials compute method: " + partials_method);
             Logger::log_info("Density compute method:  " + density_method);
+
+            if (partials_method == "simple")
+                initHpwlLut();
 
             // Read Convergence criteria
             max_iterations = cfg["params"]["convergence_max_iterations"];
@@ -455,8 +458,8 @@ void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist
         filler->initializeState(init_pos);
     }
 
-    // Initialize pin State (pins are fixed, but need valid probe_pos for gradient computation)
-    for (auto item : db.getPins())
+    // Initialize IO pad state (fixed, but need valid probe_pos for gradient computation)
+    for (auto item : db.getIOPads())
         item.second->initializeState(item.second->next.node_pos);
 
 

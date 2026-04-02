@@ -21,7 +21,7 @@ void Placer::computeHpwlPartials()
     for (auto filler : db.getFillers()) {
         filler->next.probe_grad.clear();
     }
-    for (auto item : db.getPins()) {
+    for (auto item : db.getIOPads()) {
         item.second->next.probe_grad.clear();
     }
 
@@ -158,60 +158,84 @@ void Placer::receivePartials(Packet* p)
  * These functions run on the host CPU and don't require XRT or VCK5000 hardware.
  ****************/
 
-// Compute all partials using a table-based approach
-// nodes far enough away are assigned partials of 1 or -1
-// nodes in between are table look up
+// Precompute exp(-d/gamma) lookup table for the simple HPWL gradient method.
+// Called once at startup when partials_method == "simple".
+void Placer::initHpwlLut()
+{
+    hpwl_lut_range = LUT_GAMMA_MULTIPLIER * gamma;
+    hpwl_lut_size = int(hpwl_lut_range / LUT_STEP) + 2; // +2 for interpolation safety
+    hpwl_lut.resize(hpwl_lut_size);
+    for (int i = 0; i < hpwl_lut_size; i++) {
+        float d = i * LUT_STEP;
+        hpwl_lut[i] = exp(-d / gamma);
+    }
+    Logger::log_info("HPWL LUT initialized: " + std::to_string(hpwl_lut_size)
+        + " entries, range=" + std::to_string(hpwl_lut_range)
+        + ", gamma=" + std::to_string(gamma));
+}
+
+// Linearly interpolate into the precomputed exp(-d/gamma) LUT.
+inline float Placer::lutLookup(float d) const
+{
+    float idx_f = d * inv_lut_step;
+    int idx = int(idx_f);
+    float frac = idx_f - idx;
+    return hpwl_lut[idx] * (1.0f - frac) + hpwl_lut[idx + 1] * frac;
+}
+
+// LUT-based WA-HPWL gradient approximation.
+// Uses the 2-node softmax approximation: for a node at distance d_max from the
+// net's max edge and d_min from the min edge, the gradient is approximately:
+//   grad = [exp(-d_max/γ) - exp(-d_min/γ)] / [1 + exp(-span/γ)]
+// The exp values come from the precomputed LUT. Nodes far from both edges
+// (distance > 5γ) get gradient ≈ 0 and are skipped entirely.
 void Placer::computeHpwlPartials_simple()
 {
     TIME_FUNCTION();
-    Logger::log_trace("BEGIN computeAllPartials_simple()");
 
-    auto& nets = db.getNetsVector();
+    const float range = hpwl_lut_range;
 
-    for (Net* net_p : nets) {
+    for (Net* net_p : db.getNetsVector()) {
         const std::vector<Node*>& nodes = net_p->getNodes();
         int net_size = net_p->getDegree();
-
-        // Skip further processing for very small nets
         if (net_size <= 1) continue;
 
-        // find max and min x and y probe positions
-        float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
+        // Find bounding box
+        float min_x = __FLT_MAX__, min_y = __FLT_MAX__;
+        float max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
         for (Node* node_p : nodes) {
-            min_x = std::min(min_x, node_p->getProbeX());
-            min_y = std::min(min_y, node_p->getProbeY());
-            max_x = std::max(max_x, node_p->getProbeX());
-            max_y = std::max(max_y, node_p->getProbeY());
+            float px = node_p->getProbeX(), py = node_p->getProbeY();
+            min_x = std::min(min_x, px); max_x = std::max(max_x, px);
+            min_y = std::min(min_y, py); max_y = std::max(max_y, py);
         }
 
-        for(size_t i = 0; i < net_size; i++) {
+        float span_x = max_x - min_x;
+        float span_y = max_y - min_y;
+
+        // Normalization: 1/(1+exp(-span/γ)) — corrects for small-span nets
+        // where the gradient magnitude should be < 1.
+        float norm_x = (span_x < range) ? 1.0f / (1.0f + lutLookup(span_x)) : 1.0f;
+        float norm_y = (span_y < range) ? 1.0f / (1.0f + lutLookup(span_y)) : 1.0f;
+
+        for (size_t i = 0; i < net_size; i++) {
             float x = nodes[i]->getProbeX();
             float y = nodes[i]->getProbeY();
 
-            // Compute partials using shortcut
-            const int THRESHOLD = 10; // distance threshold for partials
-            Gradient simple_partial;
-            if (x < min_x + THRESHOLD) {
-                simple_partial.x = (int(x - min_x) * 0.1f) - 1;
-            } else if (x > max_x - THRESHOLD) {
-                simple_partial.x = 1 - (int(max_x - x) * 0.1f);
-            } else {
-                simple_partial.x = 0;
-            }
+            float d_max_x = max_x - x;
+            float d_min_x = x - min_x;
+            float d_max_y = max_y - y;
+            float d_min_y = y - min_y;
 
-            if (y < min_y + THRESHOLD) {
-                simple_partial.y = (int(y - min_y) * 0.1f) - 1;
-            } else if (y > max_y - THRESHOLD) {
-                simple_partial.y = 1 - (int(max_y - y) * 0.1f);
-            } else {
-                simple_partial.y = 0;
-            }
+            float plus_x  = (d_max_x < range) ? lutLookup(d_max_x) * norm_x : 0.0f;
+            float minus_x = (d_min_x < range) ? lutLookup(d_min_x) * norm_x : 0.0f;
 
-            nodes[i]->next.probe_grad.x += simple_partial.x ;
-            nodes[i]->next.probe_grad.y += simple_partial.y ;
+            float plus_y  = (d_max_y < range) ? lutLookup(d_max_y) * norm_y : 0.0f;
+            float minus_y = (d_min_y < range) ? lutLookup(d_min_y) * norm_y : 0.0f;
+
+            nodes[i]->next.probe_grad.x += plus_x - minus_x;
+            nodes[i]->next.probe_grad.y += plus_y - minus_y;
         }
     }
-
 }
 
 void Placer::computeHpwlPartials_CPU()

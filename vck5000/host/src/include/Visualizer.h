@@ -46,7 +46,7 @@ class Visualizer
     void init(Box die_area);
     float scale(float f);
     void drawComponent(Component* c);
-    void drawPin(Pin* p);
+    void drawIOPad(IOPad* p);
     void highlightNet(Net* net);
     void highlightNode(Node* node);
     void drawCross(float x, float y, float cross_size = 0.004);
