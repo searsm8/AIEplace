@@ -11,10 +11,10 @@
   "input": {
     //"benchmark": "host/benchmarks/ispd2015/mgc_matrix_mult_b",
     //"benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
-    //"benchmark": "host/benchmarks/ispd2015/mgc_pci_bridge32_a",
+    "benchmark": "host/benchmarks/ispd2015/mgc_pci_bridge32_a",
     //"benchmark": "host/benchmarks/ispd2005/adaptec1",
     //"benchmark": "host/benchmarks/ispd2005/bigblue1",
-    "benchmark": "host/benchmarks/ispd2005/bigblue4",
+    //"benchmark": "host/benchmarks/ispd2005/bigblue4",
     //"benchmark": "host/benchmarks/ispd2015/mgc_superblue11_a",
     //"benchmark": "host/benchmarks/ispd2015/mgc_superblue19",
     //"benchmark": "host/benchmarks/ispd2015/toy",
@@ -67,7 +67,7 @@
 
   "output": {
     "visualize": true, // if true, will export visualization images
-    "iterations_per_export": 1,
+    "iterations_per_export": 10,
     "quiet": false,    // if true, suppress all console output except errors (for DSE)
     "results_dir": "results/single_runs",
     "focus_nets": [], // focus nets are highlighted in visualization exports.

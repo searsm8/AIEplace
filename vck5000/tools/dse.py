@@ -34,53 +34,53 @@ CONFIG_PATH = "host/run_config.json"
 dse_sweep = OrderedDict([
     # Full list of benchmarks, ordered largest-first (by node count) so the
     # longest-running jobs start first and smaller ones fill in around them.
-    ("benchmark", (["input"], [
-        "ispd2005/bigblue4",            # 2.2M nodes
-        "ispd2015/mgc_superblue12",     # 1.3M nodes
-        "ispd2005/bigblue3",            # 1.1M nodes
-        "ispd2015/mgc_superblue11_a",   #  927K nodes
-        "ispd2015/mgc_superblue16_a",   #  681K nodes
-        "ispd2015/mgc_superblue14",     #  613K nodes
-        "ispd2005/bigblue2",            #  535K nodes
-        "ispd2015/mgc_superblue19",     #  506K nodes
-        "ispd2005/adaptec4",            #  495K nodes
-        "ispd2005/adaptec3",            #  451K nodes
-        "ispd2005/bigblue1",            #  278K nodes
-        "ispd2005/adaptec2",            #  254K nodes
-        "ispd2005/adaptec1",            #  211K nodes
-        "ispd2015/mgc_matrix_mult_1",   #  155K nodes
-        "ispd2015/mgc_matrix_mult_a",   #  150K nodes
-        "ispd2015/mgc_matrix_mult_b",   #  146K nodes
-        "ispd2015/mgc_matrix_mult_c",   #  146K nodes
-        "ispd2015/mgc_matrix_mult_2",   #  155K nodes
-        "ispd2015/mgc_edit_dist_a",     #  127K nodes
-        "ispd2015/mgc_des_perf_1",      #  113K nodes
-        "ispd2015/mgc_des_perf_a",      #  108K nodes
-        "ispd2015/mgc_des_perf_b",      #  113K nodes
-        "ispd2015/mgc_fft_1",           #   32K nodes
-        "ispd2015/mgc_fft_2",           #   32K nodes
-        "ispd2015/mgc_fft_a",           #   31K nodes
-        "ispd2015/mgc_fft_b",           #   31K nodes
-        "ispd2015/mgc_pci_bridge32_a",  #   30K nodes
-        "ispd2015/mgc_pci_bridge32_b",  #   29K nodes
-    ])),
+    #("benchmark", (["input"], [
+        #"ispd2005/bigblue4",            # 2.2M nodes
+        #"ispd2015/mgc_superblue12",     # 1.3M nodes
+        #"ispd2005/bigblue3",            # 1.1M nodes
+        #"ispd2015/mgc_superblue11_a",   #  927K nodes
+        #"ispd2015/mgc_superblue16_a",   #  681K nodes
+        #"ispd2015/mgc_superblue14",     #  613K nodes
+        #"ispd2005/bigblue2",            #  535K nodes
+        #"ispd2015/mgc_superblue19",     #  506K nodes
+        #"ispd2005/adaptec4",            #  495K nodes
+        #"ispd2005/adaptec3",            #  451K nodes
+        #"ispd2005/bigblue1",            #  278K nodes
+        #"ispd2005/adaptec2",            #  254K nodes
+        #"ispd2005/adaptec1",            #  211K nodes
+        #"ispd2015/mgc_matrix_mult_1",   #  155K nodes
+        #"ispd2015/mgc_matrix_mult_a",   #  150K nodes
+        #"ispd2015/mgc_matrix_mult_b",   #  146K nodes
+        #"ispd2015/mgc_matrix_mult_c",   #  146K nodes
+        #"ispd2015/mgc_matrix_mult_2",   #  155K nodes
+        #"ispd2015/mgc_edit_dist_a",     #  127K nodes
+        #"ispd2015/mgc_des_perf_1",      #  113K nodes
+        #"ispd2015/mgc_des_perf_a",      #  108K nodes
+        #"ispd2015/mgc_des_perf_b",      #  113K nodes
+        #"ispd2015/mgc_fft_1",           #   32K nodes
+        #"ispd2015/mgc_fft_2",           #   32K nodes
+        #"ispd2015/mgc_fft_a",           #   31K nodes
+        #"ispd2015/mgc_fft_b",           #   31K nodes
+        #"ispd2015/mgc_pci_bridge32_a",  #   30K nodes
+    #    "ispd2015/mgc_pci_bridge32_b",  #   29K nodes
+    #])),
 
     # Smaller subset, largest-first for efficient parallel scheduling:
-    #("benchmark", (["input"], [
-    #    "ispd2005/bigblue4",            # 2.2M nodes
-    #    "ispd2015/mgc_superblue11_a",   #  927K nodes
-    #    "ispd2015/mgc_superblue14",    #  613K nodes
-    #    "ispd2005/adaptec4",           #  495K nodes
-    #    "ispd2005/bigblue1",            #  278K nodes
-    #    "ispd2005/adaptec1",            #  211K nodes
-    #    "ispd2015/mgc_matrix_mult_b",   #  146K nodes
-    #    "ispd2015/mgc_matrix_mult_1",  #  155K nodes
-    #    "ispd2015/mgc_edit_dist_a",     #  127K nodes
-    #    "ispd2015/mgc_des_perf_1",      #  113K nodes
-    #    "ispd2015/mgc_fft_1",           #   32K nodes
-    #    "ispd2015/mgc_fft_a",           #   31K nodes
-    #    "ispd2015/mgc_pci_bridge32_a", #   30K nodes
-    #])),
+    ("benchmark", (["input"], [
+        "ispd2005/bigblue4",            # 2.2M nodes
+        "ispd2015/mgc_superblue11_a",   #  927K nodes
+        "ispd2015/mgc_superblue14",    #  613K nodes
+        "ispd2005/adaptec4",           #  495K nodes
+        "ispd2005/bigblue1",            #  278K nodes
+        "ispd2005/adaptec1",            #  211K nodes
+        "ispd2015/mgc_matrix_mult_b",   #  146K nodes
+        "ispd2015/mgc_matrix_mult_1",  #  155K nodes
+        "ispd2015/mgc_edit_dist_a",     #  127K nodes
+        "ispd2015/mgc_des_perf_1",      #  113K nodes
+        "ispd2015/mgc_fft_1",           #   32K nodes
+        "ispd2015/mgc_fft_a",           #   31K nodes
+        "ispd2015/mgc_pci_bridge32_a", #   30K nodes
+    ])),
 
     # Uncomment to sweep additional parameters:
     # (<param_name>, ([section_path], [values_to_sweep]))
@@ -96,7 +96,7 @@ dse_sweep = OrderedDict([
     #("convergence_min_iterations", (["params"], [50, 100, 200])),
     #("density_weight_max_step", (["params"], [1.02, 1.05, 1.1])),
     #("bins_per_row",            (["params"], [64, 128, 256])),
-    #("partials_compute_method", (["params"], ["cpu", "aie"])),
+    ("partials_compute_method", (["params"], ["cpu", "simple"])),
 ])
 
 

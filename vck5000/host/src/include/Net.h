@@ -9,6 +9,15 @@
 AIEPLACE_NAMESPACE_BEGIN
 class Node;
 
+// A pin connection on a net: the parent node, pin offset from node origin, and pin name.
+// Absolute pin position = node->getProbePos() + offset (for gradient evaluation)
+//                       = node->getPos()      + offset (for committed position)
+struct NetPin {
+    Node* node;
+    Position offset;   // from MacroClass pin geometry; (0,0) if unknown
+    string pin_name;   // DEF pin name (e.g. "A", "Y"); empty for IOPads/bookshelf
+};
+
 class Net
 {
 public:
@@ -16,9 +25,8 @@ public:
     string m_name;
     int m_degree;
 
-
-    std::vector<Node*> mv_nodes; // List of all nodes on this net, sorted by descending X or Y positions
-    std::map<Node*, string> mm_net_pins; // which pins are used for this net
+    std::vector<Node*> mv_nodes; // List of all nodes on this net
+    std::vector<NetPin> mv_pins; // Parallel to mv_nodes: each node + pin offset + pin name
 
     int tally = 0; // debugging counter used to track how many times this net has been processed
 
@@ -31,13 +39,11 @@ public:
     // Getters
     string getName() { return m_name; }
     const std::vector<Node*>& getNodes() { return mv_nodes; }
+    const std::vector<NetPin>& getPins() { return mv_pins; }
     int getDegree() { return m_degree; }
 
-    void addNode(Node* n)
-        { mv_nodes.push_back(n); m_degree++; }
-
-    void addNetPin(Node* n, string pin_str)
-        { mm_net_pins[n] = pin_str; }
+    void addNode(Node* n, Position pin_offset = Position(0, 0), string pin_name = "")
+        { mv_nodes.push_back(n); mv_pins.push_back({n, pin_offset, pin_name}); m_degree++; }
 
     // Sorting
     void sortPositionsByX();

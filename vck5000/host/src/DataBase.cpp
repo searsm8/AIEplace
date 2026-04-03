@@ -699,8 +699,12 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                 {
                     Component* comp_p = mm_components[net_pin.first];
                     assert(comp_p != NULL && "COMPONENT name points to nullptr while reading .DEF\n");
-                    new_net->addNode(comp_p);
-                    new_net->addNetPin(comp_p, net_pin.second);
+                    // Look up pin offset from the component's macro
+                    Position pin_offset(0, 0);
+                    MacroClass* macro = comp_p->getMacro();
+                    if (macro && macro->hasPinOffset(net_pin.second))
+                        pin_offset = macro->getPinOffset(net_pin.second);
+                    new_net->addNode(comp_p, pin_offset, net_pin.second);
                     comp_p->addNet(new_net);
                 }
             }
@@ -792,7 +796,6 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                 } else if(mm_components.count(net_pin.node_name)){ // it's a component
                     Component* comp_p = mm_components[net_pin.node_name];
                     new_net->addNode(comp_p);
-                    //new_net->addNetPin(comp_p, net_pin.second);
                     comp_p->addNet(new_net);
                 } else {
                     Logger::log_error("Node was not found while parsing bookshelf nets.");
@@ -1057,14 +1060,11 @@ void DataBase::writeNets(std::ofstream& out) const {
         Net* net = item.second;
         out << "    - " << net->getName();
         int count = 0;
-        for (const auto& node : net->mv_nodes) {
-            try {
-                IOPad& iopad = dynamic_cast<IOPad&>(*node);
-                out << " ( PIN " << iopad.getName() << " )";
-
-            } catch(const std::bad_cast&) {
-                // else node is a component
-                out << " ( " << node->getName() << " " << net->mm_net_pins[node] << " )";
+        for (const auto& pin : net->mv_pins) {
+            if (dynamic_cast<IOPad*>(pin.node)) {
+                out << " ( PIN " << pin.node->getName() << " )";
+            } else {
+                out << " ( " << pin.node->getName() << " " << pin.pin_name << " )";
             }
             if(++count == 4) { // print 4 nodes, then newline
                 out << endl;

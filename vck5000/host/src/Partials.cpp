@@ -196,15 +196,16 @@ void Placer::computeHpwlPartials_simple()
     const float range = hpwl_lut_range;
 
     for (Net* net_p : db.getNetsVector()) {
-        const std::vector<Node*>& nodes = net_p->getNodes();
+        const std::vector<NetPin>& pins = net_p->getPins();
         int net_size = net_p->getDegree();
         if (net_size <= 1) continue;
 
-        // Find bounding box
+        // Find bounding box using pin positions (node + offset)
         float min_x = __FLT_MAX__, min_y = __FLT_MAX__;
         float max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
-        for (Node* node_p : nodes) {
-            float px = node_p->getProbeX(), py = node_p->getProbeY();
+        for (const NetPin& pin : pins) {
+            float px = pin.node->getProbeX() + pin.offset.x;
+            float py = pin.node->getProbeY() + pin.offset.y;
             min_x = std::min(min_x, px); max_x = std::max(max_x, px);
             min_y = std::min(min_y, py); max_y = std::max(max_y, py);
         }
@@ -217,9 +218,9 @@ void Placer::computeHpwlPartials_simple()
         float norm_x = (span_x < range) ? 1.0f / (1.0f + lutLookup(span_x)) : 1.0f;
         float norm_y = (span_y < range) ? 1.0f / (1.0f + lutLookup(span_y)) : 1.0f;
 
-        for (size_t i = 0; i < net_size; i++) {
-            float x = nodes[i]->getProbeX();
-            float y = nodes[i]->getProbeY();
+        for (const NetPin& pin : pins) {
+            float x = pin.node->getProbeX() + pin.offset.x;
+            float y = pin.node->getProbeY() + pin.offset.y;
 
             float d_max_x = max_x - x;
             float d_min_x = x - min_x;
@@ -232,8 +233,9 @@ void Placer::computeHpwlPartials_simple()
             float plus_y  = (d_max_y < range) ? lutLookup(d_max_y) * norm_y : 0.0f;
             float minus_y = (d_min_y < range) ? lutLookup(d_min_y) * norm_y : 0.0f;
 
-            nodes[i]->next.probe_grad.x += plus_x - minus_x;
-            nodes[i]->next.probe_grad.y += plus_y - minus_y;
+            // Gradient accumulates onto the parent node
+            pin.node->next.probe_grad.x += plus_x - minus_x;
+            pin.node->next.probe_grad.y += plus_y - minus_y;
         }
     }
 }
@@ -242,42 +244,45 @@ void Placer::computeHpwlPartials_CPU()
 {
     TIME_FUNCTION();
     for (Net* net_p : db.getNetsVector()) {
-        const std::vector<Node*>& nodes = net_p->getNodes();
+        const std::vector<NetPin>& pins = net_p->getPins();
         int net_size = net_p->getDegree();
 
-        // Skip further processing for very small nets
         if (net_size <= 1) continue;
 
-        // find max and min x and y probe positions
+        // find max and min x and y pin positions (node + offset)
         float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
-        for (Node* node_p : nodes) {
-            min_x = std::min(min_x, node_p->getProbeX());
-            min_y = std::min(min_y, node_p->getProbeY());
-            max_x = std::max(max_x, node_p->getProbeX());
-            max_y = std::max(max_y, node_p->getProbeY());
+        for (const NetPin& pin : pins) {
+            float px = pin.node->getProbeX() + pin.offset.x;
+            float py = pin.node->getProbeY() + pin.offset.y;
+            min_x = std::min(min_x, px); max_x = std::max(max_x, px);
+            min_y = std::min(min_y, py); max_y = std::max(max_y, py);
         }
 
         // Compute A terms directly into our flat vector
         std::vector<Term> A(net_size);
         for (size_t i = 0; i < net_size; i++) {
-            A[i].plus.x  = exp((nodes[i]->getProbeX() - max_x) * inv_gamma);
-            A[i].minus.x = exp((min_x - nodes[i]->getProbeX()) * inv_gamma);
-            A[i].plus.y  = exp((nodes[i]->getProbeY() - max_y) * inv_gamma);
-            A[i].minus.y = exp((min_y - nodes[i]->getProbeY()) * inv_gamma);
+            float px = pins[i].node->getProbeX() + pins[i].offset.x;
+            float py = pins[i].node->getProbeY() + pins[i].offset.y;
+            A[i].plus.x  = exp((px - max_x) * inv_gamma);
+            A[i].minus.x = exp((min_x - px) * inv_gamma);
+            A[i].plus.y  = exp((py - max_y) * inv_gamma);
+            A[i].minus.y = exp((min_y - py) * inv_gamma);
         }
 
         // Compute B and C terms
         Term B, C;
         B.clear(); C.clear();
         for (size_t i = 0; i < net_size; i++) {
+            float px = pins[i].node->getProbeX() + pins[i].offset.x;
+            float py = pins[i].node->getProbeY() + pins[i].offset.y;
             B.plus.x  += A[i].plus.x;
             B.minus.x += A[i].minus.x;
             B.plus.y  += A[i].plus.y;
             B.minus.y += A[i].minus.y;
-            C.plus.x  += A[i].plus.x  * nodes[i]->getProbeX();
-            C.minus.x += A[i].minus.x * nodes[i]->getProbeX();
-            C.plus.y  += A[i].plus.y  * nodes[i]->getProbeY();
-            C.minus.y += A[i].minus.y * nodes[i]->getProbeY();
+            C.plus.x  += A[i].plus.x  * px;
+            C.minus.x += A[i].minus.x * px;
+            C.plus.y  += A[i].plus.y  * py;
+            C.minus.y += A[i].minus.y * py;
         }
 
         // Pre-compute common terms
@@ -290,41 +295,40 @@ void Placer::computeHpwlPartials_CPU()
             Logger::log_error("Zero value detected in B terms, cannot compute partials for net " + net_p->getName());
             Logger::log_error("B: " + B.to_string());
             Logger::log_error(net_p->to_string());
-            for (size_t i = 0; i < net_size; i++) 
-                Logger::log_error("A[" + std::to_string(i) + "]: " + A[i].to_string() + " node: " + nodes[i]->getName());
+            for (size_t i = 0; i < net_size; i++)
+                Logger::log_error("A[" + std::to_string(i) + "]: " + A[i].to_string() + " node: " + pins[i].node->getName());
             Logger::log_error("max_x: " + std::to_string(max_x) + " min_x: " + std::to_string(min_x) + " max_y: " + std::to_string(max_y) + " min_y: " + std::to_string(min_y));
             Logger::log_error("Probe positions:");
-            for (size_t i = 0; i < net_size; i++) 
-                Logger::log_error("Node " + nodes[i]->getName() + " probe_x: " + std::to_string(nodes[i]->getProbeX()) + " probe_y: " + std::to_string(nodes[i]->getProbeY()));
-                
-            Logger::log_error("Node positions:");
-            for (size_t i = 0; i < net_size; i++) 
-                Logger::log_error("Node " + nodes[i]->getName() + " x: " + std::to_string(nodes[i]->getX()) + " y: " + std::to_string(nodes[i]->getY()));
+            for (size_t i = 0; i < net_size; i++) {
+                float px = pins[i].node->getProbeX() + pins[i].offset.x;
+                float py = pins[i].node->getProbeY() + pins[i].offset.y;
+                Logger::log_error("Node " + pins[i].node->getName() + " pin_x: " + std::to_string(px) + " pin_y: " + std::to_string(py));
+            }
         }
         assert(B.plus.x  != 0 && "B.plus.x is zero, cannot compute partials");
         assert(B.minus.x != 0 && "B.minus.x is zero, cannot compute partials");
         assert(B.plus.y  != 0 && "B.plus.y is zero, cannot compute partials");
         assert(B.minus.y != 0 && "B.minus.y is zero, cannot compute partials");
 
-        // Compute partials and store in our flat vector
+        // Compute partials and store — gradient accumulates onto parent node
         for (size_t i = 0; i < net_size; i++) {
-            float x = nodes[i]->getProbeX();
-            float y = nodes[i]->getProbeY();
+            float px = pins[i].node->getProbeX() + pins[i].offset.x;
+            float py = pins[i].node->getProbeY() + pins[i].offset.y;
 
             Gradient partial;
-            partial.x = ((1 + x * inv_gamma) * B.plus.x - (C.plus.x * inv_gamma))
+            partial.x = ((1 + px * inv_gamma) * B.plus.x - (C.plus.x * inv_gamma))
                       * (A[i].plus.x * bpx_sq_inv)
-                    - ((1 - x * inv_gamma) * B.minus.x + (C.minus.x * inv_gamma))
+                    - ((1 - px * inv_gamma) * B.minus.x + (C.minus.x * inv_gamma))
                       * (A[i].minus.x * bmx_sq_inv);
 
-            partial.y = ((1 + y * inv_gamma) * B.plus.y - (C.plus.y * inv_gamma))
+            partial.y = ((1 + py * inv_gamma) * B.plus.y - (C.plus.y * inv_gamma))
                       * (A[i].plus.y * bpy_sq_inv)
-                    - ((1 - y * inv_gamma) * B.minus.y + (C.minus.y * inv_gamma))
+                    - ((1 - py * inv_gamma) * B.minus.y + (C.minus.y * inv_gamma))
                       * (A[i].minus.y * bmy_sq_inv);
 
             //check for NaNs
             if(partial.x != partial.x || partial.y != partial.y) {
-                Logger::log_error("NaN detected in partials for node " + nodes[i]->getName() + " in net " + net_p->getName());
+                Logger::log_error("NaN detected in partials for node " + pins[i].node->getName() + " in net " + net_p->getName());
                 Logger::log_error("partial x: " + std::to_string(partial.x) + " y: " + std::to_string(partial.y));
                 Logger::log_error("net size: " + std::to_string(net_size));
                 Logger::log_error(net_p->to_string());
@@ -334,7 +338,7 @@ void Placer::computeHpwlPartials_CPU()
                 exit(1);
             }
 
-            nodes[i]->next.probe_grad += partial;
+            pins[i].node->next.probe_grad += partial;
         }
     }
 }
