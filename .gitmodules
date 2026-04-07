@@ -1,3 +1,6 @@
 [submodule "third_party/Limbo"]
 	path = third_party/Limbo
 	url = https://github.com/limbo018/Limbo.git
+[submodule "vck5000/aie/lib/Vitis_Libraries"]
+	path = vck5000/aie/lib/Vitis_Libraries
+	url = https://github.com/Xilinx/Vitis_Libraries.git
