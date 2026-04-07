@@ -122,17 +122,13 @@ position_type Net::computeWirelength(string method)
  */
 position_type Net::computeWirelength_HPWL()
 {
-    float min_x = mv_pins.front().node->getX() + mv_pins.front().offset.x;
-    float max_x = min_x;
-    float min_y = mv_pins.front().node->getY() + mv_pins.front().offset.y;
-    float max_y = min_y;
+    Position first = mv_pins.front().getPos();
+    float min_x = first.x, max_x = first.x;
+    float min_y = first.y, max_y = first.y;
     for (const NetPin& pin : mv_pins) {
-        float px = pin.node->getX() + pin.offset.x;
-        float py = pin.node->getY() + pin.offset.y;
-        min_x = std::min(min_x, px);
-        min_y = std::min(min_y, py);
-        max_x = std::max(max_x, px);
-        max_y = std::max(max_y, py);
+        Position p = pin.getPos();
+        min_x = std::min(min_x, p.x); max_x = std::max(max_x, p.x);
+        min_y = std::min(min_y, p.y); max_y = std::max(max_y, p.y);
     }
     return (max_x - min_x) + (max_y - min_y);
 }
@@ -153,10 +149,9 @@ Box Net::getBoundingBox()
     float min_x = __FLT_MAX__, min_y = __FLT_MAX__;
     float max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
     for (const NetPin& pin : mv_pins) {
-        float px = pin.node->getX() + pin.offset.x;
-        float py = pin.node->getY() + pin.offset.y;
-        min_x = std::min(min_x, px); max_x = std::max(max_x, px);
-        min_y = std::min(min_y, py); max_y = std::max(max_y, py);
+        Position p = pin.getPos();
+        min_x = std::min(min_x, p.x); max_x = std::max(max_x, p.x);
+        min_y = std::min(min_y, p.y); max_y = std::max(max_y, p.y);
     }
     return Box(min_x, min_y, max_x, max_y);
 }

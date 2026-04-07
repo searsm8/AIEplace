@@ -66,6 +66,8 @@ public:
     const string& getOrientation() { return m_orient; }
 
     // Convenience getters (for code that doesn't care about current/next distinction)
+    Position getPos() { return next.node_pos; }
+    Position getProbePos() { return next.probe_pos; }
     float getX() { return next.node_pos.x; }
     float getY() { return next.node_pos.y; }
     float getProbeX() { return next.probe_pos.x; }

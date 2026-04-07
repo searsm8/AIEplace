@@ -5,9 +5,9 @@
 #include "Common.h"
 #include "Logger.h"
 #include "Bin.h"
+#include "Node.h"
 
 AIEPLACE_NAMESPACE_BEGIN
-class Node;
 
 // A pin connection on a net: the parent node, pin offset from node origin, and pin name.
 // Absolute pin position = node->getProbePos() + offset (for gradient evaluation)
@@ -16,6 +16,9 @@ struct NetPin {
     Node* node;
     Position offset;   // from MacroClass pin geometry; (0,0) if unknown
     string pin_name;   // DEF pin name (e.g. "A", "Y"); empty for IOPads/bookshelf
+
+    Position getPos() const { return node->getPos() + offset; }
+    Position getProbePos() const { return node->getProbePos() + offset; }
 };
 
 class Net
@@ -40,6 +43,7 @@ public:
     string getName() { return m_name; }
     const std::vector<Node*>& getNodes() { return mv_nodes; }
     const std::vector<NetPin>& getPins() { return mv_pins; }
+    std::vector<NetPin>& getPinsMutable() { return mv_pins; }
     int getDegree() { return m_degree; }
 
     void addNode(Node* n, Position pin_offset = Position(0, 0), string pin_name = "")

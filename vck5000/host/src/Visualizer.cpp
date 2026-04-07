@@ -49,7 +49,7 @@ void Visualizer::drawIOPad(IOPad* p)
     double y = DIE_START + (start_y / (double) m_die_height) * DIE_SCALE;
     double width = max<double>(MIN_SIZE, (p->getXsize() / (double) m_die_width) * DIE_SCALE);
     double height =max<double>(MIN_SIZE, (p->getYsize() / (double) m_die_height) * DIE_SCALE);
-    //cairo_rectangle (cr, x, y, width, height);
+    cairo_rectangle (cr, x, y, width, height);
 }
 
 void Visualizer::highlightNet(Net* net)
@@ -64,27 +64,29 @@ void Visualizer::highlightNet(Net* net)
                          bb.getYsize() * DIE_SCALE / m_die_height); // height
     cairo_stroke(cr);
 
-    // draw X's for each node location
+    // draw X's for each pin location (node + offset)
     cairo_set_source_rgb (cr, 0.0, 0.0, 0.0); // black
     float sum_X = 0;
     float sum_Y = 0;
-    for(Node* node: net->getNodes()) {
-        sum_X += node->getX();
-        sum_Y += node->getY();
-        drawCross(DIE_START + node->getX() * DIE_SCALE / m_die_width,
-              DIE_START + node->getY() * DIE_SCALE / m_die_height);
+    for(const NetPin& pin : net->getPins()) {
+        Position p = pin.getPos();
+        sum_X += p.x;
+        sum_Y += p.y;
+        drawCross(DIE_START + p.x * DIE_SCALE / m_die_width,
+              DIE_START + p.y * DIE_SCALE / m_die_height);
     }
     cairo_stroke(cr);
 
 
     // draw rat's nest of connecting wires!
-    float avg_X = DIE_START + sum_X / net->getNodes().size() * DIE_SCALE / m_die_width;
-    float avg_Y = DIE_START + sum_Y / net->getNodes().size() * DIE_SCALE / m_die_height;
+    float avg_X = DIE_START + sum_X / net->getPins().size() * DIE_SCALE / m_die_width;
+    float avg_Y = DIE_START + sum_Y / net->getPins().size() * DIE_SCALE / m_die_height;
     cairo_set_line_width (cr, 0.0004); // very thin lines for rat's nest
-    for(Node* node: net->getNodes()) {
-        cairo_move_to(cr, DIE_START + node->getX() * DIE_SCALE / m_die_width,
-                            DIE_START + node->getY() * DIE_SCALE / m_die_height);
-        cairo_line_to(cr, avg_X, avg_Y);  
+    for(const NetPin& pin : net->getPins()) {
+        Position p = pin.getPos();
+        cairo_move_to(cr, DIE_START + p.x * DIE_SCALE / m_die_width,
+                            DIE_START + p.y * DIE_SCALE / m_die_height);
+        cairo_line_to(cr, avg_X, avg_Y);
     }
     cairo_stroke(cr);
 }
@@ -107,8 +109,8 @@ void  Visualizer::highlightNode(Node* node)
     cairo_select_font_face (cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size (cr, .02);
     cairo_move_to (cr, .1, .99);
-    std::string highlight_str = "Focus Node: " + node->getName();
-    cairo_show_text (cr, highlight_str.c_str());
+    //std::string highlight_str = "Focus Node: " + node->getName();
+    //cairo_show_text (cr, highlight_str.c_str());
     cairo_move_to (cr, .6, .99);
     cairo_stroke(cr);
 }
@@ -230,7 +232,7 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     cairo_show_text (cr, ovfw_str.c_str());
 
     if (info.filename_override.empty()) {
-        cairo_move_to (cr, .60, .99);
+        cairo_move_to (cr, .55, .99);
         std::string alpha_str = "alpha: " + SCI(info.step_length);
         cairo_show_text (cr, alpha_str.c_str());
 

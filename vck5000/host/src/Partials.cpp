@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cassert>
 #include <chrono>
+#include <unordered_map>
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -158,20 +159,33 @@ void Placer::receivePartials(Packet* p)
  * These functions run on the host CPU and don't require XRT or VCK5000 hardware.
  ****************/
 
-// Precompute exp(-d/gamma) lookup table for the simple HPWL gradient method.
-// Called once at startup when partials_method == "simple".
+// Build normalized exp(-x) lookup table for the simple HPWL gradient method.
+// Stores exp(-i * LUT_STEP_NORM) for i = 0..size-1 (normalized distances x = d/gamma).
+// Table is built once; only inv_lut_step and hpwl_lut_range depend on gamma and are
+// refreshed by updateGamma() each iteration when gamma_schedule is enabled.
 void Placer::initHpwlLut()
 {
-    hpwl_lut_range = LUT_GAMMA_MULTIPLIER * gamma;
-    hpwl_lut_size = int(hpwl_lut_range / LUT_STEP) + 2; // +2 for interpolation safety
+    hpwl_lut_size = int(LUT_GAMMA_MULTIPLIER / LUT_STEP_NORM) + 2; // fixed: 52
     hpwl_lut.resize(hpwl_lut_size);
-    for (int i = 0; i < hpwl_lut_size; i++) {
-        float d = i * LUT_STEP;
-        hpwl_lut[i] = exp(-d / gamma);
-    }
+    for (int i = 0; i < hpwl_lut_size; i++)
+        hpwl_lut[i] = exp(-i * LUT_STEP_NORM);
+    // Set gamma-dependent scalars for the initial gamma value
+    hpwl_lut_range = LUT_GAMMA_MULTIPLIER * gamma;
+    inv_lut_step   = 1.0f / (LUT_STEP_NORM * gamma);
     Logger::log_info("HPWL LUT initialized: " + std::to_string(hpwl_lut_size)
-        + " entries, range=" + std::to_string(hpwl_lut_range)
-        + ", gamma=" + std::to_string(gamma));
+        + " entries (normalized), init_gamma=" + std::to_string(gamma));
+}
+
+// Update gamma according to XPlace overflow-driven schedule and refresh LUT scalars.
+// Formula: gamma = 10^((overflow - 0.1) * 20/9 - 1) * base_gamma
+// At overflow=1.0 → ~10x base; overflow=0.55 → 1x base; overflow=0.07 → ~0.09x base.
+void Placer::updateGamma(float overflow)
+{
+    float coef = std::pow(10.0f, (overflow - 0.1f) * (20.0f / 9.0f) - 1.0f);
+    gamma     = coef * base_gamma;
+    inv_gamma = 1.0f / gamma;
+    hpwl_lut_range = LUT_GAMMA_MULTIPLIER * gamma;
+    inv_lut_step   = 1.0f / (LUT_STEP_NORM * gamma);
 }
 
 // Linearly interpolate into the precomputed exp(-d/gamma) LUT.
@@ -204,10 +218,9 @@ void Placer::computeHpwlPartials_simple()
         float min_x = __FLT_MAX__, min_y = __FLT_MAX__;
         float max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
         for (const NetPin& pin : pins) {
-            float px = pin.node->getProbeX() + pin.offset.x;
-            float py = pin.node->getProbeY() + pin.offset.y;
-            min_x = std::min(min_x, px); max_x = std::max(max_x, px);
-            min_y = std::min(min_y, py); max_y = std::max(max_y, py);
+            Position p = pin.getProbePos();
+            min_x = std::min(min_x, p.x); max_x = std::max(max_x, p.x);
+            min_y = std::min(min_y, p.y); max_y = std::max(max_y, p.y);
         }
 
         float span_x = max_x - min_x;
@@ -219,13 +232,12 @@ void Placer::computeHpwlPartials_simple()
         float norm_y = (span_y < range) ? 1.0f / (1.0f + lutLookup(span_y)) : 1.0f;
 
         for (const NetPin& pin : pins) {
-            float x = pin.node->getProbeX() + pin.offset.x;
-            float y = pin.node->getProbeY() + pin.offset.y;
+            Position p = pin.getProbePos();
 
-            float d_max_x = max_x - x;
-            float d_min_x = x - min_x;
-            float d_max_y = max_y - y;
-            float d_min_y = y - min_y;
+            float d_max_x = max_x - p.x;
+            float d_min_x = p.x - min_x;
+            float d_max_y = max_y - p.y;
+            float d_min_y = p.y - min_y;
 
             float plus_x  = (d_max_x < range) ? lutLookup(d_max_x) * norm_x : 0.0f;
             float minus_x = (d_min_x < range) ? lutLookup(d_min_x) * norm_x : 0.0f;
@@ -252,37 +264,34 @@ void Placer::computeHpwlPartials_CPU()
         // find max and min x and y pin positions (node + offset)
         float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
         for (const NetPin& pin : pins) {
-            float px = pin.node->getProbeX() + pin.offset.x;
-            float py = pin.node->getProbeY() + pin.offset.y;
-            min_x = std::min(min_x, px); max_x = std::max(max_x, px);
-            min_y = std::min(min_y, py); max_y = std::max(max_y, py);
+            Position p = pin.getProbePos();
+            min_x = std::min(min_x, p.x); max_x = std::max(max_x, p.x);
+            min_y = std::min(min_y, p.y); max_y = std::max(max_y, p.y);
         }
 
         // Compute A terms directly into our flat vector
         std::vector<Term> A(net_size);
         for (size_t i = 0; i < net_size; i++) {
-            float px = pins[i].node->getProbeX() + pins[i].offset.x;
-            float py = pins[i].node->getProbeY() + pins[i].offset.y;
-            A[i].plus.x  = exp((px - max_x) * inv_gamma);
-            A[i].minus.x = exp((min_x - px) * inv_gamma);
-            A[i].plus.y  = exp((py - max_y) * inv_gamma);
-            A[i].minus.y = exp((min_y - py) * inv_gamma);
+            Position p = pins[i].getProbePos();
+            A[i].plus.x  = exp((p.x - max_x) * inv_gamma);
+            A[i].minus.x = exp((min_x - p.x) * inv_gamma);
+            A[i].plus.y  = exp((p.y - max_y) * inv_gamma);
+            A[i].minus.y = exp((min_y - p.y) * inv_gamma);
         }
 
         // Compute B and C terms
         Term B, C;
         B.clear(); C.clear();
         for (size_t i = 0; i < net_size; i++) {
-            float px = pins[i].node->getProbeX() + pins[i].offset.x;
-            float py = pins[i].node->getProbeY() + pins[i].offset.y;
+            Position p = pins[i].getProbePos();
             B.plus.x  += A[i].plus.x;
             B.minus.x += A[i].minus.x;
             B.plus.y  += A[i].plus.y;
             B.minus.y += A[i].minus.y;
-            C.plus.x  += A[i].plus.x  * px;
-            C.minus.x += A[i].minus.x * px;
-            C.plus.y  += A[i].plus.y  * py;
-            C.minus.y += A[i].minus.y * py;
+            C.plus.x  += A[i].plus.x  * p.x;
+            C.minus.x += A[i].minus.x * p.x;
+            C.plus.y  += A[i].plus.y  * p.y;
+            C.minus.y += A[i].minus.y * p.y;
         }
 
         // Pre-compute common terms
@@ -298,11 +307,10 @@ void Placer::computeHpwlPartials_CPU()
             for (size_t i = 0; i < net_size; i++)
                 Logger::log_error("A[" + std::to_string(i) + "]: " + A[i].to_string() + " node: " + pins[i].node->getName());
             Logger::log_error("max_x: " + std::to_string(max_x) + " min_x: " + std::to_string(min_x) + " max_y: " + std::to_string(max_y) + " min_y: " + std::to_string(min_y));
-            Logger::log_error("Probe positions:");
+            Logger::log_error("Pin positions:");
             for (size_t i = 0; i < net_size; i++) {
-                float px = pins[i].node->getProbeX() + pins[i].offset.x;
-                float py = pins[i].node->getProbeY() + pins[i].offset.y;
-                Logger::log_error("Node " + pins[i].node->getName() + " pin_x: " + std::to_string(px) + " pin_y: " + std::to_string(py));
+                Position p = pins[i].getProbePos();
+                Logger::log_error("Node " + pins[i].node->getName() + " pin_x: " + std::to_string(p.x) + " pin_y: " + std::to_string(p.y));
             }
         }
         assert(B.plus.x  != 0 && "B.plus.x is zero, cannot compute partials");
@@ -312,18 +320,17 @@ void Placer::computeHpwlPartials_CPU()
 
         // Compute partials and store — gradient accumulates onto parent node
         for (size_t i = 0; i < net_size; i++) {
-            float px = pins[i].node->getProbeX() + pins[i].offset.x;
-            float py = pins[i].node->getProbeY() + pins[i].offset.y;
+            Position p = pins[i].getProbePos();
 
             Gradient partial;
-            partial.x = ((1 + px * inv_gamma) * B.plus.x - (C.plus.x * inv_gamma))
+            partial.x = ((1 + p.x * inv_gamma) * B.plus.x - (C.plus.x * inv_gamma))
                       * (A[i].plus.x * bpx_sq_inv)
-                    - ((1 - px * inv_gamma) * B.minus.x + (C.minus.x * inv_gamma))
+                    - ((1 - p.x * inv_gamma) * B.minus.x + (C.minus.x * inv_gamma))
                       * (A[i].minus.x * bmx_sq_inv);
 
-            partial.y = ((1 + py * inv_gamma) * B.plus.y - (C.plus.y * inv_gamma))
+            partial.y = ((1 + p.y * inv_gamma) * B.plus.y - (C.plus.y * inv_gamma))
                       * (A[i].plus.y * bpy_sq_inv)
-                    - ((1 - py * inv_gamma) * B.minus.y + (C.minus.y * inv_gamma))
+                    - ((1 - p.y * inv_gamma) * B.minus.y + (C.minus.y * inv_gamma))
                       * (A[i].minus.y * bmy_sq_inv);
 
             //check for NaNs
@@ -341,6 +348,123 @@ void Placer::computeHpwlPartials_CPU()
             pins[i].node->next.probe_grad += partial;
         }
     }
+}
+
+void Placer::compareHpwlPartials()
+{
+    // Ensure LUT is initialized for simple method
+    if (hpwl_lut.empty()) initHpwlLut();
+
+    // Collect all movable nodes (components + fillers, not IOPads)
+    std::vector<Node*> movable_nodes;
+    for (auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
+        movable_nodes.push_back(item.second);
+    }
+    for (auto filler : db.getFillers())
+        movable_nodes.push_back(filler);
+
+    // --- Run CPU method ---
+    for (Node* n : movable_nodes) n->next.probe_grad.clear();
+    computeHpwlPartials_CPU();
+
+    // Save CPU gradients
+    std::unordered_map<Node*, Gradient> cpu_grads;
+    cpu_grads.reserve(movable_nodes.size());
+    for (Node* n : movable_nodes)
+        cpu_grads[n] = n->next.probe_grad;
+
+    // --- Run simple method ---
+    for (Node* n : movable_nodes) n->next.probe_grad.clear();
+    computeHpwlPartials_simple();
+
+    // --- Compare ---
+    double sum_abs_err_x = 0, sum_abs_err_y = 0;
+    double sum_sq_err_x = 0, sum_sq_err_y = 0;
+    double sum_rel_err = 0;
+    int rel_err_count = 0;
+    int outliers_5pct = 0, outliers_10pct = 0;
+    float max_abs_err_x = 0, max_abs_err_y = 0;
+    std::string max_err_node_x, max_err_node_y;
+
+    // For Pearson R^2
+    double sum_cpu_x = 0, sum_cpu_y = 0;
+    double sum_simple_x = 0, sum_simple_y = 0;
+    double sum_cpu_x2 = 0, sum_cpu_y2 = 0;
+    double sum_simple_x2 = 0, sum_simple_y2 = 0;
+    double sum_prod_x = 0, sum_prod_y = 0;
+
+    int n_nodes = movable_nodes.size();
+
+    for (Node* n : movable_nodes) {
+        Gradient g_cpu = cpu_grads[n];
+        Gradient g_simple = n->next.probe_grad;
+
+        float err_x = std::abs(g_simple.x - g_cpu.x);
+        float err_y = std::abs(g_simple.y - g_cpu.y);
+
+        sum_abs_err_x += err_x;
+        sum_abs_err_y += err_y;
+        sum_sq_err_x += err_x * err_x;
+        sum_sq_err_y += err_y * err_y;
+
+        if (err_x > max_abs_err_x) { max_abs_err_x = err_x; max_err_node_x = n->getName(); }
+        if (err_y > max_abs_err_y) { max_abs_err_y = err_y; max_err_node_y = n->getName(); }
+
+        // Relative error (magnitude-based, skip near-zero CPU gradients)
+        float mag_cpu = std::sqrt(g_cpu.x * g_cpu.x + g_cpu.y * g_cpu.y);
+        if (mag_cpu > 1e-6f) {
+            float mag_err = std::sqrt(err_x * err_x + err_y * err_y);
+            float rel = mag_err / mag_cpu;
+            sum_rel_err += rel;
+            rel_err_count++;
+            if (rel > 0.05f) outliers_5pct++;
+            if (rel > 0.10f) outliers_10pct++;
+        }
+
+        // Correlation accumulators
+        sum_cpu_x += g_cpu.x;       sum_cpu_y += g_cpu.y;
+        sum_simple_x += g_simple.x; sum_simple_y += g_simple.y;
+        sum_cpu_x2 += g_cpu.x * g_cpu.x;       sum_cpu_y2 += g_cpu.y * g_cpu.y;
+        sum_simple_x2 += g_simple.x * g_simple.x; sum_simple_y2 += g_simple.y * g_simple.y;
+        sum_prod_x += g_cpu.x * g_simple.x;
+        sum_prod_y += g_cpu.y * g_simple.y;
+    }
+
+    auto pearson_r2 = [](double sum_a, double sum_b, double sum_a2, double sum_b2, double sum_ab, int n) -> double {
+        double num = n * sum_ab - sum_a * sum_b;
+        double den = std::sqrt((n * sum_a2 - sum_a * sum_a) * (n * sum_b2 - sum_b * sum_b));
+        if (den < 1e-12) return 1.0;
+        double r = num / den;
+        return r * r;
+    };
+
+    double r2_x = pearson_r2(sum_cpu_x, sum_simple_x, sum_cpu_x2, sum_simple_x2, sum_prod_x, n_nodes);
+    double r2_y = pearson_r2(sum_cpu_y, sum_simple_y, sum_cpu_y2, sum_simple_y2, sum_prod_y, n_nodes);
+
+    Logger::log_info("=== HPWL Gradient Comparison: CPU vs Simple ===");
+    Logger::log_info("Movable nodes compared: " + std::to_string(n_nodes));
+    Logger::log_info("Max abs error  X: " + std::to_string(max_abs_err_x) + " (node " + max_err_node_x + ")");
+    Logger::log_info("Max abs error  Y: " + std::to_string(max_abs_err_y) + " (node " + max_err_node_y + ")");
+    Logger::log_info("Mean abs error X: " + std::to_string(sum_abs_err_x / n_nodes));
+    Logger::log_info("Mean abs error Y: " + std::to_string(sum_abs_err_y / n_nodes));
+    Logger::log_info("RMS error      X: " + std::to_string(std::sqrt(sum_sq_err_x / n_nodes)));
+    Logger::log_info("RMS error      Y: " + std::to_string(std::sqrt(sum_sq_err_y / n_nodes)));
+    if (rel_err_count > 0) {
+        Logger::log_info("Mean relative error: " + std::to_string(sum_rel_err / rel_err_count)
+            + " (over " + std::to_string(rel_err_count) + " non-zero nodes)");
+    }
+    Logger::log_info("Outliers >5% relative error:  " + std::to_string(outliers_5pct)
+        + " (" + std::to_string(100.0 * outliers_5pct / std::max(rel_err_count, 1)) + "%)");
+    Logger::log_info("Outliers >10% relative error: " + std::to_string(outliers_10pct)
+        + " (" + std::to_string(100.0 * outliers_10pct / std::max(rel_err_count, 1)) + "%)");
+    Logger::log_info("R^2 (Pearson)  X: " + std::to_string(r2_x));
+    Logger::log_info("R^2 (Pearson)  Y: " + std::to_string(r2_y));
+    Logger::log_info("=== End Comparison ===");
+
+    // Restore CPU gradients so caller gets the reference result
+    for (Node* n : movable_nodes)
+        n->next.probe_grad = cpu_grads[n];
 }
 
 AIEPLACE_NAMESPACE_END
