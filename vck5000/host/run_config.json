@@ -9,9 +9,9 @@
   // JSON doesn't support comments, but AIEplace strips them out like a compiler
 {
   "input": {
-    //"benchmark": "host/benchmarks/ispd2015/mgc_matrix_mult_b",
+    "benchmark": "host/benchmarks/ispd2015/mgc_matrix_mult_b",
     //"benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
-    "benchmark": "host/benchmarks/ispd2015/mgc_pci_bridge32_a",
+    //"benchmark": "host/benchmarks/ispd2015/mgc_pci_bridge32_a",
     //"benchmark": "host/benchmarks/ispd2005/adaptec1",
     //"benchmark": "host/benchmarks/ispd2005/bigblue1",
     //"benchmark": "host/benchmarks/ispd2005/bigblue4",
@@ -36,7 +36,8 @@
     "enable_preconditioning": false,   // diagonal preconditioner: damps large macro movement (XPlace-style)
 
     // Hyperparameters
-    "gamma": 4,
+    "init_gamma": 4,
+    "gamma_schedule": true, // if true, gamma follows overflow-driven schedule (XPlace-style); starts at 10x init_gamma
     "max_threads": 1, // multithreading not yet implemented
     "init_spread": 0.25, // fraction of die width for initial node spread
     "init_step_length": 0.1, // small first step for calibration
@@ -72,7 +73,9 @@
     "results_dir": "results/single_runs",
     "focus_nets": [], // focus nets are highlighted in visualization exports.
     "rand_focus_IO": 0, // not yet implemented
-    "rand_focus_nets": 3,
-    "rand_focus_nodes": 0 // not yet implemented
+    "rand_focus_nets": 0,
+    "rand_macro_nets": 3,
+    "rand_focus_nodes": 0, // not yet implemented
+    "compare_hpwl_methods": false     // one-time comparison of CPU vs simple HPWL gradients at iteration 1
   }
 }

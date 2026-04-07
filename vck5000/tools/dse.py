@@ -90,13 +90,15 @@ dse_sweep = OrderedDict([
     #("enable_momentum",  (["params"], [True, False])),
     #("enable_preconditioning",  (["params"], [True, False])),
     #("enable_filler",     (["params"], [True, False])),
+    ("gamma_schedule",     (["params"], [True, False])),
 
     #("init_step_length",        (["params"], [0.001, 0.01, 0.1, 1.0])),
     #("init_spread",              (["params"], [0.5, 0.4, 0.3, 0.25])),
     #("convergence_min_iterations", (["params"], [50, 100, 200])),
     #("density_weight_max_step", (["params"], [1.02, 1.05, 1.1])),
     #("bins_per_row",            (["params"], [64, 128, 256])),
-    ("partials_compute_method", (["params"], ["cpu", "simple"])),
+    #("partials_compute_method", (["params"], ["cpu", "simple"])),
+
 ])
 
 

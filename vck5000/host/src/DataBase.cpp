@@ -699,11 +699,15 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                 {
                     Component* comp_p = mm_components[net_pin.first];
                     assert(comp_p != NULL && "COMPONENT name points to nullptr while reading .DEF\n");
-                    // Look up pin offset from the component's macro
+                    // Look up pin offset from the component's macro (LEF microns → DEF dbu)
                     Position pin_offset(0, 0);
                     MacroClass* macro = comp_p->getMacro();
-                    if (macro && macro->hasPinOffset(net_pin.second))
+                    if (macro && macro->hasPinOffset(net_pin.second)) {
                         pin_offset = macro->getPinOffset(net_pin.second);
+                        float scale = (float)m_units_per_micron;
+                        pin_offset.x *= scale;
+                        pin_offset.y *= scale;
+                    }
                     new_net->addNode(comp_p, pin_offset, net_pin.second);
                     comp_p->addNet(new_net);
                 }

@@ -48,6 +48,7 @@ void Placer::performIteration()
         iterationReset();
 
         computeHpwlPartials();      // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
+        if (compare_hpwl_methods) compareHpwlPartials();
         computeElectricFields();    // ∇D from ρ → bin eFields
 
         initializeDensityWeight();
@@ -65,6 +66,8 @@ void Placer::performIteration()
     recordIterationResults();
     printIterationResults();
 
+    if (gamma_schedule)
+        updateGamma(ovfw_history.back());
     updateDensityWeight();
 }
 
@@ -108,7 +111,9 @@ Placer::Placer(std::string config_filepath)
             Logger::log_info("Reading runtime configuration from: " + config_filepath);
 
             // Read hyperparameters
-            gamma = cfg["params"]["gamma"];
+            base_gamma    = cfg["params"]["init_gamma"];
+            gamma_schedule = cfg["params"].value("gamma_schedule", false);
+            gamma     = gamma_schedule ? 10.0f * base_gamma : base_gamma;
             inv_gamma = 1.0f / gamma;
             step_length = cfg["params"]["init_step_length"];
             density_weight = 1.0f; // will be updated on iteration 1 after computing gradients
@@ -137,6 +142,7 @@ Placer::Placer(std::string config_filepath)
             backtrack_epsilon = cfg["params"]["backtrack_epsilon"];
 
             // Read other stuff
+            compare_hpwl_methods = cfg["output"].value("compare_hpwl_methods", false);
             MAX_THREADS = cfg["params"]["max_threads"];
             input_dir = fs::path(cfg["input"]["benchmark"]);
             results_dir = fs::path(cfg["output"]["results_dir"].get<std::string>());

@@ -39,6 +39,7 @@ public:
     bool hasPinOffset(const string& pin_name) const { return m_pin_offsets.count(pin_name) > 0; }
     const Position& getPinOffset(const string& pin_name) const { return m_pin_offsets.at(pin_name); }
     const std::map<string, Position>& getPinOffsets() const { return m_pin_offsets; }
+    std::map<string, Position>& getPinOffsetsMutable() { return m_pin_offsets; }
 
 }; // End of class MacroClass
 

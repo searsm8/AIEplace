@@ -64,8 +64,9 @@ public:
     float density_weight; // λ (lambda) in eplace
     float nesterov_ak = 1.0f; // a_k in Algorithm 1; controls momentum coefficient
     float momentum_coeff; // (a_k - 1) / a_{k+1} in Algorithm 1; computed each iteration if momentum enabled
-    float gamma, inv_gamma; // smoothness factor for estimations;
-                       // larger means less smooth but more accurate
+    float gamma, inv_gamma; // smoothness factor for WA gradient; updated each iteration if gamma_schedule enabled
+    float base_gamma;       // reference gamma from config; schedule varies around this
+    bool gamma_schedule;    // if true, gamma follows overflow-driven schedule (XPlace-style)
 
     int backtrack_steps = 0;
     int max_backtracking_attempts;
@@ -73,6 +74,7 @@ public:
     bool enable_backtracking;
     bool enable_momentum;
     bool enable_preconditioning;
+    bool compare_hpwl_methods = false;
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
     float avg_node_size = 1.0f; // average cell area; normalizes preconditioner area term
 
@@ -85,13 +87,13 @@ public:
     std::string density_method;
 
     // LUT for simplified HPWL gradient (used by computeHpwlPartials_simple)
-    // Precomputes exp(-d/gamma) for d = 0, LUT_STEP, 2*LUT_STEP, ... up to 5*gamma.
-    // Nodes beyond lut_range from both bounding box edges get gradient = 0.
-    static constexpr float LUT_STEP = 0.5f;
-    static constexpr int LUT_GAMMA_MULTIPLIER = 5;
-    float hpwl_lut_range = 0.0f;
+    // Stores exp(-x) for normalized x = d/gamma, x in [0, LUT_GAMMA_MULTIPLIER].
+    // LUT is built once; only inv_lut_step and hpwl_lut_range are updated when gamma changes.
+    static constexpr float LUT_STEP_NORM = 0.1f;   // step in normalized units (d/gamma)
+    static constexpr int LUT_GAMMA_MULTIPLIER = 5;  // max normalized distance = 5γ
+    float hpwl_lut_range = 0.0f;  // = LUT_GAMMA_MULTIPLIER * gamma (physical units cutoff)
     int hpwl_lut_size = 0;
-    float inv_lut_step = 1.0f / LUT_STEP;
+    float inv_lut_step = 0.0f;    // = 1 / (LUT_STEP_NORM * gamma); updated with gamma
     std::vector<float> hpwl_lut;
 
     // Convergence Criteria, loaded from config file
@@ -175,6 +177,7 @@ public:
 
     // Comparison functions for verification
     void compareDensityResults();
+    void compareHpwlPartials();
 
     // Main algorithm loop functions
     void run();
@@ -188,6 +191,7 @@ public:
     void stepAllNodes();                // Algorithm 1, lines 2–4
     void enforceDieBoundaries(Node* node_p);           // clamp next.node_pos to die area
     void updateDensityWeight();
+    void updateGamma(float overflow);
     void updatePrecondWeights();
     bool checkOverflowPlateau(int window, float threshold);
 

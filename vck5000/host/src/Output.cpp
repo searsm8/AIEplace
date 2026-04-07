@@ -8,6 +8,10 @@
 #include <sstream>
 #include <iomanip>
 #include <ctime>
+#include <cmath>
+#include <algorithm>
+#include <random>
+#include <set>
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -53,8 +57,8 @@ void Placer::printIterationResults()
     // only print if NOT in quiet mode
     if(!quiet)
     {
-        system("clear"); // Clear console for cleaner output each iteration
-        printWelcomeBanner(false);
+        //system("clear"); // Clear console for cleaner output each iteration
+        //printWelcomeBanner(false);
     }
 
     if (cfg["output"].contains("DSE_info"))
@@ -547,42 +551,94 @@ void Placer::recordInitialHPWL()
 void Placer::initializeFocus()
 {
     // add named focus nets
-    //for()
-
-    // add random focus nets — collect eligible nets first, then sample
     auto& nets = db.getNets();
-    int num_focus = cfg["output"].value("rand_focus_nets", 0);
-    if (num_focus <= 0) return;
-
-    // Build list of nets that have at least one fixed node (IO pad or fixed macro)
-    std::vector<Net*> eligible;
-    for (auto& [id, net] : nets) {
-        if (net->hasFixedNode())
-            eligible.push_back(net);
+    if (cfg["output"].contains("focus_nets")) {
+        for (const auto& name : cfg["output"]["focus_nets"]) {
+            string net_name = name.get<string>();
+            auto it = nets.find(net_name);
+            if (it != nets.end()) {
+                db.addFocusNet(it->second);
+                Logger::log_info("Focus net (named): " + net_name
+                    + " (" + std::to_string(it->second->getNodes().size()) + " nodes)");
+            } else {
+                Logger::log_warning("Focus net not found: " + net_name);
+            }
+        }
     }
 
-    if (eligible.empty()) {
-        Logger::log_info("No nets with fixed nodes found for focus visualization");
-        return;
+    std::mt19937 rng(std::random_device{}());
+
+    // add random focus nets — sample from all nets
+    int num_focus_nets = cfg["output"].value("rand_focus_nets", 0);
+    if (num_focus_nets > 0) {
+        std::vector<Net*> all_nets;
+        all_nets.reserve(nets.size());
+        for (auto& [id, net] : nets)
+            all_nets.push_back(net);
+        std::shuffle(all_nets.begin(), all_nets.end(), rng);
+        int count = std::min(num_focus_nets, (int)all_nets.size());
+        for (int i = 0; i < count; i++) {
+            db.addFocusNet(all_nets[i]);
+            Logger::log_info("Focus net (rand) " + std::to_string(i) + ": " + all_nets[i]->getName()
+                + " (" + std::to_string(all_nets[i]->getNodes().size()) + " nodes)");
+        }
     }
 
-    // Shuffle eligible nets to pick random ones
-    std::srand((unsigned)std::time(nullptr));
-    for (int i = (int)eligible.size() - 1; i > 0; i--) {
-        int j = std::rand() % (i + 1);
-        std::swap(eligible[i], eligible[j]);
+    // add random focus nodes — sample from movable components
+    int num_focus_nodes = cfg["output"].value("rand_focus_nodes", 0);
+    if (num_focus_nodes > 0) {
+        std::vector<Node*> movable;
+        for (auto& [name, comp] : db.getComponents())
+            if (comp->getStatus() != FIXED)
+                movable.push_back(comp);
+        std::shuffle(movable.begin(), movable.end(), rng);
+        int count = std::min(num_focus_nodes, (int)movable.size());
+        for (int i = 0; i < count; i++) {
+            db.addFocusNode(movable[i]);
+            Logger::log_info("Focus node (rand) " + std::to_string(i) + ": " + movable[i]->getName()
+                + " pos=(" + std::to_string(movable[i]->getPos().x) + ","
+                + std::to_string(movable[i]->getPos().y) + ")");
+        }
     }
 
-    int count = std::min(num_focus, (int)eligible.size());
-    for (int i = 0; i < count; i++) {
-        db.addFocusNet(eligible[i]);
-        Box bb = eligible[i]->getBoundingBox();
-        Logger::log_info("Focus net " + std::to_string(i) + ": " + eligible[i]->getName()
-            + " (" + std::to_string(eligible[i]->getNodes().size()) + " nodes)"
-            + " BB=[" + std::to_string((int)bb.getPosBottomLeft().x) + ","
-            + std::to_string((int)bb.getPosBottomLeft().y) + " → "
-            + std::to_string((int)bb.getPosTopRight().x) + ","
-            + std::to_string((int)bb.getPosTopRight().y) + "]");
+    // add random macro nets — nets with at least one pin on a fixed macro (Component, not IOPad)
+    int num_macro_nets = cfg["output"].value("rand_macro_nets", 0);
+    if (num_macro_nets > 0) {
+        std::vector<Net*> macro_nets;
+        for (auto& [id, net] : nets) {
+            for (Node* node : net->getNodes()) {
+                if (dynamic_cast<Component*>(node) && node->getStatus() == FIXED) {
+                    macro_nets.push_back(net);
+                    break;
+                }
+            }
+        }
+        std::shuffle(macro_nets.begin(), macro_nets.end(), rng);
+        int count = std::min(num_macro_nets, (int)macro_nets.size());
+        for (int i = 0; i < count; i++) {
+            db.addFocusNet(macro_nets[i]);
+            Logger::log_info("Focus net (macro) " + std::to_string(i) + ": " + macro_nets[i]->getName()
+                + " (" + std::to_string(macro_nets[i]->getNodes().size()) + " nodes)");
+        }
+    }
+
+    // add random focus IO — sample from IOPads and fixed components
+    int num_focus_io = cfg["output"].value("rand_focus_IO", 0);
+    if (num_focus_io > 0) {
+        std::vector<Node*> fixed_nodes;
+        for (auto& [name, pad] : db.getIOPads())
+            fixed_nodes.push_back(pad);
+        for (auto& [name, comp] : db.getComponents())
+            if (comp->getStatus() == FIXED)
+                fixed_nodes.push_back(comp);
+        std::shuffle(fixed_nodes.begin(), fixed_nodes.end(), rng);
+        int count = std::min(num_focus_io, (int)fixed_nodes.size());
+        for (int i = 0; i < count; i++) {
+            db.addFocusNode(fixed_nodes[i]);
+            Logger::log_info("Focus IO (rand) " + std::to_string(i) + ": " + fixed_nodes[i]->getName()
+                + " pos=(" + std::to_string(fixed_nodes[i]->getPos().x) + ","
+                + std::to_string(fixed_nodes[i]->getPos().y) + ")");
+        }
     }
 }
 
