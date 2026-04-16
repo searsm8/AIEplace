@@ -4,7 +4,7 @@
 #include "Common.h"
 #include "MacroClass.h"
 #include "Component.h"
-#include "Pin.h"
+#include "IOPad.h"
 #include "Node.h"
 #include "Net.h"
 #include "Bin.h"
@@ -80,7 +80,7 @@ private:
 
     map<string, MacroClass *> mm_macros;
     map<string, Component *> mm_components;
-    map<string, Pin *> mm_pins;
+    map<string, IOPad *> mm_iopads;
     map<string, Net *> mm_nets;
     vector<Net *> mv_nets; // list of all nets
     vector<Component *> mv_fillers; // standard cell fillers
@@ -91,9 +91,14 @@ private:
     Box m_die_area;
     int m_max_x, m_max_y; // used when reading Bookshelf format to find die_area
     string m_design_name;
-    int m_units_per_micron; 
+    int m_units_per_micron;
     int m_packet_count;
     int m_total_net_degree;
+    float m_maximum_utilization = 0.0f; // 0 = not specified by benchmark
+    MacroClass* m_current_lef_macro = nullptr; // tracks current macro during LEF parsing for pin callbacks
+    float m_total_component_area = 0.0f; // all components (movable + fixed), cached after construction
+    float m_total_fixed_area = 0.0f;     // fixed components only
+    float m_total_movable_area = 0.0f;   // movable components only (= total - fixed)
 
 public:
     // each compute graph has a vector of PacketIndex which records what data has been sent
@@ -112,7 +117,7 @@ public:
     const map<string, MacroClass *> &getMacros() { return mm_macros; }
     const map<string, Component *> &getComponents() { return mm_components; }
     const vector<Component *> &getFillers() { return mv_fillers; }
-    const map<string, Pin *> &getPins() { return mm_pins; }
+    const map<string, IOPad *> &getIOPads() { return mm_iopads; }
     const map<string, Net *> &getNets() { return mm_nets; }
     const vector<Net *> &getNetsVector() { return mv_nets; }
     const map<int, std::vector<Net *>> &getNetsByDegree() { return mmv_nets_by_degree; }
@@ -120,11 +125,13 @@ public:
     int getTotalNetDegree() { return m_total_net_degree; }
     Box &getDieArea() { return m_die_area; }
     string getBenchmarkName() { return m_input_dir.filename().string(); }
+    float getMaximumUtilization() { return m_maximum_utilization; }
 
     // Parse functions
     std::vector<fs::path> findExtensions(fs::path, string);
     bool readLEF();
     bool readDEF();
+    void readPlacementConstraints();
     // bool readVerilog();
     bool readBookshelf();
 
@@ -143,6 +150,8 @@ public:
 
     float computeTotalWirelength(string);
     float computeTotalComponentArea();
+    float getTotalFixedArea() { return m_total_fixed_area; }
+    float getTotalMovableArea() { return m_total_movable_area; }
     float getTotalOverflow();
 
     // Packet loading/unloading
@@ -242,7 +251,7 @@ public:
     // Print functions
     // const functions guarantee that this object won't be modified by the function
     void printNodes() const;
-    void printPins() const;
+    void printIOPads() const;
     void printComponents() const;
     void printNets();
     void printNetsByDegree() const;

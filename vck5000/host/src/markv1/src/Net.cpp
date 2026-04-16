@@ -1,7 +1,7 @@
 
 #include "Net.h"
 #include "Node.h"
-#include "Pin.h"
+#include "IOPad.h"
 
 
 AIEPLACE_NAMESPACE_BEGIN
@@ -81,14 +81,14 @@ void Net::sortPositionsMaxMinY()
 string Net::to_string()
 {
     string s = m_name + ":\n";
-    for (Node* node : mv_nodes)
+    for (const NetPin& pin : mv_pins)
     {
-        if(node == nullptr)
+        if(pin.node == nullptr)
         {
             cout << "nullptr found!" << endl;
             exit(1);
         }
-        s += "\t" + node->getName() + " (Pin " + mm_net_pins[node] + ") : " + node->next.probe_pos.to_string() + "\n";
+        s += "\t" + pin.node->getName() + " (Pin " + pin.pin_name + ") : " + pin.node->next.probe_pos.to_string() + "\n";
     }
 
     return s;
@@ -122,19 +122,15 @@ position_type Net::computeWirelength(string method)
  */
 position_type Net::computeWirelength_HPWL()
 {
-    float min_x = mv_nodes.front()->getX();
-    float max_x = min_x;
-    float min_y = mv_nodes.front()->getY();
-    float max_y = min_y;
-    for (Node* node_p : mv_nodes) {
-        min_x = std::min(min_x, node_p->getX());
-        min_y = std::min(min_y, node_p->getY());
-        max_x = std::max(max_x, node_p->getX());
-        max_y = std::max(max_y, node_p->getY());
+    Position first = mv_pins.front().getPos();
+    float min_x = first.x, max_x = first.x;
+    float min_y = first.y, max_y = first.y;
+    for (const NetPin& pin : mv_pins) {
+        Position p = pin.getPos();
+        min_x = std::min(min_x, p.x); max_x = std::max(max_x, p.x);
+        min_y = std::min(min_y, p.y); max_y = std::max(max_y, p.y);
     }
-    return (max_x - min_x) + (max_y - min_y); // HPWL = (max_x - min_x) + (max_y - min_y)
-    // Note: This is a simple implementation, more complex methods may be used in the future.
-    // For example, we could use Rectilinear Steiner Minimum Spanning Tree (RSMT) for better accuracy.
+    return (max_x - min_x) + (max_y - min_y);
 }
 
 /** 
@@ -150,19 +146,29 @@ position_type Net::computeWirelength_RSMT()
 
 Box Net::getBoundingBox()
 {
-    sortPositionsByX();
-    float max_x = mv_nodes.front()->getX();
-    float min_x = mv_nodes.back()->getX();
-    sortPositionsByY();
-    float max_y = mv_nodes.front()->getY();
-    float min_y = mv_nodes.back()->getY();
+    float min_x = __FLT_MAX__, min_y = __FLT_MAX__;
+    float max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
+    for (const NetPin& pin : mv_pins) {
+        Position p = pin.getPos();
+        min_x = std::min(min_x, p.x); max_x = std::max(max_x, p.x);
+        min_y = std::min(min_y, p.y); max_y = std::max(max_y, p.y);
+    }
     return Box(min_x, min_y, max_x, max_y);
 }
 
-bool Net::hasPin()
+bool Net::hasIOPad()
 {
     for(Node* node : mv_nodes) {
-        if (Pin* pin_ptr = dynamic_cast<Pin*>(node))
+        if (IOPad* iopad_ptr = dynamic_cast<IOPad*>(node))
+            return true;
+    }
+    return false;
+}
+
+bool Net::hasFixedNode()
+{
+    for(Node* node : mv_nodes) {
+        if (node->getStatus() == FIXED)
             return true;
     }
     return false;

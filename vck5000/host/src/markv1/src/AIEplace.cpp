@@ -3,6 +3,7 @@
 #include "JsonUtils.h"
 #include <cmath>
 #include <cassert>
+#include <numeric>
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -20,17 +21,17 @@ void Placer::run()
     // Set the center point of die area as initial placement target
     Position target = Position(grid.getDieWidth()/2, grid.getDieHeight()/2);
 
-    initializePlacement(target, 0, grid.getDieWidth()/4); // even spread around center
-    //initializePlacement(target, 0, 500); // Close placement for testing purposes
+    // read init_spread parameter
+    float init_spread = cfg["params"].value("init_spread", 0.25f);
+    int max_dist = (int)(std::min(grid.getDieWidth(), grid.getDieHeight()) * init_spread);
+
+    initializePlacement(target, 0, max_dist);
 
     bool converged = false;
     while( !converged )
     {
         performIteration();
-
         converged = checkConvergence();
-
-        iteration++;
     }
 
 }
@@ -38,19 +39,24 @@ void Placer::run()
 void Placer::performIteration()
 {
     Logger::log_detail("BEGIN iteration " + std::to_string(iteration));
+    ++iteration;
 
     // Iteration 1: compute first gradients and initialize solver state.
     // Probe positions (v_1 = u_1) are already set by initializePlacement().
     if (iteration == 1)
     {
-        iterationReset(); // is this needed?
+        iterationReset();
 
         computeHpwlPartials();      // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
+        if (compare_hpwl_methods) compareHpwlPartials();
         computeElectricFields();    // ∇D from ρ → bin eFields
 
         initializeDensityWeight();
         recordInitialHPWL();
     }
+
+    // Update per-node preconditioner weights (fixed for this iteration, unaffected by backtracking)
+    updatePrecondWeights();
 
     // Algorithm 1 + Algorithm 2: step with backtracking line search.
     // On exit: positions at u_{k+1}, v_{k+1}; gradients at v_{k+1} already computed;
@@ -60,6 +66,8 @@ void Placer::performIteration()
     recordIterationResults();
     printIterationResults();
 
+    if (gamma_schedule)
+        updateGamma(ovfw_history.back());
     updateDensityWeight();
 }
 
@@ -76,9 +84,7 @@ void Placer::performIteration()
 Placer::Placer(std::string config_filepath) 
         { 
             m_config_filepath = config_filepath;
-            printWelcomeBanner();
             // Read configuration file (supports JSON with comments)
-            Logger::log_info("Reading runtime configuration from: " + config_filepath);
             std::ifstream config_file(config_filepath);
             // check if config file was found
             if (!config_file.is_open()) {
@@ -98,35 +104,62 @@ Placer::Placer(std::string config_filepath)
             // Parse JSON
             cfg = json::parse(json_content);
 
+            // Setup logging (quiet mode suppresses all output except errors)
+            quiet = cfg["output"].value("quiet", false);
+            Logger::setup_logging(quiet);
+            printWelcomeBanner();
+            Logger::log_info("Reading runtime configuration from: " + config_filepath);
+
             // Read hyperparameters
-            gamma = cfg["params"]["gamma"];
+            base_gamma    = cfg["params"]["init_gamma"];
+            gamma_schedule = cfg["params"].value("gamma_schedule", false);
+            gamma     = gamma_schedule ? 10.0f * base_gamma : base_gamma;
             inv_gamma = 1.0f / gamma;
             step_length = cfg["params"]["init_step_length"];
             density_weight = 1.0f; // will be updated on iteration 1 after computing gradients
 
-            // Read compute methods 
+            // Read compute methods
             partials_method = cfg["params"]["partials_compute_method"];
             density_method = cfg["params"]["density_compute_method"];
             Logger::log_info("Partials compute method: " + partials_method);
             Logger::log_info("Density compute method:  " + density_method);
+
+            if (partials_method == "simple")
+                initHpwlLut();
 
             // Read Convergence criteria
             max_iterations = cfg["params"]["convergence_max_iterations"];
             min_iterations = cfg["params"]["convergence_min_iterations"];
             hpwl_improvement_threshold = cfg["params"]["convergence_hpwl_improvement_threshold"];
             overflow_threshold = cfg["params"]["convergence_overflow_threshold"];
-            target_density = cfg["params"]["convergence_target_density"];
+            target_density = cfg["params"].value("maximum_utilization", 0.9f);
             enable_backtracking = cfg["params"]["enable_backtracking"];
             enable_momentum = cfg["params"]["enable_momentum"];
-            warmup_iterations = cfg["params"]["warmup_iterations"];
+            enable_preconditioning = cfg["params"].value("enable_preconditioning", true);
             convergence_window = cfg["params"]["convergence_window"];
+            convergence_iterations = cfg["params"].value("convergence_iterations", 30);
             max_backtracking_attempts = cfg["params"]["backtrack_max_tries"];
             backtrack_epsilon = cfg["params"]["backtrack_epsilon"];
 
             // Read other stuff
+            compare_hpwl_methods = cfg["output"].value("compare_hpwl_methods", false);
             MAX_THREADS = cfg["params"]["max_threads"];
             input_dir = fs::path(cfg["input"]["benchmark"]);
             results_dir = fs::path(cfg["output"]["results_dir"].get<std::string>());
+
+            // Grid resolution (default to compile-time BINS_PER_ROW if not specified)
+            if (cfg["params"].contains("bins_per_row")) {
+                bins_per_row = cfg["params"]["bins_per_row"];
+            } else {
+                bins_per_row = BINS_PER_ROW;
+            }
+            if (density_method == "aie" && bins_per_row != BINS_PER_ROW) {
+                Logger::log_error("bins_per_row=" + std::to_string(bins_per_row)
+                    + " but density_method='aie' requires bins_per_row=" + std::to_string(BINS_PER_ROW)
+                    + " (hardware constraint)");
+                exit(1);
+            }
+            Logger::log_info("Grid resolution: " + std::to_string(bins_per_row) + " x " + std::to_string(bins_per_row));
 
 // AI Summary:
 // The following section initializes the Xilinx Runtime (XRT) and AI Engine (AIE) drivers if hardware acceleration
@@ -170,8 +203,25 @@ Placer::Placer(std::string config_filepath)
             // Initialize database by reading LEF and DEF design files
             db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
 
-            if(cfg["params"]["enable_filler"])   
+            // Benchmark-specified maximum_utilization overrides config default
+            if (db.getMaximumUtilization() > 0.0f) {
+                target_density = db.getMaximumUtilization();
+                Logger::log_info("Using benchmark maximum_utilization: " +
+                                std::to_string(target_density));
+            }
+
+            if(cfg["params"]["enable_filler"])
                 db.addFillers(target_density);
+
+            // Preconditioner area normalization: average cell area so area term is O(1) for standard cells
+            // (XPlace achieves this by normalizing all coordinates by site_width)
+            // Preconditioner normalization: use movable area and count only
+            {
+                int movable_count = 0;
+                for (auto& item : db.getComponents())
+                    if (item.second->getStatus() != FIXED) movable_count++;
+                avg_node_size = db.getTotalMovableArea() / std::max(1, movable_count);
+            }
 
             db_IO_time = getInterval(pgrm_start_time, getTime());
             Logger::log_info("db read time: " + std::to_string(db_IO_time));
@@ -180,7 +230,7 @@ Placer::Placer(std::string config_filepath)
             // Must be after database initialization to get benchmark name
             createRunOutputStructure();
 
-            grid = Grid(db.getDieArea(), BINS_PER_ROW, BINS_PER_ROW); 
+            grid = Grid(db.getDieArea(), bins_per_row, bins_per_row);
 
             die_size = min( grid.getDieWidth(), grid.getDieHeight() );
 
@@ -218,8 +268,10 @@ float Placer::computeLipshitzEstimate()
         grad_norm_sq += dgx*dgx + dgy*dgy;
     };
 
-    for (auto item : db.getComponents())
+    for (auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
         accumulate(item.second);
+    }
     for (auto filler : db.getFillers())
         accumulate(filler);
 
@@ -259,7 +311,88 @@ void Placer::updateDensityWeight()
 
     // perform the update
     density_weight *= dw_multiplier;
+
+    // Emergency 2x jolt: if overflow has plateaued at a high value, double density_weight
+    // to break out of the stall. Modeled after XPlace's enlarge_density mechanism.
+    // (param_scheduler.py lines 293-304)
+    int plateau_window = cfg["params"]["adaptation_window"];
+    float plateau_threshold = cfg["params"]["slow_improvement_threshold"];
+    float high_ovfw = cfg["params"]["high_overflow_threshold"];
+    int min_jolt_interval = 1000; // Xplace uses 1000 (effectively once per run)
+
+    if (iteration > plateau_window &&
+        iteration - last_density_jolt_iter >= min_jolt_interval &&
+        ovfw_history.back() > high_ovfw &&
+        checkOverflowPlateau(plateau_window, plateau_threshold))
+    {
+        density_weight *= 2.0f;
+        last_density_jolt_iter = iteration;
+        Logger::log_info("Overflow plateau detected (ovfw=" +
+            PREC(ovfw_history.back()) + "), 2x density weight jolt -> " +
+            PREC(density_weight));
+    }
+
+    // Escalate preconditioner: double precond_coef every 20 iterations once overflow < 0.3
+    // This progressively tightens macro movement in late placement (XPlace param_scheduler.py:340-347)
+    if (enable_preconditioning && ovfw_history.back() < 0.3f && precond_coef < 1024.0f) {
+        if (iteration % 20 == 0) {
+            precond_coef *= 2.0f;
+            Logger::log_detail("Preconditioner escalation: precond_coef=" + PREC(precond_coef));
+        }
+    }
 }
+
+
+/**
+ * @brief Check if overflow has plateaued over a recent window.
+ *
+ * Returns true if the relative range (max - min) / mean of the last
+ * `window` overflow values is below `threshold`. Matches XPlace's
+ * check_plateau() in param_scheduler.py.
+ */
+bool Placer::checkOverflowPlateau(int window, float threshold)
+{
+    if ((int)ovfw_history.size() < window) return false;
+    auto begin = ovfw_history.end() - window;
+    auto end = ovfw_history.end();
+    float min_val = *std::min_element(begin, end);
+    float max_val = *std::max_element(begin, end);
+    float mean_val = std::accumulate(begin, end, 0.0f) / window;
+    return (max_val - min_val) / (mean_val + 1e-8f) < threshold;
+}
+
+
+/**
+ * @brief Update per-node preconditioner weights (diagonal preconditioner).
+ *
+ * Each node's gradient is divided by its precond_weight before the Nesterov step.
+ * weight = max(1.0, num_pins + precond_coef * density_weight * area)
+ *
+ * Large macros (many pins, large area) get heavy damping, while standard cells
+ * are barely affected. The precond_coef escalates over time (see updateDensityWeight),
+ * progressively tightening macro movement as placement matures.
+ *
+ * Reference: XPlace param_scheduler.py:349-364, calculator.py:5-8
+ */
+void Placer::updatePrecondWeights()
+{
+    if (!enable_preconditioning) return;
+
+    float lambda_area_coef = precond_coef * density_weight;
+
+    for (auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
+        Node* node = item.second;
+        float num_pins = (float)node->getNets().size();
+        float norm_area = node->getArea() / avg_node_size;
+        node->precond_weight = std::max(1.0f, num_pins + lambda_area_coef * norm_area);
+    }
+    for (auto filler : db.getFillers()) {
+        float norm_area = filler->getArea() / avg_node_size;
+        filler->precond_weight = std::max(1.0f, lambda_area_coef * norm_area);
+    }
+}
+
 
 /**
  * @brief Reset all nodes and nets in preparation for the next iteration
@@ -294,23 +427,32 @@ void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist
     Logger::log_info(top);
 
     float bin_area_16th = grid.getBinWidth() * grid.getBinHeight() / 16;
-    // For each component that isn't fixed
-    for (auto item : db.getComponents()) {
-        // Choose a random position based on parameters
-        // TODO: Different initial position "shapes" could help with performance?
-        // e.g. maybe a donut shape would be good.
-        int x_offset = min_dist + rand()%(max_dist-min_dist); // clustered around target
-        if(rand()%2 == 1) x_offset *= -1; // 50% chance to negate
-        int y_offset = min_dist + rand()%(max_dist-min_dist); // clustered around target
-        if(rand()%2 == 1) y_offset *= -1; // 50% chance to negate
-        //int x_offset = rand()%(grid.getDieWidth()) - grid.getDieWidth()/2; // Even Spread
-        //int y_offset = rand()%(grid.getDieWidth()) - grid.getDieWidth()/2; // Even Spread
-        Position init_pos = target_pos + Position(x_offset, y_offset);
-        item.second->initializeState(init_pos);
+    int placed_count = 0, randomized_count = 0;
 
-        // if this component is bigger than 1/16th of bin area, set member bool
-        item.second->checkIfLarge(bin_area_16th);
+    for (auto item : db.getComponents()) {
+        Component* comp = item.second;
+
+        // If the benchmark provides an initial placement (PLACED status from DEF),
+        // use it — this gives a much better starting point than random center placement.
+        // Only randomize truly UNPLACED components.
+        if (comp->getStatus() == PLACED || comp->getStatus() == FIXED) {
+            comp->initializeState(comp->next.node_pos); // use position from DEF parser
+            placed_count++;
+        } else {
+            int range = std::max(1, max_dist - min_dist);
+            int x_offset = min_dist + rand() % range;
+            if(rand()%2 == 1) x_offset *= -1;
+            int y_offset = min_dist + rand() % range;
+            if(rand()%2 == 1) y_offset *= -1;
+            Position init_pos = target_pos + Position(x_offset, y_offset);
+            comp->initializeState(init_pos);
+            randomized_count++;
+        }
+
+        comp->checkIfLarge(bin_area_16th);
     }
+    Logger::log_info("Initial placement: " + std::to_string(placed_count) +
+                     " from benchmark, " + std::to_string(randomized_count) + " randomized");
 
     // Place Fillers
     for (auto filler : db.getFillers()) {
@@ -322,19 +464,14 @@ void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist
         filler->initializeState(init_pos);
     }
 
-    // Initialize pin State (pins are fixed, but need valid probe_pos for gradient computation)
-    for (auto item : db.getPins())
+    // Initialize IO pad state (fixed, but need valid probe_pos for gradient computation)
+    for (auto item : db.getIOPads())
         item.second->initializeState(item.second->next.node_pos);
 
 
     //printIterationResults(); // Prints "iteration 0" starting statistics
-    iteration = 1;
+    iteration = 0;
 
-    // TODO
-    // Wild and Crazy Idea: wouldn't this have the same effect as slowly increasing the bin's lambda?
-    // Add additional large "phantom" macros for experimentation
-    // Observe what affect they have,
-    // They could be made to have a repulsive affect on the real nodes or macros
     // These macros won't be on any nets, but they will add to the density computation
     // and could be created en masse at hotspot areas to gently push other nodes away.
 }
@@ -351,6 +488,7 @@ void Placer::initializeDensityWeight()
     float HPWL_L1_norm = 0.0f;
     float density_L1_norm = 0.0f;
     for(auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
         Node* node_p = item.second;
 
         Gradient& partials = node_p->next.probe_grad;  // HPWL-only (before combineGradients)
@@ -383,68 +521,102 @@ void Placer::initializeDensityWeight()
  */
 bool Placer::checkConvergence()
 {
-    // Check 0: Max iterations as safety fallback
+    // Safety fallback: max iterations
     if (iteration >= max_iterations) {
-        Logger::log_info("Convergence: Reached maximum iteration " +
-                        std::to_string(max_iterations));
+        Logger::log_info("Stopping: reached maximum iterations (" +
+                        std::to_string(max_iterations) + ")");
         return true;
     }
 
-    // Check 1: Enforce minimum iterations
+    // Enforce minimum iterations before any checks
     if (iteration < min_iterations)
         return false;
 
-    // Check 2: Overflow of each bin must be below overflow threshold 
-    bool overflow_converged = false;
-
-    float overflow = grid.computeTotalOverflow( 
-                    target_density, 
-                    db.computeTotalComponentArea());
-
-    Logger::log_detail("Current overflow: " + std::to_string(overflow));
-    if (overflow < overflow_threshold) {
-        overflow_converged = true;
-        Logger::log_info("OVERFLOW CONVERGED (Less than: " + std::to_string(overflow_threshold) + ")");
-    }
-
-    // Check 3: HPWL improvement over last N iterations must be small
-    if (hpwl_history.size() < convergence_window + 1)
-        return false;
-
-    float old_hpwl = hpwl_history[hpwl_history.size() - convergence_window - 1];
+    float overflow = ovfw_history.back();
     float current_hpwl = hpwl_history.back();
-    float hpwl_improvement = (old_hpwl - current_hpwl) / old_hpwl;
 
-    bool hpwl_converged = (hpwl_improvement < hpwl_improvement_threshold);
-                            //&& (hpwl_improvement > 0.0f);
-
-    Logger::log_detail("HPWL improvement from previous "+ std::to_string(convergence_window) +
-                    " iterations: " + std::to_string(100*hpwl_improvement) +"%");
-    // Combined convergence: both criteria must be met
-    if(overflow_converged && hpwl_converged) {
-        Logger::log_info("CONVERGENCE ACHIEVED at iteration " + std::to_string(iteration));
-
+    // NaN detection — stop immediately
+    if (std::isnan(overflow) || std::isnan(current_hpwl)) {
+        Logger::log_info("Stopping: NaN detected at iteration " +
+                        std::to_string(iteration));
         return true;
     }
-    else return false;
-}
 
+    // Divergence detection: HPWL has regressed significantly from best known solution
+    const BestSolution& best_ref = best_primary.valid ? best_primary
+                                 : best_fallback.valid ? best_fallback
+                                 : best_primary;
+    if (best_ref.valid && current_hpwl > 2.0f * best_ref.hpwl) {
+        Logger::log_info("Stopping: divergence detected at iteration " +
+                        std::to_string(iteration) +
+                        " (HPWL " + std::to_string(current_hpwl) +
+                        " > 2x best " + std::to_string(best_ref.hpwl) +
+                        " from iter " + std::to_string(best_ref.iteration) + ")");
+        return true;
+    }
 
-/**
- * @brief Computes the gradients of all nodes at their probe positions (v_k).
- * This is a key step that must be performed at the start of each iteration to get the forces.
- * Can be computed on CPU or offloaded to AIE depending on configuration. 
- * Results are cached in node-local fields for reuse.
- */
+    // Stagnation detection: DISABLED for now — need to let density weight grow
+    // longer before declaring stagnation. Re-enable once density schedule is tuned.
+    // static constexpr int STAGNATION_WINDOW = 50;
+    // if ((int)hpwl_history.size() > STAGNATION_WINDOW + 1) {
+    //     float old_hpwl = hpwl_history[hpwl_history.size() - STAGNATION_WINDOW - 1];
+    //     float old_ovfw = ovfw_history[ovfw_history.size() - STAGNATION_WINDOW - 1];
+    //     bool hpwl_worsening = current_hpwl > old_hpwl * 1.01f;
+    //     bool ovfw_not_improving = overflow > old_ovfw * 0.95f;
+    //     if (hpwl_worsening && ovfw_not_improving) {
+    //         Logger::log_info("Stopping: stagnation detected at iteration " +
+    //                         std::to_string(iteration) +
+    //                         " (HPWL worsening: " + std::to_string(old_hpwl) +
+    //                         " -> " + std::to_string(current_hpwl) +
+    //                         ", overflow stalled: " + std::to_string(old_ovfw) +
+    //                         " -> " + std::to_string(overflow) +
+    //                         " over last " + std::to_string(STAGNATION_WINDOW) + " iters)");
+    //         return true;
+    //     }
+    // }
 
- // TODO: NOT USED, REMOVE?
-void Placer::computeAllProbeGradients()
-{
-    // Should be non-blocking and multithreaded, as partials and eFields are independent
-    computeHpwlPartials();      // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
-    computeElectricFields();    // ∇D from ρ → bin eFields
+    // Overflow countdown — XPlace-inspired convergence mechanism
+    // Once overflow drops below threshold, count down convergence_iterations then stop.
+    if (overflow < overflow_threshold) {
+        if (convergence_iterations_remaining < 0) {
+            // First crossing below threshold — start countdown
+            convergence_iterations_remaining = convergence_iterations;
+            Logger::log_info("Overflow below " + PREC(overflow_threshold) +
+                            ", starting convergence countdown (" +
+                            std::to_string(convergence_iterations) + " iterations)");
+        }
+        convergence_iterations_remaining--;
 
-    combineGradients();         // subtract electro in-place: next.probe_grad becomes total ∇f
+        // Accelerator: if HPWL has also plateaued, stop immediately
+        if ((int)hpwl_history.size() > convergence_window + 1) {
+            float old_hpwl = hpwl_history[hpwl_history.size() - convergence_window - 1];
+            float hpwl_improvement = (old_hpwl - current_hpwl) / old_hpwl;
+            if (hpwl_improvement < hpwl_improvement_threshold) {
+                Logger::log_info("Convergence achieved at iteration " +
+                                std::to_string(iteration) +
+                                " (overflow + HPWL both converged)");
+                return true;
+            }
+        }
+
+        if (convergence_iterations_remaining <= 0) {
+            Logger::log_info("Convergence achieved at iteration " +
+                            std::to_string(iteration) +
+                            " (overflow countdown complete)");
+            return true;
+        }
+
+        Logger::log_detail("Convergence countdown: " +
+                          std::to_string(convergence_iterations_remaining) + " remaining");
+    } else {
+        // Overflow rose back above threshold — reset countdown
+        if (convergence_iterations_remaining >= 0) {
+            Logger::log_detail("Overflow rose above threshold, resetting convergence countdown");
+            convergence_iterations_remaining = -1;
+        }
+    }
+
+    return false;
 }
 
 
@@ -458,6 +630,7 @@ void Placer::computeAllProbeGradients()
 void Placer::combineGradients()
 {
     for (auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
         item.second->next.probe_grad -= computeElectrostaticForce(item.second);
     }
     for (auto filler : db.getFillers()) {
@@ -467,17 +640,24 @@ void Placer::combineGradients()
 
 
 /**
- * @brief Clamp node's actual position (m_node_pos) to the die area boundaries.
+ * @brief Clamp node positions so the entire cell stays within the die area.
+ *
+ * The node position is the lower-left corner of the cell, so the upper bound
+ * must account for the cell's width/height to prevent the right/top edge from
+ * extending past the die boundary.
  */
 void Placer::enforceDieBoundaries(Node* node_p)
 {
+    float max_x = (float)grid.getDieWidth()  - node_p->getXsize();
+    float max_y = (float)grid.getDieHeight() - node_p->getYsize();
+
     // Clamp node_pos
-    node_p->next.node_pos.x = std::clamp(node_p->next.node_pos.x, 0.0f, (float)grid.getDieWidth());
-    node_p->next.node_pos.y = std::clamp(node_p->next.node_pos.y, 0.0f, (float)grid.getDieHeight());
-    
+    node_p->next.node_pos.x = std::clamp(node_p->next.node_pos.x, 0.0f, max_x);
+    node_p->next.node_pos.y = std::clamp(node_p->next.node_pos.y, 0.0f, max_y);
+
     // Clamp probe_pos
-    node_p->next.probe_pos.x = std::clamp(node_p->next.probe_pos.x, 0.0f, (float)grid.getDieWidth());
-    node_p->next.probe_pos.y = std::clamp(node_p->next.probe_pos.y, 0.0f, (float)grid.getDieHeight());
+    node_p->next.probe_pos.x = std::clamp(node_p->next.probe_pos.x, 0.0f, max_x);
+    node_p->next.probe_pos.y = std::clamp(node_p->next.probe_pos.y, 0.0f, max_y);
 }
 
 
@@ -487,7 +667,10 @@ void Placer::enforceDieBoundaries(Node* node_p)
  */
 void Placer::advanceIterationState()
 {
-    for (auto item : db.getComponents()) item.second->cacheState();
+    for (auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
+        item.second->cacheState();
+    }
     for (auto filler : db.getFillers())  filler->cacheState();
 }
 
@@ -502,6 +685,7 @@ void Placer::advanceIterationState()
 void Placer::stepAllNodes()
 {
     for (auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
         item.second->step(step_length, momentum_coeff);
         enforceDieBoundaries(item.second);
     }
@@ -543,7 +727,7 @@ void Placer::performNextStep(bool backtracking_enabled)
         // Recompute gradients at trial v̂ (the expensive part, accelerated on AIEs)
         computeHpwlPartials();      // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
         computeElectricFields();    // ∇D from ρ → bin eFields
-        combineGradients();         // subtract electro in-place: next.probe_grad becomes total ∇f
+        combineGradients();         // add electro in-place: next.probe_grad becomes total ∇f
 
         prev_step_length = step_length;
 
@@ -572,6 +756,7 @@ void Placer::logStepDiagnostics()
     // Gradient statistics (from current state used for stepping)
     float grad_L1 = 0.0f, max_grad = 0.0f;
     for (auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
         Node* n = item.second;
         grad_L1 += fabs(n->current.probe_grad.x) + fabs(n->current.probe_grad.y);
         max_grad = std::max(max_grad, std::max(fabs(n->current.probe_grad.x), fabs(n->current.probe_grad.y)));
@@ -585,6 +770,7 @@ void Placer::logStepDiagnostics()
     int clamped_count = 0;
     float die_w = (float)grid.getDieWidth(), die_h = (float)grid.getDieHeight();
     for (auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
         Node* n = item.second;
         float dx = fabs(n->next.node_pos.x - n->current.node_pos.x);
         float dy = fabs(n->next.node_pos.y - n->current.node_pos.y);
@@ -606,6 +792,7 @@ void Placer::logStepDiagnostics()
     int count = 0;
     for (auto item : db.getComponents()) {
         if (count >= 3) break;
+        if (item.second->getStatus() == FIXED) continue;
         Node* n = item.second;
         Logger::log_info("  --- Sample node: " + n->getName() + " ---");
         Logger::log_info("    current.node_pos (u_k):   (" + PREC_P(n->current.node_pos.x, 2) + ", " + PREC_P(n->current.node_pos.y, 2) + ")");
@@ -618,6 +805,26 @@ void Placer::logStepDiagnostics()
         count++;
     }
     Logger::log_info("=== End Step Diagnostics ===");
+}
+
+void Placer::snapshotBestPlacement()
+{
+    for (auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
+        item.second->best_solution_pos = item.second->next.node_pos;
+    }
+    for (auto filler : db.getFillers())
+        filler->best_solution_pos = filler->next.node_pos;
+}
+
+void Placer::restoreBestPlacement()
+{
+    for (auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
+        item.second->next.node_pos = item.second->best_solution_pos;
+    }
+    for (auto filler : db.getFillers())
+        filler->next.node_pos = filler->best_solution_pos;
 }
 
 AIEPLACE_NAMESPACE_END

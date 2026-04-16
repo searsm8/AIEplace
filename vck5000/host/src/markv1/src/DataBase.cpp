@@ -14,6 +14,19 @@ DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
     bool LEF_success = readLEF();
     bool DEF_success = readDEF();
 
+    // LEF macro sizes are in microns; DEF coordinates are in database units (dbu).
+    // Scale macro sizes to match DEF coordinate system.
+    if (LEF_success && DEF_success && m_units_per_micron > 0) {
+        float scale = (float)m_units_per_micron;
+        for (auto& item : mm_macros) {
+            MacroClass* macro = item.second;
+            macro->setSize(macro->getXsize() * scale, macro->getYsize() * scale);
+        }
+        Logger::log_info("Scaled " + std::to_string(mm_macros.size()) +
+                        " LEF macro sizes by " + std::to_string(m_units_per_micron) +
+                        " (microns -> dbu)");
+    }
+
     // else look for bookshelf
     if (!LEF_success || !DEF_success)
     {
@@ -23,6 +36,9 @@ DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
             exit(1);
         }
     }
+
+    // Read placement constraints (maximum_utilization) if present
+    readPlacementConstraints();
 
     // Add IO pins as focus nets for visualizer
     //int focus_nets_added = 0;
@@ -45,11 +61,66 @@ DataBase::DataBase(fs::path input_dir) : m_input_dir(input_dir) {
     for (auto* net : mv_nets) {
         m_total_net_degree += net->getDegree();
     }
+
+    // Cache area breakdown (constant for the lifetime of the design)
+    double area_sum = 0;
+    double fixed_sum = 0;
+    int fixed_count = 0;
+    for (auto item : mm_components) {
+        float area = item.second->getArea();
+        area_sum += area;
+        if (item.second->getStatus() == FIXED) {
+            fixed_sum += area;
+            fixed_count++;
+        }
+    }
+    m_total_component_area = (float)area_sum;
+    m_total_fixed_area = (float)fixed_sum;
+    m_total_movable_area = m_total_component_area - m_total_fixed_area;
+
+    Logger::log_info("Fixed components: " + std::to_string(fixed_count)
+        + " (area: " + std::to_string((long long)m_total_fixed_area)
+        + ", " + std::to_string((int)(100.0f * m_total_fixed_area / m_die_area.getArea())) + "% of die)");
+    Logger::log_info("Movable components: " + std::to_string((int)mm_components.size() - fixed_count)
+        + " (area: " + std::to_string((long long)m_total_movable_area) + ")");
 }
 
 /**
+ * Read placement.constraints file if present (ISPD2015 format).
+ * Parses "maximum_utilization=XX%" and stores as a float in [0, 1].
+ */
+void DataBase::readPlacementConstraints()
+{
+    fs::path constraints_path = m_input_dir / "placement.constraints";
+    if (!fs::exists(constraints_path)) return;
+
+    std::ifstream file(constraints_path);
+    if (!file.is_open()) return;
+
+    std::string line;
+    while (std::getline(file, line)) {
+        // Look for "maximum_utilization=XX%"
+        auto pos = line.find("maximum_utilization=");
+        if (pos != std::string::npos) {
+            std::string value_str = line.substr(pos + strlen("maximum_utilization="));
+            // Strip trailing '%' if present
+            if (!value_str.empty() && value_str.back() == '%') {
+                value_str.pop_back();
+                m_maximum_utilization = std::stof(value_str) / 100.0f;
+            } else {
+                m_maximum_utilization = std::stof(value_str);
+            }
+            Logger::log_info("Read placement constraint: maximum_utilization=" +
+                            std::to_string((int)(m_maximum_utilization * 100)) + "%");
+            break;
+        }
+    }
+}
+
+
+/**
  * Search the specified directory path for files with the specified extension.
- * 
+ *
  * @param dir_path: Path to the directory containing all design files
  * @param extension_match: extension which is being searched for e.g. ".lef" or ".def"
  * 
@@ -195,7 +266,9 @@ bool DataBase::addFillers(float target_utilization)
 
     Logger::log_info("Adding filler cells to database...");
 
-    float unfilled_area = getDieArea().getArea() * target_utilization - computeTotalComponentArea();
+    float available_area = getDieArea().getArea() - m_total_fixed_area;
+    float unfilled_area = available_area * target_utilization - m_total_movable_area;
+    Logger::log_info("Available area (die - fixed): " + PREC(available_area));
     Logger::log_info("Total area to fill: " + PREC(unfilled_area));
 
     int fillers_needed = unfilled_area / filler_macro->getArea();
@@ -220,7 +293,7 @@ void DataBase::iterationReset()
         item.second->iterationReset();
     for (auto filler : mv_fillers)
         filler->iterationReset();
-    for (auto item : mm_pins)
+    for (auto item : mm_iopads)
         item.second->iterationReset();
 }
 
@@ -265,12 +338,7 @@ float DataBase::computeTotalWirelength(string method)
 
 float DataBase::computeTotalComponentArea()
 {
-    double total_area = 0;
-    for(auto item : mm_components)
-    {
-        total_area += item.second->getArea();
-    }
-    return total_area;
+    return m_total_component_area;
 }
 
 /* @brief: Organize data into “groups” to create “packets”.
@@ -531,12 +599,43 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         void DataBase::lef_viarule_cbk(LefParser::lefiViaRule const& ) {}
         void DataBase::lef_spacing_cbk(LefParser::lefiSpacing const& ) {}
         void DataBase::lef_site_cbk(LefParser::lefiSite const& s) {}
-        void DataBase::lef_macrobegin_cbk(std::string const& n) {}
-        void DataBase::lef_macro_cbk(LefParser::lefiMacro const& m) {
-            MacroClass* new_macro = new MacroClass(m.name(), m.sizeX(), m.sizeY());
-            mm_macros.emplace(std::make_pair(m.name(), new_macro));
+        void DataBase::lef_macrobegin_cbk(std::string const& n) {
+            // Create macro early so lef_pin_cbk (which fires before lef_macro_cbk) can add pin offsets
+            MacroClass* new_macro = new MacroClass(n);
+            mm_macros.emplace(std::make_pair(n, new_macro));
+            m_current_lef_macro = new_macro;
         }
-        void DataBase::lef_pin_cbk(LefParser::lefiPin const& p) {}
+        void DataBase::lef_macro_cbk(LefParser::lefiMacro const& m) {
+            // Finalize macro size (pins have already been added by lef_pin_cbk)
+            m_current_lef_macro->setSize(m.sizeX(), m.sizeY());
+
+            m_current_lef_macro = nullptr;
+        }
+
+        // Called for each PIN within the current MACRO block.
+        // Extracts pin offset as center of first RECT in first port.
+        void DataBase::lef_pin_cbk(LefParser::lefiPin const& p) {
+            if (!m_current_lef_macro) return;
+
+            // Skip power/ground pins — they don't appear in signal nets
+            if (p.hasUse()) {
+                string use = p.use();
+                if (use == "POWER" || use == "GROUND") return;
+            }
+
+            // Find the center of the first RECT in the first port
+            if (p.numPorts() < 1) return;
+            LefParser::lefiGeometries* geom = p.port(0);
+            for (int gi = 0; gi < geom->numItems(); gi++) {
+                if ((int)geom->itemType(gi) == (int)LefParser::lefiGeomRectE) {
+                    LefParser::lefiGeomRect* rect = geom->getRect(gi);
+                    float cx = (float)(rect->xl + rect->xh) / 2.0f;
+                    float cy = (float)(rect->yl + rect->yh) / 2.0f;
+                    m_current_lef_macro->addPinOffset(p.name(), Position(cx, cy));
+                    break; // use first RECT only
+                }
+            }
+        }
         void DataBase::lef_obstruction_cbk(LefParser::lefiObstruction const& o) {}
         void DataBase::lef_prop_cbk(LefParser::lefiProp const&) {}
         void DataBase::lef_maxstackvia_cbk(LefParser::lefiMaxStackVia const&) {}
@@ -571,15 +670,14 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         void DataBase::resize_def_pin(int s) {}
 
         void DataBase::add_def_pin(DefParser::Pin const& p) {
-            Pin* new_pin = new Pin(p.pin_name);
+            IOPad* new_iopad = new IOPad(p.pin_name);
             std::vector<int> bb = p.vBbox.front();
-            new_pin->setBoundingBox(bb[0], bb[1], bb[2], bb[3]);
-            new_pin->setPlacementStatus(p.status);
-            new_pin->setNodePos(Position((float)p.origin[0], (float)p.origin[1]));
-            new_pin->setDirection(p.direct); // primary input or output
-            // TODO: assert pin is created correctly
+            new_iopad->setBoundingBox(bb[0], bb[1], bb[2], bb[3]);
+            new_iopad->setPlacementStatus(p.status);
+            new_iopad->setNodePos(Position((float)p.origin[0], (float)p.origin[1]));
+            new_iopad->setDirection(p.direct); // primary input or output
 
-            mm_pins.emplace(std::make_pair(new_pin->getName(), new_pin));
+            mm_iopads.emplace(std::make_pair(new_iopad->getName(), new_iopad));
         }
 
         void DataBase::resize_def_net(int s) {}
@@ -592,17 +690,25 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             {
                 if (net_pin.first == "PIN")
                 {
-                    Pin* pin_p = mm_pins[net_pin.second];
-                    assert(pin_p != NULL && "PIN name points to nullptr while reading .DEF\n");
-                    new_net->addNode(pin_p);
-                    pin_p->addNet(new_net);
+                    IOPad* iopad_p = mm_iopads[net_pin.second];
+                    assert(iopad_p != NULL && "PIN name points to nullptr while reading .DEF\n");
+                    new_net->addNode(iopad_p);
+                    iopad_p->addNet(new_net);
                 }
                 else // it is a component
                 {
                     Component* comp_p = mm_components[net_pin.first];
                     assert(comp_p != NULL && "COMPONENT name points to nullptr while reading .DEF\n");
-                    new_net->addNode(comp_p);
-                    new_net->addNetPin(comp_p, net_pin.second);
+                    // Look up pin offset from the component's macro (LEF microns → DEF dbu)
+                    Position pin_offset(0, 0);
+                    MacroClass* macro = comp_p->getMacro();
+                    if (macro && macro->hasPinOffset(net_pin.second)) {
+                        pin_offset = macro->getPinOffset(net_pin.second);
+                        float scale = (float)m_units_per_micron;
+                        pin_offset.x *= scale;
+                        pin_offset.y *= scale;
+                    }
+                    new_net->addNode(comp_p, pin_offset, net_pin.second);
                     comp_p->addNet(new_net);
                 }
             }
@@ -646,14 +752,19 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         /// @brief set number of blockage nodes with layers 
         //void DataBase::resize_bookshelf_blockage_layers(int) {}
 
-        /// @brief add terminal 
+        /// @brief add terminal (fixed macro or IO pad) as a Component with FIXED status
         void DataBase::add_bookshelf_terminal(string& name, int width, int height) {
-            Pin* new_pin = new Pin(name);
-            new_pin->setBoundingBox(0, 0, width, height);
-            new_pin->setPlacementStatus(PlacementStatus::FIXED);
-            new_pin->setNodePos(Position(0, 0));
-            //cout << "NEW PIN: " << new_pin->getName() << " : " << width << ", " << height << " : " << mm_pins.size() << endl;
-            mm_pins.emplace(std::make_pair(new_pin->getName(), new_pin));
+            Component* comp = new Component(name);
+            string macro_name = "macro_" + std::to_string(width) + "_" + std::to_string(height);
+            MacroClass* macro_p = mm_macros[macro_name];
+            if(macro_p == NULL) {
+                macro_p = new MacroClass(macro_name, width, height);
+                mm_macros[macro_name] = macro_p;
+            }
+            comp->setMacroClass(macro_p);
+            comp->setPlacementStatus(PlacementStatus::FIXED);
+            comp->setNodePos(Position(0, 0));
+            mm_components.emplace(std::make_pair(name, comp));
         }
 
         /// @brief add terminal_NI
@@ -682,14 +793,13 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
             for (BookshelfParser::NetPin net_pin : bookshelf_net.vNetPin)
             {
                 //cout << "\tNetPin: " << net_pin.node_name << endl;
-                if(mm_pins.count(net_pin.node_name) > 0) {
-                    Pin* pin_p = mm_pins[net_pin.node_name]; // this creates a new entry
-                    new_net->addNode(pin_p);
-                    pin_p->addNet(new_net);
+                if(mm_iopads.count(net_pin.node_name) > 0) {
+                    IOPad* iopad_p = mm_iopads[net_pin.node_name];
+                    new_net->addNode(iopad_p);
+                    iopad_p->addNet(new_net);
                 } else if(mm_components.count(net_pin.node_name)){ // it's a component
                     Component* comp_p = mm_components[net_pin.node_name];
                     new_net->addNode(comp_p);
-                    //new_net->addNetPin(comp_p, net_pin.second);
                     comp_p->addNet(new_net);
                 } else {
                     Logger::log_error("Node was not found while parsing bookshelf nets.");
@@ -711,29 +821,19 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
 
         /// @brief add row 
         void DataBase::add_bookshelf_row(BookshelfParser::Row const&) {  }
-        /// @brief set node position 
+        /// @brief set node position — all bookshelf nodes (terminals + cells) are now Components
         void DataBase::set_bookshelf_node_position(string const& name, double x, double y, string const& orientation, string const& placement_status, bool notsurewhatfor) {
-            //cout << "set_bookshelf_node_position(): " << name << ": (" << x << ", " << y << ") " << orientation << " " << orientation << " " << notsurewhatfor << endl;
-            if(placement_status == "FIXED") { // terminal pin
-                Pin* pin = mm_pins[name];
-                //cout << "pin found: " << name << " (" << x << ", " << y << ") " << orientation << " " << placement_status << "\tmm_pins.size(): " << mm_pins.size() << endl;
-                assert(pin != NULL && "invalid pin name!");
-                //cout << pin->getName() << " pin->setNodePos(" << x << ", " << y << ")\n";
-                pin->setNodePos(Position(x, y));
-                pin->setPlacementStatus(PlacementStatus::FIXED);
-                pin->setOrientation(orientation);
-                // Bookshelf format doesn't seem to explicitly give die area?
-                // Instead we look for the pins with the biggest coordinates
+            Component* comp = mm_components[name];
+            assert(comp != NULL && "invalid component name!");
+            comp->setNodePos(Position(x, y));
+            comp->setOrientation(orientation);
+            if(placement_status == "FIXED") {
+                comp->setPlacementStatus(PlacementStatus::FIXED);
+                // Bookshelf format doesn't explicitly give die area,
+                // so we infer it from the outermost fixed terminal coordinates
                 if(x > m_max_x) m_max_x = x;
                 if(y > m_max_y) m_max_y = y;
-            } else { // non-terminal node
-                //cout << "component found: " << name << " (" << x << ", " << y << ") " << orientation << " " << placement_status << endl;
-                Component* comp = mm_components[name];
-                assert(comp != NULL && "invalid component name!");
-                comp->setNodePos(Position(x, y));
-                comp->setOrientation(orientation);
             }
-
         }
         /// @brief set net weight 
         //void DataBase::set_bookshelf_net_weight(string const& name, double w) {}
@@ -763,16 +863,16 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
 void DataBase::printNodes() const
 {
     printComponents();
-    printPins();
+    printIOPads();
 }
 
-void DataBase::printPins() const
+void DataBase::printIOPads() const
 {
-    for(auto item : mm_pins)
+    for(auto item : mm_iopads)
     {
-        Pin* pin_p = item.second;
-        cout << pin_p->getName() << pin_p->next.node_pos.to_string() << endl;
-        cout << "\tArea: " << pin_p->getArea() << "\tStatus: " << pin_p->getStatus() << endl;
+        IOPad* iopad_p = item.second;
+        cout << iopad_p->getName() << iopad_p->next.node_pos.to_string() << endl;
+        cout << "\tArea: " << iopad_p->getArea() << "\tStatus: " << iopad_p->getStatus() << endl;
     }
 }
 
@@ -828,7 +928,7 @@ void DataBase::printInfo()
 
     Table data;
     data.add_row(RowStream{} << "Macros" << mm_macros.size());
-    data.add_row(RowStream{} << "Pins" << mm_pins.size());
+    data.add_row(RowStream{} << "IO Pads" << mm_iopads.size());
     data.add_row(RowStream{} << "Components" << mm_components.size());
     data.add_row(RowStream{} << "Nets" << mm_nets.size());
     data.add_row(RowStream{} << "Die Area" << m_die_area.getArea());
@@ -921,20 +1021,19 @@ void DataBase::writeComponents(std::ofstream& out) const {
 }
 
 void DataBase::writePins(std::ofstream& out) const {
-    out << "PINS " << mm_pins.size() << " ;\n";
-    for (const auto& item : mm_pins) {
-        Pin* pin = item.second;
-        out << "    - " << pin->getName() << " + NET " << pin->getName()
-            << "\n      + DIRECTION " << pin->getDirection()
-            //<< " + USE " << pin.use 
+    out << "PINS " << mm_iopads.size() << " ;\n";
+    for (const auto& item : mm_iopads) {
+        IOPad* iopad = item.second;
+        out << "    - " << iopad->getName() << " + NET " << iopad->getName()
+            << "\n      + DIRECTION " << iopad->getDirection()
             << "\n";
-        if (pin->isPlaced()) {
+        if (iopad->isPlaced()) {
             out << "      + PLACED "
-                << " ( " << pin->getX() << " " << pin->getY() << " ) "
-                << pin->getOrientation() << "\n";
+                << " ( " << iopad->getX() << " " << iopad->getY() << " ) "
+                << iopad->getOrientation() << "\n";
         }
-        out << "      + LAYER " << pin->getLayer()
-            << pin->getBoundingBox().getDEFstring()
+        out << "      + LAYER " << iopad->getLayer()
+            << iopad->getBoundingBox().getDEFstring()
             << " ;\n";
     }
     out << "END PINS\n\n";
@@ -965,15 +1064,11 @@ void DataBase::writeNets(std::ofstream& out) const {
         Net* net = item.second;
         out << "    - " << net->getName();
         int count = 0;
-        for (const auto& node : net->mv_nodes) {
-            try {
-                Pin& pin = dynamic_cast<Pin&>(*node);
-                // node is a primary IO pin
-                out << " ( PIN " << pin.getName() << " )";
-
-            } catch(const std::bad_cast&) {
-                // else node is a component
-                out << " ( " << node->getName() << " " << net->mm_net_pins[node] << " )";
+        for (const auto& pin : net->mv_pins) {
+            if (dynamic_cast<IOPad*>(pin.node)) {
+                out << " ( PIN " << pin.node->getName() << " )";
+            } else {
+                out << " ( " << pin.node->getName() << " " << pin.pin_name << " )";
             }
             if(++count == 4) { // print 4 nodes, then newline
                 out << endl;

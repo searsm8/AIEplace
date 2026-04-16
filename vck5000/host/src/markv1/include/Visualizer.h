@@ -18,6 +18,7 @@ struct PlotInfo {
     float step_length;
     float density_weight;
     std::string benchmark_name;
+    std::string filename_override; // if set, use this instead of "iter_<N>"
 };
 
 class Visualizer
@@ -29,9 +30,10 @@ class Visualizer
     float m_die_width, m_die_height;
     float m_canvas_width, m_canvas_height;
 
-    const int CANVAS_PIXELS = 2048;//1024; // reasonable trade off between image size and detail shown.
-    const float DIE_START = 0.05; // boundary 
-    const float DIE_SCALE = 1 - 2*DIE_START; // scale for drawing components on the die
+    const int MAX_CANVAS_PX = 2048; // longest dimension in pixels
+    int m_canvas_px_w, m_canvas_px_h; // computed from die aspect ratio in init()
+    const float DIE_SCALE = 0.80; // die occupies 80% of canvas
+    const float DIE_START = (1 - DIE_SCALE) / 2; // 10% margin on all sides
     const float MIN_SIZE = 0.001; // Minimum size to be visible
     cairo_surface_t *surface;
     cairo_t *cr;
@@ -44,7 +46,7 @@ class Visualizer
     void init(Box die_area);
     float scale(float f);
     void drawComponent(Component* c);
-    void drawPin(Pin* p);
+    void drawIOPad(IOPad* p);
     void highlightNet(Net* net);
     void highlightNode(Node* node);
     void drawCross(float x, float y, float cross_size = 0.004);

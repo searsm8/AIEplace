@@ -10,6 +10,7 @@ AIEPLACE_NAMESPACE_BEGIN
 
 void Placer::computeElectricFields()
 {
+    TIME_FUNCTION();
     computeOverlaps();          // update the density ρ at probe positions
 
     if(density_method == "aie") {
@@ -43,15 +44,15 @@ void Placer::computeElectricFields_AIE()
     Logger::log_trace("Begin computeElectricFields_AIE()");
 
     // Call AIE graph_driver to accelerate computation
-    std::vector< std::vector<float> > rho = grid.getRho();
+    std::vector< std::vector<float> > density = grid.getBinDensities(); // rho
     std::vector< std::vector<float> > temp;
 
-    //DEBUGGING: print out the rho matrix
+    //DEBUGGING: print out the density (rho) matrix
     //for( int x_index = 0; x_index < BINS_PER_ROW; x_index++)
     //{
     //    for( int y_index = 0; y_index < BINS_PER_ROW; y_index++)
     //    {
-    //        cout << rho[x_index][y_index] << " ";
+    //        cout << density[x_index][y_index] << " ";
     //    }
     //    cout << endl;
     //}
@@ -60,11 +61,11 @@ void Placer::computeElectricFields_AIE()
     float * input_data  = new float[2*BINS_PER_ROW];
     float * output_data = new float[2*BINS_PER_ROW];
 
-    // Send the rho matrix into the AIE, one row at a time, for 1D-DCTs
+    // Send the density (rho) matrix into the AIE, one row at a time, for 1D-DCTs
 
     for(int row = 0; row < BINS_PER_ROW; row++) {
         for(int col = 0; col < BINS_PER_ROW; col++) {
-        input_data[2*col] = rho[row][col]; // real part
+        input_data[2*col] = density[row][col]; // real part
         input_data[2*col+1] = 0; // imaginary part
         }
 
@@ -83,7 +84,7 @@ void Placer::computeElectricFields_AIE()
 
     }
 
-    // Send the rho matrix into the AIE, one column at a time, to complete 2D-DCT
+    // Send the density (rho) matrix into the AIE, one column at a time, to complete 2D-DCT
     //cout << "Input" << std::setprecision(2) << endl;
     for(int col = 0; col < BINS_PER_ROW; col++) {
         for(int row = 0; row < BINS_PER_ROW; row++) { // looping order performs DCT on columns
@@ -243,36 +244,13 @@ void Placer::computeElectricFields_DCT()
     compute_eField_DCT();
 }
 
-// TODO: function not used? Marked for deletion
-void Placer::normalizeElectricFields()
-{
-    float max_abs = 0;
-    // find the max absolute value of all eFields
-    for (int x = 0; x < grid.getBinsPerRow(); x++) {
-        for (int y = 0; y < grid.getBinsPerCol(); y++) {
-            if(abs(grid.getBin(x, y).eField.x) > max_abs)
-                max_abs = abs(grid.getBin(x, y).eField.x);
-            if(abs(grid.getBin(x, y).eField.y) > max_abs)
-                max_abs = abs(grid.getBin(x, y).eField.y);
-        }
-    }
-
-    // normalize values
-    for (int x = 0; x < grid.getBinsPerRow(); x++) {
-        for (int y = 0; y < grid.getBinsPerCol(); y++) {
-            grid.getBin(x, y).eField.x = grid.getBin(x, y).eField.x / max_abs;
-            grid.getBin(x, y).eField.y = grid.getBin(x, y).eField.y / max_abs;
-        }
-    }
-
-}
 
 // Compute the intermediate term a_uv for Efields
 // Store results in each bin
 // Implements DREAMplace Eq 3a
 void Placer::compute_a_uv_naive()
 {
-    std::vector< std::vector<float> > rho = grid.getRho();
+    std::vector< std::vector<float> > density = grid.getBinDensities(); // rho
     for (int u = 0; u < grid.getBinsPerRow(); u++) {
         for (int v = 0; v < grid.getBinsPerCol(); v++) {
             //float w_u = 1 * M_PI * u / grid.getBinsPerRow();
@@ -284,8 +262,8 @@ void Placer::compute_a_uv_naive()
             float a_uv = 0;
             for (int x = 0; x < grid.getBinsPerRow(); x++) {
                 for (int y = 0; y < grid.getBinsPerCol(); y++) {
-                    a_uv += rho[x][y] * cos(w_u*x) * cos(w_v*y); // is this in radians? or degrees?
-                    //cout << "rho: " << rho[x][y] << "\toverlap/bb.area: " << (grid.getBin(x, y).overlap / grid.getBin(x, y).bb.getArea()) << endl;
+                    a_uv += density[x][y] * cos(w_u*x) * cos(w_v*y);
+                    //cout << "density (rho): " << density[x][y] << "\toverlap/bb.area: " << (grid.getBin(x, y).overlap / grid.getBin(x, y).bb.getArea()) << endl;
                     //a_uv += (grid.getBin(x, y).overlap / grid.getBin(x, y).bb.getArea()) * cos(w_u*x) * cos(w_v*y);
                 }
             }
@@ -325,13 +303,13 @@ void Placer::compute_eField_naive()
 /* @brief: Compute the intermediate term a_uv using DCTs*/
 void Placer::compute_a_uv_DCT()
 {
-    std::vector< std::vector<float> > rho = grid.getRho();
+    std::vector< std::vector<float> > density = grid.getBinDensities(); // rho
     std::vector< std::vector<float> > temp;
     std::vector< std::vector<float> > a_uv;
 
-    // Perform 1-D DCT on rows
+    // Perform 1-D DCT on rows of density (rho) matrix
     for (int row_index = 0; row_index < grid.getBinsPerCol(); row_index++)
-        temp.push_back(DCT_naive(rho[row_index]));
+        temp.push_back(DCT_naive(density[row_index]));
 
     temp = transpose(temp);
 
@@ -403,28 +381,22 @@ void Placer::computeOverlaps()
 {
     Logger::log_trace("Begin computeOverlaps()");
 
+    // Pass 1: Fixed components — their density is clamped so bins fully covered
+    // by fixed macros register as "at capacity" but not overflowed.
     for (auto item : db.getComponents())
-        grid.computeBinOverlaps(item.second);
+        if (item.second->getStatus() == FIXED)
+            grid.computeBinOverlaps(item.second);
+
+    grid.clampFixedDensity(target_density);
+
+    // Pass 2: Movable components and fillers — any density on top of
+    // the clamped fixed baseline counts as real overflow.
+    for (auto item : db.getComponents())
+        if (item.second->getStatus() != FIXED)
+            grid.computeBinOverlaps(item.second);
 
     for (auto filler : db.getFillers())
         grid.computeBinOverlaps(filler);
-
-    // DEBUGGING
-    //double total_node_area = 0;
-    //for (auto item : db.getComponents())
-    //    total_node_area += item.second->getArea();
-    //double total_overlap = 0;
-    //for (int col = 0; col < grid.getBinsPerRow(); col++) {
-    //    for (int row = 0; row < grid.getBinsPerCol(); row++) {
-    //        total_overlap += grid.getBin(col, row).getOverlap();
-    //    }
-    //}
-
-    //Table t;
-    //t.add_row(RowStream{} << "total_node_area" << total_node_area<< ""<<"");
-    //t.add_row(RowStream{} << "total_overlap" << total_overlap);
-    //t.add_row(RowStream{} << "single bin area" << grid.getBin(0,0).bb.getArea() << grid.getBin(7,8).bb.getArea() );
-    //Logger::log("overlap", t);
 }
 
 Gradient Placer::computeElectrostaticForce(Node* node_p)

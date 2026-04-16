@@ -13,9 +13,18 @@ void Visualizer::init(Box die_area)
     m_canvas_width = m_die_width * 1.2;
     m_canvas_height = m_die_height * 1.2;
 
-    surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, CANVAS_PIXELS, CANVAS_PIXELS);
+    // Scale canvas pixels to match die aspect ratio
+    if (m_die_width >= m_die_height) {
+        m_canvas_px_w = MAX_CANVAS_PX;
+        m_canvas_px_h = std::max(1, (int)(MAX_CANVAS_PX * m_die_height / m_die_width));
+    } else {
+        m_canvas_px_h = MAX_CANVAS_PX;
+        m_canvas_px_w = std::max(1, (int)(MAX_CANVAS_PX * m_die_width / m_die_height));
+    }
+
+    surface = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, m_canvas_px_w, m_canvas_px_h);
     cr = cairo_create (surface);
-	cairo_scale (cr, CANVAS_PIXELS, CANVAS_PIXELS);
+    cairo_scale (cr, m_canvas_px_w, m_canvas_px_h);
 }
 
 float Visualizer::scale(float f) {
@@ -32,7 +41,7 @@ void Visualizer::drawComponent(Component* c)
     cairo_rectangle (cr, x, y, width, height);
 }
 
-void Visualizer::drawPin(Pin* p)
+void Visualizer::drawIOPad(IOPad* p)
 {
     double start_x = (double) p->getX() ;
     double start_y = (double) p->getY() ;
@@ -40,7 +49,7 @@ void Visualizer::drawPin(Pin* p)
     double y = DIE_START + (start_y / (double) m_die_height) * DIE_SCALE;
     double width = max<double>(MIN_SIZE, (p->getXsize() / (double) m_die_width) * DIE_SCALE);
     double height =max<double>(MIN_SIZE, (p->getYsize() / (double) m_die_height) * DIE_SCALE);
-    //cairo_rectangle (cr, x, y, width, height);
+    cairo_rectangle (cr, x, y, width, height);
 }
 
 void Visualizer::highlightNet(Net* net)
@@ -55,27 +64,29 @@ void Visualizer::highlightNet(Net* net)
                          bb.getYsize() * DIE_SCALE / m_die_height); // height
     cairo_stroke(cr);
 
-    // draw X's for each node location
+    // draw X's for each pin location (node + offset)
     cairo_set_source_rgb (cr, 0.0, 0.0, 0.0); // black
     float sum_X = 0;
     float sum_Y = 0;
-    for(Node* node: net->getNodes()) {
-        sum_X += node->getX();
-        sum_Y += node->getY();
-        drawCross(DIE_START + node->getX() * DIE_SCALE / m_die_width,
-              DIE_START + node->getY() * DIE_SCALE / m_die_height);
+    for(const NetPin& pin : net->getPins()) {
+        Position p = pin.getPos();
+        sum_X += p.x;
+        sum_Y += p.y;
+        drawCross(DIE_START + p.x * DIE_SCALE / m_die_width,
+              DIE_START + p.y * DIE_SCALE / m_die_height);
     }
     cairo_stroke(cr);
 
 
     // draw rat's nest of connecting wires!
-    float avg_X = DIE_START + sum_X / net->getNodes().size() * DIE_SCALE / m_die_width;
-    float avg_Y = DIE_START + sum_Y / net->getNodes().size() * DIE_SCALE / m_die_height;
+    float avg_X = DIE_START + sum_X / net->getPins().size() * DIE_SCALE / m_die_width;
+    float avg_Y = DIE_START + sum_Y / net->getPins().size() * DIE_SCALE / m_die_height;
     cairo_set_line_width (cr, 0.0004); // very thin lines for rat's nest
-    for(Node* node: net->getNodes()) {
-        cairo_move_to(cr, DIE_START + node->getX() * DIE_SCALE / m_die_width,
-                            DIE_START + node->getY() * DIE_SCALE / m_die_height);
-        cairo_line_to(cr, avg_X, avg_Y);  
+    for(const NetPin& pin : net->getPins()) {
+        Position p = pin.getPos();
+        cairo_move_to(cr, DIE_START + p.x * DIE_SCALE / m_die_width,
+                            DIE_START + p.y * DIE_SCALE / m_die_height);
+        cairo_line_to(cr, avg_X, avg_Y);
     }
     cairo_stroke(cr);
 }
@@ -98,8 +109,8 @@ void  Visualizer::highlightNode(Node* node)
     cairo_select_font_face (cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size (cr, .02);
     cairo_move_to (cr, .1, .99);
-    std::string highlight_str = "Focus Node: " + node->getName();
-    cairo_show_text (cr, highlight_str.c_str());
+    //std::string highlight_str = "Focus Node: " + node->getName();
+    //cairo_show_text (cr, highlight_str.c_str());
     cairo_move_to (cr, .6, .99);
     cairo_stroke(cr);
 }
@@ -151,7 +162,7 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     // Draw die boundary in black
     cairo_set_source_rgb (cr, 0.0, 0.0, 0.0);
     cairo_set_line_width (cr, 0.004);
-    cairo_rectangle (cr, DIE_START, DIE_START, 1-2*DIE_START, 1-2*DIE_START); // always a square!~
+    cairo_rectangle (cr, DIE_START, DIE_START, DIE_SCALE, DIE_SCALE);
     cairo_stroke(cr);
     
     // Draw Fillers
@@ -161,16 +172,28 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     cairo_set_source_rgb (cr, 0.9, 0.9, 0.9);  // grey 
     cairo_fill(cr);
 
-    // Draw Components
+    // Draw Fixed Components 
     for (auto item : db.getComponents()) {
-       drawComponent(item.second);
+       if (item.second->getStatus() == FIXED)
+           drawComponent(item.second);
+    }
+    cairo_set_source_rgb (cr, 0.8, 0.0, 0.0); // red for fixed components
+    cairo_fill_preserve(cr);
+    cairo_set_source_rgb (cr, 0.0, 0.0, 0.0); // black border
+    cairo_set_line_width (cr, 0.001);
+    cairo_stroke(cr);
+
+    // Draw Movable Components (blue)
+    for (auto item : db.getComponents()) {
+       if (item.second->getStatus() != FIXED)
+           drawComponent(item.second);
     }
     cairo_set_source_rgb (cr, 0.0, 0.0, 1.0); // blue
     cairo_fill(cr);
 
-    // Draw Pins
-    for (auto item : db.getPins()) 
-        drawPin(item.second);
+    // Draw IO Pads
+    for (auto item : db.getIOPads())
+        drawIOPad(item.second);
 
     cairo_set_source_rgb (cr, 1.0, 0.64, 0.0); // orange 
     cairo_fill(cr);
@@ -200,31 +223,35 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     std::string iter_str = "Iter: " + std::to_string(info.iteration);
     cairo_show_text (cr, iter_str.c_str());
 
-    cairo_move_to (cr, .12, .99);
+    cairo_move_to (cr, .18, .99);
     std::string hpwl_str = "HPWL: " + SCI(info.hpwl);
     cairo_show_text (cr, hpwl_str.c_str());
 
-    cairo_move_to (cr, .35, .99);
+    cairo_move_to (cr, .40, .99);
     std::string ovfw_str = "OVFW: " + PREC_P(info.overflow, 2);
     cairo_show_text (cr, ovfw_str.c_str());
 
-    cairo_move_to (cr, .54, .99);
-    std::string alpha_str = "alpha: " + SCI(info.step_length);
-    cairo_show_text (cr, alpha_str.c_str());
+    if (info.filename_override.empty()) {
+        cairo_move_to (cr, .55, .99);
+        std::string alpha_str = "alpha: " + SCI(info.step_length);
+        cairo_show_text (cr, alpha_str.c_str());
 
-    cairo_move_to (cr, .78, .99);
-    std::string lambda_str = "lambda: " + SCI(info.density_weight);
-    cairo_show_text (cr, lambda_str.c_str());
+        cairo_move_to (cr, .78, .99);
+        std::string lambda_str = "lambda: " + SCI(info.density_weight);
+        cairo_show_text (cr, lambda_str.c_str());
+    }
 
     cairo_stroke(cr);
 
 
     // export image
-    // index the image based on iteration
     fs::create_directories(dir); // ensure this directory exists
-    string filename = "iter_";
-    filename.append(std::to_string(info.iteration));
-    filename.append(".png");
+    string filename;
+    if (!info.filename_override.empty()) {
+        filename = info.filename_override + ".png";
+    } else {
+        filename = "iter_" + std::to_string(info.iteration) + ".png";
+    }
     dir.append(filename);
     Table t;
     t.add_row(RowStream{} << "VISUALIZER output PNG to ");
@@ -240,29 +267,31 @@ void Visualizer::drawElectricField(Grid& grid, fs::path dir, int iteration)
     //cairo_paint(cr);
 
     // Draw bin reticles
+    int bpr = grid.getBinsPerRow();
+    int bpc = grid.getBinsPerCol();
     cairo_set_source_rgb (cr, 0.75, 0.75, 0.75); // grey
-    for(int i = 1; i < BINS_PER_COL; i++) {
-        for(int j = 1; j < BINS_PER_ROW; j++) {
-            drawReticle(scale(float(j)/BINS_PER_ROW), scale(float(i)/BINS_PER_COL), 0.004);
+    for(int i = 1; i < bpc; i++) {
+        for(int j = 1; j < bpr; j++) {
+            drawReticle(scale(float(j)/bpr), scale(float(i)/bpc), 0.004);
         }
     }
 
     // Draw arrows in middle of bins
     cairo_set_source_rgb (cr, 0.05, 0.05, 0.05); // black
     float max_eField = 0;
-    for(int i = 0; i < BINS_PER_COL; i++) {
-        for(int j = 0; j < BINS_PER_ROW; j++) {
+    for(int i = 0; i < bpc; i++) {
+        for(int j = 0; j < bpr; j++) {
             Bin bin = grid.getBin(i, j);
             if(bin.eField.x > max_eField) max_eField = bin.eField.x;
             if(bin.eField.y > max_eField) max_eField = bin.eField.y;
         }
     }
-    for(int i = 0; i < BINS_PER_COL; i++) {
-        for(int j = 0; j < BINS_PER_ROW; j++) {
+    for(int i = 0; i < bpc; i++) {
+        for(int j = 0; j < bpr; j++) {
             Bin bin = grid.getBin(i, j);
-            float x_mag = (0.2/BINS_PER_ROW) * std::atan(bin.eField.x / max_eField ); // use arctan function for asymptotes
-            float y_mag = (0.2/BINS_PER_ROW) * std::atan(bin.eField.y / max_eField );
-            drawArrow(scale((j+.5)/BINS_PER_ROW), scale((i+.5)/BINS_PER_COL), x_mag, y_mag);
+            float x_mag = (0.2f/bpr) * std::atan(bin.eField.x / max_eField ); // use arctan function for asymptotes
+            float y_mag = (0.2f/bpr) * std::atan(bin.eField.y / max_eField );
+            drawArrow(scale((j+.5f)/bpr), scale((i+.5f)/bpc), x_mag, y_mag);
         }
     }
 
