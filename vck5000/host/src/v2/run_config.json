@@ -1,0 +1,78 @@
+  // =============================================================================
+  // AIEPlace Configuration Options
+  // =============================================================================
+  // This JSON file contains the default configuration parameters for running
+  // the AIEPlace placement algorithm. It includes options for method selection,
+  // input file paths, and hyperparameters for the algorithm.
+  // =============================================================================
+
+{
+  "input": {
+    //"benchmark": "host/benchmarks/ispd2015/mgc_fft_b",
+    "benchmark": "host/benchmarks/ispd2005/adaptec1",
+    //"benchmark": "host/benchmarks/ispd2005/bigblue1",
+    //"benchmark": "host/benchmarks/ispd2005/bigblue4",
+    //"benchmark": "host/benchmarks/ispd2015/mgc_superblue11_a",
+    //"benchmark": "host/benchmarks/ispd2015/mgc_superblue19",
+    //"benchmark": "host/benchmarks/ispd2015/toy",
+
+    "xclbin": "bin/aieplace.hw.xclbin"
+    //"xclbin": "bin/aieplace_1cu.hw.xclbin"
+    //"xclbin": "bin/aieplace.hw_emu.xclbin"
+  },
+
+  "params": {
+    // Computation method selection
+    "partials_compute_method": "cpu", // choose: aie, cpu, simple, hybrid, threaded
+    "density_compute_method": "cpu",  // choose: aie, cpu
+    "wirelength_method": "HPWL",      // choose: HPWL
+    "enable_backtracking": true,      // whether to use backtracking line search for step length selection
+    "enable_momentum": true,          // whether to use momentum in the optimization (Nesterov Accelerated Gradient)
+    "enable_filler": true,            // whether to include filler cells in placement
+
+    // Hyperparameters
+    "gamma": 4,
+    "max_threads": 1, // multithreading not yet implemented
+    "init_step_length": 0.1, // small first step 
+    "density_weight_init_multiplier": 0.01, // multiplier used to set density penalty
+                                            // 0.01 means that density will contribute about 1% as much
+                                            // as wirelength to the cost function at the start of placement
+    "density_weight_min_step": 0.95,   // minimum step size for density_weight updates to prevent stagnation
+    "density_weight_max_step": 1.05,   // maximum step size for density_weight updates to avoid divergence
+
+    // Adaptive hyperparameter schedule parameters
+    "adaptation_window": 5,
+    "slow_improvement_threshold": 0.02,
+    "high_overflow_threshold": 0.1,
+    "warmup_iterations": 5,
+    "backtrack_enabled": true,
+    "backtrack_max_tries": 10,
+    "backtrack_epsilon": 1.05,
+
+    // Convergence criteria (adaptive algorithm will stop early if met)
+    "convergence_min_iterations": 50,
+    "convergence_max_iterations": 800,
+    "convergence_window": 5,
+    "convergence_hpwl_improvement_threshold": 0.01, // If HPWL improvement over window is below this, HPWL convergence is met.
+    "convergence_overflow_threshold": 0.07, // If ratio of total overflow to total node area is below this, density convergence is met.
+    "convergence_target_density": 0.9,  // Bin density maximum. If density within a bin exceeds this, 
+                                        // we consider it overflow. Also used for filler insertion.
+
+    // Simple decay parameters (used for simple hyperparameter schedule, not adaptive)
+    "naive_decay": false,
+    "decay_interval": 20,
+    "decay_factor": 0.9
+  },
+
+  "output": {
+    "results_dir": "results/single_runs",
+    "visualize": true, // if true, will export visualization images 
+    "iterations_per_export": 10,
+    "focus_nets": [], // focus nets are highlighted in visualization exports.
+    "rand_focus_IO": 0,
+    "rand_focus_nets": 0,
+    "rand_focus_nodes": 0
+    //"log_file": "logs/aieplace.log",
+    //"performance_jsonl": "results/aieplace_performance.jsonl",
+  }
+}
