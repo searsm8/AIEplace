@@ -540,6 +540,8 @@ void DataBase::lef_site_cbk(LefParser::lefiSite const& s) {}
 void DataBase::lef_macrobegin_cbk(std::string const& n) {}
 
 void DataBase::lef_macro_cbk(LefParser::lefiMacro const& m) {
+  // callback for each Component (called macro by limbo) as
+  // defined in the cells.lef
   std::cout << "lef_macro_cbk" << std::endl;
   ComponentKind kind = ComponentKind::Unknown;
   if (m.hasClass() == 1) {
@@ -553,9 +555,19 @@ void DataBase::lef_macro_cbk(LefParser::lefiMacro const& m) {
     }
   }
   typeLib.emplace(m.name(), kind, m.sizeX(), m.sizeY());
+  //pins.emplace_back(m.name(), m.foreignName(0), m.numForeigns(), m.numProperties());
 }
 
-void DataBase::lef_pin_cbk(LefParser::lefiPin const& p) {}
+void DataBase::lef_pin_cbk(LefParser::lefiPin const& p) {
+  // callback for each Pin of a Component as defined per
+  // lef 'macro' in the cells.lef
+  std::cout << p.name() << " - " << p.numForeigns() << " - " << p.direction() << " - " << p.port(0) << std::endl;
+  //uint32_t idx = typeLib.index_of(p.name());
+  //ComponentType& ct = typeLib.at_index(idx);
+  //ct.pinDx.push_back(0.0);
+  //ct.pinDy.push_back(0.0);
+  pins.emplace_back(p.name(), p.tableHighName(), p.numForeigns(), p.numProperties());
+}
 
 void DataBase::lef_obstruction_cbk(LefParser::lefiObstruction const& o) {}
 void DataBase::lef_prop_cbk(LefParser::lefiProp const&) {}

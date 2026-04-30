@@ -41,13 +41,11 @@ namespace AIEPLACE_NAMESPACE {
 
     ComponentType(ComponentKind k, float w, float h,
         uint32_t pins = 0, const int32_t* dx = nullptr, const int32_t* dy = nullptr)
-      : kind(k), width(w), height(h),
-      numPins(pins), pinDx(dx), pinDy(dy) {}
+      : kind(k), width(w), height(h) {}
 
     // identifying info
 
     ComponentKind kind;
-    uint32_t numPins;
 
     // geometry
     float width;
@@ -57,10 +55,11 @@ namespace AIEPLACE_NAMESPACE {
 
     // pin info
     // offsets from cell origin
-    const int32_t *pinDx;   // size = numPins
-    const int32_t *pinDy;   // size = numPins
+    std::vector<float> pinDx;
+    std::vector<float> pinDy;
+    std::unordered_map<std::string, uint32_t> pinIndex;
+    uint32_t numPins() const { return static_cast<uint32_t>(pinDx.size()); }
   };
-
 
 }
 

@@ -22,13 +22,12 @@ namespace AIEPLACE_NAMESPACE {
   public:
       using key_type        = Key;
       using mapped_type     = T;
-      using size_type       = std::uint32_t; // matches your index type
+      using size_type       = std::uint32_t;
       using index_type      = size_type;
       using vector_type     = std::vector<T>;
       using map_type        = std::unordered_map<Key, index_type, Hash, KeyEqual>;
       using const_iterator  = typename vector_type::const_iterator;
   
-      // --- construction ---
       LockableIndexedCollection() = default;
   
       bool is_locked() const noexcept { return locked_; }
@@ -206,32 +205,16 @@ namespace AIEPLACE_NAMESPACE {
       bool locked_ = false;
   };
 
-  // ---- ComponentType pretty-print ----
-  std::ostream& printComponentType(std::ostream& os, const std::string& name, const ComponentType& ct) {
-    os << "ComponentType{\n"
-      << "  name: "      << name << "\n"
-      << "  kind: "      << ct.kind << "\n"
-      << "  width: "     << ct.width << "\n"
-      << "  height: "    << ct.height << "\n"
-      << "  numPins: "   << ct.numPins << "\n";
-
-    if (ct.numPins > 0 && ct.pinDx && ct.pinDy) {
-      os << "  pins:\n";
-      for (uint32_t i = 0; i < ct.numPins; ++i) {
-        os << "    [" << i << "]: (" << ct.pinDx[i] << ", " << ct.pinDy[i] << ")\n";
-      }
-    } else {
-      os << "  pins: <none or not initialized>\n";
-    }
-
-    os << "}";
-    return os;
-  }
-
   using ComponentTypeLibrary =
       LockableIndexedCollection<std::string, ComponentType>;
   using ComponentLibrary =
       LockableIndexedCollection<std::string, Component>;
   //using NetlistLibrary =
   //    LockableIndexedCollection<std::string, Netlist>;
+
+  std::ostream& operator<<(std::ostream& os, ComponentState s);
+  std::ostream& operator<<(std::ostream& os, ComponentKind k);
+  std::ostream& printComponentType(std::ostream& os, const std::string& name, const ComponentType& ct);
+  void print_component_type_library(const ComponentTypeLibrary& lib, std::ostream& os = std::cout);
+
 }

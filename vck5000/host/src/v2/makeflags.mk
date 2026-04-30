@@ -5,7 +5,7 @@ BUILD_VIZ ?= 0# Set to 1 to build with visualization support.
 THIRD_PARTY = $(PROJECT_ROOT)/../third_party
 
 HOST_MAIN = main.cpp
-HOST_SRCS = DataBase.cpp Common.cpp Logger.cpp Net.cpp
+HOST_SRCS = Library.cpp Parsers.cpp Common.cpp Logger.cpp Net.cpp
 #HOST_SRCS = AIEplace.cpp Partials.cpp \
 #	    Density.cpp Output.cpp DataBase.cpp \
 #	    Grid.cpp Net.cpp DCT.cpp Logger.cpp \
