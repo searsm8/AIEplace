@@ -19,28 +19,38 @@ namespace AIEPLACE_NAMESPACE {
     IOPad = 4
   };
 
-  class Component
+  struct Net
   {
-    public:
-      Component(const char* n, uint32_t li, float x, float y,
-          ComponentState s = ComponentState::Unplaced)
-        : instName(n), libraryId(li), origin(x, y), state(s) {}
+    Net(const std::string n) : name_(n) {}
 
-    private:
-      // TODO: name is only for debug, could be removed if
-      // component name to index map works well
-      std::string instName;
-      uint32_t    libraryId;
+    struct NetPinIndex {
+      uint32_t component;
+      uint32_t type;
+    };
 
-      Coordinate origin;
-      ComponentState state;
+    std::vector<NetPinIndex> pin_indeces;
+    //TODO: remove name after map works
+    const std::string name_;
+  };
+
+  struct Component
+  {
+    Component() : libraryId(0), origin(0.0f, 0.0f), state(ComponentState::Unplaced) {}
+    Component(uint32_t li, float x, float y,
+        ComponentState s = ComponentState::Unplaced)
+      : libraryId(li), origin(x, y), state(s) {}
+
+    uint32_t libraryId;
+
+    Coordinate origin;
+    ComponentState state;
   };
 
 
   struct ComponentType {
 
-    ComponentType(ComponentKind k, float w, float h,
-        uint32_t pins = 0, const int32_t* dx = nullptr, const int32_t* dy = nullptr)
+    ComponentType() : kind(ComponentKind::Unknown), width(0.0f), height(0.0f) {}
+    ComponentType(ComponentKind k, float w, float h)
       : kind(k), width(w), height(h) {}
 
     // identifying info
@@ -59,6 +69,22 @@ namespace AIEPLACE_NAMESPACE {
     std::vector<float> pinDy;
     std::unordered_map<std::string, uint32_t> pinIndex;
     uint32_t numPins() const { return static_cast<uint32_t>(pinDx.size()); }
+  };
+
+  struct ComponentTypeComparator {
+    bool operator()(const std::pair<std::string, ComponentType>& a,
+        const std::pair<std::string, ComponentType>& b) const
+    {
+      return static_cast<uint8_t>(a.second.kind) < static_cast<uint8_t>(b.second.kind);
+    }
+  };
+
+  struct ComponentComparator {
+    bool operator()(const std::pair<std::string, Component>& a,
+        const std::pair<std::string, Component>& b) const
+    {
+      return static_cast<uint32_t>(a.second.libraryId) < static_cast<uint32_t>(b.second.libraryId);
+    }
   };
 
 }

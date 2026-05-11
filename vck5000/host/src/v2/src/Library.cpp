@@ -45,16 +45,68 @@ namespace AIEPLACE_NAMESPACE {
     return os;
   }
 
+  // ---- Component pretty-print ----
+  std::ostream& printComponent(std::ostream& os, const std::string& name, const Component& c) {
+    os << "Component{\n"
+      << "  name:              "  << name << "\n"
+      << "  ComponentType idx: "  << c.libraryId << "\n"
+      << "  origin:            (" << c.origin.x << ", " << c.origin.y << ")\n"
+      << "  state:             "  << c.state << "\n";
+
+    os << "}";
+    return os;
+  }
+
   // ---- Dump the vector and map ----
   void print_component_type_library(const ComponentTypeLibrary& lib, std::ostream& os)
   {
-    os << "component_library (size=" << lib.size() << "):\n";
-    const auto& map = lib.index_map();
-    for (const auto& [name, idx] : map) {
-      os << "[" << idx << "]: ";
-      const ComponentType& ct = lib[idx];
-      printComponentType(os, name, ct);
+    if(!lib.is_locked()) {
+      os << "#############################\n";
+      os << "# LIBRARY IS NOT LOCKED!    #\n";
+      os << "# Indeces can still change! #\n";
+      os << "#############################\n";
       os << "\n";
+    }
+    const auto& array = lib.data();
+    const auto n = lib.size();
+    os << "component_type_library (size=" << n << "):\n";
+    for (uint32_t idx = 0; idx < n; idx++) {
+      os << "[" << idx << "]: ";
+      if(lib.is_locked()) {
+        const ComponentType& ct = lib[idx];
+        printComponentType(os, lib.name_at(idx), ct);
+      } else {
+        const ComponentType& ct = lib.at_index(idx);
+        printComponentType(os, lib.name_at(idx), ct);
+      }
+      os << "\n";
+    }
+  }
+  void print_component_library(const ComponentLibrary& lib, std::ostream& os)
+  {
+    if(!lib.is_locked()) {
+      os << "#############################\n";
+      os << "# LIBRARY IS NOT LOCKED!    #\n";
+      os << "# Indeces can still change! #\n";
+      os << "#############################\n";
+      os << "\n";
+    }
+    const auto& array = lib.data();
+    const auto n = lib.size();
+    os << "component_library (size=" << n << "):\n";
+    for (uint32_t idx = 0; idx < n; idx++) {
+      os << "[" << idx << "]: ";
+      if(lib.is_locked()) {
+        const Component& c = lib[idx];
+        printComponent(os, lib.name_at(idx), c);
+      } else {
+        const Component& c = lib.at_index(idx);
+        printComponent(os, lib.name_at(idx), c);
+      }
+      os << "\n";
+
+      if (idx > 10)
+        break;
     }
   }
 }
