@@ -6,6 +6,17 @@
 
 namespace AIEPLACE_NAMESPACE {
 
+  class ParserUtils {
+    public:
+      // Trim helpers
+      void trimInPlace(std::string& s);
+      std::vector<std::string> tokenize(const std::string& line);
+      bool iequals(const std::string& a, const std::string& b);
+      void processLine(std::string line);
+      void dropComments(std::string& s);
+
+  };
+
   class CellParser {
     public:
       explicit CellParser(ComponentTypeLibrary& lib) : lib_(lib) {}
@@ -15,6 +26,7 @@ namespace AIEPLACE_NAMESPACE {
 
     private:
       ComponentTypeLibrary& lib_;
+      ParserUtils parserUtils_;
 
       enum class State {
         Idle,
@@ -38,13 +50,7 @@ namespace AIEPLACE_NAMESPACE {
       float       currentPinDy_ = 0.0f;
 
       void resetState();
-
-      // Trim helpers
-      void trimInPlace(std::string& s);
-      std::vector<std::string> tokenize(const std::string& line);
-      bool iequals(const std::string& a, const std::string& b);
       void processLine(std::string line);
-
       // --- State handlers ---
       void handleIdle(const std::vector<std::string>& tokens);
       void handleInMacro(const std::vector<std::string>& tokens);
@@ -53,6 +59,71 @@ namespace AIEPLACE_NAMESPACE {
 
       void ensureMacroInLibrary();
       void addCurrentPinToMacro();
+  };
+
+  class FloorplanParser {
+    public:
+      FloorplanParser(ComponentLibrary& compLib, ComponentTypeLibrary& typeLib, std::string filename) : compLib_(compLib), typeLib_(typeLib), ifs_(filename)
+    {
+      if (!ifs_) {
+        throw std::runtime_error("Cannot open DEF file: " + filename);
+      }
+    }
+
+      // After parseFile you can query these:
+      Coordinate dieLowerLeft() const { return metadata_.die_ll; }
+      Coordinate dieUpperRight() const { return metadata_.die_ur; }
+      float dieWidth() const { return metadata_.die_ur.x - metadata_.die_ll.x; }
+      float dieHeight() const { return metadata_.die_ur.y - metadata_.die_ll.y; }
+
+      float dbUnitsPerMicron() const { return metadata_.dbu_per_micron; }
+
+      struct SectionPos {
+        std::streampos beginLinePos{}; // position at start of line with "<NAME> <count> ;"
+        long count = -1;               // as read from header (e.g. COMPONENTS 108292 ;)
+        bool present = false;
+      };
+
+      struct FloorplanSectionMap {
+        SectionPos components;
+        SectionPos pins;
+        SectionPos nets;
+        SectionPos vias;
+        SectionPos nonDefaultRules;
+        SectionPos regions;
+        SectionPos groups;
+      };
+
+      struct FloorplanMetadata {
+        std::string version;
+        std::string dividerChar;
+        std::string busBitChars;
+        std::string designName;
+        float dbu_per_micron = 1.0f;
+        Coordinate die_ll{0.0f, 0.0f};
+        Coordinate die_ur{0.0f, 0.0f};
+        // add ROWS, TRACKS here if needed
+      };
+
+      void parseFileMetadata();
+      void parseComponents();
+
+    private:
+
+      std::ifstream ifs_;
+      ParserUtils parserUtils_;
+
+      ComponentTypeLibrary& typeLib_;
+      ComponentLibrary&     compLib_;
+
+      FloorplanMetadata   metadata_;
+      FloorplanSectionMap sections_;
+
+      void parseComponentLine(const std::vector<std::string>& tokens);
+      void finalizeCurrentComponent();
+
+      // Helper to interpret section header line, e.g. "COMPONENTS 108292 ;"
+      void recordSectionHeader(const std::string& line, std::streampos linePos, const std::vector<std::string>& toks, SectionPos& section);
   };
 
 }

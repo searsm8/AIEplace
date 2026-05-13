@@ -6,6 +6,7 @@
 #include "Common.h"
 #include "Component.h"
 #include "Library.h"
+#include "Parsers.h"
 //#include "Pin.h"
 //#include "Node.h"
 //#include "Net.h"
@@ -17,17 +18,17 @@ namespace AIEPLACE_NAMESPACE {
   class DataBase
   {
     public:
-      DataBase() {}
-      DataBase(fs::path input_dir) : design_dir(input_dir) {};
+      DataBase(fs::path design_dir);
       virtual ~DataBase() {}
 
-      ComponentTypeLibrary  typeLib;
-      ComponentLibrary      componentLib;
+      ComponentTypeLibrary  typeLib_;
+      ComponentLibrary      componentLib_;
 
     private:
       // Path to find directory containing design data.
       // Expects to find a cells.lef and floorplan.def file
-      fs::path design_dir;
+      void parseDesign(fs::path design_dir);
+
 
   };
 

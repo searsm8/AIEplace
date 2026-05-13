@@ -2,6 +2,70 @@
 
 namespace AIEPLACE_NAMESPACE {
 
+  // ParserUtils
+  //
+  [[noreturn]] void throwBadComponent(const std::vector<std::string>& toks,
+      const std::string& reason) {
+    std::ostringstream oss;
+    oss << "Malformed component: " << reason << "\nTokens:";
+    for (const auto& t : toks) {
+      oss << " [" << t << "]";
+    }
+    throw std::runtime_error(oss.str());
+  }
+
+
+  void ParserUtils::trimInPlace(std::string& s) {
+    auto notspace = [](unsigned char ch) { return !std::isspace(ch); };
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), notspace));
+    s.erase(std::find_if(s.rbegin(), s.rend(), notspace).base(), s.end());
+  }
+
+  std::vector<std::string> ParserUtils::tokenize(const std::string& line) {
+    std::vector<std::string> tokens;
+    std::string current;
+
+    auto flush = [&]() {
+      if (!current.empty()) {
+        tokens.push_back(current);
+        current.clear();
+      }
+    };
+
+    for (char c : line) {
+      if (std::isspace(static_cast<unsigned char>(c))) {
+        flush();
+      } else if (c == '(' || c == ')' || c == ',' || c == ';' || c == '+' ) {
+        flush();
+        std::string s(1, c);
+        tokens.push_back(s);
+      } else {
+        current.push_back(c);
+      }
+    }
+    flush();
+    return tokens;
+  }
+
+  bool ParserUtils::iequals(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+      if (std::tolower(static_cast<unsigned char>(a[i])) !=
+          std::tolower(static_cast<unsigned char>(b[i])))
+        return false;
+    }
+    return true;
+  }
+
+  void ParserUtils::dropComments(std::string& line) {
+    auto pos = line.find('#');
+    if (pos != std::string::npos) {
+      line.erase(pos);
+    }
+  }
+
+  // CellParser
+
   void CellParser::parseFile(const std::string& filename) {
     std::ifstream ifs(filename);
     if (!ifs) {
@@ -33,45 +97,21 @@ namespace AIEPLACE_NAMESPACE {
     currentPinDx_ = currentPinDy_ = 0.0f;
   }
 
-  void CellParser::trimInPlace(std::string& s) {
-    auto notspace = [](unsigned char ch) { return !std::isspace(ch); };
-    s.erase(s.begin(), std::find_if(s.begin(), s.end(), notspace));
-    s.erase(std::find_if(s.rbegin(), s.rend(), notspace).base(), s.end());
-  }
-
-  std::vector<std::string> CellParser::tokenize(const std::string& line) {
-    std::vector<std::string> tokens;
-    std::istringstream iss(line);
-    std::string tok;
-    while (iss >> tok) {
-      tokens.push_back(tok);
-    }
-    return tokens;
-  }
-
-  bool CellParser::iequals(const std::string& a, const std::string& b) {
-    if (a.size() != b.size()) return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-      if (std::tolower(static_cast<unsigned char>(a[i])) !=
-          std::tolower(static_cast<unsigned char>(b[i])))
-        return false;
-    }
-    return true;
-  }
-
   void CellParser::processLine(std::string line) {
-    trimInPlace(line);
-    if (line.empty() || line[0] == '#')
+    parserUtils_.dropComments(line);
+    parserUtils_.trimInPlace(line);
+
+    if (line.empty())
       return;
 
-    auto tokens = tokenize(line);
+    auto tokens = parserUtils_.tokenize(line);
     if (tokens.empty())
       return;
 
     const std::string& kw = tokens[0];
 
     // Global END LIBRARY
-    if (iequals(kw, "END") && tokens.size() >= 2 && iequals(tokens[1], "LIBRARY")) {
+    if (parserUtils_.iequals(kw, "END") && tokens.size() >= 2 && parserUtils_.iequals(tokens[1], "LIBRARY")) {
       // We just ignore it – parseFile will end naturally
       return;
     }
@@ -97,7 +137,7 @@ namespace AIEPLACE_NAMESPACE {
   void CellParser::handleIdle(const std::vector<std::string>& tokens) {
     const std::string& kw = tokens[0];
 
-    if (iequals(kw, "MACRO")) {
+    if (parserUtils_.iequals(kw, "MACRO")) {
       if (tokens.size() < 2)
         throw std::runtime_error("MACRO without name");
 
@@ -114,23 +154,23 @@ namespace AIEPLACE_NAMESPACE {
   void CellParser::handleInMacro(const std::vector<std::string>& tokens) {
     const std::string& kw = tokens[0];
 
-    if (iequals(kw, "CLASS")) {
+    if (parserUtils_.iequals(kw, "CLASS")) {
       // CLASS CORE/BLOCK
       if (tokens.size() >= 2) {
         const std::string& cls = tokens[1];
-        if (iequals(cls, "CORE"))  currentMacroKind_ = ComponentKind::LogicCell;
-        else if (iequals(cls, "BLOCK")) currentMacroKind_ = ComponentKind::Macro;
+        if (parserUtils_.iequals(cls, "CORE"))  currentMacroKind_ = ComponentKind::LogicCell;
+        else if (parserUtils_.iequals(cls, "BLOCK")) currentMacroKind_ = ComponentKind::Macro;
         else currentMacroKind_ = ComponentKind::Unknown;
       }
-    } else if (iequals(kw, "SIZE")) {
+    } else if (parserUtils_.iequals(kw, "SIZE")) {
       // SIZE X BY Y ;
-      if (tokens.size() >= 4 && iequals(tokens[2], "BY")) {
+      if (tokens.size() >= 4 && parserUtils_.iequals(tokens[2], "BY")) {
         currentMacroWidth_  = std::stof(tokens[1]);
         currentMacroHeight_ = std::stof(tokens[3]);
       } else {
         throw std::runtime_error("Malformed SIZE line in macro " + currentMacroName_);
       }
-    } else if (iequals(kw, "PIN")) {
+    } else if (parserUtils_.iequals(kw, "PIN")) {
       // PIN <name>
       if (tokens.size() < 2)
         throw std::runtime_error("PIN without name in macro " + currentMacroName_);
@@ -143,9 +183,9 @@ namespace AIEPLACE_NAMESPACE {
       currentPinDx_ = currentPinDy_ = 0.0f;
 
       state_ = State::InPin;
-    } else if (iequals(kw, "END")) {
+    } else if (parserUtils_.iequals(kw, "END")) {
       // END <macro_name>
-      if (tokens.size() >= 2 && iequals(tokens[1], currentMacroName_)) {
+      if (tokens.size() >= 2 && parserUtils_.iequals(tokens[1], currentMacroName_)) {
         // finalize macro in library (if no pins were encountered)
         ensureMacroInLibrary();
         state_ = State::Idle;
@@ -157,13 +197,13 @@ namespace AIEPLACE_NAMESPACE {
   void CellParser::handleInPin(const std::vector<std::string>& tokens) {
     const std::string& kw = tokens[0];
 
-    if (iequals(kw, "PORT")) {
+    if (parserUtils_.iequals(kw, "PORT")) {
       // Begin port region
       state_ = State::InPort;
-    } else if (iequals(kw, "END")) {
+    } else if (parserUtils_.iequals(kw, "END")) {
       // END <pin_name>
       // When we leave a PIN, if we saw at least one RECT center, store it.
-      if (tokens.size() >= 2 && iequals(tokens[1], currentPinName_)) {
+      if (tokens.size() >= 2 && parserUtils_.iequals(tokens[1], currentPinName_)) {
         if (currentPinHasRect_) {
           addCurrentPinToMacro();
         } else {
@@ -179,10 +219,10 @@ namespace AIEPLACE_NAMESPACE {
   void CellParser::handleInPort(const std::vector<std::string>& tokens) {
     const std::string& kw = tokens[0];
 
-    if (iequals(kw, "END")) {
+    if (parserUtils_.iequals(kw, "END")) {
       // END of PORT
       state_ = State::InPin;
-    } else if (iequals(kw, "RECT")) {
+    } else if (parserUtils_.iequals(kw, "RECT")) {
       // RECT x1 y1 x2 y2 ;
       if (tokens.size() < 5) {
         throw std::runtime_error("Malformed RECT in pin " + currentPinName_ +
@@ -228,6 +268,192 @@ namespace AIEPLACE_NAMESPACE {
     ct.pinDx.push_back(currentPinDx_);
     ct.pinDy.push_back(currentPinDy_);
     ct.pinIndex.emplace(currentPinName_, pinIdx);
+  }
+
+
+  // FloorplanParser
+
+  // Pass 1: parse header & discover sections
+  void FloorplanParser::parseFileMetadata() {
+    // rewind
+    ifs_.clear();
+    ifs_.seekg(0, std::ios::beg);
+
+    std::string line;
+    bool inDesign = false;
+
+    while (true) {
+      std::streampos pos = ifs_.tellg();
+      if (!std::getline(ifs_, line)) break;
+
+      parserUtils_.dropComments(line);
+      parserUtils_.trimInPlace(line);
+      if (line.empty()) continue;
+
+      auto toks = parserUtils_.tokenize(line);
+      if (toks.empty()) continue;
+
+      if (!inDesign) {
+        // Header fields appear before DESIGN or just after
+        if (parserUtils_.iequals(toks[0], "VERSION")) {
+          if (toks.size() >= 2) metadata_.version = toks[1];
+        } else if (parserUtils_.iequals(toks[0], "DIVIDERCHAR")) {
+          if (toks.size() >= 2) metadata_.dividerChar = toks[1];
+        } else if (parserUtils_.iequals(toks[0], "BUSBITCHARS")) {
+          if (toks.size() >= 2) metadata_.busBitChars = toks[1];
+        } else if (parserUtils_.iequals(toks[0], "DESIGN")) {
+          if (toks.size() >= 2) metadata_.designName = toks[1];
+          inDesign = true;
+        } else if (parserUtils_.iequals(toks[0], "UNITS")) {
+          // Expect: UNITS DISTANCE MICRONS 1000 ;
+          // tokens: [0]=UNITS [1]=DISTANCE [2]=MICRONS [3]=1000 ...
+          if (toks.size() >= 4 && parserUtils_.iequals(toks[2], "MICRONS")) {
+            metadata_.dbu_per_micron = std::stoi(toks[3]);
+          }
+        } else {
+          continue; // only record sections inside DESIGN
+        }
+      }
+
+      // Section discovery
+      if (parserUtils_.iequals(toks[0], "COMPONENTS")) {
+        recordSectionHeader(line, pos, toks, sections_.components);
+      } else if (parserUtils_.iequals(toks[0], "PINS")) {
+        recordSectionHeader(line, pos, toks, sections_.pins);
+      } else if (parserUtils_.iequals(toks[0], "NETS")) {
+        recordSectionHeader(line, pos, toks, sections_.nets);
+      } else if (parserUtils_.iequals(toks[0], "VIAS")) {
+        recordSectionHeader(line, pos, toks, sections_.vias);
+      } else if (parserUtils_.iequals(toks[0], "NONDEFAULTRULES")) {
+        recordSectionHeader(line, pos, toks, sections_.nonDefaultRules);
+      } else if (parserUtils_.iequals(toks[0], "REGIONS")) {
+        recordSectionHeader(line, pos, toks, sections_.regions);
+      } else if (parserUtils_.iequals(toks[0], "GROUPS")) {
+        recordSectionHeader(line, pos, toks, sections_.groups);
+      } else if (parserUtils_.iequals(toks[0], "END") && toks.size() >= 2 &&
+          parserUtils_.iequals(toks[1], "DESIGN")) {
+        inDesign = false;
+        break;
+      }
+    }
+  }
+
+  void FloorplanParser::recordSectionHeader(const std::string& line, std::streampos linePos, const std::vector<std::string>& toks, SectionPos& section) {
+    section.beginLinePos = linePos;
+    section.present = true;
+
+    // typical: KEYWORD <count> ;
+    if (toks.size() >= 2) {
+      try {
+        section.count = std::stol(toks[1]);
+      } catch (...) {
+        section.count = -1;
+      }
+    }
+  }
+
+  void FloorplanParser::parseComponents() {
+    if (!sections_.components.present)
+      throw std::runtime_error("No components found in metadata. Have you parsed the metadata already?");
+
+    ifs_.clear();
+    ifs_.seekg(sections_.components.beginLinePos);
+
+    std::string line;
+    // Consume "COMPONENTS <count> ;" line
+    if (!std::getline(ifs_, line)) return;
+
+    std::vector<std::string> buffer = {};
+
+    while (std::getline(ifs_, line)) {
+      parserUtils_.dropComments(line);
+      parserUtils_.trimInPlace(line);
+      if (line.empty()) continue;
+      auto toks = parserUtils_.tokenize(line);
+      if (toks.empty()) continue;
+
+      // detect END COMPONENTS
+      if (parserUtils_.iequals(toks[0], "END") &&
+          toks.size() >= 2 &&
+          parserUtils_.iequals(toks[1], "COMPONENTS")) {
+
+        if (!buffer.empty()) {
+          throw std::runtime_error("END COMPONENTS before current component terminated with ';'");
+        }
+        break; // done with Components section
+      }
+
+      for (auto& tok : toks) {
+        if (tok == "-" && !buffer.empty()) {
+          throw std::runtime_error("Found new component start before finishing previous component");
+        } else if (tok != ";") {
+          buffer.push_back(tok);
+        } else {
+          buffer.push_back(tok);
+          parseComponentLine(buffer);
+          buffer.clear();
+        }
+      }
+    }
+  }
+
+  void FloorplanParser::parseComponentLine(const std::vector<std::string>& toks) {
+    // A component line looks like:
+    // - component_name macro_name + UNPLACED ;
+    // - component_name macro_name + PLACED (x,y) Orientation ;
+
+    if (toks.empty())
+        throwBadComponent(toks, "empty token list");
+    if (toks.front() != "-")
+        throwBadComponent(toks, "first token is not '-'");
+    if (toks.back() != ";")
+        throwBadComponent(toks, "last token is not ';'");
+
+    std::string component_name = toks[1];
+    std::string macro_name = toks[2];
+    uint32_t typeIdx = typeLib_.index_of(macro_name);
+
+    bool placed = false;
+    float x = 0.0f, y = 0.0f;
+
+    std::size_t step = 1;
+    for (std::size_t i = 3; i < toks.size(); i+=step) {
+      if (toks[i] != "+") { step=1; continue;}
+
+      // toks[i] is always "+"
+      if (i + 1 >= toks.size()) {
+        throwBadComponent(toks, "Unexpected end after '+' in component");
+      }
+      const std::string& kw = toks[i + 1];
+
+      if (kw == "UNPLACED") {
+        step = 2;
+        // expect: + UNPLACED
+        placed = false;
+        x = 0.0f;
+        y = 0.0f;
+      } else if (kw == "FIXED") {
+        step = 7;
+        // expect: + FIXED  (   x   y   )  ORIENT
+        // tokens: i  i+1  i+2 i+3 i+4 i+5  i+6
+        //         + FIXED  (   x   y   )   N/FS
+        placed = true;
+        if (i + 6 < toks.size() && toks[i+2] == "(" && toks[i+5] == ")") {
+          x = std::stof(toks[i+3]);
+          y = std::stof(toks[i+4]);
+          // orientation in toks[i+6]
+        } else {
+          throwBadComponent(toks, "Unexpected FIXED syntax in component");
+        }
+      } else {
+        step=1;
+        // other + properties: ignore for now
+        // + SOURCE, + REGION, etc...
+      }
+
+    }
+    ComponentState state = placed ? ComponentState::Placed : ComponentState::Unplaced;
+    compLib_.emplace(component_name, typeIdx, x, y, state);
   }
 
 }

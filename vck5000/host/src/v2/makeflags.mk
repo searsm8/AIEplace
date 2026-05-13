@@ -5,7 +5,7 @@ BUILD_VIZ ?= 0# Set to 1 to build with visualization support.
 THIRD_PARTY = $(PROJECT_ROOT)/../third_party
 
 HOST_MAIN = main.cpp
-HOST_SRCS = Library.cpp Parsers.cpp Common.cpp Logger.cpp Net.cpp
+HOST_SRCS = DataBase.cpp Library.cpp Parsers.cpp Common.cpp Logger.cpp Net.cpp
 #HOST_SRCS = AIEplace.cpp Partials.cpp \
 #	    Density.cpp Output.cpp DataBase.cpp \
 #	    Grid.cpp Net.cpp DCT.cpp Logger.cpp \
@@ -19,8 +19,8 @@ CPPFLAGS += -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/
 
 CXXFLAGS += -std=c++2a
 CXXFLAGS += -g
-CXXFLAGS += -O0 # optimization level, 0 means no optimization
-#CXXFLAGS += -O1 # optimization level, 3 means full optimization
+#CXXFLAGS += -O0 # optimization level, 0 means no optimization
+CXXFLAGS += -O1 # optimization level, 3 means full optimization
 #CXXFLAGS += -Wall
 
 LDFLAGS += -L$(HOST_DIR)/lib
