@@ -86,7 +86,7 @@ namespace AIEPLACE_NAMESPACE {
 
       struct FloorplanSectionMap {
         SectionPos components;
-        SectionPos pins;
+        SectionPos iopads;
         SectionPos nets;
         SectionPos vias;
         SectionPos nonDefaultRules;
@@ -107,6 +107,7 @@ namespace AIEPLACE_NAMESPACE {
 
       void parseFileMetadata();
       void parseComponents();
+      void parseIOPads();
 
     private:
 
@@ -119,11 +120,14 @@ namespace AIEPLACE_NAMESPACE {
       FloorplanMetadata   metadata_;
       FloorplanSectionMap sections_;
 
+      void parseSection(const std::string& name, const SectionPos& section, std::function<void(const std::vector<std::string>&)> lineParser);
       void parseComponentLine(const std::vector<std::string>& tokens);
+      void parseIOPadLine(const std::vector<std::string>& tokens);
       void finalizeCurrentComponent();
 
       // Helper to interpret section header line, e.g. "COMPONENTS 108292 ;"
       void recordSectionHeader(const std::string& line, std::streampos linePos, const std::vector<std::string>& toks, SectionPos& section);
+      std::string toUpper(std::string str);
   };
 
 }

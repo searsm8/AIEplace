@@ -4,10 +4,19 @@ namespace AIEPLACE_NAMESPACE {
 
   // ParserUtils
   //
-  [[noreturn]] void throwBadComponent(const std::vector<std::string>& toks,
-      const std::string& reason) {
+  std::string FloorplanParser::toUpper(std::string str)
+  {
+    std::transform(str.begin(), str.end(), str.begin(),
+        [](unsigned char c) {
+        return std::toupper(c);
+        });
+
+    return str;
+  }
+
+  [[noreturn]] void throwMalformedStatement(std::string section, const std::vector<std::string>& toks, const std::string& reason) {
     std::ostringstream oss;
-    oss << "Malformed component: " << reason << "\nTokens:";
+    oss << "Malformed " << section << ": " << reason << "\nTokens:";
     for (const auto& t : toks) {
       oss << " [" << t << "]";
     }
@@ -319,7 +328,7 @@ namespace AIEPLACE_NAMESPACE {
       if (parserUtils_.iequals(toks[0], "COMPONENTS")) {
         recordSectionHeader(line, pos, toks, sections_.components);
       } else if (parserUtils_.iequals(toks[0], "PINS")) {
-        recordSectionHeader(line, pos, toks, sections_.pins);
+        recordSectionHeader(line, pos, toks, sections_.iopads);
       } else if (parserUtils_.iequals(toks[0], "NETS")) {
         recordSectionHeader(line, pos, toks, sections_.nets);
       } else if (parserUtils_.iequals(toks[0], "VIAS")) {
@@ -353,14 +362,22 @@ namespace AIEPLACE_NAMESPACE {
   }
 
   void FloorplanParser::parseComponents() {
-    if (!sections_.components.present)
-      throw std::runtime_error("No components found in metadata. Have you parsed the metadata already?");
+    parseSection("component", sections_.components, [this](const std::vector<std::string>& toks) {parseComponentLine(toks);});
+  }
+
+  void FloorplanParser::parseIOPads() {
+    parseSection("pin", sections_.iopads, [this](const std::vector<std::string>& toks) {parseIOPadLine(toks);});
+  }
+
+  void FloorplanParser::parseSection(const std::string& name, const SectionPos& section, std::function<void(const std::vector<std::string>&)> lineParser) {
+    if (!section.present)
+      throw std::runtime_error("No " + name + " section found in metadata. Have you parsed the metadata already?");
 
     ifs_.clear();
-    ifs_.seekg(sections_.components.beginLinePos);
+    ifs_.seekg(section.beginLinePos);
 
     std::string line;
-    // Consume "COMPONENTS <count> ;" line
+    // Consume section header line, ie. "COMPONENTS <count> ;"
     if (!std::getline(ifs_, line)) return;
 
     std::vector<std::string> buffer = {};
@@ -372,25 +389,25 @@ namespace AIEPLACE_NAMESPACE {
       auto toks = parserUtils_.tokenize(line);
       if (toks.empty()) continue;
 
-      // detect END COMPONENTS
+      // detect section end, ie. END COMPONENTS
       if (parserUtils_.iequals(toks[0], "END") &&
           toks.size() >= 2 &&
-          parserUtils_.iequals(toks[1], "COMPONENTS")) {
+          parserUtils_.iequals(toks[1], toUpper(name) + "S")) {
 
         if (!buffer.empty()) {
-          throw std::runtime_error("END COMPONENTS before current component terminated with ';'");
+          throw std::runtime_error("END " + toUpper(name) + "S before current " + name + " terminated with ';'");
         }
-        break; // done with Components section
+        break; // done with section
       }
 
       for (auto& tok : toks) {
         if (tok == "-" && !buffer.empty()) {
-          throw std::runtime_error("Found new component start before finishing previous component");
+          throw std::runtime_error("Found new " + name + " start before finishing previous component");
         } else if (tok != ";") {
           buffer.push_back(tok);
         } else {
           buffer.push_back(tok);
-          parseComponentLine(buffer);
+          lineParser(buffer);
           buffer.clear();
         }
       }
@@ -403,11 +420,11 @@ namespace AIEPLACE_NAMESPACE {
     // - component_name macro_name + PLACED (x,y) Orientation ;
 
     if (toks.empty())
-        throwBadComponent(toks, "empty token list");
+        throwMalformedStatement("component", toks, "empty token list");
     if (toks.front() != "-")
-        throwBadComponent(toks, "first token is not '-'");
+        throwMalformedStatement("component", toks, "first token is not '-'");
     if (toks.back() != ";")
-        throwBadComponent(toks, "last token is not ';'");
+        throwMalformedStatement("component", toks, "last token is not ';'");
 
     std::string component_name = toks[1];
     std::string macro_name = toks[2];
@@ -418,35 +435,36 @@ namespace AIEPLACE_NAMESPACE {
 
     std::size_t step = 1;
     for (std::size_t i = 3; i < toks.size(); i+=step) {
-      if (toks[i] != "+") { step=1; continue;}
+      // reset step
+      step=1;
+
+      if (toks[i] != "+") continue;
 
       // toks[i] is always "+"
       if (i + 1 >= toks.size()) {
-        throwBadComponent(toks, "Unexpected end after '+' in component");
+        throwMalformedStatement("component", toks, "Unexpected end after '+' in component");
       }
-      const std::string& kw = toks[i + 1];
+      const std::string& property = toks[i + 1];
 
-      if (kw == "UNPLACED") {
+      if (property == "UNPLACED") {
         step = 2;
         // expect: + UNPLACED
         placed = false;
         x = 0.0f;
         y = 0.0f;
-      } else if (kw == "FIXED") {
+      } else if (property == "FIXED") {
         step = 7;
         // expect: + FIXED  (   x   y   )  ORIENT
         // tokens: i  i+1  i+2 i+3 i+4 i+5  i+6
-        //         + FIXED  (   x   y   )   N/FS
         placed = true;
         if (i + 6 < toks.size() && toks[i+2] == "(" && toks[i+5] == ")") {
           x = std::stof(toks[i+3]);
           y = std::stof(toks[i+4]);
           // orientation in toks[i+6]
         } else {
-          throwBadComponent(toks, "Unexpected FIXED syntax in component");
+          throwMalformedStatement("component", toks, "Unexpected FIXED syntax in component");
         }
       } else {
-        step=1;
         // other + properties: ignore for now
         // + SOURCE, + REGION, etc...
       }
@@ -454,6 +472,82 @@ namespace AIEPLACE_NAMESPACE {
     }
     ComponentState state = placed ? ComponentState::Placed : ComponentState::Unplaced;
     compLib_.emplace(component_name, typeIdx, x, y, state);
+  }
+
+  void FloorplanParser::parseIOPadLine(const std::vector<std::string>& toks) {
+    // A Pin line looks like:
+    // - pin_name + property + property + ... ;
+
+    if (toks.empty())
+        throwMalformedStatement("pin", toks, "empty token list");
+    if (toks.front() != "-")
+        throwMalformedStatement("pin", toks, "first token is not '-'");
+    if (toks.back() != ";")
+        throwMalformedStatement("pin", toks, "last token is not ';'");
+
+    std::string pin_name = toks[1];
+
+    bool placed = false;
+    float x = 0.0f, y = 0.0f;
+    Coordinate pin_ll, pin_ur;
+
+    std::size_t step = 1;
+    for (std::size_t i = 2; i < toks.size(); i+=step) {
+      // reset step
+      step=1;
+
+      if (toks[i] != "+") continue;
+
+      // toks[i] is always "+"
+      if (i + 1 >= toks.size()) {
+        throwMalformedStatement("pin", toks, "Unexpected end after '+' in IOPad");
+      }
+      const std::string& property = toks[i + 1];
+
+      if (property == "LAYER") {
+        step = 11;
+        // expect: + LAYER layer_name (  ll_x ll_y  )   (  ur_x ur_y  )
+        // tokens: i  i+1   i+2      i+3 i+4  i+5  i+6 i+7  i+8  i+9 i+10
+        pin_ll.x = std::stof(toks[i+4]);
+        pin_ll.y = std::stof(toks[i+5]);
+        pin_ur.x = std::stof(toks[i+8]);
+        pin_ur.y = std::stof(toks[i+9]);
+      } else if (property == "PLACED") {
+        step = 7;
+        // expect: + PLACED  (   x   y   )  ORIENT
+        // tokens: i  i+1   i+2 i+3 i+4 i+5  i+6
+        placed = true;
+        if (i + 6 < toks.size() && toks[i+2] == "(" && toks[i+5] == ")") {
+          x = std::stof(toks[i+3]);
+          y = std::stof(toks[i+4]);
+          // orientation in toks[i+6]
+        } else {
+          throwMalformedStatement("pin", toks, "Unexpected PLACED syntax in pin");
+        }
+      } else {
+        // other + properties: ignore for now
+        // + NET, + DIRECTION, + UNPLACED etc...
+      }
+
+    }
+
+    float width = pin_ur.x - pin_ll.x;
+    float height = pin_ur.y - pin_ll.y;
+    std::string pin_type_name = "IOPin" + std::to_string(static_cast<int>(width)) + "x" + std::to_string(static_cast<int>(height));
+
+    uint32_t typeIdx;
+    if (! typeLib_.find_index(pin_type_name, typeIdx)) {
+      // add IOPad to component type
+      typeIdx = typeLib_.emplace(pin_type_name, ComponentKind::IOPad, width, height);
+      // add pin to component type
+      ComponentType& ct = typeLib_.at_index(typeIdx);
+      ct.pinDx.push_back(width * 0.5f);
+      ct.pinDy.push_back(height * 0.5f);
+      ct.pinIndex.emplace("pin", 0);
+    }
+
+    ComponentState state = placed ? ComponentState::Placed : ComponentState::Unplaced;
+    compLib_.emplace(pin_name, typeIdx, x, y, state);
   }
 
 }

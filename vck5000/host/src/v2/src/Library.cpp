@@ -105,8 +105,8 @@ namespace AIEPLACE_NAMESPACE {
       }
       os << "\n";
 
-      if (idx > 10)
-        break;
+      //if (idx > 10)
+      //  break;
     }
   }
 }

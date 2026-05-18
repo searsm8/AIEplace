@@ -192,8 +192,8 @@ namespace AIEPLACE_NAMESPACE {
     LockableIndexedCollection<std::string, ComponentType>;
   using ComponentLibrary =
     LockableIndexedCollection<std::string, Component>;
-  //using NetlistLibrary =
-  //    LockableIndexedCollection<std::string, Netlist>;
+  //using NetLibrary =
+  //    LockableIndexedCollection<std::string, Net>;
 
   std::ostream& operator<<(std::ostream& os, ComponentState s);
   std::ostream& operator<<(std::ostream& os, ComponentKind k);

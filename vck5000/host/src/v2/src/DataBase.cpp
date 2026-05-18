@@ -44,7 +44,7 @@ void DataBase::parseDesign(fs::path design_dir) {
 
   cellparser.parseFile(cellsPath);
   floorplanparser.parseFileMetadata();
-  //floorplanparser.parseIOPads();
+  floorplanparser.parseIOPads();
 
   typeLib_.sort(ComponentTypeComparator{});
   typeLib_.lock();
