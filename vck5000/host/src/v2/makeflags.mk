@@ -35,7 +35,7 @@ LDLIBS += -lstdc++fs
 LDLIBS += -llefparseradapt
 LDLIBS += -ldefparseradapt
 #LDLIBS += -lverilogparser
-LDLIBS += -lbookshelfparser -lgzstream -lz
+LDLIBS += -lbookshelfparser -lgzstream
 
 #Boost
 CPPFLAGS += -I${HOME}/local/boost_1_82_0/

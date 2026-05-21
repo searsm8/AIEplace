@@ -23,6 +23,7 @@ namespace AIEPLACE_NAMESPACE {
 
       ComponentTypeLibrary  typeLib_;
       ComponentLibrary      componentLib_;
+      NetLibrary            netLib_;
 
     private:
       // Path to find directory containing design data.

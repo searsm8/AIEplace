@@ -63,7 +63,7 @@ namespace AIEPLACE_NAMESPACE {
 
   class FloorplanParser {
     public:
-      FloorplanParser(ComponentLibrary& compLib, ComponentTypeLibrary& typeLib, std::string filename) : compLib_(compLib), typeLib_(typeLib), ifs_(filename)
+      FloorplanParser(ComponentLibrary& compLib, ComponentTypeLibrary& typeLib, NetLibrary& netLib, std::string filename) : compLib_(compLib), typeLib_(typeLib), netLib_(netLib), ifs_(filename)
     {
       if (!ifs_) {
         throw std::runtime_error("Cannot open DEF file: " + filename);
@@ -108,6 +108,7 @@ namespace AIEPLACE_NAMESPACE {
       void parseFileMetadata();
       void parseComponents();
       void parseIOPads();
+      void parseNets();
 
     private:
 
@@ -116,6 +117,7 @@ namespace AIEPLACE_NAMESPACE {
 
       ComponentTypeLibrary& typeLib_;
       ComponentLibrary&     compLib_;
+      NetLibrary&           netLib_;
 
       FloorplanMetadata   metadata_;
       FloorplanSectionMap sections_;
@@ -123,6 +125,7 @@ namespace AIEPLACE_NAMESPACE {
       void parseSection(const std::string& name, const SectionPos& section, std::function<void(const std::vector<std::string>&)> lineParser);
       void parseComponentLine(const std::vector<std::string>& tokens);
       void parseIOPadLine(const std::vector<std::string>& tokens);
+      void parseNetLine(const std::vector<std::string>& tokens);
       void finalizeCurrentComponent();
 
       // Helper to interpret section header line, e.g. "COMPONENTS 108292 ;"

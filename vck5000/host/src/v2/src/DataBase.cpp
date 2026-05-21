@@ -40,7 +40,7 @@ void DataBase::parseDesign(fs::path design_dir) {
   }
 
   CellParser cellparser(typeLib_);
-  FloorplanParser floorplanparser(componentLib_, typeLib_, floorplanPath);
+  FloorplanParser floorplanparser(componentLib_, typeLib_, netLib_, floorplanPath);
 
   cellparser.parseFile(cellsPath);
   floorplanparser.parseFileMetadata();
@@ -53,8 +53,10 @@ void DataBase::parseDesign(fs::path design_dir) {
   componentLib_.sort(ComponentComparator{});
   componentLib_.lock();
 
-  //netlistLib_.sort(NetlistComparator{});
-  //netlistLib_.lock();
+  floorplanparser.parseNets();
+
+  netLib_.sort(NetComparator{});
+  netLib_.lock();
 }
 //
 ///**

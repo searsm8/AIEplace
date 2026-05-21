@@ -369,6 +369,10 @@ namespace AIEPLACE_NAMESPACE {
     parseSection("pin", sections_.iopads, [this](const std::vector<std::string>& toks) {parseIOPadLine(toks);});
   }
 
+  void FloorplanParser::parseNets() {
+    parseSection("net", sections_.nets, [this](const std::vector<std::string>& toks) {parseNetLine(toks);});
+  }
+
   void FloorplanParser::parseSection(const std::string& name, const SectionPos& section, std::function<void(const std::vector<std::string>&)> lineParser) {
     if (!section.present)
       throw std::runtime_error("No " + name + " section found in metadata. Have you parsed the metadata already?");
@@ -548,6 +552,74 @@ namespace AIEPLACE_NAMESPACE {
 
     ComponentState state = placed ? ComponentState::Placed : ComponentState::Unplaced;
     compLib_.emplace(pin_name, typeIdx, x, y, state);
+  }
+
+  void FloorplanParser::parseNetLine(const std::vector<std::string>& toks) {
+    // A Net line looks like:
+    // - net_name ( component pin ) ( component pin ) ... + property ... ;
+    // properties at the end of a net is optional
+
+    if (toks.empty())
+      throwMalformedStatement("net", toks, "empty token list");
+    if (toks.front() != "-")
+      throwMalformedStatement("net", toks, "first token is not '-'");
+    if (toks.back() != ";")
+      throwMalformedStatement("net", toks, "last token is not ';'");
+
+    std::string net_name = toks[1];
+    std::vector<std::pair<std::string,std::string>> netpins;
+
+    std::size_t step = 1;
+    for (std::size_t i = 2; i < toks.size(); i+=step) {
+      // reset step
+      step=1;
+
+      if (toks[i] == "(") {
+        // handle net pin ( component pin )
+
+        if (i + 1 >= toks.size()) {
+          throwMalformedStatement("net", toks, "Unexpected end after '(' in net");
+        }
+        if (toks[i + 3] != ")") {
+          throwMalformedStatement("net", toks, "Could not find matching closing ')' for net");
+        }
+        const std::string& component = toks[i + 1];
+        const std::string& pin = toks[i + 2];
+        netpins.emplace_back(component, pin);
+
+      } else if (toks[i] == "+") {
+        // handle + property
+        // Skip for now
+      }
+
+    }
+
+    if (netpins.empty()) {
+      throwMalformedStatement("net", toks, "No netpins found in net.");
+    }
+
+    uint32_t netIdx = netLib_.emplace(net_name);
+    auto& n = netLib_.at_index(netIdx);
+
+    for ( auto& netpin : netpins ) {
+      uint32_t componentIdx, pinIdx;
+      if ( netpin.first == "PIN" ) {
+        if ( ! compLib_.find_index(netpin.second, componentIdx)) {
+          throwMalformedStatement("net", toks, "Component '" + netpin.second + "' not found in components library" );
+        }
+        pinIdx = 0;
+      } else {
+        if ( ! compLib_.find_index(netpin.first, componentIdx)) {
+          throwMalformedStatement("net", toks, "Component '" + netpin.first + "' not found in components library" );
+        }
+        const auto& type = typeLib_[compLib_[componentIdx].libraryId];
+        pinIdx = type.pinIndex.at(netpin.second);
+      }
+
+      n.netpins.emplace_back(componentIdx, pinIdx);
+
+    }
+
   }
 
 }

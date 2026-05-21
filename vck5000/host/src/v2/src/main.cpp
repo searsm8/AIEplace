@@ -20,6 +20,7 @@ int main(int argc, char *argv[])
 
     AIEplace::print_component_type_library(db.typeLib_);
     AIEplace::print_component_library(db.componentLib_);
+    AIEplace::print_net_library(db.netLib_);
 
     // Print DataBase info
     //placer.db.printInfo(); 

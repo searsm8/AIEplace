@@ -157,6 +157,7 @@ namespace AIEPLACE_NAMESPACE {
             // TODO: throw error if a key is not yet in the index
           }
         }
+        build_names_from_index();
       }
 
       void fix_vector_into_array() {
@@ -192,13 +193,16 @@ namespace AIEPLACE_NAMESPACE {
     LockableIndexedCollection<std::string, ComponentType>;
   using ComponentLibrary =
     LockableIndexedCollection<std::string, Component>;
-  //using NetLibrary =
-  //    LockableIndexedCollection<std::string, Net>;
+  using NetLibrary =
+      LockableIndexedCollection<std::string, Net>;
 
   std::ostream& operator<<(std::ostream& os, ComponentState s);
   std::ostream& operator<<(std::ostream& os, ComponentKind k);
   std::ostream& printComponentType(std::ostream& os, const std::string& name, const ComponentType& ct);
+  std::ostream& printComponent(std::ostream& os, const std::string& name, const Component& c);
+  std::ostream& printNet(std::ostream& os, const std::string& name, const Net& n);
   void print_component_type_library(const ComponentTypeLibrary& lib, std::ostream& os = std::cout);
   void print_component_library(const ComponentLibrary& lib, std::ostream& os = std::cout);
+  void print_net_library(const NetLibrary& lib, std::ostream& os = std::cout);
 
 }

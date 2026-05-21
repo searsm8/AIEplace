@@ -21,16 +21,11 @@ namespace AIEPLACE_NAMESPACE {
 
   struct Net
   {
-    Net(const std::string n) : name_(n) {}
-
-    struct NetPinIndex {
-      uint32_t component;
-      uint32_t type;
+    struct NetPin {
+      uint32_t component_idx;
+      uint32_t pin_idx;
     };
-
-    std::vector<NetPinIndex> pin_indeces;
-    //TODO: remove name after map works
-    const std::string name_;
+    std::vector<NetPin> netpins;
   };
 
   struct Component
@@ -84,6 +79,13 @@ namespace AIEPLACE_NAMESPACE {
         const std::pair<std::string, Component>& b) const
     {
       return static_cast<uint32_t>(a.second.libraryId) < static_cast<uint32_t>(b.second.libraryId);
+    }
+  };
+
+  struct NetComparator {
+    bool operator()(const std::pair<std::string, Net>& a, const std::pair<std::string, Net>& b) const
+    {
+      return static_cast<uint32_t>(a.second.netpins.size()) < static_cast<uint32_t>(b.second.netpins.size());
     }
   };
 

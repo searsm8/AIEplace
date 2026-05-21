@@ -57,6 +57,22 @@ namespace AIEPLACE_NAMESPACE {
     return os;
   }
 
+  std::ostream& printNet(std::ostream& os, const std::string& name, const Net& n) {
+    os << "Net{\n"
+       << "  name:              "  << name << "\n";
+    if (! n.netpins.empty() ) {
+      os << "   ";
+      for (const auto& np : n.netpins ) {
+        os << " ( " << np.component_idx << ", " << np.pin_idx << " )";
+      }
+      os << "\n";
+    } else {
+      os << " <no pins on net>\n";
+    }
+    os << "}";
+    return os;
+  }
+
   // ---- Dump the vector and map ----
   void print_component_type_library(const ComponentTypeLibrary& lib, std::ostream& os)
   {
@@ -67,7 +83,6 @@ namespace AIEPLACE_NAMESPACE {
       os << "#############################\n";
       os << "\n";
     }
-    const auto& array = lib.data();
     const auto n = lib.size();
     os << "component_type_library (size=" << n << "):\n";
     for (uint32_t idx = 0; idx < n; idx++) {
@@ -91,7 +106,6 @@ namespace AIEPLACE_NAMESPACE {
       os << "#############################\n";
       os << "\n";
     }
-    const auto& array = lib.data();
     const auto n = lib.size();
     os << "component_library (size=" << n << "):\n";
     for (uint32_t idx = 0; idx < n; idx++) {
@@ -102,6 +116,32 @@ namespace AIEPLACE_NAMESPACE {
       } else {
         const Component& c = lib.at_index(idx);
         printComponent(os, lib.name_at(idx), c);
+      }
+      os << "\n";
+
+      //if (idx > 10)
+      //  break;
+    }
+  }
+  void print_net_library(const NetLibrary& lib, std::ostream& os)
+  {
+    if(!lib.is_locked()) {
+      os << "#############################\n";
+      os << "# LIBRARY IS NOT LOCKED!    #\n";
+      os << "# Indeces can still change! #\n";
+      os << "#############################\n";
+      os << "\n";
+    }
+    const auto n = lib.size();
+    os << "net_library (size=" << n << "):\n";
+    for (uint32_t idx = 0; idx < n; idx++) {
+      os << "[" << idx << "]: ";
+      if(lib.is_locked()) {
+        const Net& n = lib[idx];
+        printNet(os, lib.name_at(idx), n);
+      } else {
+        const Net& n = lib.at_index(idx);
+        printNet(os, lib.name_at(idx), n);
       }
       os << "\n";
 
