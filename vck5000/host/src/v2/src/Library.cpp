@@ -24,9 +24,9 @@ namespace AIEPLACE_NAMESPACE {
   }
 
   // ---- ComponentType pretty-print ----
-  std::ostream& printComponentType(std::ostream& os, const std::string& name, const ComponentType& ct) {
+  std::ostream& printComponentType(std::ostream& os, const ComponentType& ct) {
     os << "ComponentType{\n"
-      << "  name: "      << name << "\n"
+      << "  name: "      << ct.name << "\n"
       << "  kind: "      << ct.kind << "\n"
       << "  width: "     << ct.width << "\n"
       << "  height: "    << ct.height << "\n"
@@ -35,7 +35,7 @@ namespace AIEPLACE_NAMESPACE {
     if (ct.numPins() > 0) {
       os << "  pins:\n";
       for (uint32_t i = 0; i < ct.numPins(); ++i) {
-        os << "    [" << i << "]: (" << ct.pinDx[i] << ", " << ct.pinDy[i] << ")\n";
+        os << "    " << ct.pins[i].name << " [" << i << "]: (" << ct.pins[i].Dx << ", " << ct.pins[i].Dy << ")\n";
       }
     } else {
       os << "  pins: <none or not initialized>\n";
@@ -46,9 +46,9 @@ namespace AIEPLACE_NAMESPACE {
   }
 
   // ---- Component pretty-print ----
-  std::ostream& printComponent(std::ostream& os, const std::string& name, const Component& c) {
+  std::ostream& printComponent(std::ostream& os, const Component& c) {
     os << "Component{\n"
-      << "  name:              "  << name << "\n"
+      << "  name:              "  << c.name << "\n"
       << "  ComponentType idx: "  << c.libraryId << "\n"
       << "  origin:            (" << c.origin.x << ", " << c.origin.y << ")\n"
       << "  state:             "  << c.state << "\n";
@@ -57,9 +57,9 @@ namespace AIEPLACE_NAMESPACE {
     return os;
   }
 
-  std::ostream& printNet(std::ostream& os, const std::string& name, const Net& n) {
+  std::ostream& printNet(std::ostream& os, const Net& n) {
     os << "Net{\n"
-       << "  name:              "  << name << "\n";
+       << "  name:              "  << n.name << "\n";
     if (! n.netpins.empty() ) {
       os << "   ";
       for (const auto& np : n.netpins ) {
@@ -83,17 +83,11 @@ namespace AIEPLACE_NAMESPACE {
       os << "#############################\n";
       os << "\n";
     }
-    const auto n = lib.size();
-    os << "component_type_library (size=" << n << "):\n";
-    for (uint32_t idx = 0; idx < n; idx++) {
-      os << "[" << idx << "]: ";
-      if(lib.is_locked()) {
-        const ComponentType& ct = lib[idx];
-        printComponentType(os, lib.name_at(idx), ct);
-      } else {
-        const ComponentType& ct = lib.at_index(idx);
-        printComponentType(os, lib.name_at(idx), ct);
-      }
+    os << "component_type_library (size=" << lib.size() << "):\n";
+    std::size_t idx = 0;
+    for (const auto& ct : lib) {
+      os << "[" << idx++ << "]: ";
+      printComponentType(os, ct);
       os << "\n";
     }
   }
@@ -106,21 +100,12 @@ namespace AIEPLACE_NAMESPACE {
       os << "#############################\n";
       os << "\n";
     }
-    const auto n = lib.size();
-    os << "component_library (size=" << n << "):\n";
-    for (uint32_t idx = 0; idx < n; idx++) {
-      os << "[" << idx << "]: ";
-      if(lib.is_locked()) {
-        const Component& c = lib[idx];
-        printComponent(os, lib.name_at(idx), c);
-      } else {
-        const Component& c = lib.at_index(idx);
-        printComponent(os, lib.name_at(idx), c);
-      }
+    os << "component_library (size=" << lib.size() << "):\n";
+    std::size_t idx = 0;
+    for (const auto& c : lib) {
+      os << "[" << idx++ << "]: ";
+      printComponent(os, c);
       os << "\n";
-
-      //if (idx > 10)
-      //  break;
     }
   }
   void print_net_library(const NetLibrary& lib, std::ostream& os)
@@ -132,21 +117,12 @@ namespace AIEPLACE_NAMESPACE {
       os << "#############################\n";
       os << "\n";
     }
-    const auto n = lib.size();
-    os << "net_library (size=" << n << "):\n";
-    for (uint32_t idx = 0; idx < n; idx++) {
-      os << "[" << idx << "]: ";
-      if(lib.is_locked()) {
-        const Net& n = lib[idx];
-        printNet(os, lib.name_at(idx), n);
-      } else {
-        const Net& n = lib.at_index(idx);
-        printNet(os, lib.name_at(idx), n);
-      }
+    os << "net_library (size=" << lib.size() << "):\n";
+    std::size_t idx = 0;
+    for (const auto& n : lib) {
+      os << "[" << idx++ << "]: ";
+      printNet(os, n);
       os << "\n";
-
-      //if (idx > 10)
-      //  break;
     }
   }
 }

@@ -274,8 +274,7 @@ namespace AIEPLACE_NAMESPACE {
     ComponentType& ct = lib_.at_index(currentMacroIndex_);
 
     uint32_t pinIdx = ct.numPins();
-    ct.pinDx.push_back(currentPinDx_);
-    ct.pinDy.push_back(currentPinDy_);
+    ct.pins.emplace_back(currentPinName_, currentPinDx_, currentPinDy_);
     ct.pinIndex.emplace(currentPinName_, pinIdx);
   }
 
@@ -545,8 +544,7 @@ namespace AIEPLACE_NAMESPACE {
       typeIdx = typeLib_.emplace(pin_type_name, ComponentKind::IOPad, width, height);
       // add pin to component type
       ComponentType& ct = typeLib_.at_index(typeIdx);
-      ct.pinDx.push_back(width * 0.5f);
-      ct.pinDy.push_back(height * 0.5f);
+      ct.pins.emplace_back("pin", width * 0.5f, height * 0.5f);
       ct.pinIndex.emplace("pin", 0);
     }
 

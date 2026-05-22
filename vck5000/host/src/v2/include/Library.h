@@ -24,10 +24,8 @@ namespace AIEPLACE_NAMESPACE {
       using mapped_type     = T;
       using size_type       = std::uint32_t;
       using index_type      = size_type;
-      using vector_type     = std::vector<std::pair<Key,T>>;
-      using array_type      = std::unique_ptr<T[]>;
+      using vector_type     = std::vector<T>;
       using index_map_type  = std::unordered_map<Key, index_type, Hash, KeyEqual>;
-      using names_map_type  = std::map<index_type, Key>;
       using const_iterator  = typename vector_type::const_iterator;
 
       LockableIndexedCollection() = default;
@@ -35,38 +33,30 @@ namespace AIEPLACE_NAMESPACE {
       bool is_locked() const noexcept { return locked_; }
 
       // --- basic queries (always allowed) ---
-      size_type size() const noexcept { return is_locked() ? static_cast<size_type>(size_) : static_cast<size_type>(vec_.size()); }
-      bool empty() const noexcept { return is_locked() ? size_ == 0 : vec_.empty(); }
+      size_type size() const noexcept { return static_cast<size_type>(vec_.size()); }
+      bool empty() const noexcept { return vec_.empty(); }
 
-      const vector_type& items() const noexcept { return vec_; }
-      const array_type& data() const noexcept { return arr_; }
+      const vector_type& data() const noexcept { return vec_; }
       const index_map_type& index_map() const noexcept { return index_; }
-      const names_map_type& names_map() const noexcept { return names_; }
 
       // --- access by index (read) ---
       const T& at_index(index_type i) const {
-        if(is_locked()) {
-          return arr_[static_cast<std::size_t>(i)];
-        }
-        return vec_.at(static_cast<std::size_t>(i)).second;
+        return vec_.at(static_cast<std::size_t>(i));
       }
       const T& operator[](index_type i) const noexcept {
-        if(is_locked()) {
-          return arr_[static_cast<std::size_t>(i)];
-        }
-        return vec_.at(static_cast<std::size_t>(i)).second;
+        return vec_.at(static_cast<std::size_t>(i));
       }
       const std::string& name_at(index_type idx) const {
-        auto it = names_.find(idx);
-        if (it == names_.end())
-          throw std::out_of_range("index not found in names_");
-        return it->second;
+        auto it = vec_.begin() + idx;
+        if (it >= vec_.end())
+          throw std::out_of_range("index out of range");
+        return it->name;
       }
 
       // --- acess by index (write) ---
       T& at_index(index_type i) {
         ensure_unlocked();
-        return vec_.at(static_cast<std::size_t>(i)).second;
+        return vec_.at(static_cast<std::size_t>(i));
       }
 
       // --- lookup by key ---
@@ -90,15 +80,18 @@ namespace AIEPLACE_NAMESPACE {
       // --- insertion (only when unlocked) ---
       // returns index of the new element.
       template<class... Args>
-      index_type emplace(const key_type& key, Args&&... args) {
+      index_type emplace(Args&&... args) {
         ensure_unlocked();
-        auto [it, inserted] = index_.emplace(key, index_type{});
+        mapped_type obj(std::forward<Args>(args)...);
+
+        auto const& name = obj.name;
+
+        auto [it, inserted] = index_.emplace(name, index_type{});
         if (!inserted)
           throw std::runtime_error("Duplicate key in LockableIndexedCollection");
 
         index_type idx = static_cast<index_type>(vec_.size());
-        vec_.emplace_back(std::make_pair(key, mapped_type(std::forward<Args>(args)...)));
-        names_.emplace(idx, key);
+        vec_.emplace_back(std::move(obj));
         it->second = idx;
         return idx;
       }
@@ -123,10 +116,6 @@ namespace AIEPLACE_NAMESPACE {
         // update index
         update_index();
 
-        // create array
-        fix_vector_into_array();
-        build_names_from_index();
-
         locked_ = true;
       }
 
@@ -148,7 +137,7 @@ namespace AIEPLACE_NAMESPACE {
 
       void update_index() {
         for (index_type i = 0; i < static_cast<index_type>(vec_.size()); ++i) {
-          const key_type& key = vec_[i].first;
+          const key_type& key = vec_[i].name;
 
           auto it = index_.find(key);
           if (it != index_.end()) {
@@ -157,34 +146,10 @@ namespace AIEPLACE_NAMESPACE {
             // TODO: throw error if a key is not yet in the index
           }
         }
-        build_names_from_index();
       }
 
-      void fix_vector_into_array() {
-        size_ = vec_.size();
-        arr_ = std::make_unique<mapped_type[]>(size_);
-
-        // copy data from vector to array
-        std::transform(vec_.begin(), vec_.end(), arr_.get(), [](const auto& p) { return p.second; });
-
-        // clean up vector
-        vec_.clear();
-        vec_.shrink_to_fit();
-      }
-
-      void build_names_from_index() {
-        names_.clear();
-
-        for (const auto& [name, idx] : index_) {
-          names_[idx] = name;
-        }
-      }
-
-      size_type size_;
       vector_type vec_;
-      array_type arr_;
       index_map_type index_;
-      names_map_type names_;
       bool locked_ = false;
 
   };
@@ -198,9 +163,9 @@ namespace AIEPLACE_NAMESPACE {
 
   std::ostream& operator<<(std::ostream& os, ComponentState s);
   std::ostream& operator<<(std::ostream& os, ComponentKind k);
-  std::ostream& printComponentType(std::ostream& os, const std::string& name, const ComponentType& ct);
-  std::ostream& printComponent(std::ostream& os, const std::string& name, const Component& c);
-  std::ostream& printNet(std::ostream& os, const std::string& name, const Net& n);
+  std::ostream& printComponentType(std::ostream& os, const ComponentType& ct);
+  std::ostream& printComponent(std::ostream& os, const Component& c);
+  std::ostream& printNet(std::ostream& os, const Net& n);
   void print_component_type_library(const ComponentTypeLibrary& lib, std::ostream& os = std::cout);
   void print_component_library(const ComponentLibrary& lib, std::ostream& os = std::cout);
   void print_net_library(const NetLibrary& lib, std::ostream& os = std::cout);
