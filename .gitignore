@@ -18,3 +18,14 @@ build/
 *core.*
 results/
 temp/
+
+# editor / tooling junk
+__pycache__/
+/tat
+/vck5000/bin/
+/vck5000/.claude/
+
+# AIE compiler workdirs and simulator/golden output
+/vck5000/aie/Work/
+/vck5000/aie/x86simulator_output/
+/vck5000/aie/golden_data/
