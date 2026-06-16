@@ -1,0 +1,63 @@
+#ifndef GRID_H
+#define GRID_H
+
+#include "Common.h"
+#include "Bin.h"
+#include "Node.h"
+//#include "Logger.h"
+
+AIEPLACE_NAMESPACE_BEGIN
+
+class Grid
+{
+private:
+    // Grid data members
+    Box m_die_area;
+    int m_bins_per_row;
+    int m_bins_per_col;
+    float m_bin_width, m_bin_height;
+    std::vector<std::vector<Bin> > m_bins; // 2D grid of bins to compute eField
+
+public:
+    // Constructors
+    Grid() {}
+
+    Grid(Box die_area) : m_die_area(die_area), m_bins_per_row(1024), m_bins_per_col(1024) { init(); }
+
+    Grid(Box die_area, int bins_per_row, int bins_per_col) : 
+        m_die_area(die_area), m_bins_per_row(bins_per_row), m_bins_per_col(bins_per_col) { init(); }
+
+    void init();
+
+    // How to quickly find the Bin that a Node is in?
+    Bin& getBin(int row, int col) { return m_bins[row][col]; }
+
+    int getBinsPerRow() { return m_bins_per_row; }
+    int getBinsPerCol() { return m_bins_per_col; }
+    int getDieWidth() { return m_die_area.getXsize(); }
+    int getDieHeight() { return m_die_area.getYsize(); }
+    float getBinWidth() { return m_bin_width; }
+    float getBinHeight() { return m_bin_height; }
+
+    void iterationReset();
+
+    void computeBinOverlaps(Node* node_p);
+    void clampFixedDensity(float target_density);
+
+    std::vector< std::vector<float> > getBinDensities(); // rho = overlap / bin_area
+    std::vector< std::vector<float> > get_a_uv();
+
+
+    // Returns normalized overflow in [0, 1]: total excess cell area above target_density
+    // across all bins, divided by total movable cell area (fillers excluded).
+    // Equivalent to Xplace's overflow metric; convergence target is typically ~0.07.
+    float computeTotalOverflow(float target_density, float total_movable_area);
+
+    // Print Functions
+    void printOverflows();
+    void printElectricFields();
+
+};
+
+AIEPLACE_NAMESPACE_END
+#endif

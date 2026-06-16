@@ -6,11 +6,10 @@
 # The top-level Makefile includes this file BEFORE common.mk, so these
 # assignments take effect over common.mk's `?=` defaults.
 
-# Build the PL-centric placement kernel variant.
-PL = pl_algo
+# Build the PL-centric placement kernel + its lean host driver.
+PL   = pl_algo
+HOST = pl_algo
 
-# No pl_algo-specific AIE/HOST variants exist yet, so AIE and HOST fall through
-# to the common.mk defaults (markv1). Pin them here once aie/src/pl_algo and
-# host/src/pl_algo exist:
+# No pl_algo-specific AIE variant exists yet, so AIE falls through to the
+# common.mk default (markv1). Pin it here once aie/src/pl_algo exists:
 # AIE  = pl_algo
-# HOST = pl_algo
