@@ -55,6 +55,22 @@ $(XCLBIN): $(XSA)
 $(OUT)/emconfig.json: | $(OUT)
 	emconfigutil --platform $(PLATFORM) --nd 1 --od $(OUT)
 
+# 5. run the host under sw_emu. The host exe is built separately:
+#      make host HOST=pl_algo BUILD_XRT=1
+# sw_emu is selected by XCL_EMULATION_MODE (not the xclbin); EMCONFIG_PATH points
+# XRT at the emulated-device description; LD_LIBRARY_PATH adds the sw_emu shims.
+# Override BENCH=<dir> for a different design (keep it small -- sw_emu sims the
+# kernel in software).
+HOST_EXE ?= $(CURDIR)/../../../build/hw/host/pl_algo/aieplace_pl_algo.exe
+BENCH    ?= $(CURDIR)/../../../host/benchmarks/ispd2015/mgc_pci_bridge32_b
+
+.PHONY: run
+run: all
+	XCL_EMULATION_MODE=$(TARGET) \
+	EMCONFIG_PATH=$(CURDIR)/$(OUT) \
+	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
+	$(HOST_EXE) $(BENCH) $(XCLBIN)
+
 .PHONY: clean
 clean:
 	rm -rf $(OUT) _x .Xil *.log *.jou *.link_summary *.compile_summary package.* *.pb
