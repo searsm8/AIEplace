@@ -12,6 +12,10 @@
 #include <cmath>
 #include <algorithm>
 
+#ifdef USE_XILINX_XRT
+#include "Driver.hpp"
+#endif
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         printf("usage: %s <benchmark_dir>\n", argv[0]);
@@ -39,6 +43,18 @@ int main(int argc, char** argv) {
     const double rel_err = std::fabs(packed - golden) / std::fabs(golden);
     printf("[hpwl] golden=%.10g  packed=%.10g  rel_err=%.3e  -> %s\n",
            golden, packed, rel_err, rel_err < 1e-6 ? "PASS" : "FAIL");
+
+#ifdef USE_XILINX_XRT
+    // If an xclbin is given, run the kernel on the device and compare its HPWL
+    // (float, accumulated in double) against the golden.
+    if (argc >= 3) {
+        const double device  = (double)plalgo::runHpwlKernel(pk, argv[2]);
+        const double rel_dev = std::fabs(device - golden) / std::fabs(golden);
+        printf("[hpwl/PL] device=%.10g  golden=%.10g  rel_err=%.3e  -> %s\n",
+               device, golden, rel_dev, rel_dev < 1e-5 ? "PASS" : "FAIL");
+        return rel_dev < 1e-5 ? 0 : 1;
+    }
+#endif
 
     return rel_err < 1e-6 ? 0 : 1;
 }

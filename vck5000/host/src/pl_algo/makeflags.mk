@@ -28,10 +28,15 @@ CPPFLAGS += -I${THIRD_PARTY}/Limbo   # boost is found via the system include pat
 CPPFLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 CPPFLAGS += -I${THIRD_PARTY}/tabulate/include   # header-only, used by Logger
 
-# XRT (PL kernel driver) -- enabled once Driver.cpp lands (v0 step C).
+# XRT (PL kernel driver).
 ifdef BUILD_XRT
 HOST_SRCS += Driver.cpp
 CPPFLAGS += -DUSE_XILINX_XRT -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/
 LDFLAGS  += -L$(XILINX_XRT)/lib/
 LDLIBS   += -lxrt_coreutil
+# libxrt is built with the new GLIBCXX ABI, but the rest of the host uses the old
+# ABI for Limbo. Compile ONLY the XRT TU with the new ABI; it shares no
+# std::string with the parser side (PackedDesign is std::vector-only, the xclbin
+# path is const char*), so the two ABIs coexist safely in one binary.
+$(BUILD_DIR_HOST)/obj/Driver.o: CPPFLAGS += -U_GLIBCXX_USE_CXX11_ABI -D_GLIBCXX_USE_CXX11_ABI=1
 endif
