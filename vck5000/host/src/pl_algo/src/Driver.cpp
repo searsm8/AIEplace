@@ -51,7 +51,7 @@ float runHpwlKernel(const PackedDesign& pk, const char* xclbin_path) {
 
     // ---- run top(node_pos, net_ptr, pins, result, num_nets) ----
     xrt::run run = top(bo_node, bo_nptr, bo_pins, bo_res, num_nets);
-    run.wait();
+    run.wait(); // blocks until ap_done signal
 
     // ---- pull the result back ----
     bo_res.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
