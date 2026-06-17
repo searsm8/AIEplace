@@ -2,3 +2,4 @@ reference_files_*
 *.xo
 *.xsa
 *.xclbin
+build_v0/
