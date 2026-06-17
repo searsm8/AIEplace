@@ -41,7 +41,9 @@ void top(
 #pragma HLS INTERFACE s_axilite port=num_nets bundle=control
 #pragma HLS INTERFACE s_axilite port=return   bundle=control
 
-    float total = 0.0f;
+    // Accumulate in double: summing ~1e6 per-net values (~1e5 each) into a float
+    // is order-dependent to ~0.3%. Per-net bbox stays float (positions are float).
+    double total = 0.0;
 
 net_loop:
     for (int n = 0; n < num_nets; n++) {
@@ -66,9 +68,9 @@ net_loop:
             if (y < min_y) min_y = y;
             if (y > max_y) max_y = y;
         }
-        total += (max_x - min_x) + (max_y - min_y);
+        total += (double)((max_x - min_x) + (max_y - min_y));
     }
 
-    result[0] = total;
+    result[0] = (float)total;   // final metric to ~7 sig figs is plenty for the host
 }
 } // extern "C"

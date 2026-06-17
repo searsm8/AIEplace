@@ -30,9 +30,12 @@ struct PackedDesign {
 PackedDesign packDesign(AIEplace::DataBase& db);
 
 // CPU reference: total HPWL computed directly from a PackedDesign. Mirrors what
-// the PL kernel will do over the same buffers, so it verifies the packing in
+// the PL kernel does over the same buffers, so it verifies the packing in
 // isolation (independent of, and cross-checked against, the DataBase golden).
-float hpwlFromPacked(const PackedDesign& pk);
+// Accumulates in double: at ~1e6 nets, summing per-net HPWL (~1e5 each) into a
+// float accumulator is order-dependent to ~0.3%, so float is not a usable
+// reference. Per-net bbox stays in float (positions are float).
+double hpwlFromPacked(const PackedDesign& pk);
 
 } // namespace plalgo
 

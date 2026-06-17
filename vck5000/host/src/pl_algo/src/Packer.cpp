@@ -57,8 +57,8 @@ PackedDesign packDesign(AIEplace::DataBase& db) {
     return pk;
 }
 
-float hpwlFromPacked(const PackedDesign& pk) {
-    float total = 0.0f;
+double hpwlFromPacked(const PackedDesign& pk) {
+    double total = 0.0;
     for (int n = 0; n < pk.header.num_nets; ++n) {
         const int beg = pk.net_ptr[n], end = pk.net_ptr[n + 1];
         if (beg == end) continue;
@@ -72,7 +72,7 @@ float hpwlFromPacked(const PackedDesign& pk) {
             min_x = std::min(min_x, x); max_x = std::max(max_x, x);
             min_y = std::min(min_y, y); max_y = std::max(max_y, y);
         }
-        total += (max_x - min_x) + (max_y - min_y);
+        total += (double)((max_x - min_x) + (max_y - min_y));
     }
     return total;
 }

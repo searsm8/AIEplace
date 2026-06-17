@@ -10,6 +10,7 @@
 #include "Packer.hpp"
 #include <cstdio>
 #include <cmath>
+#include <algorithm>
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -27,15 +28,17 @@ int main(int argc, char** argv) {
            pk.header.num_movable, pk.header.num_nodes,
            pk.header.num_nets, pk.header.num_pins);
 
-    // Verify: HPWL from packed buffers vs DataBase golden.
-    const float hpwl_golden = db.computeTotalWirelength("HPWL");
-    const float hpwl_packed = plalgo::hpwlFromPacked(pk);
-    const float rel_err = (hpwl_golden != 0.0f)
-                        ? std::fabs(hpwl_packed - hpwl_golden) / std::fabs(hpwl_golden)
-                        : std::fabs(hpwl_packed);
-    printf("[hpwl] golden=%.6g  packed=%.6g  rel_err=%.3e  -> %s\n",
-           hpwl_golden, hpwl_packed, rel_err,
-           rel_err < 1e-4f ? "PASS" : "FAIL");
+    // Verify the packing: HPWL recomputed from the packed buffers must match a
+    // golden recomputed from the DataBase. Both summed in double -- at ~1e6 nets
+    // a float accumulator is order-dependent to ~0.3%, so it cannot serve as a
+    // reference (and the PL kernel accumulates in double for the same reason).
+    double golden = 0.0;
+    for (AIEplace::Net* net : db.getNetsVector())
+        golden += (double)net->computeWirelength_HPWL();
+    const double packed  = plalgo::hpwlFromPacked(pk);
+    const double rel_err = std::fabs(packed - golden) / std::fabs(golden);
+    printf("[hpwl] golden=%.10g  packed=%.10g  rel_err=%.3e  -> %s\n",
+           golden, packed, rel_err, rel_err < 1e-6 ? "PASS" : "FAIL");
 
-    return rel_err < 1e-4f ? 0 : 1;
+    return rel_err < 1e-6 ? 0 : 1;
 }
