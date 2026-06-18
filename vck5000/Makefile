@@ -116,23 +116,22 @@ run:
 #perf record #use this for perf profiler
 	time -p $(HOST_EXE) $(HOST_RUN_CONFIG)
 
-# --- TEMPORARY (Milestone B): build + run the HPWL-gradient AIE sw_emu check ---
-# One-shot convenience around the throwaway --hpwl-grad-test fixture. Source the
-# toolchain env first:
+# --- TEMPORARY: build + run the PL HPWL-gradient sw_emu verify on a benchmark ---
+# One-shot convenience. Source the toolchain env first:
 #   source /tools/Xilinx/Vitis/2022.2/settings64.sh
 #   source /opt/xilinx/xrt/setup.sh
 #   export PLATFORM_REPO_PATHS=$$HOME/xilinx_local/opt/xilinx/platforms
-# Usage:
-#   make run-hpwl-grad-test AIE=pl_algo PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1
-# Delete this once the PL packer replaces the fixture.
-.PHONY: run-hpwl-grad-test
-run-hpwl-grad-test: $(XCLBIN) $(HOST_EXE)
+# Usage (BENCH overridable):
+#   make run-hpwl-grad AIE=none PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1
+BENCH ?= $(PROJECT_ROOT)/host/benchmarks/ispd2015/mgc_pci_bridge32_b
+.PHONY: run-hpwl-grad
+run-hpwl-grad: $(XCLBIN) $(HOST_EXE)
 	mkdir -p $(BUILD_DIR)/$(TARGET)/run
 	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
 	cd $(BUILD_DIR)/$(TARGET)/run && \
 	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
 	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
-	$(HOST_EXE) --hpwl-grad-test $(XCLBIN)
+	$(HOST_EXE) --hpwl-grad $(BENCH) $(XCLBIN)
 
 
 # make dse

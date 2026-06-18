@@ -14,22 +14,29 @@
 
 #ifdef USE_XILINX_XRT
 #include "Driver.hpp"
-#include "HpwlGradTest.hpp"
+#include "HpwlGradVerify.hpp"
 #include <cstring>
 #endif
 
 int main(int argc, char** argv) {
     if (argc < 2) {
         printf("usage: %s <benchmark_dir> [xclbin]\n", argv[0]);
-        printf("       %s --hpwl-grad-test <xclbin>\n", argv[0]);
+        printf("       %s --hpwl-grad <benchmark_dir> <xclbin>\n", argv[0]);
         return 1;
     }
 
 #ifdef USE_XILINX_XRT
-    // Milestone B: end-to-end HPWL-gradient check on the AIE (synthetic fixture,
-    // no benchmark needed). Verifies host->PL->AIE->PL->host vs the CPU golden.
-    if (argc >= 3 && std::strcmp(argv[1], "--hpwl-grad-test") == 0)
-        return plalgo::runHpwlGradTest(argv[2]);
+    // Verify the PL HPWL gradient compute unit on a real benchmark: parse + pack,
+    // run hpwl_CU on the device, compare per-node gradient vs the CPU golden.
+    if (argc >= 4 && std::strcmp(argv[1], "--hpwl-grad") == 0) {
+        AIEplace::DataBase db(argv[2]);
+        db.printInfo();
+        plalgo::PackedDesign pk = plalgo::packDesign(db);
+        printf("[pack] M=%d  N=%d  nets=%d  pins=%d\n",
+               pk.header.num_movable, pk.header.num_nodes,
+               pk.header.num_nets, pk.header.num_pins);
+        return plalgo::runHpwlGradVerify(pk, argv[3]);
+    }
 #endif
 
     // Parse LEF/DEF or bookshelf (full parse happens in the constructor).

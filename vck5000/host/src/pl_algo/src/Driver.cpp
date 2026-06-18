@@ -16,7 +16,6 @@
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_kernel.h"
 #include "xrt/xrt_bo.h"
-#include "experimental/xrt_graph.h"
 
 namespace plalgo {
 
@@ -59,35 +58,46 @@ float runHpwlKernel(const PackedDesign& pk, const char* xclbin_path) {
     return *bo_res.map<float*>();
 }
 
-void runHpwlGradPacket(const float* in, int in_floats,
-                       float* out, int out_floats,
-                       const char* xclbin_path) {
-    const size_t in_bytes  = (size_t)in_floats  * sizeof(float);
-    const size_t out_bytes = (size_t)out_floats * sizeof(float);
+void runHpwlGradCU(const PackedDesign& pk,
+                   const float* exp_lut, int lut_size,
+                   float inv_gamma, float inv_lut_step,
+                   coord_t* node_grad,
+                   const char* xclbin_path) {
+    const int    M          = pk.header.num_movable;
+    const int    num_nets   = pk.header.num_nets;
+    const size_t node_bytes = pk.node_pos.size() * sizeof(coord_t);
+    const size_t nptr_bytes = pk.net_ptr.size()  * sizeof(int32_t);
+    const size_t pins_bytes = pk.pins.size()     * sizeof(PinRecord);
+    const size_t lut_bytes  = (size_t)lut_size   * sizeof(float);
+    const size_t grad_bytes = (size_t)M          * sizeof(coord_t);
 
-    // ---- open device, load xclbin, get the kernel and the AIE graph ----
     xrt::device device(0);
     xrt::uuid   uuid = device.load_xclbin(xclbin_path);
     xrt::kernel top(device, uuid, "top");
-    xrt::graph  graph(device, uuid, "hpwl_grad_graph");
 
-    // top args: 0=hpwl_packet (in), 1=hpwl_grad (out); the two axis stream ports
-    // are wired to the AIE via link.cfg and are NOT XRT args.
-    xrt::bo bo_in  = xrt::bo(device, in_bytes,  top.group_id(0));
-    xrt::bo bo_out = xrt::bo(device, out_bytes, top.group_id(1));
+    // top args: 0=node_pos 1=net_ptr 2=pins 3=exp_lut 4=node_grad (then scalars).
+    xrt::bo bo_node = xrt::bo(device, node_bytes, top.group_id(0));
+    xrt::bo bo_nptr = xrt::bo(device, nptr_bytes, top.group_id(1));
+    xrt::bo bo_pins = xrt::bo(device, pins_bytes, top.group_id(2));
+    xrt::bo bo_lut  = xrt::bo(device, lut_bytes,  top.group_id(3));
+    xrt::bo bo_grad = xrt::bo(device, grad_bytes, top.group_id(4));
 
-    std::memcpy(bo_in.map<void*>(), in, in_bytes);
-    bo_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    std::memcpy(bo_node.map<void*>(), pk.node_pos.data(), node_bytes);
+    std::memcpy(bo_nptr.map<void*>(), pk.net_ptr.data(),  nptr_bytes);
+    std::memcpy(bo_pins.map<void*>(), pk.pins.data(),     pins_bytes);
+    std::memcpy(bo_lut.map<void*>(),  exp_lut,            lut_bytes);
 
-    // Start the AIE graph (one run consumes one packet), then run top to feed the
-    // packet and drain the partials. in/out are sized in 128b beats (4 floats).
-    graph.run(1);
-    xrt::run run = top(bo_in, bo_out, in_floats / 4, out_floats / 4);
+    bo_node.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_nptr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_pins.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_lut.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    xrt::run run = top(bo_node, bo_nptr, bo_pins, bo_lut, bo_grad,
+                       inv_gamma, inv_lut_step, lut_size, num_nets, M);
     run.wait();
-    graph.wait();
 
-    bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-    std::memcpy(out, bo_out.map<void*>(), out_bytes);
+    bo_grad.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::memcpy(node_grad, bo_grad.map<void*>(), grad_bytes);
 }
 
 } // namespace plalgo

@@ -30,7 +30,7 @@ CPPFLAGS += -I${THIRD_PARTY}/tabulate/include   # header-only, used by Logger
 
 # XRT (PL kernel driver).
 ifdef BUILD_XRT
-HOST_SRCS += Driver.cpp HpwlGradTest.cpp
+HOST_SRCS += Driver.cpp HpwlGradVerify.cpp
 CPPFLAGS += -DUSE_XILINX_XRT -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/
 LDFLAGS  += -L$(XILINX_XRT)/lib/
 LDLIBS   += -lxrt_coreutil
