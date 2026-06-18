@@ -54,6 +54,12 @@ BUILD_DIR_AIE = $(BUILD_DIR)/$(AIE_TARGET)/aie/$(AIE)
 AIE_LIBADF = $(BUILD_DIR_AIE)/libadf_$(AIE)_$(INSTANCES_CONFIG).a
 AIE_WORKDIR = $(BUILD_DIR_AIE)/Work_$(AIE)_$(INSTANCES_CONFIG)
 
+# AIE=none -> PL-only design: no libadf, no PL<->AIE stream connectivity. Lets the
+# xsa/xclbin flow build a kernel that doesn't use the AI Engine array.
+ifeq ($(AIE),none)
+AIE_LIBADF =
+endif
+
 PL_DIR = $(PROJECT_ROOT)/pl/src/$(PL)
 BUILD_DIR_PL = $(BUILD_DIR)/$(TARGET)/pl/$(PL)
 PL_KERNELS = $(addprefix $(BUILD_DIR_PL)/, $(KERNEL_XO))

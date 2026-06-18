@@ -70,13 +70,15 @@ link_config: $(LINK_CONNECTIONS_FILE)
 $(LINK_CONNECTIONS_FILE):
 	$(dir_guard)
 	python3 $(PL_DIR)/generate_link_cfg.py $@ \
-		-p $(AIE_PARTIALS_INSTANCES) -d $(AIE_DENSITY_INSTANCES)
+		-p $(AIE_PARTIALS_INSTANCES) -d $(AIE_DENSITY_INSTANCES) --aie $(AIE)
 
 # Link backs to trigger PHONY targets if artifacts don't exist
 # Those recipes have to have PHONY target so that their respecitve
 # makefiles handle the rebuild always. This keeps the dependency
 # chain intact.
+ifneq ($(AIE),none)
 $(AIE_LIBADF): aie
+endif
 $(PL_KERNELS): pl
 $(HOST_EXE): host
 
