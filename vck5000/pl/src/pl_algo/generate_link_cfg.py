@@ -5,11 +5,10 @@
 # do not change the wiring. They are still accepted for compatibility with the top-level
 # Makefile's link_config target, but ignored.
 #
-# NOTE: the AIE-side port names (ai_engine_0.*) are placeholders until aie/src/pl_algo
-# is written; finalize them together with that variant.
+# AIE-side port names match the HpwlGradGraph PLIO (aie/src/pl_algo): a single
+# instance exposes hpwl_grad_in_0 / hpwl_grad_out_0. The FFT pool lanes are added
+# back here once the density_grad graph exists in the AIE variant.
 import argparse
-
-FFT_LANES = 8
 
 def generate_link_cfg(file_path, partials_instances, density_instances):
     with open(file_path, 'w') as f:
@@ -17,15 +16,11 @@ def generate_link_cfg(file_path, partials_instances, density_instances):
         f.write("### Single top-level PL kernel ###\n")
         f.write("nk=top:1:top_1\n\n")
 
-        f.write("### HPWL gradient graph ###\n")
-        f.write("stream_connect=top_1.hpwl_to_aie:ai_engine_0.hpwl_in\n")
-        f.write("stream_connect=ai_engine_0.hpwl_out:top_1.hpwl_from_aie\n\n")
+        f.write("### HPWL gradient graph (Milestone B: hpwl_manager pass-through) ###\n")
+        f.write("stream_connect=top_1.hpwl_to_aie:ai_engine_0.hpwl_grad_in_0\n")
+        f.write("stream_connect=ai_engine_0.hpwl_grad_out_0:top_1.hpwl_from_aie\n\n")
 
-        f.write("### FFT pool ###\n")
-        for i in range(FFT_LANES):
-            f.write(f"stream_connect=top_1.fft_to_aie_{i}:ai_engine_0.fft_in_{i}\n")
-            f.write(f"stream_connect=ai_engine_0.fft_out_{i}:top_1.fft_from_aie_{i}\n")
-        f.write("\n")
+        # ### FFT pool ### -- deferred until the density_grad AIE graph exists.
 
         f.write("[vivado]\n")
         f.write("# improve hw_emu speed (platform-dependent)\n")

@@ -16,6 +16,7 @@
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_kernel.h"
 #include "xrt/xrt_bo.h"
+#include "experimental/xrt_graph.h"
 
 namespace plalgo {
 
@@ -56,6 +57,37 @@ float runHpwlKernel(const PackedDesign& pk, const char* xclbin_path) {
     // ---- pull the result back ----
     bo_res.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     return *bo_res.map<float*>();
+}
+
+void runHpwlGradPacket(const float* in, int in_floats,
+                       float* out, int out_floats,
+                       const char* xclbin_path) {
+    const size_t in_bytes  = (size_t)in_floats  * sizeof(float);
+    const size_t out_bytes = (size_t)out_floats * sizeof(float);
+
+    // ---- open device, load xclbin, get the kernel and the AIE graph ----
+    xrt::device device(0);
+    xrt::uuid   uuid = device.load_xclbin(xclbin_path);
+    xrt::kernel top(device, uuid, "top");
+    xrt::graph  graph(device, uuid, "hpwl_grad_graph");
+
+    // top args: 0=hpwl_packet (in), 1=hpwl_grad (out); the two axis stream ports
+    // are wired to the AIE via link.cfg and are NOT XRT args.
+    xrt::bo bo_in  = xrt::bo(device, in_bytes,  top.group_id(0));
+    xrt::bo bo_out = xrt::bo(device, out_bytes, top.group_id(1));
+
+    std::memcpy(bo_in.map<void*>(), in, in_bytes);
+    bo_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    // Start the AIE graph (one run consumes one packet), then run top to feed the
+    // packet and drain the partials. in/out are sized in 128b beats (4 floats).
+    graph.run(1);
+    xrt::run run = top(bo_in, bo_out, in_floats / 4, out_floats / 4);
+    run.wait();
+    graph.wait();
+
+    bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::memcpy(out, bo_out.map<void*>(), out_bytes);
 }
 
 } // namespace plalgo

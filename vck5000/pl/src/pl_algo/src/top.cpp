@@ -1,76 +1,47 @@
-// top.cpp -- pl_algo PL kernel, v0 bring-up: total HPWL on the PL.
+// top.cpp -- pl_algo PL kernel.
 //
-// v0 scope: read the static design (node positions + CSR net connectivity + pin
-// offsets) the host uploads per host_interface.hpp, compute the total
-// half-perimeter wirelength, and write one float back. This proves the host->PL
-// transfer path end-to-end in sw_emu before any iteration / density / AIE
-// machinery is added.
+// Milestone B scope: drive the AIE HPWL-gradient graph through the hpwl_manager
+// module as a pass-through. The host uploads an AIE input packet to DDR (already
+// in the kernel's format, per host_interface.hpp); top streams it to the AIE via
+// hpwl_to_aie, reads the per-pin partials back over hpwl_from_aie, and writes
+// them to DDR. This proves the host->PL->AIE->PL->host path in sw_emu.
 //
-// The full PL-centric design (per-iteration FSM wiring the memory_writer /
-// hpwl_manager / density_manager / iteration_update / metrics modules, AIE FFT
-// pool + HPWL graph streams) is documented in DATAFLOW.md and modules/*.hpp, and
-// the earlier interface skeleton of this file is preserved in git history. It is
-// reintroduced incrementally on top of this working kernel.
+// This is the single top-level kernel of the PL-centric design; per-iteration
+// wiring of the other modules (memory_writer / density_manager / iteration_update
+// / metrics) and the FFT pool are reintroduced incrementally. The v0 total-HPWL
+// kernel is preserved in git history (it returns later via the metrics module).
 //
-// v0 uses natural typed m_axi pointers (coord_t / PinRecord / int / float) rather
-// than the 128-bit beat packing in formats.hpp -- the beat layout is a throughput
-// optimization for the full design; correctness first here.
+// Stream <-> AIE PLIO connectivity is applied at link time from
+// generate_link_cfg.py.
 
 #include "host_interface.hpp"
+#include "formats.hpp"
+#include "modules/hpwl_manager.hpp"
 
 using namespace plalgo;
 
 extern "C" {
 void top(
-    const coord_t*   node_pos,   // [num_nodes]      movable [0,M), fixed [M,N)
-    const int*       net_ptr,    // [num_nets + 1]   CSR prefix offsets into pins
-    const PinRecord* pins,       // [num_pins]       flattened, net-major
-    float*           result,     // [1]              total HPWL (output)
-    int              num_nets)
+    const beat_t* hpwl_packet,   // DDR: host-built AIE input packet (4 floats/beat)
+    beat_t*       hpwl_grad,     // DDR: AIE partials written back
+    int           hpwl_in_beats, // 128b beats to stream to the AIE
+    int           hpwl_out_beats,// 128b beats to read back from the AIE
+    hls::stream<axis_t>& hpwl_to_aie,   // PL -> AIE HPWL graph
+    hls::stream<axis_t>& hpwl_from_aie) // AIE HPWL graph -> PL
 {
-#pragma HLS INTERFACE m_axi port=node_pos offset=slave bundle=gmem0
-#pragma HLS INTERFACE m_axi port=net_ptr  offset=slave bundle=gmem1
-#pragma HLS INTERFACE m_axi port=pins     offset=slave bundle=gmem2
-#pragma HLS INTERFACE m_axi port=result   offset=slave bundle=gmem3
-// Each m_axi port's offset register and every scalar arg must share one
-// AXI-Lite bundle ("control") in Vitis kernel mode.
-#pragma HLS INTERFACE s_axilite port=node_pos bundle=control
-#pragma HLS INTERFACE s_axilite port=net_ptr  bundle=control
-#pragma HLS INTERFACE s_axilite port=pins     bundle=control
-#pragma HLS INTERFACE s_axilite port=result   bundle=control
-#pragma HLS INTERFACE s_axilite port=num_nets bundle=control
-#pragma HLS INTERFACE s_axilite port=return   bundle=control
+#pragma HLS INTERFACE m_axi port=hpwl_packet offset=slave bundle=gmem0
+#pragma HLS INTERFACE m_axi port=hpwl_grad   offset=slave bundle=gmem1
+#pragma HLS INTERFACE axis  port=hpwl_to_aie
+#pragma HLS INTERFACE axis  port=hpwl_from_aie
+// Each m_axi port's offset register and every scalar arg must share the one
+// AXI-Lite "control" bundle in Vitis kernel mode (axis ports do not).
+#pragma HLS INTERFACE s_axilite port=hpwl_packet    bundle=control
+#pragma HLS INTERFACE s_axilite port=hpwl_grad      bundle=control
+#pragma HLS INTERFACE s_axilite port=hpwl_in_beats  bundle=control
+#pragma HLS INTERFACE s_axilite port=hpwl_out_beats bundle=control
+#pragma HLS INTERFACE s_axilite port=return         bundle=control
 
-    // Accumulate in double: summing ~1e6 per-net values (~1e5 each) into a float
-    // is order-dependent to ~0.3%. Per-net bbox stays float (positions are float).
-    double total = 0.0;
-
-net_loop:
-    for (int n = 0; n < num_nets; n++) {
-        const int beg = net_ptr[n];
-        const int end = net_ptr[n + 1];
-        if (end <= beg) continue;   // empty net contributes 0
-
-        // Seed the bounding box with the first pin.
-        const PinRecord r0 = pins[beg];
-        const coord_t   c0 = node_pos[r0.node_idx];
-        float min_x = c0.x + r0.off_x, max_x = min_x;
-        float min_y = c0.y + r0.off_y, max_y = min_y;
-
-    pin_loop:
-        for (int p = beg + 1; p < end; p++) {
-            const PinRecord r = pins[p];
-            const coord_t   c = node_pos[r.node_idx];   // gather by node index
-            const float x = c.x + r.off_x;
-            const float y = c.y + r.off_y;
-            if (x < min_x) min_x = x;
-            if (x > max_x) max_x = x;
-            if (y < min_y) min_y = y;
-            if (y > max_y) max_y = y;
-        }
-        total += (double)((max_x - min_x) + (max_y - min_y));
-    }
-
-    result[0] = (float)total;   // final metric to ~7 sig figs is plenty for the host
+    hpwl_manager(hpwl_packet, hpwl_grad, hpwl_in_beats, hpwl_out_beats,
+                 hpwl_to_aie, hpwl_from_aie);
 }
 } // extern "C"

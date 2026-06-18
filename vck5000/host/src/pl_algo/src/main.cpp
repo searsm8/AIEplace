@@ -14,13 +14,23 @@
 
 #ifdef USE_XILINX_XRT
 #include "Driver.hpp"
+#include "HpwlGradTest.hpp"
+#include <cstring>
 #endif
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        printf("usage: %s <benchmark_dir>\n", argv[0]);
+        printf("usage: %s <benchmark_dir> [xclbin]\n", argv[0]);
+        printf("       %s --hpwl-grad-test <xclbin>\n", argv[0]);
         return 1;
     }
+
+#ifdef USE_XILINX_XRT
+    // Milestone B: end-to-end HPWL-gradient check on the AIE (synthetic fixture,
+    // no benchmark needed). Verifies host->PL->AIE->PL->host vs the CPU golden.
+    if (argc >= 3 && std::strcmp(argv[1], "--hpwl-grad-test") == 0)
+        return plalgo::runHpwlGradTest(argv[2]);
+#endif
 
     // Parse LEF/DEF or bookshelf (full parse happens in the constructor).
     AIEplace::DataBase db(argv[1]);

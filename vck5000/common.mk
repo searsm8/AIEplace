@@ -80,8 +80,13 @@ VPP_EXTRA_DESIGN_OPTS = --config $(PL_DIR)/design.cfg
 VPP_LINK_DEBUG_FLAGS = --debug.aie=true --debug.aie.chipscope TopGraph --debug.aie_trace=true --debug.aie_trace_buffer_size=0x8000
 VPP_PACKAGE_DEBUG_FLAGS = --debug $(AIE_LIBADF)
 
-XO_COMPILE_OPTS = $(VPP_HLS_FLAGS) $(VPP_EXTRA_DESIGN_OPTS) $(VPP_INTERMEDIATE_FILE_DIRS)
-XSA_LINK_OPTS = -g $(VPP_LINK_CLOCK_FLAGS) $(VPP_PROFILE_FLAGS) $(VPP_VIVADO_FLAGS) $(VPP_CONNECTION_FLAGS) $(VPP_INTERMEDIATE_FILE_DIRS)
+# Kernel source include dir. Needed at BOTH -c and -l: in sw_emu the linker
+# re-compiles the kernel from a copied source tree, so it must also see the PL
+# variant's headers (host_interface.hpp / formats.hpp / modules/).
+VPP_KERNEL_INCLUDE = -I$(PL_DIR)/src
+
+XO_COMPILE_OPTS = $(VPP_HLS_FLAGS) $(VPP_KERNEL_INCLUDE) $(VPP_EXTRA_DESIGN_OPTS) $(VPP_INTERMEDIATE_FILE_DIRS)
+XSA_LINK_OPTS = -g $(VPP_KERNEL_INCLUDE) $(VPP_LINK_CLOCK_FLAGS) $(VPP_PROFILE_FLAGS) $(VPP_VIVADO_FLAGS) $(VPP_CONNECTION_FLAGS) $(VPP_INTERMEDIATE_FILE_DIRS)
 XCLBIN_PACKAGE_OPTS = $(VPP_PACKAGE_FLAGS) $(VPP_INTERMEDIATE_FILE_DIRS)
 
 # Ensures the target recipe dirs exist

@@ -27,7 +27,7 @@ public:
       // PLIO ports. The .dat paths are only used by standalone x86sim/aiesim;
       // in sw_emu/hw these ports are driven by the PL data movers (link.cfg).
       x_in[i] = adf::input_plio::create(
-          "hpwl_grad_x_in_" + std::to_string(i), adf::plio_128_bits,
+          "hpwl_grad_in_" + std::to_string(i), adf::plio_128_bits,
           "golden_data/hpwl_grad/x_in" + std::to_string(i) + ".dat");
       grad_out[i] = adf::output_plio::create(
           "hpwl_grad_out_" + std::to_string(i), adf::plio_128_bits,

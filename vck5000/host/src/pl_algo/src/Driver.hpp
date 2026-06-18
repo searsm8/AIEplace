@@ -19,6 +19,16 @@ namespace plalgo {
 // boundary is what lets the two ABIs coexist in one binary (see PackedDesign.hpp).
 float runHpwlKernel(const PackedDesign& pk, const char* xclbin_path);
 
+// Milestone B: run a single HPWL-gradient packet through the AIE graph.
+//   in/out are flat float arrays already in the AIE packet format
+//   (host_interface.hpp): `in` holds the control beat + sorted, SIMD-grouped pin
+//   coords; `out` receives the per-pin partials. Both lengths must be multiples
+//   of FLOATS_PER_BEAT (4). Drives top (DDR<->stream pass-through) and the
+//   hpwl_grad_graph. POD-only signature to keep the ABI boundary clean.
+void runHpwlGradPacket(const float* in, int in_floats,
+                       float* out, int out_floats,
+                       const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DRIVER_HPP
