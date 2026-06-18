@@ -77,6 +77,59 @@ struct PinRecord {
 //   over each net's pin positions. Verified against the host golden
 //   DataBase::computeTotalWirelength("HPWL").
 
+// ===========================================================================
+//  HPWL GRADIENT EXTENSION  (step 2a -- AIE partials offload)
+// ===========================================================================
+// The AIE HPWL-gradient graph computes, per pin, the weighted-average (WA)
+// wirelength partials dW/dx, dW/dy and the host accumulates them per node.
+// Reference math: markv1 computeHpwlPartials_CPU() (Partials.cpp). The on-chip
+// kernel is a SIMD port of that, with two fixed properties we must match when
+// verifying:
+//   * gamma is a COMPILE-TIME constant on the AIE (no runtime params on the
+//     VCK5000), so AIE_INV_GAMMA below is the single source of truth and the
+//     CPU golden is pinned to it.
+//   * exp() is the kernel's fast_exp() approximation -> verify with a tolerance
+//     (RMS / R^2 / outlier %), never bit-exact.
+
+// ---- AIE packet geometry (PL <-> AIE HPWL graph) ---------------------------
+// Ported verbatim from markv1 (Common.h). The AIE processes nets in SIMD
+// "groups": NETS_PER_GROUP nets of the SAME degree share one 8-lane vector,
+// with x and y interleaved, so one kernel pass yields both x and y partials for
+// 4 nets at once (4 nets * {x,y} = 8 lanes = AIE_VEC).
+//   AIE handles net degrees [AIE_NET_MIN, AIE_NET_MAX]; degree-1 nets have no
+//   gradient and degree>AIE_NET_MAX nets stay on the host/CPU.
+constexpr int   AIE_VEC        = 8;     // floats per AIE vector beat (VEC_SIZE)
+constexpr int   NETS_PER_GROUP = 4;     // nets packed across the 8 lanes (x,y interleaved)
+constexpr int   AIE_NET_MIN    = 2;     // smallest net degree handled on the AIE
+constexpr int   AIE_NET_MAX    = 8;     // largest net degree handled on the AIE
+constexpr float AIE_INV_GAMMA  = 0.25f; // 1/gamma baked into the AIE kernel (== markv1)
+
+// ---- AIE input packet  (host -> PL mover -> AIE)  flat float buffer ---------
+// One packet per net degree D. Layout (all beats are AIE_VEC floats):
+//   beat 0  = control: | (float)D | (float)num_groups | 0 | 0 | 0 | 0 | 0 | 0 |
+//   then num_groups blocks, each D beats. Block g, term beat t:
+//     | n0.c_t | n0.d_t | n1.c_t | n1.d_t | n2.c_t | n2.d_t | n3.c_t | n3.d_t |
+//   where (c,d) = (x,y); nk is the k-th net of group g (k in [0,NETS_PER_GROUP)).
+//   SORT CONTRACT (load-bearing -- the kernel seeds b/c sums from terms 0,1):
+//     * the x lanes of each net are ordered max-x first (t=0), min-x second (t=1);
+//     * the y lanes are ordered max-y first, min-y second -- INDEPENDENTLY of x.
+//   So the node sitting in a lane differs between the x and y halves; the host
+//   keeps the lane->node_idx map for both axes (see Packer aie_lane_map).
+//   Nets past the end of a degree bucket are zero-padded in the trailing lanes.
+
+// ---- AIE output packet  (AIE -> PL mover -> host)  flat float buffer --------
+// Same geometry as the input packet MINUS the control beat: num_groups blocks of
+// D beats, each beat | n0.gc_t | n0.gd_t | ... | with (gc,gd) = (dW/dx, dW/dy)
+// in the SAME lane/term order the host sent. The host scatters each partial onto
+// its node (via the lane->node_idx map) with += ; only movable nodes are kept.
+
+// ===========================================================================
+//  Buffer 6: per-node HPWL gradient  (PL -> host)  coord_t grad[num_movable]
+// ===========================================================================
+// Accumulated WA-wirelength gradient for each MOVABLE node (indices [0, M)).
+// Fixed nodes ([M, N)) participate in their nets' partials but carry no stored
+// gradient. Verified against the pinned-gamma CPU golden with a tolerance.
+
 } // namespace plalgo
 
 #endif // PL_ALGO_HOST_INTERFACE_HPP

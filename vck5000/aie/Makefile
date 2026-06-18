@@ -5,7 +5,11 @@ PROJECT_ROOT ?= $(CURDIR)/..
 
 include $(PROJECT_ROOT)/common.mk
 
-PLATFORM := /opt/xilinx/platforms/$(PLATFORM)/$(PLATFORM).xpfm
+# Resolve the platform .xpfm from PLATFORM_REPO_PATHS (where v++ and the rest of
+# the toolchain already find it). The old hardcoded /opt/xilinx/platforms path
+# does not exist in this environment; PLATFORM_REPO_PATHS is exported in the
+# user profile (see ~/.bashrc).
+PLATFORM := $(PLATFORM_REPO_PATHS)/$(PLATFORM)/$(PLATFORM).xpfm
 
 TOPGRAPH := TopGraph
 AIE_SRCS_MAIN := $(AIE_DIR)/src/$(TOPGRAPH).cpp

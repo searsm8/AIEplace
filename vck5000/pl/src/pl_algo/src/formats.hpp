@@ -63,10 +63,13 @@ constexpr int STATE_BEATS_PER_NODE = 2;
 // fixed-size packet sent to the AIE HPWL graph (see below).
 //
 // ---- HPWL packet (PL <-> AIE HPWL graph) -----------------------------------
-// To AIE:   stream of pin coordinates for a net group: | x | y | x | y | ... per beat
-// From AIE: stream of per-pin partials             : | dW/dx | dW/dy | ... per beat
-// (Net grouping / packet size mirrors markv1's prepareNetGroup; finalized with the
-//  aie/src/pl_algo HPWL graph variant.)
+// The HPWL-gradient transfer contract (packet beat layout, sort rule, gradient
+// return) lives in host_interface.hpp, since it is shared by the host packer and
+// is POD/STL-free. v1 reuses markv1's SIMD-grouped layout verbatim: per degree D,
+// a control beat then num_groups*D beats of NETS_PER_GROUP nets x {x,y} packed
+// across the 8 lanes (max-coord term first). The host owns grouping + the per-axis
+// max/min sort; PL movers are passthrough. See host_interface.hpp "HPWL GRADIENT
+// EXTENSION".
 
 // ---- Bin density / E-field matrices (DDR) ----------------------------------
 // Row-major 1024x1024 real, 4 MB each. Streamed as FLOATS_PER_BEAT bins per beat,
