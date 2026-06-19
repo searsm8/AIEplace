@@ -46,11 +46,11 @@ static void hpwl_CU(const coord_t*   node_pos,   // [num_nodes] AoS {x,y}
                     int              lut_size,
                     int              num_nets,
                     int              num_movable) {
-    // Cache the LUT on-chip.
+    // Cache the LUT on-chip (BRAM or URAM). This avoid going to DDR for every access.
     float lut[HPWL_CU_LUT_MAX];
 cache_lut:
     for (int i = 0; i < lut_size; i++) {
-#pragma HLS PIPELINE II=1
+#pragma HLS PIPELINE II=1 // II = Initiation Interval (i.e. how many clock cycles between initiating the pipeline with new data)
         lut[i] = exp_lut[i];
     }
 
