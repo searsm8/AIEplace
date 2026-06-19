@@ -312,19 +312,25 @@ namespace AIEPLACE_NAMESPACE {
         } else if (parserUtils_.iequals(toks[0], "DESIGN")) {
           if (toks.size() >= 2) metadata_.designName = toks[1];
           inDesign = true;
-        } else if (parserUtils_.iequals(toks[0], "UNITS")) {
-          // Expect: UNITS DISTANCE MICRONS 1000 ;
-          // tokens: [0]=UNITS [1]=DISTANCE [2]=MICRONS [3]=1000 ...
-          if (toks.size() >= 4 && parserUtils_.iequals(toks[2], "MICRONS")) {
-            metadata_.dbu_per_micron = std::stoi(toks[3]);
-          }
         } else {
           continue; // only record sections inside DESIGN
         }
       }
 
       // Section discovery
-      if (parserUtils_.iequals(toks[0], "COMPONENTS")) {
+      if (parserUtils_.iequals(toks[0], "UNITS")) {
+        // Expect: UNITS DISTANCE MICRONS 1000 ;
+        // tokens: [0]=UNITS [1]=DISTANCE [2]=MICRONS [3]=1000 ...
+        if (toks.size() >= 4 && parserUtils_.iequals(toks[2], "MICRONS")) {
+          metadata_.dbu_per_micron = std::stoi(toks[3]);
+        }
+      } else if (parserUtils_.iequals(toks[0], "DIEAREA")) {
+        // Expect: DIEAREA ( ll_x ll_y ) ( ur_x ur_y ) ;
+        metadata_.die_ll.x = std::stoi(toks[2])/metadata_.dbu_per_micron;
+        metadata_.die_ll.y = std::stoi(toks[3])/metadata_.dbu_per_micron;
+        metadata_.die_ur.x = std::stoi(toks[6])/metadata_.dbu_per_micron;
+        metadata_.die_ur.y = std::stoi(toks[7])/metadata_.dbu_per_micron;
+      } else if (parserUtils_.iequals(toks[0], "COMPONENTS")) {
         recordSectionHeader(line, pos, toks, sections_.components);
       } else if (parserUtils_.iequals(toks[0], "PINS")) {
         recordSectionHeader(line, pos, toks, sections_.iopads);
@@ -461,8 +467,8 @@ namespace AIEPLACE_NAMESPACE {
         // tokens: i  i+1  i+2 i+3 i+4 i+5  i+6
         placed = true;
         if (i + 6 < toks.size() && toks[i+2] == "(" && toks[i+5] == ")") {
-          x = std::stof(toks[i+3]);
-          y = std::stof(toks[i+4]);
+          x = std::stof(toks[i+3])/metadata_.dbu_per_micron;
+          y = std::stof(toks[i+4])/metadata_.dbu_per_micron;
           // orientation in toks[i+6]
         } else {
           throwMalformedStatement("component", toks, "Unexpected FIXED syntax in component");
@@ -511,18 +517,18 @@ namespace AIEPLACE_NAMESPACE {
         step = 11;
         // expect: + LAYER layer_name (  ll_x ll_y  )   (  ur_x ur_y  )
         // tokens: i  i+1   i+2      i+3 i+4  i+5  i+6 i+7  i+8  i+9 i+10
-        pin_ll.x = std::stof(toks[i+4]);
-        pin_ll.y = std::stof(toks[i+5]);
-        pin_ur.x = std::stof(toks[i+8]);
-        pin_ur.y = std::stof(toks[i+9]);
+        pin_ll.x = std::stof(toks[i+4])/metadata_.dbu_per_micron;
+        pin_ll.y = std::stof(toks[i+5])/metadata_.dbu_per_micron;
+        pin_ur.x = std::stof(toks[i+8])/metadata_.dbu_per_micron;
+        pin_ur.y = std::stof(toks[i+9])/metadata_.dbu_per_micron;
       } else if (property == "PLACED") {
         step = 7;
         // expect: + PLACED  (   x   y   )  ORIENT
         // tokens: i  i+1   i+2 i+3 i+4 i+5  i+6
         placed = true;
         if (i + 6 < toks.size() && toks[i+2] == "(" && toks[i+5] == ")") {
-          x = std::stof(toks[i+3]);
-          y = std::stof(toks[i+4]);
+          x = std::stof(toks[i+3])/metadata_.dbu_per_micron;
+          y = std::stof(toks[i+4])/metadata_.dbu_per_micron;
           // orientation in toks[i+6]
         } else {
           throwMalformedStatement("pin", toks, "Unexpected PLACED syntax in pin");
@@ -594,10 +600,13 @@ namespace AIEPLACE_NAMESPACE {
 
     if (netpins.empty()) {
       throwMalformedStatement("net", toks, "No netpins found in net.");
+    } else if (netpins.size() == 1) {
+      throwMalformedStatement("net", toks, "Only one netpin found in net. There should at least be two.");
     }
 
-    uint32_t netIdx = netLib_.emplace(net_name);
-    auto& n = netLib_.at_index(netIdx);
+    uint32_t netsize = netpins.size();
+    uint32_t netIdx = netLib_[netsize].emplace(net_name);
+    auto& net = netLib_[netsize].at_index(netIdx);
 
     for ( auto& netpin : netpins ) {
       uint32_t componentIdx, pinIdx;
@@ -610,11 +619,11 @@ namespace AIEPLACE_NAMESPACE {
         if ( ! compLib_.find_index(netpin.first, componentIdx)) {
           throwMalformedStatement("net", toks, "Component '" + netpin.first + "' not found in components library" );
         }
-        const auto& type = typeLib_[compLib_[componentIdx].libraryId];
+        const auto& type = typeLib_[compLib_[componentIdx].typeIndex];
         pinIdx = type.pinIndex.at(netpin.second);
       }
 
-      n.netpins.emplace_back(componentIdx, pinIdx);
+      net.netpins.emplace_back(componentIdx, pinIdx);
 
     }
 

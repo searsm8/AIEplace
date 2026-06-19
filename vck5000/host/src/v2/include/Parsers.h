@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Common.h"
-#include "Component.h"
+#include "Types.h"
 #include "Library.h"
 
 namespace AIEPLACE_NAMESPACE {
@@ -63,7 +63,7 @@ namespace AIEPLACE_NAMESPACE {
 
   class FloorplanParser {
     public:
-      FloorplanParser(ComponentLibrary& compLib, ComponentTypeLibrary& typeLib, NetLibrary& netLib, std::string filename) : compLib_(compLib), typeLib_(typeLib), netLib_(netLib), ifs_(filename)
+      FloorplanParser(ComponentLibrary& compLib, ComponentTypeLibrary& typeLib, std::map<uint16_t, NetLibrary>& netLib, std::string filename) : compLib_(compLib), typeLib_(typeLib), netLib_(netLib), ifs_(filename)
     {
       if (!ifs_) {
         throw std::runtime_error("Cannot open DEF file: " + filename);
@@ -115,9 +115,9 @@ namespace AIEPLACE_NAMESPACE {
       std::ifstream ifs_;
       ParserUtils parserUtils_;
 
-      ComponentTypeLibrary& typeLib_;
-      ComponentLibrary&     compLib_;
-      NetLibrary&           netLib_;
+      ComponentTypeLibrary&            typeLib_;
+      ComponentLibrary&                compLib_;
+      std::map<uint16_t, NetLibrary>&  netLib_;
 
       FloorplanMetadata   metadata_;
       FloorplanSectionMap sections_;

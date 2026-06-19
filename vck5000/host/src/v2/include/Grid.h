@@ -2,61 +2,66 @@
 #define GRID_H
 
 #include "Common.h"
-#include "Bin.h"
-#include "Node.h"
-//#include "Logger.h"
+#include "Types.h"
 
-AIEPLACE_NAMESPACE_BEGIN
+namespace AIEPLACE_NAMESPACE {
 
-class Grid
-{
-private:
-    // Grid data members
-    Box m_die_area;
-    int m_bins_per_row;
-    int m_bins_per_col;
-    float m_bin_width, m_bin_height;
-    std::vector<std::vector<Bin> > m_bins; // 2D grid of bins to compute eField
+  class Grid
+  {
+    public:
+      // Constructors
+      Grid() {}
 
-public:
-    // Constructors
-    Grid() {}
+      Grid(float width, float height, int bins_per_row, int bins_per_col) :
+        die_area_(Box{width, height}),
+        bins_per_row_(bins_per_row),
+        bins_per_col_(bins_per_col)
+      { init(); }
 
-    Grid(Box die_area) : m_die_area(die_area), m_bins_per_row(1024), m_bins_per_col(1024) { init(); }
+      Grid(Box die_area) : die_area_(die_area), bins_per_row_(1024), bins_per_col_(1024) { init(); }
 
-    Grid(Box die_area, int bins_per_row, int bins_per_col) : 
-        m_die_area(die_area), m_bins_per_row(bins_per_row), m_bins_per_col(bins_per_col) { init(); }
+      Grid(Box die_area, int bins_per_row, int bins_per_col) :
+        die_area_(die_area), bins_per_row_(bins_per_row), bins_per_col_(bins_per_col) { init(); }
 
-    void init();
+      void setDimensions(float width, float height, int bins_per_row, int bins_per_col);
+      void init();
 
-    // How to quickly find the Bin that a Node is in?
-    Bin& getBin(int row, int col) { return m_bins[row][col]; }
+      // How to quickly find the Bin that a Node is in?
+      Bin& getBin(int row, int col) { return density_bins_[binIndex(row, col)]; }
 
-    int getBinsPerRow() { return m_bins_per_row; }
-    int getBinsPerCol() { return m_bins_per_col; }
-    int getDieWidth() { return m_die_area.getXsize(); }
-    int getDieHeight() { return m_die_area.getYsize(); }
-    float getBinWidth() { return m_bin_width; }
-    float getBinHeight() { return m_bin_height; }
+      int getBinsPerRow() { return bins_per_row_; }
+      int getBinsPerCol() { return bins_per_col_; }
+      float getDieWidth() { return die_area_.getXsize(); }
+      float getDieHeight() { return die_area_.getYsize(); }
+      float getDieArea() { return die_area_.getArea(); }
+      float getBinWidth() { return bin_width_; }
+      float getBinHeight() { return bin_height_; }
 
-    void iterationReset();
+      void addComponentAreaToDensityBins(const Box& comp);
+      void clearDensities();
 
-    void computeBinOverlaps(Node* node_p);
+      // Returns normalized overflow in [0, 1]: total excess cell area above target_density
+      // across all bins, divided by total movable cell area (fillers excluded).
+      // Equivalent to Xplace's overflow metric; convergence target is typically ~0.07.
+      float computeTotalOverflow(float target_density, float total_movable_area);
 
-    std::vector< std::vector<float> > getRho();
-    std::vector< std::vector<float> > get_a_uv();
+    private:
+      // Grid data members
+      Box die_area_;
+      int bins_per_row_;
+      int bins_per_col_;
+      float bin_width_;
+      float bin_height_;
+
+      // 2D grid of bins to compute eField
+      std::unique_ptr<Bin[]> density_bins_;
 
 
-    // Returns normalized overflow in [0, 1]: total excess cell area above target_density
-    // across all bins, divided by total movable cell area (fillers excluded).
-    // Equivalent to Xplace's overflow metric; convergence target is typically ~0.07.
-    float computeTotalOverflow(float target_density, float total_movable_area);
+      int binIndexX(const float x) const;
+      int binIndexY(const float y) const;
+      int binIndex(const int ix, const int iy) const;
 
-    // Print Functions
-    void printOverflows();
-    void printElectricFields();
+  };
 
-};
-
-AIEPLACE_NAMESPACE_END
+}
 #endif

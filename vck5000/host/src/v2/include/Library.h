@@ -8,7 +8,7 @@
 #include <utility>
 #include <functional>
 #include "Common.h"
-#include "Component.h"
+#include "Types.h"
 
 namespace AIEPLACE_NAMESPACE {
 
@@ -26,7 +26,6 @@ namespace AIEPLACE_NAMESPACE {
       using index_type      = size_type;
       using vector_type     = std::vector<T>;
       using index_map_type  = std::unordered_map<Key, index_type, Hash, KeyEqual>;
-      using const_iterator  = typename vector_type::const_iterator;
 
       LockableIndexedCollection() = default;
 
@@ -88,7 +87,7 @@ namespace AIEPLACE_NAMESPACE {
 
         auto [it, inserted] = index_.emplace(name, index_type{});
         if (!inserted)
-          throw std::runtime_error("Duplicate key in LockableIndexedCollection");
+          throw std::runtime_error("Duplicate key in LockableIndexedCollection: " + name);
 
         index_type idx = static_cast<index_type>(vec_.size());
         vec_.emplace_back(std::move(obj));
@@ -119,11 +118,17 @@ namespace AIEPLACE_NAMESPACE {
         locked_ = true;
       }
 
+      // iterators (read-write)
+      vector_type::iterator begin() { return vec_.begin(); }
+      vector_type::iterator end() { return vec_.end(); }
+      vector_type::iterator cbegin() { return vec_.cbegin(); }
+      vector_type::iterator cend() { return vec_.cend(); }
+
       // iterators (read-only)
-      const_iterator begin() const noexcept { return vec_.begin(); }
-      const_iterator end() const noexcept { return vec_.end(); }
-      const_iterator cbegin() const noexcept { return vec_.cbegin(); }
-      const_iterator cend() const noexcept { return vec_.cend(); }
+      vector_type::const_iterator begin() const { return vec_.begin(); }
+      vector_type::const_iterator end() const { return vec_.end(); }
+      vector_type::const_iterator cbegin() const { return vec_.cbegin(); }
+      vector_type::const_iterator cend() const { return vec_.cend(); }
 
     private:
       void ensure_unlocked() const {
@@ -168,6 +173,6 @@ namespace AIEPLACE_NAMESPACE {
   std::ostream& printNet(std::ostream& os, const Net& n);
   void print_component_type_library(const ComponentTypeLibrary& lib, std::ostream& os = std::cout);
   void print_component_library(const ComponentLibrary& lib, std::ostream& os = std::cout);
-  void print_net_library(const NetLibrary& lib, std::ostream& os = std::cout);
+  void print_net_library(const std::map<uint16_t, NetLibrary>& lib, std::ostream& os = std::cout);
 
 }

@@ -5,9 +5,9 @@
 // Initialize static members of Logger
 std::mutex Logger::iMutex;
 Logger* Logger::iLogger = nullptr;
-std::unordered_set<string> Logger::keys;
-std::map<string, Color> Logger::string_colors;
-std::unordered_map<string, Logger::FunctionStatBlock> Logger::function_stats_map;
+std::unordered_set<std::string> Logger::keys;
+std::map<std::string, Color> Logger::string_colors;
+std::unordered_map<std::string, Logger::FunctionStatBlock> Logger::function_stats_map;
 
 // Logger implementation
 Logger::Logger() { }
@@ -51,7 +51,7 @@ void Logger::setup_logging()
     Logger::string_colors["CRITICAL"] = Color::red;
 }
 
-bool Logger::log(string key, MsgType msg)
+bool Logger::log(std::string key, MsgType msg)
 {
     // if the key is in the active key set, print it
     if(Logger::keys.find(key) == Logger::keys.end())
@@ -132,7 +132,7 @@ bool Logger::log(string key, MsgType msg)
 //    std::cout << std::endl;
 //}
 
-Color Logger::getColor(string key)
+Color Logger::getColor(std::string key)
 {
         if ( string_colors.find(key) == string_colors.end() )
             return Color::white;
@@ -140,7 +140,7 @@ Color Logger::getColor(string key)
 
 }
 
-void Logger::export_markdown(Table t, fs::path dir, string filename)
+void Logger::export_markdown(Table t, fs::path dir, std::string filename)
 {
     // Use exporter
     MarkdownExporter exporter;
@@ -155,40 +155,41 @@ void Logger::export_markdown(Table t, fs::path dir, string filename)
 
 // used for debugging, enables easy comparison of CPU and AIE results
 // export intermdiate results of computations such as density or partials terms
-void Logger::export_eField(AIEplace::Grid& grid, fs::path dir, int iter)
+void Logger::export_Density_Bins(AIEplace::Grid& grid, fs::path dir, int iter)
 {
-    std::ofstream eField_file;
-    eField_file.open(dir.append("intermed_eField.dat"), std::ios_base::app);
-    eField_file << endl << "Iteration: " << iter << endl;
-    eField_file << "eField.x" << endl;
+  fs::path file_path = dir / "intermed_density_bins.dat";
+
+  std::ios_base::openmode mode = std::ios_base::out;
+  if (iter != 0)
+    mode |= std::ios_base::app;      // append from iter > 0
+  else
+    mode |= std::ios_base::trunc;    // clear file at iter == 0
+
+  std::ofstream csv(file_path, mode);
+  csv << std::fixed << std::setprecision(6);
+  csv << "Iteration: " << iter << std::endl;
+  csv << "Shape: " << grid.getBinsPerCol() << ", " << grid.getBinsPerRow() << std::endl;
+
+  for (int y = 0; y < grid.getBinsPerCol(); y++) {
     for (int x = 0; x < grid.getBinsPerRow(); x++) {
-        eField_file << "row " << x << ": ";
-        for (int y = 0; y < grid.getBinsPerCol(); y++) {
-            eField_file << grid.getBin(x, y).eField.x << " ";
-        }
-        eField_file << endl;
+      csv << grid.getBin(x, y).getDensity();
+      if (x != grid.getBinsPerRow() - 1) {
+        csv << ",";
+      }
     }
+    csv << std::endl;
+  }
 
-    eField_file << endl << "eField.y" << endl;
-    for (int x = 0; x < grid.getBinsPerRow(); x++) {
-        eField_file << "row " << x << ": ";
-        for (int y = 0; y < grid.getBinsPerCol(); y++) {
-            eField_file << grid.getBin(x, y).eField.y << " ";
-        }
-        eField_file << endl;
-    }
-
-    eField_file.close();
-
+  csv.close();
 }
 
 double Logger::getFunctionTime(const std::string& func_name) {
     if (function_stats_map.find(func_name) != function_stats_map.end())
-        return function_stats_map[func_name].total_time;
+      return function_stats_map[func_name].total_time;
     return 0.0;
 }
 
-void Logger::updateFunctionStats(string func_name, long long func_time)
+void Logger::updateFunctionStats(std::string func_name, long long func_time)
 {
     std::lock_guard<std::mutex> lock(iMutex); // thread-safe access
     // Check if the function name already exists in the map
@@ -279,7 +280,7 @@ const std::string& Timer::getName() const {
 }
 
 // ScopeTimer implementation
-ScopeTimer::ScopeTimer(const std::string& name, string log_key) 
+ScopeTimer::ScopeTimer(const std::string& name, std::string log_key) 
     : mName(name), mLogKey(log_key) {
     mTimer.start();
     // Track function entry

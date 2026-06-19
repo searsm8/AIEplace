@@ -15,7 +15,6 @@
 #include <iomanip>
 
 using namespace tabulate;
-using std::string;
 
 // Macros for convenient logging in scientific notation
 inline std::string SCI(double val) {
@@ -56,8 +55,8 @@ private:
     using MsgType = std::variant<std::string, const char*, std::string_view, Table>;
     //using MsgType = std::variant<string, Table>;
 
-    static std::unordered_set<string> keys;
-    static std::map<string, Color> string_colors;
+    static std::unordered_set<std::string> keys;
+    static std::map<std::string, Color> string_colors;
 
 
     struct FunctionStatBlock {
@@ -68,7 +67,7 @@ private:
         std::vector<long long> recent_times; // Recent execution times for percentiles
     };
 
-    static std::unordered_map<string, FunctionStatBlock> function_stats_map;
+    static std::unordered_map<std::string, FunctionStatBlock> function_stats_map;
 
     // Constructor, private for singleton
     Logger();
@@ -81,20 +80,20 @@ public:
     // Setup functions
     static void setup_logging();
 
-    static inline void activate_logging_key(string key)
+    static inline void activate_logging_key(std::string key)
     { Logger::keys.insert(key); }
 
-    static inline void deactivate_logging_key(string key)
+    static inline void deactivate_logging_key(std::string key)
     { Logger::keys.erase(key); }
 
-    static inline bool isKeyActive(const string& key)
+    static inline bool isKeyActive(const std::string& key)
     { return Logger::keys.count(key) > 0; }
 
 
     // Primary logging fucntions
-    static bool log(string key, MsgType msg);
+    static bool log(std::string key, MsgType msg);
 
-    static Color getColor(string key);
+    static Color getColor(std::string key);
 
     // inline functions for convenience
     static inline void log_trace(const MsgType& msg)    { iLogger->log("TRACE", msg); }
@@ -107,9 +106,9 @@ public:
     static inline void log_critical(const MsgType& msg) { iLogger->log("CRITICAL", msg); }
 
     // Report generation functions
-    static void export_markdown(Table t, fs::path dir, string filename = "statistics");
-    static void export_eField(AIEplace::Grid& grid, fs::path dir, int iter);
-    static void updateFunctionStats(string func_name, long long func_time);
+    static void export_markdown(Table t, fs::path dir, std::string filename = "statistics");
+    static void export_Density_Bins(AIEplace::Grid& grid, fs::path dir, int iter);
+    static void updateFunctionStats(std::string func_name, long long func_time);
     static Table printFunctionStats();
     static double getFunctionTime(const std::string& func_name);
 
@@ -148,10 +147,10 @@ class ScopeTimer {
 private:
     Timer mTimer;
     std::string mName;
-    string mLogKey;
+    std::string mLogKey;
 
 public:
-    ScopeTimer(const std::string& name, string log_key = "profiling");
+    ScopeTimer(const std::string& name, std::string log_key = "profiling");
     ~ScopeTimer();
     
     // Non-copyable

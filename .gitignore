@@ -18,3 +18,5 @@ build/
 *core.*
 results/
 temp/
+
+vck5000/output/
