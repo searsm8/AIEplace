@@ -26,6 +26,14 @@ namespace plalgo {
 constexpr int HPWL_CU_CAP     = 4096;  // max pins per net held on-chip
 constexpr int HPWL_CU_LUT_MAX = 1024;  // max LUT entries cached on-chip
 
+// Max movable nodes whose gradient accumulator fits in the on-chip (URAM) buffer.
+// node_grad is accumulated here -- not in DDR -- to keep the scatter read-modify-
+// write round-trip on-chip (~3 cycles vs ~141 to DDR). 262144 coord_t * 8 B = 2 MB
+// -> ~64 URAM blocks (of 463 on the VC1902). Designs with num_movable beyond this
+// need the tiled / scatter-to-unique follow-on (where a host-side M <= cap guard
+// also belongs); the current benchmarks are well under this.
+constexpr int HPWL_CU_MAX_MOVABLE = 262144;
+
 // exp(-d/gamma) via the cached LUT (d >= 0). Beyond the table -> ~0 (underflow).
 static inline float hpwl_lut_exp(const float lut[HPWL_CU_LUT_MAX], int lut_size,
                                  float inv_lut_step, float d) {
@@ -54,12 +62,22 @@ cache_lut:
         lut[i] = exp_lut[i];
     }
 
+    // On-chip gradient accumulator (URAM). The per-pin scatter below is a
+    // read-modify-write whose II is set by the LOAD->STORE round-trip; in DDR
+    // that round-trip is ~141 cycles and HLS must serialize it (a net can list the
+    // same node twice -> a real loop-carried dependence on node_grad[idx], so we
+    // cannot DEPENDENCE-false it away). Privatizing the accumulator to URAM keeps
+    // the same dependence but shrinks the round-trip to a few cycles. The buffer is
+    // cleared here, accumulated during partials, then streamed to DDR once at the end.
+    static coord_t ng[HPWL_CU_MAX_MOVABLE];
+#pragma HLS bind_storage variable=ng type=RAM_2P impl=URAM
+
     // Clear the gradient buffer (fresh accumulation each eval).
 clear_grad:
     for (int n = 0; n < num_movable; n++) {
 #pragma HLS PIPELINE II=1
         coord_t z; z.x = 0.0f; z.y = 0.0f;
-        node_grad[n] = z;
+        ng[n] = z;
     }
 
     // Per-net on-chip pin buffer.
@@ -127,10 +145,17 @@ net_loop:
             const float py = ((1.0f + y * inv_gamma) * Bpy - Cpy * inv_gamma) * (apy * bpy2)
                            - ((1.0f - y * inv_gamma) * Bmy + Cmy * inv_gamma) * (amy * bmy2);
 
-            coord_t g = node_grad[idx];
+            coord_t g = ng[idx];
             g.x += px; g.y += py;
-            node_grad[idx] = g;
+            ng[idx] = g;
         }
+    }
+
+    // Stream the on-chip accumulator out to DDR once (sequential -> II=1, burst).
+write_grad:
+    for (int n = 0; n < num_movable; n++) {
+#pragma HLS PIPELINE II=1
+        node_grad[n] = ng[n];
     }
 }
 
