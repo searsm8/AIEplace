@@ -61,12 +61,14 @@ struct DesignHeader {
 // One record per (net, node) connection, net-major (matches CSR above).
 // Absolute pin position = node_pos[node_idx] + {off_x, off_y}.
 // A plain cell pin has offset (0,0); only macro pins carry nonzero offsets.
-// Padded to 16 B so the array is 128-bit ("beat") aligned, per formats.hpp.
+// The 4th field carries the owning net id (it was 16 B alignment padding): the PL
+// scatters per-net reductions indexed by `net` without a separate pin->net map.
+// net == -1 marks a pin whose net has no gradient (degree <= 1) -> the kernel skips it.
 struct PinRecord {
     int32_t node_idx;      // index into node_pos[]
     float   off_x;         // NetPin.offset.x
     float   off_y;         // NetPin.offset.y
-    int32_t _pad;
+    int32_t net;           // owning net id, or -1 if the net has no gradient
 };
 
 // ===========================================================================

@@ -41,13 +41,19 @@ PackedDesign packDesign(AIEplace::DataBase& db) {
     pk.net_ptr.reserve(nets.size() + 1);
     pk.net_ptr.push_back(0);
     int unresolved = 0;
+    int32_t net_id = 0;
     for (Net* net : nets) {
+        const int32_t beg = (int32_t)pk.pins.size();
         for (const NetPin& pin : net->getPins()) {
             auto it = idx.find(pin.node);
             if (it == idx.end()) { ++unresolved; continue; } // not in v0 index space
-            pk.pins.push_back(PinRecord{ it->second, pin.offset.x, pin.offset.y, 0 });
+            pk.pins.push_back(PinRecord{ it->second, pin.offset.x, pin.offset.y, net_id });
         }
+        // Tag pins of no-gradient nets (resolved degree <= 1) so the PL skips them.
+        if ((int32_t)pk.pins.size() - beg <= 1)
+            for (int32_t p = beg; p < (int32_t)pk.pins.size(); ++p) pk.pins[p].net = -1;
         pk.net_ptr.push_back((int32_t)pk.pins.size());
+        ++net_id;
     }
     if (unresolved)
         fprintf(stderr, "[pack] WARNING: %d pin(s) referenced nodes outside the "

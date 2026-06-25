@@ -7,19 +7,25 @@
 // node, entirely on the PL -- no AIE. Math mirrors markv1 computeHpwlPartials_CPU,
 // with exp() replaced by a host-supplied LUT (exp(-d/gamma), linear-interpolated).
 //
-// FLATTENED SCHEDULE: the work is three *flat sweeps over all pins* (not three
-// passes per net). Per-net reductions live in on-chip accumulators indexed by net
-// (bb[]/sums[]); the per-pin gradient accumulates into ng[] indexed by node. A
-// pin->net map lets each sweep run as one flat loop, so each pipeline's fill
-// (iteration latency) is paid ONCE over ~num_pins iterations instead of once per
-// net -- the earlier per-net structure re-filled gather/reduce/partials ~num_nets
-// times for nets averaging ~3 pins, which was fill-dominated. Sweeps:
-//   0. build_pin2net : pin -> its net (or -1 if the net has no gradient)
-//   1. sweep_bbox    : scatter min/max into bb[net]
-//   2. sweep_sums    : read final bb[net], scatter B/C sums into sums[net]
-//   3. sweep_partials: read bb[net]+sums[net], scatter WA partial into ng[idx]
-// Because reductions are per-net accumulators (no per-net pin buffer), there is no
-// per-net degree cap -- nets of any degree are handled.
+// FLATTENED + NET-TILED SCHEDULE: the work is flat sweeps over pins (not passes
+// per net), so each pipeline's fill (iteration latency) is paid once over many
+// pins instead of once per ~3-pin net (which was fill-dominated). Per-net
+// reductions live in on-chip accumulators indexed by net (bb[]/sums[]); the
+// per-pin gradient accumulates into ng[] indexed by node. Each pin carries its
+// net id (PinRecord.net, -1 if no gradient), so no separate pin->net map is needed.
+//
+// NET TILING bounds the on-chip per-net accumulators independent of design size:
+// we process nets in windows of TILE_NETS. Because pins are net-major, a net
+// window [net0,net1) is a CONTIGUOUS pin range [net_ptr[net0], net_ptr[net1]), so
+// each tile is just a flat sweep over that sub-range -- zero redundant work (every
+// net is in exactly one tile). bb[]/sums[] are sized to the window and cleared per
+// tile; ng[] is the whole-design output, cleared/drained ONCE and accumulated
+// across tiles. Per tile:
+//   1. sweep_bbox    : scatter min/max into bb[net-net0]
+//   2. sweep_sums    : read final bb[], scatter B/C sums into sums[net-net0]
+//   3. sweep_partials: read bb[]/sums[], scatter WA partial into ng[idx]
+// (ng overflow -- num_movable beyond URAM -- is the second-level node-tiling
+// fallback, not yet implemented.)
 //
 // NOTE (accuracy watch): the LUT is an approximation of exp. Expected to be
 // harmless (small per-iteration errors don't accumulate across the solve), but to
@@ -35,13 +41,16 @@ namespace plalgo {
 
 constexpr int HPWL_CU_LUT_MAX = 1024;  // max LUT entries cached on-chip
 
-// On-chip accumulator capacities. These bound how large a design fits fully on
-// chip; beyond them the design needs the tiled / scatter-to-unique follow-on (the
-// same bounded-slow path as the >URAM node_grad case). Current benchmarks are well
-// under all three (e.g. mgc_pci_bridge32_b: nets 29417, pins 83944, movable 28914).
-constexpr int HPWL_CU_MAX_NETS    = 1 << 16;  //  65536 nets  -> bb[]/sums[] depth
-constexpr int HPWL_CU_MAX_PINS    = 1 << 18;  // 262144 pins  -> pin2net[] depth
-constexpr int HPWL_CU_MAX_MOVABLE = 1 << 18;  // 262144 nodes -> ng[] depth (2 MB URAM)
+// On-chip accumulator capacities.
+//  - TILE_NETS bounds the per-net accumulators (bb[]/sums[]) INDEPENDENT of how
+//    many nets the design has: nets are processed in windows of this size. Set
+//    small here (8192) to exercise tiling -- mgc_pci_bridge32_b's 29417 nets ->
+//    4 tiles. A window still holds ~8192*avg_deg pins, so sweep trip >> latency
+//    (fill stays amortized). Raise for fewer tiles once validated.
+//  - MAX_MOVABLE bounds ng[] (the whole-design output); num_movable beyond this
+//    needs the second-level node-tiling fallback (not yet implemented).
+constexpr int HPWL_CU_TILE_NETS   = 1 << 13;  //   8192 nets per tile -> bb[]/sums[] depth
+constexpr int HPWL_CU_MAX_MOVABLE = 1 << 18;  // 262144 nodes        -> ng[] depth (2 MB URAM)
 
 // Per-net reduction accumulators (one slot per net, scattered into by flat sweeps).
 struct NetBBox { float mxx, mnx, mxy, mny; };                    // bounding box
@@ -71,8 +80,6 @@ static void hpwl_CU(const coord_t*   node_pos,   // [num_nodes] AoS {x,y}
                     int              lut_size,
                     int              num_nets,
                     int              num_movable) {
-    const int num_pins = net_ptr[num_nets];   // CSR: total pin records
-
     // ---- on-chip storage --------------------------------------------------
     // Cache the LUT on-chip (avoids a DDR access per exp lookup).
     float lut[HPWL_CU_LUT_MAX];
@@ -82,45 +89,22 @@ cache_lut:
         lut[i] = exp_lut[i];
     }
 
-    // pin -> net map (or -1 for pins of a no-gradient net). Lets the sweeps below
-    // be flat loops over pins with a simple sequential read instead of per-net
-    // re-entry. Built once from the CSR.
-    static int pin2net[HPWL_CU_MAX_PINS];
-
-    // Per-net reduction accumulators, scattered into by the flat sweeps.
-    static NetBBox bb[HPWL_CU_MAX_NETS];
-    static NetSums sums[HPWL_CU_MAX_NETS];
+    // Per-net reduction accumulators, sized to ONE net-tile window (not num_nets).
+    // Scattered into by the per-tile sweeps; cleared per tile.
+    static NetBBox bb[HPWL_CU_TILE_NETS];
+    static NetSums sums[HPWL_CU_TILE_NETS];
 #pragma HLS bind_storage variable=bb   type=RAM_2P impl=URAM
 #pragma HLS bind_storage variable=sums type=RAM_2P impl=URAM
 
-    // On-chip per-node gradient accumulator (URAM). The partials scatter is a
-    // read-modify-write with a real loop-carried dependence (a node appears on many
-    // pins -> repeated idx), so we cannot DEPENDENCE-false it; keeping the
-    // accumulator on-chip shrinks the RMW round-trip from a DDR latency (~141) to a
-    // few cycles. Drained to DDR once at the end (write_grad).
+    // On-chip per-node gradient accumulator (URAM), the whole-design output. The
+    // partials scatter is a read-modify-write with a real loop-carried dependence
+    // (a node appears on many pins -> repeated idx), so we cannot DEPENDENCE-false
+    // it; keeping the accumulator on-chip shrinks the RMW round-trip from a DDR
+    // latency (~141) to a few cycles. ng PERSISTS across tiles -> cleared once
+    // here, accumulated by every tile, drained to DDR once at the end.
     static coord_t ng[HPWL_CU_MAX_MOVABLE];
 #pragma HLS bind_storage variable=ng type=RAM_2P impl=URAM
 
-    // ---- sweep 0: build pin2net, tagging no-gradient (deg<=1) nets as -1 -------
-build_pin2net:
-    for (int net = 0; net < num_nets; net++) {
-        const int beg = net_ptr[net];
-        const int end = net_ptr[net + 1];
-        const int tag = (end - beg <= 1) ? -1 : net;   // deg<=1 has no gradient
-        for (int p = beg; p < end; p++) {
-#pragma HLS PIPELINE II=1
-            pin2net[p] = tag;
-        }
-    }
-
-    // ---- clear the accumulators ------------------------------------------------
-clear_nets:
-    for (int net = 0; net < num_nets; net++) {
-#pragma HLS PIPELINE II=1
-        NetBBox b; b.mxx = -1e30f; b.mnx = 1e30f; b.mxy = -1e30f; b.mny = 1e30f;
-        bb[net] = b;
-        NetSums s{}; sums[net] = s;
-    }
 clear_grad:
     for (int n = 0; n < num_movable; n++) {
 #pragma HLS PIPELINE II=1
@@ -128,78 +112,102 @@ clear_grad:
         ng[n] = z;
     }
 
-    // ---- sweep 1: bounding box (flat over all pins) ----------------------------
-    // Scatter each pin's coord into its net's min/max accumulator. Same-net pins
-    // are consecutive (net-major CSR) -> the RMW on bb[net] is loop-carried, but
-    // on-chip so its II is a few cycles, paid once over num_pins (not per net).
-sweep_bbox:
-    for (int p = 0; p < num_pins; p++) {
-#pragma HLS PIPELINE
-        const int net = pin2net[p];
-        if (net < 0) continue;
-        const PinRecord r = pins[p];
-        const coord_t   c = node_pos[r.node_idx];
-        const float x = c.x + r.off_x;
-        const float y = c.y + r.off_y;
-        NetBBox b = bb[net];
-        if (x > b.mxx) b.mxx = x;
-        if (x < b.mnx) b.mnx = x;
-        if (y > b.mxy) b.mxy = y;
-        if (y < b.mny) b.mny = y;
-        bb[net] = b;
-    }
+    const int num_tiles = (num_nets + HPWL_CU_TILE_NETS - 1) / HPWL_CU_TILE_NETS;
 
-    // ---- sweep 2: B/C sums (flat over all pins) --------------------------------
-    // bb[] is final now; accumulate the WA exp-weighted B/C sums per net.
-sweep_sums:
-    for (int p = 0; p < num_pins; p++) {
-#pragma HLS PIPELINE
-        const int net = pin2net[p];
-        if (net < 0) continue;
-        const PinRecord r = pins[p];
-        const coord_t   c = node_pos[r.node_idx];
-        const float x = c.x + r.off_x;
-        const float y = c.y + r.off_y;
-        const NetBBox b = bb[net];
-        const float apx = hpwl_lut_exp(lut, lut_size, inv_lut_step, b.mxx - x);
-        const float amx = hpwl_lut_exp(lut, lut_size, inv_lut_step, x - b.mnx);
-        const float apy = hpwl_lut_exp(lut, lut_size, inv_lut_step, b.mxy - y);
-        const float amy = hpwl_lut_exp(lut, lut_size, inv_lut_step, y - b.mny);
-        NetSums s = sums[net];
-        s.Bpx += apx; s.Bmx += amx; s.Cpx += apx * x; s.Cmx += amx * x;
-        s.Bpy += apy; s.Bmy += amy; s.Cpy += apy * y; s.Cmy += amy * y;
-        sums[net] = s;
-    }
+net_tile:
+    for (int t = 0; t < num_tiles; t++) {
+        const int net0 = t * HPWL_CU_TILE_NETS;
+        const int net1 = (net0 + HPWL_CU_TILE_NETS < num_nets)
+                       ?  net0 + HPWL_CU_TILE_NETS : num_nets;
+        const int pbeg = net_ptr[net0];   // net-major -> tile's pins are contiguous
+        const int pend = net_ptr[net1];
 
-    // ---- sweep 3: per-pin partial + scatter into ng (flat over all pins) -------
-sweep_partials:
-    for (int p = 0; p < num_pins; p++) {
+        // Clear this tile's per-net accumulators (window-local slots).
+    clear_nets:
+        for (int j = 0; j < HPWL_CU_TILE_NETS; j++) {
+#pragma HLS PIPELINE II=1
+            NetBBox b; b.mxx = -1e30f; b.mnx = 1e30f; b.mxy = -1e30f; b.mny = 1e30f;
+            bb[j] = b;
+            NetSums s{}; sums[j] = s;
+        }
+
+        // ---- sweep 1: bounding box (flat over this tile's pins) ----------------
+        // Scatter each pin's coord into its net's min/max slot (local index
+        // net-net0). The RMW on bb[] is loop-carried (same-net pins are
+        // consecutive) but on-chip, so II is a few cycles -- paid once over the
+        // tile's pin count (>> latency), not once per net.
+    sweep_bbox:
+        for (int p = pbeg; p < pend; p++) {
 #pragma HLS PIPELINE
-        const int net = pin2net[p];
-        if (net < 0) continue;
-        const PinRecord r = pins[p];
-        const int idx = r.node_idx;
-        if (idx >= num_movable) continue;  // fixed node: counted in B/C, no grad
-        const coord_t c = node_pos[idx];
-        const float x = c.x + r.off_x;
-        const float y = c.y + r.off_y;
-        const NetBBox b = bb[net];
-        const NetSums s = sums[net];
-        const float apx = hpwl_lut_exp(lut, lut_size, inv_lut_step, b.mxx - x);
-        const float amx = hpwl_lut_exp(lut, lut_size, inv_lut_step, x - b.mnx);
-        const float apy = hpwl_lut_exp(lut, lut_size, inv_lut_step, b.mxy - y);
-        const float amy = hpwl_lut_exp(lut, lut_size, inv_lut_step, y - b.mny);
-        const float bpx2 = 1.0f / (s.Bpx * s.Bpx);
-        const float bmx2 = 1.0f / (s.Bmx * s.Bmx);
-        const float bpy2 = 1.0f / (s.Bpy * s.Bpy);
-        const float bmy2 = 1.0f / (s.Bmy * s.Bmy);
-        const float px = ((1.0f + x * inv_gamma) * s.Bpx - s.Cpx * inv_gamma) * (apx * bpx2)
-                       - ((1.0f - x * inv_gamma) * s.Bmx + s.Cmx * inv_gamma) * (amx * bmx2);
-        const float py = ((1.0f + y * inv_gamma) * s.Bpy - s.Cpy * inv_gamma) * (apy * bpy2)
-                       - ((1.0f - y * inv_gamma) * s.Bmy + s.Cmy * inv_gamma) * (amy * bmy2);
-        coord_t g = ng[idx];
-        g.x += px; g.y += py;
-        ng[idx] = g;
+            const int net = pins[p].net;
+            if (net < 0) continue;
+            const int j = net - net0;
+            const PinRecord r = pins[p];
+            const coord_t   c = node_pos[r.node_idx];
+            const float x = c.x + r.off_x;
+            const float y = c.y + r.off_y;
+            NetBBox b = bb[j];
+            if (x > b.mxx) b.mxx = x;
+            if (x < b.mnx) b.mnx = x;
+            if (y > b.mxy) b.mxy = y;
+            if (y < b.mny) b.mny = y;
+            bb[j] = b;
+        }
+
+        // ---- sweep 2: B/C sums (flat over this tile's pins) --------------------
+        // bb[] is final now; accumulate the WA exp-weighted B/C sums per net.
+    sweep_sums:
+        for (int p = pbeg; p < pend; p++) {
+#pragma HLS PIPELINE
+            const int net = pins[p].net;
+            if (net < 0) continue;
+            const int j = net - net0;
+            const PinRecord r = pins[p];
+            const coord_t   c = node_pos[r.node_idx];
+            const float x = c.x + r.off_x;
+            const float y = c.y + r.off_y;
+            const NetBBox b = bb[j];
+            const float apx = hpwl_lut_exp(lut, lut_size, inv_lut_step, b.mxx - x);
+            const float amx = hpwl_lut_exp(lut, lut_size, inv_lut_step, x - b.mnx);
+            const float apy = hpwl_lut_exp(lut, lut_size, inv_lut_step, b.mxy - y);
+            const float amy = hpwl_lut_exp(lut, lut_size, inv_lut_step, y - b.mny);
+            NetSums s = sums[j];
+            s.Bpx += apx; s.Bmx += amx; s.Cpx += apx * x; s.Cmx += amx * x;
+            s.Bpy += apy; s.Bmy += amy; s.Cpy += apy * y; s.Cmy += amy * y;
+            sums[j] = s;
+        }
+
+        // ---- sweep 3: per-pin partial + scatter into ng (flat over tile pins) --
+    sweep_partials:
+        for (int p = pbeg; p < pend; p++) {
+#pragma HLS PIPELINE
+            const int net = pins[p].net;
+            if (net < 0) continue;
+            const int j = net - net0;
+            const PinRecord r = pins[p];
+            const int idx = r.node_idx;
+            if (idx >= num_movable) continue;  // fixed node: counted in B/C, no grad
+            const coord_t c = node_pos[idx];
+            const float x = c.x + r.off_x;
+            const float y = c.y + r.off_y;
+            const NetBBox b = bb[j];
+            const NetSums s = sums[j];
+            const float apx = hpwl_lut_exp(lut, lut_size, inv_lut_step, b.mxx - x);
+            const float amx = hpwl_lut_exp(lut, lut_size, inv_lut_step, x - b.mnx);
+            const float apy = hpwl_lut_exp(lut, lut_size, inv_lut_step, b.mxy - y);
+            const float amy = hpwl_lut_exp(lut, lut_size, inv_lut_step, y - b.mny);
+            const float bpx2 = 1.0f / (s.Bpx * s.Bpx);
+            const float bmx2 = 1.0f / (s.Bmx * s.Bmx);
+            const float bpy2 = 1.0f / (s.Bpy * s.Bpy);
+            const float bmy2 = 1.0f / (s.Bmy * s.Bmy);
+            const float px = ((1.0f + x * inv_gamma) * s.Bpx - s.Cpx * inv_gamma) * (apx * bpx2)
+                           - ((1.0f - x * inv_gamma) * s.Bmx + s.Cmx * inv_gamma) * (amx * bmx2);
+            const float py = ((1.0f + y * inv_gamma) * s.Bpy - s.Cpy * inv_gamma) * (apy * bpy2)
+                           - ((1.0f - y * inv_gamma) * s.Bmy + s.Cmy * inv_gamma) * (amy * bmy2);
+            coord_t g = ng[idx];
+            g.x += px; g.y += py;
+            ng[idx] = g;
+        }
     }
 
     // Stream the on-chip accumulator out to DDR once (sequential -> II=1, burst).
