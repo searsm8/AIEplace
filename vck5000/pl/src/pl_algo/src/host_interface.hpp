@@ -56,20 +56,32 @@ struct DesignHeader {
 //   - net_ptr[0] == 0, net_ptr[num_nets] == num_pins.
 
 // ===========================================================================
-//  Buffer 4: flattened pins  (host -> PL)    PinRecord pins[num_pins]
+//  Buffer 4: flattened pins  (host -> PL)    NodePin pins[num_pins]
 // ===========================================================================
-// One record per (net, node) connection, net-major (matches CSR above).
-// Absolute pin position = node_pos[node_idx] + {off_x, off_y}.
-// A plain cell pin has offset (0,0); only macro pins carry nonzero offsets.
-// The 4th field carries the owning net id (it was 16 B alignment padding): the PL
-// scatters per-net reductions indexed by `net` without a separate pin->net map.
-// net == -1 marks a pin whose net has no gradient (degree <= 1) -> the kernel skips it.
-struct PinRecord {
+// One record per (net, node) connection. Absolute pin position =
+// node_pos[node_idx] + {off_x, off_y}. A plain cell pin has offset (0,0); only
+// macro pins carry nonzero offsets. The `net` field (was 16 B alignment padding)
+// carries the owning net id so the PL needs no separate pin->net map; net == -1
+// marks a pin whose net has no gradient (degree <= 1) -> the kernel skips it.
+//
+// The SAME record type backs two DDR arrays in two different orderings:
+//   pins  -- NET-major (CSR order, matches net_ptr): used by passes 1-2 (bbox/sums)
+//   npins -- NODE-major (sorted ascending by node_idx): used by pass 3 (the
+//            segmented reduction). Only movable, gradient-bearing pins appear in
+//            npins. Same data, reshuffled so a node's pins are contiguous.
+struct NodePin {
     int32_t node_idx;      // index into node_pos[]
     float   off_x;         // NetPin.offset.x
     float   off_y;         // NetPin.offset.y
     int32_t net;           // owning net id, or -1 if the net has no gradient
 };
+
+// Per-net reduction results. Computed on-chip in passes 1-2 (net-tiled), spilled
+// to DDR (bb_DDR / sums_DDR, [num_nets]) so pass 3 -- which streams node-major --
+// can read any net's reduction. Kernel-internal scratch: the host only allocates
+// the DDR buffers (num_nets * sizeof), it neither fills nor reads them.
+struct NetBBox { float mxx, mnx, mxy, mny; };                     // bounding box
+struct NetSums { float Bpx, Bmx, Cpx, Cmx, Bpy, Bmy, Cpy, Cmy; }; // WA B/C sums
 
 // ===========================================================================
 //  Buffer 5: result  (PL -> host)            float hpwl

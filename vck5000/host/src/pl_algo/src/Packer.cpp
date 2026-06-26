@@ -47,7 +47,7 @@ PackedDesign packDesign(AIEplace::DataBase& db) {
         for (const NetPin& pin : net->getPins()) {
             auto it = idx.find(pin.node);
             if (it == idx.end()) { ++unresolved; continue; } // not in v0 index space
-            pk.pins.push_back(PinRecord{ it->second, pin.offset.x, pin.offset.y, net_id });
+            pk.pins.push_back(NodePin{ it->second, pin.offset.x, pin.offset.y, net_id });
         }
         // Tag pins of no-gradient nets (resolved degree <= 1) so the PL skips them.
         if ((int32_t)pk.pins.size() - beg <= 1)
@@ -59,6 +59,15 @@ PackedDesign packDesign(AIEplace::DataBase& db) {
         fprintf(stderr, "[pack] WARNING: %d pin(s) referenced nodes outside the "
                         "v0 index space (skipped)\n", unresolved);
 
+    // Node-major pin stream for the gradient's segmented reduction (pass 3): the
+    // movable, gradient-bearing pins, sorted ascending by node so each node's pins
+    // are contiguous (and node_grad writes come out in node order -> sequential).
+    pk.npins.reserve(pk.pins.size());
+    for (const NodePin& r : pk.pins)
+        if (r.net >= 0 && r.node_idx < M) pk.npins.push_back(r);
+    std::stable_sort(pk.npins.begin(), pk.npins.end(),
+                     [](const NodePin& a, const NodePin& b){ return a.node_idx < b.node_idx; });
+
     pk.header = DesignHeader{ M, N, (int32_t)nets.size(), (int32_t)pk.pins.size() };
     return pk;
 }
@@ -68,11 +77,11 @@ double hpwlFromPacked(const PackedDesign& pk) {
     for (int n = 0; n < pk.header.num_nets; ++n) {
         const int beg = pk.net_ptr[n], end = pk.net_ptr[n + 1];
         if (beg == end) continue;
-        const PinRecord& f = pk.pins[beg];
+        const NodePin& f = pk.pins[beg];
         float min_x = pk.node_pos[f.node_idx].x + f.off_x, max_x = min_x;
         float min_y = pk.node_pos[f.node_idx].y + f.off_y, max_y = min_y;
         for (int p = beg + 1; p < end; ++p) {
-            const PinRecord& r = pk.pins[p];
+            const NodePin& r = pk.pins[p];
             const float x = pk.node_pos[r.node_idx].x + r.off_x;
             const float y = pk.node_pos[r.node_idx].y + r.off_y;
             min_x = std::min(min_x, x); max_x = std::max(max_x, x);

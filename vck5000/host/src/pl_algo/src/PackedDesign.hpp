@@ -16,10 +16,11 @@
 namespace plalgo {
 
 struct PackedDesign {
-    DesignHeader           header;
-    std::vector<coord_t>   node_pos;  // [num_nodes]  movable [0,M), fixed [M,N)
-    std::vector<int32_t>   net_ptr;   // [num_nets+1] CSR prefix offsets
-    std::vector<PinRecord> pins;      // [num_pins]   flattened, net-major
+    DesignHeader         header;
+    std::vector<coord_t> node_pos;  // [num_nodes]  movable [0,M), fixed [M,N)
+    std::vector<int32_t> net_ptr;   // [num_nets+1] CSR prefix offsets
+    std::vector<NodePin> pins;      // [num_pins]   flattened, NET-major (CSR order)
+    std::vector<NodePin> npins;     // [num_npins]  movable pins, NODE-major (sorted)
 };
 
 } // namespace plalgo

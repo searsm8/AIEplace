@@ -38,7 +38,7 @@ static std::vector<coord_t> gradientGolden(const PackedDesign& pk, float inv_gam
 
         float maxx = -1e30f, minx = 1e30f, maxy = -1e30f, miny = 1e30f;
         for (int p = beg; p < end; p++) {
-            const PinRecord& r = pk.pins[p];
+            const NodePin& r = pk.pins[p];
             const float x = pk.node_pos[r.node_idx].x + r.off_x;
             const float y = pk.node_pos[r.node_idx].y + r.off_y;
             maxx = std::max(maxx, x); minx = std::min(minx, x);
@@ -47,7 +47,7 @@ static std::vector<coord_t> gradientGolden(const PackedDesign& pk, float inv_gam
 
         float Bpx = 0, Bmx = 0, Cpx = 0, Cmx = 0, Bpy = 0, Bmy = 0, Cpy = 0, Cmy = 0;
         for (int p = beg; p < end; p++) {
-            const PinRecord& r = pk.pins[p];
+            const NodePin& r = pk.pins[p];
             const float x = pk.node_pos[r.node_idx].x + r.off_x;
             const float y = pk.node_pos[r.node_idx].y + r.off_y;
             const float apx = std::exp((x - maxx) * inv_gamma);
@@ -61,7 +61,7 @@ static std::vector<coord_t> gradientGolden(const PackedDesign& pk, float inv_gam
         const float bpy2 = 1.0f / (Bpy * Bpy), bmy2 = 1.0f / (Bmy * Bmy);
 
         for (int p = beg; p < end; p++) {
-            const PinRecord& r = pk.pins[p];
+            const NodePin& r = pk.pins[p];
             if (r.node_idx >= M) continue; // fixed: no stored gradient
             const float x = pk.node_pos[r.node_idx].x + r.off_x;
             const float y = pk.node_pos[r.node_idx].y + r.off_y;
