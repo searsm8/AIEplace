@@ -16,6 +16,7 @@
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_kernel.h"
 #include "xrt/xrt_bo.h"
+#include "experimental/xrt_graph.h"   // xrt::graph (AIE control, MODE_DCT_1D)
 
 namespace plalgo {
 
@@ -91,8 +92,10 @@ void runHpwlGradCU(const PackedDesign& pk,
     xrt::bo bo_bb    = xrt::bo(device, bb_bytes,    top.group_id(5));
     xrt::bo bo_sums  = xrt::bo(device, sums_bytes,  top.group_id(6));
     xrt::bo bo_grad  = xrt::bo(device, grad_bytes,  top.group_id(7));
-    xrt::bo bo_box   = xrt::bo(device, sizeof(NodeBox), top.group_id(8)); // inert dummy
-    xrt::bo bo_bd    = xrt::bo(device, sizeof(float),   top.group_id(9)); // inert dummy
+    xrt::bo bo_box   = xrt::bo(device, sizeof(NodeBox), top.group_id(8));  // inert dummy
+    xrt::bo bo_bd    = xrt::bo(device, sizeof(float),   top.group_id(9));  // inert dummy
+    xrt::bo bo_din   = xrt::bo(device, sizeof(float),   top.group_id(10)); // inert dummy
+    xrt::bo bo_dout  = xrt::bo(device, sizeof(float),   top.group_id(11)); // inert dummy
 
     std::memcpy(bo_node.map<void*>(),  pk.node_pos.data(), node_bytes);
     std::memcpy(bo_nptr.map<void*>(),  pk.net_ptr.data(),  nptr_bytes);
@@ -107,9 +110,10 @@ void runHpwlGradCU(const PackedDesign& pk,
     bo_lut.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
     xrt::run run = top(bo_node, bo_nptr, bo_pins, bo_npins, bo_lut, bo_bb, bo_sums, bo_grad,
-                       bo_box, bo_bd,
+                       bo_box, bo_bd, bo_din, bo_dout,
                        inv_gamma, inv_lut_step, lut_size, num_nets, M, num_npins,
                        pk.header.num_nodes, 1.0f, 1.0f, 1.0f,   // density scalars (unused here)
+                       0, 0,                                    // dct scalars (unused here)
                        (int)MODE_HPWL_GRAD);
     run.wait();
 
@@ -142,19 +146,73 @@ void runDensityBin(const PackedDesign& pk,
     xrt::bo d_grad = xrt::bo(device, sizeof(coord_t), top.group_id(7));
     xrt::bo bo_box = xrt::bo(device, box_bytes, top.group_id(8));
     xrt::bo bo_bd  = xrt::bo(device, bd_bytes,  top.group_id(9));
+    xrt::bo bo_din  = xrt::bo(device, sizeof(float), top.group_id(10)); // inert dummy
+    xrt::bo bo_dout = xrt::bo(device, sizeof(float), top.group_id(11)); // inert dummy
 
     std::memcpy(bo_box.map<void*>(), pk.node_box.data(), box_bytes);
     bo_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
     xrt::run run = top(d_node, d_nptr, d_pins, d_npin, d_lut, d_bb, d_sums, d_grad,
-                       bo_box, bo_bd,
+                       bo_box, bo_bd, bo_din, bo_dout,
                        0.0f, 0.0f, 0, 0, M, 0,                 // HPWL scalars (unused here)
                        N, bin_w, bin_h, target_density,
+                       0, 0,                                   // dct scalars (unused here)
                        (int)MODE_DENSITY_BIN);
     run.wait();
 
     bo_bd.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     std::memcpy(bin_density, bo_bd.map<void*>(), bd_bytes);
+}
+
+void runDCT1D(const float* dct_in, int num_frames,
+              float* out_fft, float* out_dct, const char* xclbin_path) {
+    const size_t in_floats  = (size_t)num_frames * FFT_PTS;
+    const size_t in_bytes   = in_floats * sizeof(float);
+    const size_t out_max    = in_floats * 2;             // stage 0 (complex) is the larger
+    const size_t out_bytes  = out_max * sizeof(float);
+
+    // One device/graph session runs BOTH stages back-to-back (avoids reopening the
+    // sw_emu device/AIE-sim twice in one process).
+    xrt::device device(0);
+    xrt::uuid   uuid = device.load_xclbin(xclbin_path);
+    xrt::kernel top(device, uuid, "top");
+    xrt::graph  fft(device, uuid, "density_fft_graph"); // AIE graph instance name (TopGraph.cpp)
+
+    // Real DCT buffers (groups 10,11); HPWL (0-7) + density (8,9) inert dummies.
+    xrt::bo d_node = xrt::bo(device, sizeof(coord_t), top.group_id(0));
+    xrt::bo d_nptr = xrt::bo(device, sizeof(int32_t), top.group_id(1));
+    xrt::bo d_pins = xrt::bo(device, sizeof(NodePin), top.group_id(2));
+    xrt::bo d_npin = xrt::bo(device, sizeof(NodePin), top.group_id(3));
+    xrt::bo d_lut  = xrt::bo(device, sizeof(float),   top.group_id(4));
+    xrt::bo d_bb   = xrt::bo(device, sizeof(NetBBox), top.group_id(5));
+    xrt::bo d_sums = xrt::bo(device, sizeof(NetSums), top.group_id(6));
+    xrt::bo d_grad = xrt::bo(device, sizeof(coord_t), top.group_id(7));
+    xrt::bo d_box  = xrt::bo(device, sizeof(NodeBox), top.group_id(8));
+    xrt::bo d_bd   = xrt::bo(device, sizeof(float),   top.group_id(9));
+    xrt::bo bo_in  = xrt::bo(device, in_bytes,  top.group_id(10));
+    xrt::bo bo_out = xrt::bo(device, out_bytes, top.group_id(11));
+
+    std::memcpy(bo_in.map<void*>(), dct_in, in_bytes);
+    bo_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    auto run_stage = [&](int stage, float* dst, size_t dst_floats) {
+        // Start the AIE FFT graph (num_frames windows), run top (PL streams the
+        // frames to/from the AIE), wait on both. (toy_aie pattern.)
+        fft.run(num_frames);
+        xrt::run run = top(d_node, d_nptr, d_pins, d_npin, d_lut, d_bb, d_sums, d_grad,
+                           d_box, d_bd, bo_in, bo_out,
+                           0.0f, 0.0f, 0, 0, 0, 0,             // HPWL scalars (unused here)
+                           0, 1.0f, 1.0f, 1.0f,                // density scalars (unused here)
+                           stage, num_frames,
+                           (int)MODE_DCT_1D);
+        run.wait();
+        fft.wait();
+        bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        std::memcpy(dst, bo_out.map<void*>(), dst_floats * sizeof(float));
+    };
+
+    run_stage(DCT_STAGE_FFT, out_fft, in_floats * 2);  // raw complex FFT
+    run_stage(DCT_STAGE_DCT, out_dct, in_floats);      // real DCT
 }
 
 } // namespace plalgo

@@ -17,12 +17,13 @@ def generate_link_cfg(file_path, aie):
         f.write("nk=top:1:top_1\n\n")
 
         if aie != "none":
-            # Future AIE-using variant: wire top's stream ports to the AIE graph
-            # PLIO (aie/src/pl_algo HpwlGradGraph: hpwl_grad_in_0 / hpwl_grad_out_0).
-            f.write("### HPWL gradient graph ###\n")
-            f.write("stream_connect=top_1.hpwl_to_aie:ai_engine_0.hpwl_grad_in_0\n")
-            f.write("stream_connect=ai_engine_0.hpwl_grad_out_0:top_1.hpwl_from_aie\n\n")
-            # ### FFT pool ### -- deferred until the density_grad AIE graph exists.
+            # Wire top's AIE FFT stream ports to the DensityFFTGraph PLIO
+            # (aie/src/pl_algo density_fft: fft_in_0 / fft_out_0). Single lane for
+            # Stage 2; Stage 3 adds fft_in_1.. / fft_out_1.. for the 8-lane pool.
+            # (HPWL runs entirely on the PL, so its parked graph is not wired.)
+            f.write("### Density FFT pool ###\n")
+            f.write("stream_connect=top_1.fft_to_aie:ai_engine_0.fft_in_0\n")
+            f.write("stream_connect=ai_engine_0.fft_out_0:top_1.fft_from_aie\n\n")
 
         f.write("[vivado]\n")
         f.write("# improve hw_emu speed (platform-dependent)\n")

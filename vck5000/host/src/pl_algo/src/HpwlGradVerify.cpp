@@ -15,6 +15,7 @@ namespace plalgo {
 // index = d * inv_lut_step where inv_lut_step = 1/(step_norm*gamma), so
 // lut(d) ~= exp(-d/gamma). Fine resolution here so the LUT error is small and a
 // mismatch flags a kernel bug rather than LUT coarseness.
+// TODO: More precision could be added if extra URAM is available.
 static constexpr float STEP_NORM = 0.05f;  // step in normalized units (d/gamma)
 static constexpr int   GAMMA_MULT = 12;    // table covers up to 12*gamma
 

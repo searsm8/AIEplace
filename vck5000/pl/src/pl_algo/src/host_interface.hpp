@@ -154,15 +154,29 @@ constexpr float AIE_INV_GAMMA  = 0.25f; // 1/gamma baked into the AIE kernel (==
 // + getBinDensities (Density.cpp::computeOverlaps). Fillers are EXCLUDED in v1
 // (TODO: add fillers once the field pipeline is in place).
 
-// ---- top() mode selector ---------------------------------------------------
-// One PL kernel serves multiple modules during bring-up; `mode` selects which.
-// (Stage 5 replaces this with the unified per-iteration datapath.)
-enum top_mode { MODE_HPWL_GRAD = 0, MODE_DENSITY_BIN = 1 };
-
 // Bin grid dimension, host-visible. Must equal formats.hpp GRID (the PL transport
 // header pulls HLS types, so host TUs can't include it -- this is the host copy).
 constexpr int DENSITY_GRID  = 1024;
 constexpr int DENSITY_NBINS = DENSITY_GRID * DENSITY_GRID;   // 1,048,576 (4 MB float)
+
+// ---- top() mode selector ---------------------------------------------------
+// One PL kernel serves multiple modules during bring-up; `mode` selects which.
+// (Stage 5 replaces this with the unified per-iteration datapath.)
+enum top_mode { MODE_HPWL_GRAD = 0, MODE_DENSITY_BIN = 1, MODE_DCT_1D = 2 };
+
+// ---- 1D DCT via the AIE FFT  (Stage 2 -- first AIE bring-up) ----------------
+// MODE_DCT_1D streams num_frames real rows of FFT_PTS points each through:
+// PL shuffle -> AIE forward FFT (fft_to_aie/fft_from_aie streams) -> PL twiddle+Re.
+// One forward FFT serves DCT/IDCT/IDXST (PL does all pre/post); Stage 0's model
+// proved the recipe exact. FFT_PTS == DENSITY_GRID (a grid row is one 1024-pt FFT).
+//   dct_in  : float[num_frames * FFT_PTS]        real input rows
+//   dct_out : stage 0 -> float[num_frames*FFT_PTS*2] complex FFT {re,im} per point
+//             stage 1 -> float[num_frames*FFT_PTS]   real DCT per point
+// dct_stage de-risks the bring-up in two steps (see dct_stage_t):
+//   0 (FFT passthrough): no shuffle/post -> isolates AIE graph + streams + build.
+//   1 (full DCT):        PL shuffle + twiddle/Re -> vs DCT_naive.
+constexpr int FFT_PTS = DENSITY_GRID;   // 1024-pt FFT (one grid row)
+enum dct_stage_t { DCT_STAGE_FFT = 0, DCT_STAGE_DCT = 1 };
 
 // ---- Per-node geometry  (host -> PL)   NodeBox node_box[num_nodes] ----------
 // Lower-left anchor (x,y) (== node_pos) + cell size (w,h). Movable [0,M), fixed

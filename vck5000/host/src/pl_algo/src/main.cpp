@@ -16,6 +16,7 @@
 #include "Driver.hpp"
 #include "HpwlGradVerify.hpp"
 #include "DensityVerify.hpp"
+#include "DCT1DVerify.hpp"
 #include <cstring>
 #endif
 
@@ -24,8 +25,16 @@ int main(int argc, char** argv) {
         printf("usage: %s <benchmark_dir> [xclbin]\n", argv[0]);
         printf("       %s --hpwl-grad <benchmark_dir> <xclbin>\n", argv[0]);
         printf("       %s --density   <benchmark_dir> <xclbin>\n", argv[0]);
+        printf("       %s --dct       <xclbin>\n", argv[0]);
         return 1;
     }
+
+#ifdef USE_XILINX_XRT
+    // Verify the first AIE-using mode (1D DCT via the AIE FFT) on synthetic vectors.
+    // No benchmark needed (inputs are synthetic).
+    if (argc >= 3 && std::strcmp(argv[1], "--dct") == 0)
+        return plalgo::runDCT1DVerify(argv[2]);
+#endif
 
 #ifdef USE_XILINX_XRT
     // Verify the PL HPWL gradient compute unit on a real benchmark: parse + pack,

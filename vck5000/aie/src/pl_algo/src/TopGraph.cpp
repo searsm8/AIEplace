@@ -1,22 +1,25 @@
-// TopGraph.cpp -- pl_algo AIE top. Bring-up instantiates only the HPWL-gradient
-// graph; the density_grad (FFT) graph will be added here later. The shared
-// aie/Makefile always compiles a file named TopGraph.cpp from aie/src/$(AIE)/src.
-#include "hpwl_grad/HpwlGradGraph.h"
+// TopGraph.cpp -- pl_algo AIE top. The shared aie/Makefile always compiles a file
+// named TopGraph.cpp from aie/src/$(AIE)/src into libadf.
+//
+// HPWL runs entirely on the PL (the HpwlGradGraph here is PARKED -- kept in the tree
+// but not instantiated). The active AIE graph is the density-field FFT pool: the AIE
+// does only the forward FFT; all DCT/IDCT/IDXST pre/post runs on the PL.
+#include "density_fft/DensityFFTGraph.h"
 
-HpwlGradGraph hpwl_grad_graph;
+DensityFFTGraph density_fft_graph;
 
 int main(void) {
   adf::return_code ret;
 
-  hpwl_grad_graph.init();
-  ret = hpwl_grad_graph.run(1);
+  density_fft_graph.init();
+  ret = density_fft_graph.run(1);
   if (ret != adf::ok) {
-    printf("HpwlGradGraph run failed\n");
+    printf("DensityFFTGraph run failed\n");
     return ret;
   }
-  ret = hpwl_grad_graph.end();
+  ret = density_fft_graph.end();
   if (ret != adf::ok) {
-    printf("HpwlGradGraph end failed\n");
+    printf("DensityFFTGraph end failed\n");
     return ret;
   }
   return 0;

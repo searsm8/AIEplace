@@ -38,6 +38,13 @@ void runDensityBin(const PackedDesign& pk,
                    float* bin_density,
                    const char* xclbin_path);
 
+// Run the 1D DCT bring-up (MODE_DCT_1D) for num_frames real rows of FFT_PTS points.
+// One device/graph session runs BOTH stages: stage 0 (FFT passthrough) -> out_fft
+// (num_frames*FFT_PTS*2 floats, complex {re,im}); stage 1 (full DCT) -> out_dct
+// (num_frames*FFT_PTS floats, real). Both caller-allocated. AIE-using (AIE=pl_algo).
+void runDCT1D(const float* dct_in, int num_frames,
+              float* out_fft, float* out_dct, const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DRIVER_HPP
