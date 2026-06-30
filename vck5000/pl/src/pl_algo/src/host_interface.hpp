@@ -144,6 +144,41 @@ constexpr float AIE_INV_GAMMA  = 0.25f; // 1/gamma baked into the AIE kernel (==
 // Fixed nodes ([M, N)) participate in their nets' partials but carry no stored
 // gradient. Verified against the pinned-gamma CPU golden with a tolerance.
 
+// ===========================================================================
+//  DENSITY EXTENSION  (Stage 1 -- bin density on the PL)
+// ===========================================================================
+// The density_manager scatters node areas into the GRID x GRID bin-density grid
+// rho (the ePlace charge density), as step 1 of the electrostatic-field solve.
+// Stage 1 implements only the binning + readback; the DCT/FFT field solve follows
+// in later stages. Reference: markv1 Grid::computeBinOverlaps + clampFixedDensity
+// + getBinDensities (Density.cpp::computeOverlaps). Fillers are EXCLUDED in v1
+// (TODO: add fillers once the field pipeline is in place).
+
+// ---- top() mode selector ---------------------------------------------------
+// One PL kernel serves multiple modules during bring-up; `mode` selects which.
+// (Stage 5 replaces this with the unified per-iteration datapath.)
+enum top_mode { MODE_HPWL_GRAD = 0, MODE_DENSITY_BIN = 1 };
+
+// Bin grid dimension, host-visible. Must equal formats.hpp GRID (the PL transport
+// header pulls HLS types, so host TUs can't include it -- this is the host copy).
+constexpr int DENSITY_GRID  = 1024;
+constexpr int DENSITY_NBINS = DENSITY_GRID * DENSITY_GRID;   // 1,048,576 (4 MB float)
+
+// ---- Per-node geometry  (host -> PL)   NodeBox node_box[num_nodes] ----------
+// Lower-left anchor (x,y) (== node_pos) + cell size (w,h). Movable [0,M), fixed
+// [M,N) -- same index split as node_pos, so status is implicit. Separate buffer
+// from node_pos so the verified HPWL contract is untouched.
+struct NodeBox { float x; float y; float w; float h; };
+
+// ---- Bin density rho  (PL -> host for Stage 1; DDR scratch later) -----------
+//   float bin_density[GRID*GRID], row-major FIRST-INDEX(x)-major:
+//     bin_density[x*GRID + y]   x horizontal in [0,GRID), y vertical in [0,GRID)
+//   to match markv1 density[x][y] and make a fixed-x "row" contiguous (the DCT's
+//   row direction). Natural float (128-bit beat packing deferred, like hpwl_CU).
+//   bin_w = die_xsize/GRID, bin_h = die_ysize/GRID; bin indexing assumes die
+//   origin (0,0) (markv1 convention). rho = clamped_overlap / (bin_w*bin_h);
+//   fixed overlap is clamped to target_density*bin_area before movable is added.
+
 } // namespace plalgo
 
 #endif // PL_ALGO_HOST_INTERFACE_HPP

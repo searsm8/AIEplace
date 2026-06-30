@@ -20,6 +20,8 @@ PackedDesign packDesign(AIEplace::DataBase& db) {
     auto push_node = [&](Node* n) {
         idx[n] = (int32_t)pk.node_pos.size();
         pk.node_pos.push_back({n->getX(), n->getY()});
+        // Geometry for density binning (same index order as node_pos).
+        pk.node_box.push_back(NodeBox{n->getX(), n->getY(), n->getXsize(), n->getYsize()});
     };
 
     // Pass 1: movable components -> [0, M)

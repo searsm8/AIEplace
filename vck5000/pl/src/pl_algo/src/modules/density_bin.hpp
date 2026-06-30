@@ -1,0 +1,111 @@
+#ifndef PL_ALGO_DENSITY_BIN_HPP
+#define PL_ALGO_DENSITY_BIN_HPP
+
+// density_bin -- Stage 1 of the density_manager: scatter node areas into the
+// GRID x GRID bin-density grid rho (the ePlace charge density).
+//
+// Grid-strip tiled along x: a STRIP x GRID accumulator (256 KB) lives on-chip and
+// nodes are re-streamed once per strip (~16x). Two-pass per strip, matching markv1
+// Density.cpp::computeOverlaps: fixed nodes first, clamp each bin to
+// target_density*bin_area, then movable nodes on top. Per-node scatter mirrors
+// Grid::computeBinOverlaps (fast path for sub-bin cells, else exact rect
+// intersection). Fillers EXCLUDED in v1. rho = clamped_overlap / bin_area, written
+// x-major (bin_density[x*GRID+y]) per host_interface.hpp.
+//
+// Algorithm verified bit-exact vs a naive full-grid scatter in
+// model/density_bin_model.cpp; verified vs the Grid golden (real benchmark) in sw_emu.
+//
+// NOTE: the acc[][] += in bin_scatter is a float-accumulator RMW (same hazard class
+// as hpwl_CU's scatter); the node-loop II is measured in C-synth before optimizing.
+
+#include "../formats.hpp"
+#include "../host_interface.hpp"
+
+namespace plalgo {
+
+constexpr int STRIP = 64;                  // x-values per strip; GRID/STRIP = 16 strips
+
+// Scatter one node's overlap into the strip accumulator acc[STRIP][GRID], for the
+// x-bins (columns) in [c0, c0+STRIP). Mirrors Grid::computeBinOverlaps.
+static void bin_scatter(const NodeBox& nd, float bin_w, float bin_h, int c0,
+                        float acc[STRIP][GRID]) {
+    const float xl = nd.x, yl = nd.y, xh = nd.x + nd.w, yh = nd.y + nd.h;
+    int col_lo = (int)(xl / bin_w);  if (col_lo < 0)        col_lo = 0;
+    int col_hi = (int)(xh / bin_w);  if (col_hi > GRID - 1) col_hi = GRID - 1;
+    int row_lo = (int)(yl / bin_h);  if (row_lo < 0)        row_lo = 0;
+    int row_hi = (int)(yh / bin_h);  if (row_hi > GRID - 1) row_hi = GRID - 1;
+
+    const int c1 = c0 + STRIP;
+    // Fast path: node fits in a single bin -> area = w*h (matches Grid getArea()).
+    if (col_lo == col_hi && row_lo == row_hi) {
+        if (col_lo >= c0 && col_lo < c1) acc[col_lo - c0][row_lo] += nd.w * nd.h;
+        return;
+    }
+    // General case: exact rectangle intersection per covered bin, clipped to strip.
+    const int cs = col_lo > c0      ? col_lo : c0;
+    const int ce = col_hi < c1 - 1  ? col_hi : c1 - 1;
+    for (int col = cs; col <= ce; col++) {
+        const float lx = col * bin_w, rx = lx + bin_w;
+        const float ox = (xh < rx ? xh : rx) - (xl > lx ? xl : lx);
+        if (ox <= 0) continue;
+        for (int row = row_lo; row <= row_hi; row++) {
+            const float ly = row * bin_h, ry = ly + bin_h;
+            const float oy = (yh < ry ? yh : ry) - (yl > ly ? yl : ly);
+            if (oy <= 0) continue;
+            acc[col - c0][row] += ox * oy;
+        }
+    }
+}
+
+static void density_bin(const NodeBox* node_box,    // [num_nodes]  movable [0,M), fixed [M,N)
+                        float*         bin_density,  // [GRID*GRID]  rho, x-major rho[x*GRID+y]
+                        int            num_movable,
+                        int            num_nodes,
+                        float          bin_w,
+                        float          bin_h,
+                        float          target_density) {
+    static float acc[STRIP][GRID];
+#pragma HLS bind_storage variable=acc type=RAM_2P impl=URAM
+    const float bin_area = bin_w * bin_h;
+    const float cap      = target_density * bin_area;
+    const float inv_area = 1.0f / bin_area;
+
+strip_loop:
+    for (int c0 = 0; c0 < GRID; c0 += STRIP) {
+    clear_i:
+        for (int i = 0; i < STRIP; i++)
+        clear_y:
+            for (int y = 0; y < GRID; y++) {
+#pragma HLS PIPELINE II=1
+                acc[i][y] = 0.0f;
+            }
+
+    pass1_fixed:
+        for (int n = num_movable; n < num_nodes; n++)
+            bin_scatter(node_box[n], bin_w, bin_h, c0, acc);
+
+    clamp_i:
+        for (int i = 0; i < STRIP; i++)
+        clamp_y:
+            for (int y = 0; y < GRID; y++) {
+#pragma HLS PIPELINE II=1
+                if (acc[i][y] > cap) acc[i][y] = cap;
+            }
+
+    pass2_movable:
+        for (int n = 0; n < num_movable; n++)
+            bin_scatter(node_box[n], bin_w, bin_h, c0, acc);
+
+    write_i:
+        for (int i = 0; i < STRIP; i++)
+        write_y:
+            for (int y = 0; y < GRID; y++) {
+#pragma HLS PIPELINE II=1
+                bin_density[(c0 + i) * GRID + y] = acc[i][y] * inv_area;
+            }
+    }
+}
+
+} // namespace plalgo
+
+#endif // PL_ALGO_DENSITY_BIN_HPP

@@ -133,6 +133,18 @@ run-hpwl-grad: $(XCLBIN) $(HOST_EXE)
 	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
 	$(HOST_EXE) --hpwl-grad $(BENCH) $(XCLBIN)
 
+# --- build + run the PL bin-density sw_emu verify on a benchmark ---
+# Same toolchain env as run-hpwl-grad. Usage (BENCH overridable):
+#   make run-density AIE=none PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1
+.PHONY: run-density
+run-density: $(XCLBIN) $(HOST_EXE)
+	mkdir -p $(BUILD_DIR)/$(TARGET)/run
+	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
+	cd $(BUILD_DIR)/$(TARGET)/run && \
+	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
+	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
+	$(HOST_EXE) --density $(BENCH) $(XCLBIN)
+
 
 # make dse
 # launch python script to perform Design Space Exploration

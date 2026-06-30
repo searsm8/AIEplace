@@ -29,6 +29,15 @@ void runHpwlGradCU(const PackedDesign& pk,
                    coord_t* node_grad,
                    const char* xclbin_path);
 
+// Run the PL density binning module (density_bin) on the device. Uploads the
+// node_box geometry, executes top() in MODE_DENSITY_BIN, and writes the
+// GRID x GRID bin-density grid rho (x-major, rho[x*GRID+y]) into bin_density
+// (caller-allocated, DENSITY_NBINS floats). PL-only path (AIE=none).
+void runDensityBin(const PackedDesign& pk,
+                   float bin_w, float bin_h, float target_density,
+                   float* bin_density,
+                   const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DRIVER_HPP

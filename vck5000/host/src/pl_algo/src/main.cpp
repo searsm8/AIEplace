@@ -15,6 +15,7 @@
 #ifdef USE_XILINX_XRT
 #include "Driver.hpp"
 #include "HpwlGradVerify.hpp"
+#include "DensityVerify.hpp"
 #include <cstring>
 #endif
 
@@ -22,6 +23,7 @@ int main(int argc, char** argv) {
     if (argc < 2) {
         printf("usage: %s <benchmark_dir> [xclbin]\n", argv[0]);
         printf("       %s --hpwl-grad <benchmark_dir> <xclbin>\n", argv[0]);
+        printf("       %s --density   <benchmark_dir> <xclbin>\n", argv[0]);
         return 1;
     }
 
@@ -36,6 +38,18 @@ int main(int argc, char** argv) {
                pk.header.num_movable, pk.header.num_nodes,
                pk.header.num_nets, pk.header.num_pins);
         return plalgo::runHpwlGradVerify(pk, argv[3]);
+    }
+
+    // Verify the PL bin-density module on a real benchmark: parse + pack, run
+    // density_bin on the device, compare rho vs the markv1 Grid golden.
+    if (argc >= 4 && std::strcmp(argv[1], "--density") == 0) {
+        AIEplace::DataBase db(argv[2]);
+        db.printInfo();
+        plalgo::PackedDesign pk = plalgo::packDesign(db);
+        printf("[pack] M=%d  N=%d  nets=%d  pins=%d\n",
+               pk.header.num_movable, pk.header.num_nodes,
+               pk.header.num_nets, pk.header.num_pins);
+        return plalgo::runDensityVerify(db, pk, argv[3]);
     }
 #endif
 
