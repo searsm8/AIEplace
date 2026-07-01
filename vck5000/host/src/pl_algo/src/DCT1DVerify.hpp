@@ -11,6 +11,11 @@ namespace plalgo {
 
 int runDCT1DVerify(const char* xclbin_path);
 
+// Stage 3a: verify the 8-lane row-DCT pass (MODE_DCT_ROWPASS) -- DCT every row of a
+// synthetic matrix through the AIE FFT pool, compare each row vs DCT_naive. Returns 0
+// on PASS.
+int runDCTRowPassVerify(const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DCT1D_VERIFY_HPP

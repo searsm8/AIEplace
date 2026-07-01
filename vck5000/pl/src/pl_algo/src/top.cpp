@@ -57,9 +57,17 @@ void top(
     int            num_frames,
     // ---- mode selector ----
     int            mode,
-    // ---- AIE FFT streams (HW-wired via link.cfg, not host args) ----
-    hls::stream<axis_t>& fft_to_aie,
-    hls::stream<axis_t>& fft_from_aie)
+    // ---- AIE FFT pool streams: 8 lanes as SEPARATE named ports (HW-wired via link.cfg,
+    // not host args). HLS does not support an array of hls::stream at the AXIS interface,
+    // so the lanes are individual scalar streams fft_to_aie_<i> / fft_from_aie_<i>. ----
+    hls::stream<axis_t>& fft_to_aie_0, hls::stream<axis_t>& fft_to_aie_1,
+    hls::stream<axis_t>& fft_to_aie_2, hls::stream<axis_t>& fft_to_aie_3,
+    hls::stream<axis_t>& fft_to_aie_4, hls::stream<axis_t>& fft_to_aie_5,
+    hls::stream<axis_t>& fft_to_aie_6, hls::stream<axis_t>& fft_to_aie_7,
+    hls::stream<axis_t>& fft_from_aie_0, hls::stream<axis_t>& fft_from_aie_1,
+    hls::stream<axis_t>& fft_from_aie_2, hls::stream<axis_t>& fft_from_aie_3,
+    hls::stream<axis_t>& fft_from_aie_4, hls::stream<axis_t>& fft_from_aie_5,
+    hls::stream<axis_t>& fft_from_aie_6, hls::stream<axis_t>& fft_from_aie_7)
 {
 #pragma HLS INTERFACE m_axi port=node_pos    offset=slave bundle=gmem0
 #pragma HLS INTERFACE m_axi port=net_ptr     offset=slave bundle=gmem1
@@ -98,15 +106,37 @@ void top(
 #pragma HLS INTERFACE s_axilite port=dct_stage      bundle=control
 #pragma HLS INTERFACE s_axilite port=num_frames     bundle=control
 #pragma HLS INTERFACE s_axilite port=mode           bundle=control
-#pragma HLS INTERFACE axis      port=fft_to_aie
-#pragma HLS INTERFACE axis      port=fft_from_aie
+#pragma HLS INTERFACE axis port=fft_to_aie_0
+#pragma HLS INTERFACE axis port=fft_to_aie_1
+#pragma HLS INTERFACE axis port=fft_to_aie_2
+#pragma HLS INTERFACE axis port=fft_to_aie_3
+#pragma HLS INTERFACE axis port=fft_to_aie_4
+#pragma HLS INTERFACE axis port=fft_to_aie_5
+#pragma HLS INTERFACE axis port=fft_to_aie_6
+#pragma HLS INTERFACE axis port=fft_to_aie_7
+#pragma HLS INTERFACE axis port=fft_from_aie_0
+#pragma HLS INTERFACE axis port=fft_from_aie_1
+#pragma HLS INTERFACE axis port=fft_from_aie_2
+#pragma HLS INTERFACE axis port=fft_from_aie_3
+#pragma HLS INTERFACE axis port=fft_from_aie_4
+#pragma HLS INTERFACE axis port=fft_from_aie_5
+#pragma HLS INTERFACE axis port=fft_from_aie_6
+#pragma HLS INTERFACE axis port=fft_from_aie_7
 #pragma HLS INTERFACE s_axilite port=return         bundle=control
 
     if (mode == MODE_DENSITY_BIN) {
         density_bin(node_box, bin_density, num_movable, num_nodes,
                     bin_w, bin_h, target_density);
     } else if (mode == MODE_DCT_1D) {
-        dct_1d(dct_in, dct_out, num_frames, dct_stage, fft_to_aie, fft_from_aie);
+        // single lane: use lane 0 of the pool (Stage 2 bring-up).
+        dct_1d(dct_in, dct_out, num_frames, dct_stage, fft_to_aie_0, fft_from_aie_0);
+    } else if (mode == MODE_DCT_ROWPASS) {
+        // 8-lane row pass: DCT num_frames rows of the dct_in matrix (Stage 3a).
+        dct_row_pass(dct_in, dct_out, num_frames,
+                     fft_to_aie_0, fft_to_aie_1, fft_to_aie_2, fft_to_aie_3,
+                     fft_to_aie_4, fft_to_aie_5, fft_to_aie_6, fft_to_aie_7,
+                     fft_from_aie_0, fft_from_aie_1, fft_from_aie_2, fft_from_aie_3,
+                     fft_from_aie_4, fft_from_aie_5, fft_from_aie_6, fft_from_aie_7);
     } else { // MODE_HPWL_GRAD
         hpwl_CU(node_pos, net_ptr, pins, npins, exp_lut, bb, sums, node_grad,
                 inv_gamma, inv_lut_step, lut_size, num_nets, num_movable, num_npins);

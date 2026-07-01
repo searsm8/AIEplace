@@ -16,8 +16,14 @@
 
 namespace dsplib_fft = xf::dsp::aie::fft;
 
+// Lane count = the 8-wide FFT pool (Stage 3). Driven by the AIE_DENSITY_INSTANCES
+// make var (passed as -DDENSITY_INSTANCES); defaults to 8 if built standalone.
 #ifndef DENSITY_FFT_INSTANCES
-#define DENSITY_FFT_INSTANCES 1
+  #ifdef DENSITY_INSTANCES
+    #define DENSITY_FFT_INSTANCES DENSITY_INSTANCES
+  #else
+    #define DENSITY_FFT_INSTANCES 8
+  #endif
 #endif
 
 // FFT configuration (one forward FFT, serves DCT/IDCT/IDXST via PL pre/post).

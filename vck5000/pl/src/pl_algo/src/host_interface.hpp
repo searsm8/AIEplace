@@ -158,11 +158,14 @@ constexpr float AIE_INV_GAMMA  = 0.25f; // 1/gamma baked into the AIE kernel (==
 // header pulls HLS types, so host TUs can't include it -- this is the host copy).
 constexpr int DENSITY_GRID  = 1024;
 constexpr int DENSITY_NBINS = DENSITY_GRID * DENSITY_GRID;   // 1,048,576 (4 MB float)
+constexpr int DENSITY_LANES = 8;   // AIE FFT pool width; must equal formats.hpp FFT_LANES
+                                   // (and AIE_DENSITY_INSTANCES at build time)
 
 // ---- top() mode selector ---------------------------------------------------
 // One PL kernel serves multiple modules during bring-up; `mode` selects which.
 // (Stage 5 replaces this with the unified per-iteration datapath.)
-enum top_mode { MODE_HPWL_GRAD = 0, MODE_DENSITY_BIN = 1, MODE_DCT_1D = 2 };
+enum top_mode { MODE_HPWL_GRAD = 0, MODE_DENSITY_BIN = 1, MODE_DCT_1D = 2,
+                MODE_DCT_ROWPASS = 3 };  // Stage 3a: DCT all rows via the 8-lane pool
 
 // ---- 1D DCT via the AIE FFT  (Stage 2 -- first AIE bring-up) ----------------
 // MODE_DCT_1D streams num_frames real rows of FFT_PTS points each through:

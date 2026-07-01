@@ -158,6 +158,18 @@ run-dct: $(XCLBIN) $(HOST_EXE)
 	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
 	$(HOST_EXE) --dct $(XCLBIN)
 
+# --- build + run the Stage 3a 8-lane row-DCT pass (sw_emu) ---
+# Needs the 8-lane FFT pool, so build with AIE_DENSITY_INSTANCES=8. Usage:
+#   make run-dct-rowpass AIE=pl_algo PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1 AIE_DENSITY_INSTANCES=8
+.PHONY: run-dct-rowpass
+run-dct-rowpass: $(XCLBIN) $(HOST_EXE)
+	mkdir -p $(BUILD_DIR)/$(TARGET)/run
+	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
+	cd $(BUILD_DIR)/$(TARGET)/run && \
+	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
+	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
+	$(HOST_EXE) --dct-rowpass $(XCLBIN)
+
 
 # make dse
 # launch python script to perform Design Space Exploration

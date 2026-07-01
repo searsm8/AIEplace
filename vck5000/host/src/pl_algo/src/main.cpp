@@ -26,6 +26,7 @@ int main(int argc, char** argv) {
         printf("       %s --hpwl-grad <benchmark_dir> <xclbin>\n", argv[0]);
         printf("       %s --density   <benchmark_dir> <xclbin>\n", argv[0]);
         printf("       %s --dct       <xclbin>\n", argv[0]);
+        printf("       %s --dct-rowpass <xclbin>\n", argv[0]);
         return 1;
     }
 
@@ -34,6 +35,10 @@ int main(int argc, char** argv) {
     // No benchmark needed (inputs are synthetic).
     if (argc >= 3 && std::strcmp(argv[1], "--dct") == 0)
         return plalgo::runDCT1DVerify(argv[2]);
+
+    // Stage 3a: verify the 8-lane row-DCT pass on a synthetic matrix.
+    if (argc >= 3 && std::strcmp(argv[1], "--dct-rowpass") == 0)
+        return plalgo::runDCTRowPassVerify(argv[2]);
 #endif
 
 #ifdef USE_XILINX_XRT

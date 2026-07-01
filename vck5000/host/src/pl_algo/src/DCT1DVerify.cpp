@@ -105,4 +105,33 @@ int runDCT1DVerify(const char* xclbin_path) {
     return (ok0 && ok1) ? 0 : 1;
 }
 
+int runDCTRowPassVerify(const char* xclbin_path) {
+    const int N = FFT_PTS;          // 1024
+    const int R = 64;               // rows (multiple of DENSITY_LANES); 8 batches of 8
+
+    std::mt19937 rng(11);
+    std::uniform_real_distribution<float> uni(0.0f, 1.0f);
+    std::vector<float> in((size_t)R * N);
+    for (auto& v : in) v = uni(rng);
+    std::vector<float> dev((size_t)R * N);
+
+    printf("[dct_rowpass] verify: rows=%d N=%d lanes=%d\n", R, N, DENSITY_LANES);
+    runDCTRowPass(in.data(), R, dev.data(), xclbin_path);
+
+    double sse = 0, ref = 0, max_abs = 0;
+    for (int r = 0; r < R; r++) {
+        std::vector<double> g = ref_dct(&in[(size_t)r * N], N);
+        for (int k = 0; k < N; k++) {
+            const double d = dev[(size_t)r * N + k] - g[k];
+            sse += d * d; ref += g[k] * g[k];
+            if (std::fabs(d) > max_abs) max_abs = std::fabs(d);
+        }
+    }
+    const double rr = std::sqrt(sse / (ref + 1e-30));
+    const bool   ok = rr < 1e-3;
+    printf("[dct_rowpass] DCT all rows vs DCT_naive: max_abs=%.3e  rel_rms=%.3e  -> %s\n",
+           max_abs, rr, ok ? "PASS" : "FAIL");
+    return ok ? 0 : 1;
+}
+
 } // namespace plalgo

@@ -45,6 +45,12 @@ void runDensityBin(const PackedDesign& pk,
 void runDCT1D(const float* dct_in, int num_frames,
               float* out_fft, float* out_dct, const char* xclbin_path);
 
+// Run the 8-lane row-DCT pass (MODE_DCT_ROWPASS, Stage 3a): DCT every row of mat_in
+// (num_rows x FFT_PTS, row-major real) through the AIE FFT pool, into mat_out
+// (caller-allocated, same size). num_rows must be a multiple of DENSITY_LANES.
+void runDCTRowPass(const float* mat_in, int num_rows,
+                   float* mat_out, const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DRIVER_HPP
