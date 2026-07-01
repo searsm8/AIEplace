@@ -30,7 +30,7 @@ static int check_bitexact(const char* name, const std::vector<float>& dev,
 }
 
 int runTransposeVerify(const char* xclbin_path) {
-    const int N = 256;   // multiple of the tile size (32) -> 8x8 tiles
+    const int N = DENSITY_GRID;   // kernel transposes the fixed GRID x GRID matrix (1024)
 
     std::mt19937 rng(5);
     std::uniform_real_distribution<float> uni(-1.0f, 1.0f);

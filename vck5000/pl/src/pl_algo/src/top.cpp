@@ -139,9 +139,10 @@ void top(
                      fft_from_aie_0, fft_from_aie_1, fft_from_aie_2, fft_from_aie_3,
                      fft_from_aie_4, fft_from_aie_5, fft_from_aie_6, fft_from_aie_7);
     } else if (mode == MODE_TRANSPOSE) {
-        // N x N transpose (pure PL); dct_stage selects variant, num_frames = N.
-        if (dct_stage == 0) transpose_naive(dct_in, dct_out, num_frames);
-        else                transpose_tiled(dct_in, dct_out, num_frames);
+        // GRID x GRID transpose (pure PL); dct_stage selects variant. Dimension is the
+        // compile-time GRID (required for the DDR burst -- see transpose.hpp).
+        if (dct_stage == 0) transpose_naive(dct_in, dct_out);
+        else                transpose_tiled(dct_in, dct_out);
     } else { // MODE_HPWL_GRAD
         hpwl_CU(node_pos, net_ptr, pins, npins, exp_lut, bb, sums, node_grad,
                 inv_gamma, inv_lut_step, lut_size, num_nets, num_movable, num_npins);
