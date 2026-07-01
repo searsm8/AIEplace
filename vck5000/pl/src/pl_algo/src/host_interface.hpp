@@ -165,7 +165,10 @@ constexpr int DENSITY_LANES = 8;   // AIE FFT pool width; must equal formats.hpp
 // One PL kernel serves multiple modules during bring-up; `mode` selects which.
 // (Stage 5 replaces this with the unified per-iteration datapath.)
 enum top_mode { MODE_HPWL_GRAD = 0, MODE_DENSITY_BIN = 1, MODE_DCT_1D = 2,
-                MODE_DCT_ROWPASS = 3 };  // Stage 3a: DCT all rows via the 8-lane pool
+                MODE_DCT_ROWPASS = 3,    // Stage 3a: DCT all rows via the 8-lane pool
+                MODE_TRANSPOSE = 4 };    // Stage 3b: N x N matrix transpose (pure PL).
+                                         // dct_stage selects variant: 0=naive, 1=tiled;
+                                         // num_frames = N (matrix side); dct_in->dct_out.
 
 // ---- 1D DCT via the AIE FFT  (Stage 2 -- first AIE bring-up) ----------------
 // MODE_DCT_1D streams num_frames real rows of FFT_PTS points each through:

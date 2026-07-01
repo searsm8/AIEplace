@@ -51,6 +51,13 @@ void runDCT1D(const float* dct_in, int num_frames,
 void runDCTRowPass(const float* mat_in, int num_rows,
                    float* mat_out, const char* xclbin_path);
 
+// Run the PL matrix transpose (MODE_TRANSPOSE, Stage 3b) for the N x N row-major
+// float matrix `in`, BOTH variants in one device session: out_naive (variant 0) and
+// out_tiled (variant 1), each caller-allocated (N*N floats). Pure PL (no AIE). N must
+// be a multiple of the tile size (32) for the tiled variant.
+void runTranspose(const float* in, int N,
+                  float* out_naive, float* out_tiled, const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DRIVER_HPP

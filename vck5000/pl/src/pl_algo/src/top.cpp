@@ -17,9 +17,10 @@
 
 #include "host_interface.hpp"
 #include "formats.hpp"
-#include "modules/hpwl_CU.hpp"
+#include "modules/hpwl_gradient.hpp"
 #include "modules/density_bin.hpp"
 #include "modules/dct_1d.hpp"
+#include "modules/transpose.hpp"
 
 using namespace plalgo;
 
@@ -137,6 +138,10 @@ void top(
                      fft_to_aie_4, fft_to_aie_5, fft_to_aie_6, fft_to_aie_7,
                      fft_from_aie_0, fft_from_aie_1, fft_from_aie_2, fft_from_aie_3,
                      fft_from_aie_4, fft_from_aie_5, fft_from_aie_6, fft_from_aie_7);
+    } else if (mode == MODE_TRANSPOSE) {
+        // N x N transpose (pure PL); dct_stage selects variant, num_frames = N.
+        if (dct_stage == 0) transpose_naive(dct_in, dct_out, num_frames);
+        else                transpose_tiled(dct_in, dct_out, num_frames);
     } else { // MODE_HPWL_GRAD
         hpwl_CU(node_pos, net_ptr, pins, npins, exp_lut, bb, sums, node_grad,
                 inv_gamma, inv_lut_step, lut_size, num_nets, num_movable, num_npins);

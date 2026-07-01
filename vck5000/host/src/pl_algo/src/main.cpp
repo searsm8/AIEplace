@@ -17,6 +17,7 @@
 #include "HpwlGradVerify.hpp"
 #include "DensityVerify.hpp"
 #include "DCT1DVerify.hpp"
+#include "TransposeVerify.hpp"
 #include <cstring>
 #endif
 
@@ -27,6 +28,7 @@ int main(int argc, char** argv) {
         printf("       %s --density   <benchmark_dir> <xclbin>\n", argv[0]);
         printf("       %s --dct       <xclbin>\n", argv[0]);
         printf("       %s --dct-rowpass <xclbin>\n", argv[0]);
+        printf("       %s --transpose   <xclbin>\n", argv[0]);
         return 1;
     }
 
@@ -39,6 +41,10 @@ int main(int argc, char** argv) {
     // Stage 3a: verify the 8-lane row-DCT pass on a synthetic matrix.
     if (argc >= 3 && std::strcmp(argv[1], "--dct-rowpass") == 0)
         return plalgo::runDCTRowPassVerify(argv[2]);
+
+    // Stage 3b: verify the matrix transpose (naive + tiled) on a synthetic matrix.
+    if (argc >= 3 && std::strcmp(argv[1], "--transpose") == 0)
+        return plalgo::runTransposeVerify(argv[2]);
 #endif
 
 #ifdef USE_XILINX_XRT
