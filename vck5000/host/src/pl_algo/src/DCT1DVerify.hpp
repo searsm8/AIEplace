@@ -16,6 +16,11 @@ int runDCT1DVerify(const char* xclbin_path);
 // on PASS.
 int runDCTRowPassVerify(const char* xclbin_path);
 
+// Stage 3c: verify the fused DCT+transpose pass (MODE_DCT_TRANSPOSE) -- DCT every row of
+// a synthetic N x N matrix through the AIE FFT pool, written transposed; compare vs
+// transpose(DCT_naive). Returns 0 on PASS.
+int runDctTransposeVerify(const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DCT1D_VERIFY_HPP

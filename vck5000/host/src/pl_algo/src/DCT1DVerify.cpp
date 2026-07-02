@@ -134,4 +134,43 @@ int runDCTRowPassVerify(const char* xclbin_path) {
     return ok ? 0 : 1;
 }
 
+int runDctTransposeVerify(const char* xclbin_path) {
+    const int N = FFT_PTS;          // 1024 (square GRID x GRID -- transpose needs square)
+
+    std::mt19937 rng(13);
+    std::uniform_real_distribution<float> uni(0.0f, 1.0f);
+    std::vector<float> in((size_t)N * N);
+    for (auto& v : in) v = uni(rng);
+    std::vector<float> dev((size_t)N * N);
+
+    printf("[dct_transpose] verify: N=%d lanes=%d (fused DCT + transpose)\n", N, DENSITY_LANES);
+    runDctTranspose(in.data(), N, dev.data(), xclbin_path);
+
+    // Reference = transpose(rowDCT(in)): G[r][k] = DCT_naive(in row r)[k]; expect
+    // dev[k][r] == G[r][k]. Precompute the DCT basis once (cos in the inner loop over the
+    // full N x N x N would be minutes; the basis makes the compare an O(N^3) mult-add).
+    std::vector<double> basis((size_t)N * N);   // basis[k*N + n] = cos(pi/N*(n+0.5)*k)
+    for (int k = 0; k < N; k++)
+        for (int n = 0; n < N; n++)
+            basis[(size_t)k * N + n] = std::cos(PI / N * (n + 0.5) * k);
+
+    double sse = 0, ref = 0, max_abs = 0;
+    for (int r = 0; r < N; r++) {
+        const float* row = &in[(size_t)r * N];
+        for (int k = 0; k < N; k++) {
+            double g = 0;
+            const double* b = &basis[(size_t)k * N];
+            for (int n = 0; n < N; n++) g += (double)row[n] * b[n];   // DCT_naive(row)[k]
+            const double d = dev[(size_t)k * N + r] - g;              // dev is transposed: [k][r]
+            sse += d * d; ref += g * g;
+            if (std::fabs(d) > max_abs) max_abs = std::fabs(d);
+        }
+    }
+    const double rr = std::sqrt(sse / (ref + 1e-30));
+    const bool   ok = rr < 1e-3;
+    printf("[dct_transpose] fused DCT+transpose vs transpose(DCT_naive): max_abs=%.3e  "
+           "rel_rms=%.3e  -> %s\n", max_abs, rr, ok ? "PASS" : "FAIL");
+    return ok ? 0 : 1;
+}
+
 } // namespace plalgo

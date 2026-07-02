@@ -299,4 +299,45 @@ void runTranspose(const float* in, int N,
     run_variant(1, out_tiled);
 }
 
+void runDctTranspose(const float* mat_in, int N,
+                     float* mat_out, const char* xclbin_path) {
+    const size_t mat_bytes = (size_t)N * N * sizeof(float);
+
+    xrt::device device(0);
+    xrt::uuid   uuid = device.load_xclbin(xclbin_path);
+    xrt::kernel top(device, uuid, "top");
+    xrt::graph  fft(device, uuid, "density_fft_graph");
+
+    // Real matrix buffers (groups 10,11); HPWL (0-7) + density (8,9) inert dummies.
+    xrt::bo d_node = xrt::bo(device, sizeof(coord_t), top.group_id(0));
+    xrt::bo d_nptr = xrt::bo(device, sizeof(int32_t), top.group_id(1));
+    xrt::bo d_pins = xrt::bo(device, sizeof(NodePin), top.group_id(2));
+    xrt::bo d_npin = xrt::bo(device, sizeof(NodePin), top.group_id(3));
+    xrt::bo d_lut  = xrt::bo(device, sizeof(float),   top.group_id(4));
+    xrt::bo d_bb   = xrt::bo(device, sizeof(NetBBox), top.group_id(5));
+    xrt::bo d_sums = xrt::bo(device, sizeof(NetSums), top.group_id(6));
+    xrt::bo d_grad = xrt::bo(device, sizeof(coord_t), top.group_id(7));
+    xrt::bo d_box  = xrt::bo(device, sizeof(NodeBox), top.group_id(8));
+    xrt::bo d_bd   = xrt::bo(device, sizeof(float),   top.group_id(9));
+    xrt::bo bo_in  = xrt::bo(device, mat_bytes, top.group_id(10));
+    xrt::bo bo_out = xrt::bo(device, mat_bytes, top.group_id(11));
+
+    std::memcpy(bo_in.map<void*>(), mat_in, mat_bytes);
+    bo_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    // Each graph iteration = DENSITY_LANES instances x 1 frame = DENSITY_LANES rows.
+    fft.run(N / DENSITY_LANES);
+    xrt::run run = top(d_node, d_nptr, d_pins, d_npin, d_lut, d_bb, d_sums, d_grad,
+                       d_box, d_bd, bo_in, bo_out,
+                       0.0f, 0.0f, 0, 0, 0, 0,                 // HPWL scalars (unused here)
+                       0, 1.0f, 1.0f, 1.0f,                    // density scalars (unused here)
+                       0, N,                                   // dct_stage unused; num_frames = N
+                       (int)MODE_DCT_TRANSPOSE);
+    run.wait();
+    fft.wait();
+
+    bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::memcpy(mat_out, bo_out.map<void*>(), mat_bytes);
+}
+
 } // namespace plalgo

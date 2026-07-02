@@ -58,6 +58,12 @@ void runDCTRowPass(const float* mat_in, int num_rows,
 void runTranspose(const float* in, int N,
                   float* out_naive, float* out_tiled, const char* xclbin_path);
 
+// Run the fused DCT+transpose pass (MODE_DCT_TRANSPOSE, Stage 3c): DCT every row of the
+// N x N row-major real matrix mat_in through the AIE FFT pool, writing the result
+// TRANSPOSED into mat_out (caller-allocated, N*N floats). N = GRID (square). AIE-using.
+void runDctTranspose(const float* mat_in, int N,
+                     float* mat_out, const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DRIVER_HPP

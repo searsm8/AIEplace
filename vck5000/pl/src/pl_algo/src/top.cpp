@@ -21,6 +21,7 @@
 #include "modules/density_bin.hpp"
 #include "modules/dct_1d.hpp"
 #include "modules/transpose.hpp"
+#include "modules/dct_transpose.hpp"
 
 using namespace plalgo;
 
@@ -70,6 +71,10 @@ void top(
     hls::stream<axis_t>& fft_from_aie_4, hls::stream<axis_t>& fft_from_aie_5,
     hls::stream<axis_t>& fft_from_aie_6, hls::stream<axis_t>& fft_from_aie_7)
 {
+ 
+/* 
+ * DDR AXI4 master interfaces (m_axi) buffers (data to be sent into PL)
+ */
 #pragma HLS INTERFACE m_axi port=node_pos    offset=slave bundle=gmem0
 #pragma HLS INTERFACE m_axi port=net_ptr     offset=slave bundle=gmem1
 #pragma HLS INTERFACE m_axi port=pins        offset=slave bundle=gmem2
@@ -85,6 +90,11 @@ void top(
 // bursts in flight, hiding the ~70-cyc DDR latency instead of paying it per tile-row.
 #pragma HLS INTERFACE m_axi port=dct_in      offset=slave bundle=gmem10 num_read_outstanding=32 max_read_burst_length=64
 #pragma HLS INTERFACE m_axi port=dct_out     offset=slave bundle=gmem11 num_write_outstanding=32 max_write_burst_length=64
+
+
+/* 
+ * AXI4-Lite control interface (s_axilite) for kernel args and scalars
+ */
 #pragma HLS INTERFACE s_axilite port=node_pos       bundle=control
 #pragma HLS INTERFACE s_axilite port=net_ptr        bundle=control
 #pragma HLS INTERFACE s_axilite port=pins           bundle=control
@@ -110,6 +120,10 @@ void top(
 #pragma HLS INTERFACE s_axilite port=dct_stage      bundle=control
 #pragma HLS INTERFACE s_axilite port=num_frames     bundle=control
 #pragma HLS INTERFACE s_axilite port=mode           bundle=control
+
+/*
+ * AXIS interfaces PL to AIE (for the 8-lane AIE FFT pool)
+ */
 #pragma HLS INTERFACE axis port=fft_to_aie_0
 #pragma HLS INTERFACE axis port=fft_to_aie_1
 #pragma HLS INTERFACE axis port=fft_to_aie_2
@@ -145,7 +159,15 @@ void top(
         // GRID x GRID transpose (pure PL); dct_stage selects variant. Dimension is the
         // compile-time GRID (required for the DDR burst -- see transpose.hpp).
         if (dct_stage == 0) transpose_naive(dct_in, dct_out);
-        else                transpose_tiled(dct_in, dct_out);
+        else                transpose_band(dct_in, dct_out);
+    } else if (mode == MODE_DCT_TRANSPOSE) {
+        // Stage 3c: fused DCT row-pass + transpose. DCT all GRID rows via the 8-lane pool,
+        // written transposed. dct_in -> dct_out (transposed). num_frames unused (N=GRID).
+        dct_transpose_pass(dct_in, dct_out,
+                           fft_to_aie_0, fft_to_aie_1, fft_to_aie_2, fft_to_aie_3,
+                           fft_to_aie_4, fft_to_aie_5, fft_to_aie_6, fft_to_aie_7,
+                           fft_from_aie_0, fft_from_aie_1, fft_from_aie_2, fft_from_aie_3,
+                           fft_from_aie_4, fft_from_aie_5, fft_from_aie_6, fft_from_aie_7);
     } else { // MODE_HPWL_GRAD
         hpwl_CU(node_pos, net_ptr, pins, npins, exp_lut, bb, sums, node_grad,
                 inv_gamma, inv_lut_step, lut_size, num_nets, num_movable, num_npins);

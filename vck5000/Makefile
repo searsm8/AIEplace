@@ -183,6 +183,18 @@ run-transpose: $(XCLBIN) $(HOST_EXE)
 	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
 	$(HOST_EXE) --transpose $(XCLBIN)
 
+# --- build + run the Stage 3c FUSED DCT+transpose pass, sw_emu ---
+# AIE-using (FFT pool + PL<->AIE streams). Usage:
+#   make run-dct-transpose AIE=pl_algo PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1 AIE_DENSITY_INSTANCES=8
+.PHONY: run-dct-transpose
+run-dct-transpose: $(XCLBIN) $(HOST_EXE)
+	mkdir -p $(BUILD_DIR)/$(TARGET)/run
+	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
+	cd $(BUILD_DIR)/$(TARGET)/run && \
+	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
+	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
+	$(HOST_EXE) --dct-transpose $(XCLBIN)
+
 
 # make dse
 # launch python script to perform Design Space Exploration
