@@ -44,7 +44,7 @@ int runTransposeVerify(const char* xclbin_path) {
 
     int rc = 0;
     rc |= check_bitexact("naive", d_naive, in, N);
-    rc |= check_bitexact("tiled", d_tiled, in, N);
+    rc |= check_bitexact("band", d_tiled, in, N);
     return rc;
 }
 

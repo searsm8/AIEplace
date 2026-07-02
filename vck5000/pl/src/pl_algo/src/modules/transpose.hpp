@@ -9,52 +9,52 @@
 //     floats/beat). Baseline that shows why the transpose would bottleneck the field
 //     solve if left unoptimized.
 //
-//   transpose_tiled: cut the matrix into TILE x TILE tiles; read a tile into an
-//     on-chip buffer (contiguous bursts), transpose it in SRAM, write it to the
-//     TRANSPOSED tile position (contiguous bursts). Both DDR read and write are
-//     contiguous TILE-float runs -> full-beat 512-bit bursts. The row<->column scatter
-//     is confined to the on-chip buffer, where random access is free.
+//   transpose_band: read a BAND of TILE full rows as ONE contiguous DDR burst, transpose
+//     it in an on-chip corner-turn buffer, write the transposed column-stripe out. The
+//     read-latency fix (Option (b), see BAND). Supersedes the earlier 32x32
+//     transpose_tiled (git 400d5c8), whose reads were AR-port-bound at II=32.
 //
-// BURST -- two conditions, both required for the tiled variant to burst (each recovers
-// ~16x over the strided baseline; verified in the C-synth 214-115 report):
-//   1. N is a COMPILE-TIME constant (GRID). N multiplies into the DDR address
-//      ((tr*TILE+i)*N + ...); with a runtime N, HLS cannot prove N % 16 == 0, refuses
-//      to widen the m_axi port to 512 bits, and drops the burst entirely (each element
-//      becomes a separate ~75-cycle AXI read). cf. dct_one_lane (const N = FFT_PTS).
-//   2. The per-tile-row read/write is a clean stride-1 length-TILE run so HLS widens it
-//      to 512 bits and bursts 2 beats/tile row. (Flattening the tile-row loop into the
-//      element loop yields a NON-uniform stride -- jumps by N-TILE at each tile-row
-//      boundary -- that won't burst; here we keep the element loop as the burst unit.)
+// BURST (required for either DDR access to widen to a 512-bit burst): N must be a
+// COMPILE-TIME constant (GRID). N multiplies into the DDR address; with a runtime N, HLS
+// cannot prove N % 16 == 0, refuses to widen the m_axi port to 512 bits, and drops the
+// burst (each element a separate ~75-cycle AXI read). cf. dct_one_lane (const N=FFT_PTS).
 //
-// OVERLAP (Option (a)) -- beat utilization alone left the whole-transpose ~54x off the
-// bandwidth floor: with the tile-row loop (rd_i/wr_i) UNpipelined, each tile-row's burst
-// is issued, then the datapath STALLS ~70 cyc for the DDR read latency, then the next
-// row's burst issues -- latency paid 32x per tile (32,768x overall), never overlapped.
-// Fix: PIPELINE the tile-row loop (rd_i/wr_i) so the address issue of row i+1 overlaps
-// the data return of row i; the element loop (rd_j/wr_j) unrolls into the pipelined body
-// and HLS re-infers the 512-bit burst from the 32 contiguous accesses. Sized by
-// num_read_outstanding / num_write_outstanding on gmem10/gmem11 (top.cpp), which bound
-// how many row bursts the m_axi adapter keeps in flight. The read phase writes a ROW of
-// the on-chip buffer and the write phase reads a COLUMN (buf[j][i]) -- opposite access
-// patterns -- so buf is array_partition complete on BOTH dims (registers): one partition
-// per element lets both the row write and the column read complete in one cycle. With a
-// single-dim partition, whichever phase accesses the un-partitioned direction serializes
-// into one BRAM port (dim=1 alone gives rd_i II=32).
+// BAND (Option (b) -- read-latency fix, supersedes the tiled variant's II=32 read).
+// A 32x32 TILE is NOT contiguous in DDR: its 32 tile-rows are N floats apart, so reading
+// one tile is 32 separate short bursts = 32 read-address (AR) requests. Reads are
+// NON-POSTED (the load result is consumed into the buffer), and HLS could not overlap the
+// 32 fragmented AR requests on the bundle's single AR channel -> the tiled read stalled at
+// II=32 (~70-cyc DDR latency paid per tile-row, 32768x total). A BAND of TILE FULL rows,
+// by contrast, IS contiguous (rows tr*TILE .. tr*TILE+TILE-1 = one unbroken TILE*N run):
+// it reads as ONE burst -> latency paid once per band (32x total, 1024x fewer AR requests
+// than the tiled variant). The corner-turn buffer stores 512-bit WORDS (16 floats packed,
+// band[TILE][N/16]) banked complete on dim 1 (TILE row-banks). The read writes ONE word
+// per cycle (one contiguous beat, one AR request -> II=1 at beat rate); reading floats
+// individually instead makes HLS emit 16 scalar AR requests that serialize on the single
+// AR channel (II=16), and a per-float 2D-banked buffer explodes into distributed RAM. The
+// write reads a full TILE-element COLUMN as TILE parallel word-reads (float lane oc%16 of
+// word oc/16 from each row-bank). The write is the transposed stripe (out column
+// tr*TILE..), still strided per output row, but writes are POSTED so they overlap freely
+// (II~2) -- the strided write is the residual bottleneck, not the read. COST: the TILE
+// wide-word row-banks are the (b) resource price -- measure BRAM/URAM vs the FFT budget.
 //
-// Correctness: a transpose is pure data movement, so both variants must be BIT-EXACT
-// vs a host transpose (and each other). Bandwidth (burst inference, overlap, efficiency)
-// is compared in the C-synth report / hw_emu profiling, not here.
+// Correctness: a transpose is pure data movement, so both variants must be BIT-EXACT vs a
+// host transpose (and each other). Bandwidth (burst inference, II, efficiency) is compared
+// in the C-synth report / hw_emu profiling, not here.
 
+#include <cstring>
+#include <cstdint>
 #include "../formats.hpp"
 #include "../host_interface.hpp"
 
 namespace plalgo {
 
-constexpr int TILE = 32;   // transpose tile: 32x32 floats = 4 KB on-chip
+constexpr int TILE = 32;   // band height: TILE full rows read as one contiguous burst
+typedef ap_uint<512> beat512_t;   // DDR read beat: 16 floats packed (matches widened m_axi)
 
 // Baseline: sequential reads, strided writes (out[c*N+r]).
 static void transpose_naive(const float* in, float* out) {
-    const int N = GRID;   // compile-time dimension (see BURST ROOT CAUSE above)
+    const int N = GRID;   // compile-time dimension (see BURST above)
 naive_r:
     for (int r = 0; r < N; r++)
     naive_c:
@@ -64,46 +64,40 @@ naive_r:
         }
 }
 
-// Tiled + overlapped: read tile (tr,tc) -> on-chip transpose -> write tile (tc,tr).
-// Both DDR accesses are contiguous TILE-float bursts; the row<->column scatter is
-// confined to the on-chip buffer, where random access is free. The tile-row loops
-// (rd_i/wr_i) are PIPELINED so successive row bursts overlap (see OVERLAP note above);
-// the element loops (rd_j/wr_j) unroll into the pipelined body and HLS re-infers the
-// 512-bit burst from the 32 contiguous accesses.
-static void transpose_tiled(const float* in, float* out) {
-    const int N  = GRID;                      // compile-time dimension -- REQUIRED for
-                                              // the burst (see BURST ROOT CAUSE above)
-    const int NT = N / TILE;                  // tiles per side (N % TILE == 0)
-    // buf partitioned complete on dim 1 (one BRAM per row): the write phase reads a full
-    // COLUMN (buf[j][i]) -- one element from each row-BRAM -> 32 parallel reads, so wr_i
-    // pipelines at II=2. (rd_i is capped at II=32 by the single gmem10 read-request port,
-    // not by buf; full-partitioning buf to registers removes its port conflict but leaves
-    // rd_i at II=32 for only ~2.5% less latency at 1024 FF -- not worth it. See OVERLAP.)
-    float buf_BRAM[TILE][TILE];
-#pragma HLS bind_storage variable=buf_BRAM type=RAM_2P impl=BRAM
-#pragma HLS array_partition variable=buf_BRAM complete dim=1
+// Band (Option (b)): read TILE full rows as one contiguous burst -> on-chip transpose ->
+// write the transposed column-stripe. The contiguous band read collapses the tiled
+// variant's 32 discontiguous per-tile-row AR requests into ONE burst per band, fixing the
+// AR-port-bound II=32 read stall. See BAND above.
+static void transpose_band(const float* in, float* out) {
+    const int N   = GRID;                     // compile-time dimension -- REQUIRED (BURST)
+    const int WORDS_PER_ROW  = N / 16;       // 512-bit words per row (16 floats/word)
+    const int NUM_BANDS  = N / TILE;          // number of bands (N % TILE == 0)
+    const beat512_t* in512 = reinterpret_cast<const beat512_t*>(in);   // read as 512-bit beats
 
-tile_r:
-    for (int tr = 0; tr < NT; tr++) {
-    tile_c:
-        for (int tc = 0; tc < NT; tc++) {
-            // read input tile (tr,tc) -> buf; one 512-bit burst per row, tile-row loop
-            // pipelined so successive row bursts overlap (outstanding reads).
-        rd_i:
-            for (int i = 0; i < TILE; i++) {
-#pragma HLS PIPELINE
-            rd_j:
-                for (int j = 0; j < TILE; j++)
-                    buf_BRAM[i][j] = in[(tr * TILE + i) * N + (tc * TILE + j)];
-            }
-            // write transposed tile to (tc,tr): out[..] = buf[j][i] (column read); one
-            // 512-bit burst per row, tile-row loop pipelined so writes overlap.
-        wr_i:
-            for (int i = 0; i < TILE; i++) {
-#pragma HLS PIPELINE
-            wr_j:
-                for (int j = 0; j < TILE; j++)
-                    out[(tc * TILE + i) * N + (tr * TILE + j)] = buf_BRAM[j][i];
+    beat512_t band[TILE][WORDS_PER_ROW];                 // corner-turn buffer: TILE x N floats = 128 KB
+#pragma HLS array_partition variable=band complete dim=1   // TILE row-banks: parallel column read (write phase)
+
+band_r:
+    for (int tr = 0; tr < NUM_BANDS; tr++) {
+        // READ band as contiguous 512-bit beats: one beat (16 floats) per cycle -> II=1.
+    rd:
+        for (int w = 0; w < TILE * WORDS_PER_ROW; w++) {
+#pragma HLS PIPELINE II=1
+            band[w / WORDS_PER_ROW][w % WORDS_PER_ROW] = in512[tr * TILE * WORDS_PER_ROW + w];
+        }
+        // WRITE transposed stripe: out row oc, cols tr*TILE.. = band column oc. Column oc
+        // = float lane oc%16 of word oc/16 in each row-bank (TILE parallel word reads).
+    wr_o:
+        for (int oc = 0; oc < N; oc++) {
+#pragma HLS PIPELINE II=1
+            int wcol = oc / 16;
+            int lane = oc % 16;
+        wr_j:
+            for (int j = 0; j < TILE; j++) {
+                uint32_t ubits = band[j][wcol].range(32 * lane + 31, 32 * lane);
+                float f;
+                std::memcpy(&f, &ubits, sizeof(float));
+                out[oc * N + tr * TILE + j] = f;
             }
         }
     }
