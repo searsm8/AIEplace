@@ -26,6 +26,11 @@
 // row buffers (16 floats/cycle). load_i was widened to 512-bit beats earlier (was 46% of
 // the pass as a scalar float/cycle load).
 //
+// TWIDDLE ROM: the DCT-post factor e^{-i*pi*k/2N} is a function of k only, so cos/sin are
+// built once into a 1024-entry ROM (twid_cos/twid_sin) and looked up -- replacing the live
+// cosf/sinf that, after lane parallelism, was instantiated 8x in the recv datapath. Same
+// idea as the HPWL exp LUT. Reusable by dct_1d/dct_row_pass (single-lane, not yet ported).
+//
 // DEFERRED: (1) Approach C -- task-level pipeline load/send/FFT/recv/write-back across
 // batches+bands (double-buffer the row buffers and the band) so the stages overlap; (2)
 // transform_mode (IDCT/IDXST) for the Stage 4 inverse passes, which fuse identically.
@@ -54,24 +59,20 @@ static inline void dct_send_lane(const float row[FFT_PTS], int b, int N,
 }
 
 // One RECV beat for one lane: read the FFT beat (128b AXIS = 2 complex points = 4 floats),
-// twiddle+Re -> two DCT values, pack into the lane's word accumulator, and store a full
-// 512-bit word to band[rib_lane] every 8 beats (16 values). DCT_k arrives in k-order, so
-// no wide-word read-modify-write is needed.
-static inline void dct_recv_lane(hls::stream<axis_t>& from, int b, int N, float PI_F,
-                                 beat512_t& wacc, beat512_t band[TILE][WORDS_PER_ROW],
-                                 int rib_lane) {
+// apply twiddle+Re -> two DCT values, and write them straight into the (float) band at k0,
+// k1. The twiddle (c,s) for k0/k1 is looked up ONCE per beat by the caller (same k for all
+// 8 lanes) and passed in, so this datapath is pure mul-add -- no live trig. Writes are
+// addressed RAM writes (band[bank][k]); no 512-bit-word bit-field packing, whose runtime
+// bit-offset barrel-shift logic was the LUT hog.
+static inline void dct_recv_lane(hls::stream<axis_t>& from, int b,
+                                 float c0, float s0, float c1, float s1,
+                                 float band[TILE][GRID], int rib_lane) {
     ap_int<128> d = from.read().data;
     const float re0 = dct_b2f(d.range(31, 0)),  im0 = dct_b2f(d.range(63, 32));
     const float re1 = dct_b2f(d.range(95, 64)), im1 = dct_b2f(d.range(127, 96));
-    const int k0 = 2 * b, k1 = 2 * b + 1;
-    // DCT_k = Re{ FFT_k * e^{-i*pi*k/2N} } = re*cos(a) + im*sin(a), a = pi*k/2N
-    const float a0 = PI_F * k0 / (2.0f * N), a1 = PI_F * k1 / (2.0f * N);
-    const float d0 = re0 * cosf(a0) + im0 * sinf(a0);   // DCT_k0
-    const float d1 = re1 * cosf(a1) + im1 * sinf(a1);   // DCT_k1
-    const int lane0 = k0 & 15;                          // slot in the 512-bit word (k0 even)
-    wacc.range(32 * lane0 + 31, 32 * lane0)      = dct_f2b(d0);
-    wacc.range(32 * lane0 + 63, 32 * lane0 + 32) = dct_f2b(d1);
-    if ((b & 7) == 7) band[rib_lane][b >> 3] = wacc;
+    // DCT_k = Re{ FFT_k * e^{-i*pi*k/2N} } = re*cos + im*sin; twiddle from the shared ROM.
+    band[rib_lane][2 * b]     = re0 * c0 + im0 * s0;   // DCT_k0
+    band[rib_lane][2 * b + 1] = re1 * c1 + im1 * s1;   // DCT_k1
 }
 
 // Fused pass: DCT every row band-by-band (8 lanes interleaved), each band written
@@ -91,8 +92,24 @@ static void dct_transpose_pass(const float* mat_in, float* mat_out,
     const float PI_F      = 3.14159265358979f;
     const beat512_t* in512 = reinterpret_cast<const beat512_t*>(mat_in);
 
-    beat512_t band[TILE][WORDS_PER_ROW];           // corner-turn buffer: TILE x N floats = 128 KB
-#pragma HLS array_partition variable=band complete dim=1   // TILE row-banks: parallel column read
+    float band[TILE][GRID];                        // corner-turn buffer: TILE x N floats = 128 KB
+#pragma HLS array_partition variable=band complete dim=1        // TILE row-banks: parallel column read (write-back)
+#pragma HLS array_partition variable=band cyclic factor=2 dim=2 // even/odd k: recv's 2 writes/beat land in parallel
+
+    // Twiddle ROM: cos/sin of a = pi*k/2N for k=0..N-1 (the DCT-post factor). Built ONCE
+    // (one cosf/sinf instance) then looked up -- replaces the live per-lane trig, which was
+    // instantiated 8x in the recv datapath (the LUT hog after lane parallelism). cyclic-2
+    // so the k0(even)/k1(odd) reads per beat hit different banks -> II=1 recv.
+    float twid_cos[FFT_PTS], twid_sin[FFT_PTS];
+#pragma HLS array_partition variable=twid_cos cyclic factor=2
+#pragma HLS array_partition variable=twid_sin cyclic factor=2
+twid_init:
+    for (int k = 0; k < N; k++) {
+#pragma HLS PIPELINE II=1
+        const float a = PI_F * k / (2.0f * N);
+        twid_cos[k] = cosf(a);
+        twid_sin[k] = sinf(a);
+    }
 
 band_loop:
     for (int tr = 0; tr < NUM_BANDS; tr++) {
@@ -133,19 +150,23 @@ band_loop:
                 dct_send_lane(row_BRAM[7], b, N, to7);
             }
 
-            // RECV: all 8 lanes, one beat each per cycle, pack into band[rib+0..7].
-            beat512_t w0, w1, w2, w3, w4, w5, w6, w7;
+            // RECV: all 8 lanes, one beat each per cycle, pack into band[rib+0..7]. All 8
+            // lanes use the same k this beat, so read the twiddle ROM once and pass it to
+            // each lane (which is then pure mul-add -- no live trig).
         recv:
             for (int b = 0; b < BEATS; b++) {
 #pragma HLS PIPELINE II=1
-                dct_recv_lane(from0, b, N, PI_F, w0, band, rib + 0);
-                dct_recv_lane(from1, b, N, PI_F, w1, band, rib + 1);
-                dct_recv_lane(from2, b, N, PI_F, w2, band, rib + 2);
-                dct_recv_lane(from3, b, N, PI_F, w3, band, rib + 3);
-                dct_recv_lane(from4, b, N, PI_F, w4, band, rib + 4);
-                dct_recv_lane(from5, b, N, PI_F, w5, band, rib + 5);
-                dct_recv_lane(from6, b, N, PI_F, w6, band, rib + 6);
-                dct_recv_lane(from7, b, N, PI_F, w7, band, rib + 7);
+                const int   k0 = 2 * b, k1 = 2 * b + 1;
+                const float c0 = twid_cos[k0], s0 = twid_sin[k0];
+                const float c1 = twid_cos[k1], s1 = twid_sin[k1];
+                dct_recv_lane(from0, b, c0, s0, c1, s1, band, rib + 0);
+                dct_recv_lane(from1, b, c0, s0, c1, s1, band, rib + 1);
+                dct_recv_lane(from2, b, c0, s0, c1, s1, band, rib + 2);
+                dct_recv_lane(from3, b, c0, s0, c1, s1, band, rib + 3);
+                dct_recv_lane(from4, b, c0, s0, c1, s1, band, rib + 4);
+                dct_recv_lane(from5, b, c0, s0, c1, s1, band, rib + 5);
+                dct_recv_lane(from6, b, c0, s0, c1, s1, band, rib + 6);
+                dct_recv_lane(from7, b, c0, s0, c1, s1, band, rib + 7);
             }
         }
         // WRITE-BACK: transposed stripe (out row oc, cols tr*TILE.. = band column oc) --
@@ -154,14 +175,9 @@ band_loop:
     wr_o:
         for (int oc = 0; oc < N; oc++) {
 #pragma HLS PIPELINE II=1
-            const int wcol = oc / 16, lane = oc % 16;
         wr_j:
-            for (int j = 0; j < TILE; j++) {
-                uint32_t ubits = band[j][wcol].range(32 * lane + 31, 32 * lane);
-                float f;
-                std::memcpy(&f, &ubits, sizeof(float));
-                mat_out[oc * N + tr * TILE + j] = f;
-            }
+            for (int j = 0; j < TILE; j++)
+                mat_out[oc * N + tr * TILE + j] = band[j][oc];   // addressed read, no bit-field extract
         }
     }
 }
