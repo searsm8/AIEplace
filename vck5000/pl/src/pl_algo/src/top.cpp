@@ -80,8 +80,11 @@ void top(
 #pragma HLS INTERFACE m_axi port=node_grad   offset=slave bundle=gmem7
 #pragma HLS INTERFACE m_axi port=node_box    offset=slave bundle=gmem8
 #pragma HLS INTERFACE m_axi port=bin_density offset=slave bundle=gmem9
-#pragma HLS INTERFACE m_axi port=dct_in      offset=slave bundle=gmem10
-#pragma HLS INTERFACE m_axi port=dct_out     offset=slave bundle=gmem11
+// gmem10/gmem11: transpose overlaps per-tile-row bursts (transpose.hpp Option (a)) --
+// size the outstanding-request buffers so the m_axi adapter keeps a tile's worth of row
+// bursts in flight, hiding the ~70-cyc DDR latency instead of paying it per tile-row.
+#pragma HLS INTERFACE m_axi port=dct_in      offset=slave bundle=gmem10 num_read_outstanding=32 max_read_burst_length=64
+#pragma HLS INTERFACE m_axi port=dct_out     offset=slave bundle=gmem11 num_write_outstanding=32 max_write_burst_length=64
 #pragma HLS INTERFACE s_axilite port=node_pos       bundle=control
 #pragma HLS INTERFACE s_axilite port=net_ptr        bundle=control
 #pragma HLS INTERFACE s_axilite port=pins           bundle=control
