@@ -75,9 +75,76 @@ static inline void dct_recv_lane(hls::stream<axis_t>& from, int b,
     band[rib_lane][2 * b + 1] = re1 * c1 + im1 * s1;   // DCT_k1
 }
 
-// FILL task (Approach C producer): DCT the band's TILE rows (FFT_LANES at a time,
-// interleaved) into `band`. Reads mat_in + the (read-only) twiddle ROM and drives the 8
-// AIE lanes. In the DATAFLOW region this is stage 1; `band` is its output channel.
+// LOAD task (fill's stage 1): 8 contiguous rows -> row_BRAM as one 512-bit-beat burst
+// (16 floats/cycle). row_BRAM is the ping-pong channel to send/recv, so load(batch b+1)
+// overlaps send/recv(batch b).
+static void dct_load_rows(const float* mat_in, int tr, int batch,
+                          float row_BRAM[FFT_LANES][FFT_PTS]) {
+    const int r0row = tr * TILE + batch * FFT_LANES;   // first of 8 contiguous rows
+    const beat512_t* in512 = reinterpret_cast<const beat512_t*>(mat_in);
+load:
+    for (int w = 0; w < FFT_LANES * WORDS_PER_ROW; w++) {
+#pragma HLS PIPELINE II=1
+        beat512_t bt = in512[(size_t)r0row * WORDS_PER_ROW + w];
+        const int lane = w / WORDS_PER_ROW;   // 0..7
+        const int cw   = w % WORDS_PER_ROW;
+    unpack_u:
+        for (int u = 0; u < 16; u++) {
+#pragma HLS UNROLL
+            row_BRAM[lane][cw * 16 + u] = dct_b2f(bt.range(32 * u + 31, 32 * u));
+        }
+    }
+}
+
+// SEND+RECV task (fill's stage 2): shuffle+stream the 8 rows to the AIE FFT (send), then
+// read them back, twiddle+Re, pack into band[rib+*] (recv). send precedes recv within a
+// batch (the window FFT needs the whole frame); overlapping send with recv is step 2b.
+static void dct_sendrecv_rows(const float row_BRAM[FFT_LANES][FFT_PTS],
+                              const float twid_cos[FFT_PTS], const float twid_sin[FFT_PTS],
+                              float band[TILE][GRID], int batch,
+                              hls::stream<axis_t>& to0, hls::stream<axis_t>& to1,
+                              hls::stream<axis_t>& to2, hls::stream<axis_t>& to3,
+                              hls::stream<axis_t>& to4, hls::stream<axis_t>& to5,
+                              hls::stream<axis_t>& to6, hls::stream<axis_t>& to7,
+                              hls::stream<axis_t>& from0, hls::stream<axis_t>& from1,
+                              hls::stream<axis_t>& from2, hls::stream<axis_t>& from3,
+                              hls::stream<axis_t>& from4, hls::stream<axis_t>& from5,
+                              hls::stream<axis_t>& from6, hls::stream<axis_t>& from7) {
+    const int N     = GRID;
+    const int BEATS = N / CFLOAT_PER_BEAT;   // 512 beats/row
+    const int rib   = batch * FFT_LANES;
+send:
+    for (int b = 0; b < BEATS; b++) {
+#pragma HLS PIPELINE II=1
+        dct_send_lane(row_BRAM[0], b, N, to0);
+        dct_send_lane(row_BRAM[1], b, N, to1);
+        dct_send_lane(row_BRAM[2], b, N, to2);
+        dct_send_lane(row_BRAM[3], b, N, to3);
+        dct_send_lane(row_BRAM[4], b, N, to4);
+        dct_send_lane(row_BRAM[5], b, N, to5);
+        dct_send_lane(row_BRAM[6], b, N, to6);
+        dct_send_lane(row_BRAM[7], b, N, to7);
+    }
+recv:
+    for (int b = 0; b < BEATS; b++) {
+#pragma HLS PIPELINE II=1
+        const int   k0 = 2 * b, k1 = 2 * b + 1;
+        const float c0 = twid_cos[k0], s0 = twid_sin[k0];
+        const float c1 = twid_cos[k1], s1 = twid_sin[k1];
+        dct_recv_lane(from0, b, c0, s0, c1, s1, band, rib + 0);
+        dct_recv_lane(from1, b, c0, s0, c1, s1, band, rib + 1);
+        dct_recv_lane(from2, b, c0, s0, c1, s1, band, rib + 2);
+        dct_recv_lane(from3, b, c0, s0, c1, s1, band, rib + 3);
+        dct_recv_lane(from4, b, c0, s0, c1, s1, band, rib + 4);
+        dct_recv_lane(from5, b, c0, s0, c1, s1, band, rib + 5);
+        dct_recv_lane(from6, b, c0, s0, c1, s1, band, rib + 6);
+        dct_recv_lane(from7, b, c0, s0, c1, s1, band, rib + 7);
+    }
+}
+
+// FILL task (Approach C producer): DCT the band's TILE rows into `band`. Step 2a: nested
+// DATAFLOW pipelines load ∥ send/recv across the TILE/FFT_LANES batches (row_BRAM is the
+// per-iteration ping-pong channel). `band` is fill's output channel to the outer dataflow.
 static void dct_fill_band(const float* mat_in, int tr,
                           const float twid_cos[FFT_PTS], const float twid_sin[FFT_PTS],
                           float band[TILE][GRID],
@@ -89,63 +156,16 @@ static void dct_fill_band(const float* mat_in, int tr,
                           hls::stream<axis_t>& from2, hls::stream<axis_t>& from3,
                           hls::stream<axis_t>& from4, hls::stream<axis_t>& from5,
                           hls::stream<axis_t>& from6, hls::stream<axis_t>& from7) {
-    const int N     = GRID;
-    const int BEATS = N / CFLOAT_PER_BEAT;   // 512 beats/row
-    const beat512_t* in512 = reinterpret_cast<const beat512_t*>(mat_in);
-
 batch_loop:
     for (int batch = 0; batch < TILE / FFT_LANES; batch++) {   // 32/8 = 4 batches
-        const int rib   = batch * FFT_LANES;
-        const int r0row = tr * TILE + rib;      // first of 8 contiguous rows
-
-        float row_BRAM[FFT_LANES][FFT_PTS];     // 8 lane row buffers
+#pragma HLS DATAFLOW
+        float row_BRAM[FFT_LANES][FFT_PTS];     // 8 lane row buffers (ping-pong channel)
 #pragma HLS array_partition variable=row_BRAM complete dim=1          // 8 lane-banks
 #pragma HLS array_partition variable=row_BRAM cyclic factor=16 dim=2  // sink 16 floats/beat
-
-        // LOAD: 8 contiguous rows as one 512-bit-beat burst (16 floats/cycle).
-    load:
-        for (int w = 0; w < FFT_LANES * WORDS_PER_ROW; w++) {
-#pragma HLS PIPELINE II=1
-            beat512_t bt = in512[(size_t)r0row * WORDS_PER_ROW + w];
-            const int lane = w / WORDS_PER_ROW;   // 0..7
-            const int cw   = w % WORDS_PER_ROW;
-        unpack_u:
-            for (int u = 0; u < 16; u++) {
-#pragma HLS UNROLL
-                row_BRAM[lane][cw * 16 + u] = dct_b2f(bt.range(32 * u + 31, 32 * u));
-            }
-        }
-
-        // SEND: all 8 lanes, one beat each per cycle (8 stream writes/cycle).
-    send:
-        for (int b = 0; b < BEATS; b++) {
-#pragma HLS PIPELINE II=1
-            dct_send_lane(row_BRAM[0], b, N, to0);
-            dct_send_lane(row_BRAM[1], b, N, to1);
-            dct_send_lane(row_BRAM[2], b, N, to2);
-            dct_send_lane(row_BRAM[3], b, N, to3);
-            dct_send_lane(row_BRAM[4], b, N, to4);
-            dct_send_lane(row_BRAM[5], b, N, to5);
-            dct_send_lane(row_BRAM[6], b, N, to6);
-            dct_send_lane(row_BRAM[7], b, N, to7);
-        }
-
-        // RECV: all 8 lanes/cycle, twiddle (shared k) read once/beat, pack into band[rib+*].
-    recv:
-        for (int b = 0; b < BEATS; b++) {
-#pragma HLS PIPELINE II=1
-            const int   k0 = 2 * b, k1 = 2 * b + 1;
-            const float c0 = twid_cos[k0], s0 = twid_sin[k0];
-            const float c1 = twid_cos[k1], s1 = twid_sin[k1];
-            dct_recv_lane(from0, b, c0, s0, c1, s1, band, rib + 0);
-            dct_recv_lane(from1, b, c0, s0, c1, s1, band, rib + 1);
-            dct_recv_lane(from2, b, c0, s0, c1, s1, band, rib + 2);
-            dct_recv_lane(from3, b, c0, s0, c1, s1, band, rib + 3);
-            dct_recv_lane(from4, b, c0, s0, c1, s1, band, rib + 4);
-            dct_recv_lane(from5, b, c0, s0, c1, s1, band, rib + 5);
-            dct_recv_lane(from6, b, c0, s0, c1, s1, band, rib + 6);
-            dct_recv_lane(from7, b, c0, s0, c1, s1, band, rib + 7);
-        }
+        dct_load_rows(mat_in, tr, batch, row_BRAM);
+        dct_sendrecv_rows(row_BRAM, twid_cos, twid_sin, band, batch,
+                          to0, to1, to2, to3, to4, to5, to6, to7,
+                          from0, from1, from2, from3, from4, from5, from6, from7);
     }
 }
 
