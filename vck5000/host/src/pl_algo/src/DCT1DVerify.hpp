@@ -21,6 +21,10 @@ int runDCTRowPassVerify(const char* xclbin_path);
 // transpose(DCT_naive). Returns 0 on PASS.
 int runDctTransposeVerify(const char* xclbin_path);
 
+// Stage 3c composition: verify the forward 2D DCT (two fused passes) on a synthetic N x N
+// matrix; compare vs the separable reference C*rho*C^T. Returns 0 on PASS.
+int runAuvVerify(const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DCT1D_VERIFY_HPP

@@ -30,6 +30,7 @@ int main(int argc, char** argv) {
         printf("       %s --dct-rowpass <xclbin>\n", argv[0]);
         printf("       %s --transpose   <xclbin>\n", argv[0]);
         printf("       %s --dct-transpose <xclbin>\n", argv[0]);
+        printf("       %s --auv         <xclbin>\n", argv[0]);
         return 1;
     }
 
@@ -50,6 +51,10 @@ int main(int argc, char** argv) {
     // Stage 3c: verify the fused DCT+transpose pass on a synthetic matrix.
     if (argc >= 3 && std::strcmp(argv[1], "--dct-transpose") == 0)
         return plalgo::runDctTransposeVerify(argv[2]);
+
+    // Stage 3c composition: verify the forward 2D DCT (two fused passes) on a synthetic matrix.
+    if (argc >= 3 && std::strcmp(argv[1], "--auv") == 0)
+        return plalgo::runAuvVerify(argv[2]);
 #endif
 
 #ifdef USE_XILINX_XRT

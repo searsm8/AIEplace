@@ -64,6 +64,10 @@ void runTranspose(const float* in, int N,
 void runDctTranspose(const float* mat_in, int N,
                      float* mat_out, const char* xclbin_path);
 
+// Forward 2D DCT (Stage 3c composition): a_uv = C*rho*C^T via TWO fused DCT+transpose
+// passes (scratch crosses via host). rho, a_uv caller-allocated (N*N floats). AIE-using.
+void runDct2D(const float* rho, int N, float* a_uv, const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DRIVER_HPP

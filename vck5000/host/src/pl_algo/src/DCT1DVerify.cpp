@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <random>
+#include <algorithm>
 
 namespace plalgo {
 
@@ -170,6 +171,61 @@ int runDctTransposeVerify(const char* xclbin_path) {
     const bool   ok = rr < 1e-3;
     printf("[dct_transpose] fused DCT+transpose vs transpose(DCT_naive): max_abs=%.3e  "
            "rel_rms=%.3e  -> %s\n", max_abs, rr, ok ? "PASS" : "FAIL");
+    return ok ? 0 : 1;
+}
+
+int runAuvVerify(const char* xclbin_path) {
+    const int N = FFT_PTS;          // 1024 (square GRID x GRID)
+
+    std::mt19937 rng(17);
+    std::uniform_real_distribution<float> uni(0.0f, 1.0f);
+    std::vector<float> rho((size_t)N * N);
+    for (auto& v : rho) v = uni(rng);
+    std::vector<float> dev((size_t)N * N);
+
+    printf("[auv] verify: N=%d lanes=%d (fwd 2D DCT = two fused passes)\n", N, DENSITY_LANES);
+    runDct2D(rho.data(), N, dev.data(), xclbin_path);
+
+    // Reference = separable 2D DCT, a[p][q] = sum_{m,n} C[p][m] rho[m][n] C[q][n] = C*rho*C^T
+    // (same C basis as the 1D refs). Two O(N^3) passes; loops kept cache-friendly.
+    std::vector<double> C((size_t)N * N);   // C[k*N + n] = cos(pi/N*(n+0.5)*k)
+    for (int k = 0; k < N; k++)
+        for (int n = 0; n < N; n++)
+            C[(size_t)k * N + n] = std::cos(PI / N * (n + 0.5) * k);
+
+    // R[m][q] = sum_n rho[m][n] C[q][n]  (DCT along n)
+    std::vector<double> R((size_t)N * N);
+    for (int m = 0; m < N; m++) {
+        const float* rrow = &rho[(size_t)m * N];
+        for (int q = 0; q < N; q++) {
+            const double* cq = &C[(size_t)q * N];
+            double s = 0;
+            for (int n = 0; n < N; n++) s += (double)rrow[n] * cq[n];
+            R[(size_t)m * N + q] = s;
+        }
+    }
+
+    // a[p][q] = sum_m C[p][m] R[m][q]  (DCT along m); compare dev[p*N + q]
+    std::vector<double> arow(N);
+    double sse = 0, ref = 0, max_abs = 0;
+    for (int p = 0; p < N; p++) {
+        std::fill(arow.begin(), arow.end(), 0.0);
+        const double* cp = &C[(size_t)p * N];
+        for (int m = 0; m < N; m++) {
+            const double  cpm = cp[m];
+            const double* rm  = &R[(size_t)m * N];
+            for (int q = 0; q < N; q++) arow[q] += cpm * rm[q];
+        }
+        for (int q = 0; q < N; q++) {
+            const double d = dev[(size_t)p * N + q] - arow[q];
+            sse += d * d; ref += arow[q] * arow[q];
+            if (std::fabs(d) > max_abs) max_abs = std::fabs(d);
+        }
+    }
+    const double rr = std::sqrt(sse / (ref + 1e-30));
+    const bool   ok = rr < 1e-3;
+    printf("[auv] fwd 2D DCT vs separable C*rho*C^T: max_abs=%.3e  rel_rms=%.3e  -> %s\n",
+           max_abs, rr, ok ? "PASS" : "FAIL");
     return ok ? 0 : 1;
 }
 
