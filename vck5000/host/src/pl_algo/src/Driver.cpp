@@ -332,7 +332,7 @@ void runDctTranspose(const float* mat_in, int N,
                        d_box, d_bd, bo_in, bo_out,
                        0.0f, 0.0f, 0, 0, 0, 0,                 // HPWL scalars (unused here)
                        0, 1.0f, 1.0f, 1.0f,                    // density scalars (unused here)
-                       0, N,                                   // dct_stage unused; num_frames = N
+                       (int)TFH_DCT, N,                        // dct_stage = transform_mode; num_frames = N
                        (int)MODE_DCT_TRANSPOSE);
     run.wait();
     fft.wait();
@@ -373,7 +373,7 @@ void runDct2D(const float* rho, int N, float* a_uv, const char* xclbin_path) {
                            d_box, d_bd, bo_in, bo_out,
                            0.0f, 0.0f, 0, 0, 0, 0,                 // HPWL scalars (unused)
                            0, 1.0f, 1.0f, 1.0f,                    // density scalars (unused)
-                           0, N,                                   // dct_stage unused; num_frames = N
+                           (int)TFH_DCT, N,                        // dct_stage = transform_mode; num_frames = N
                            (int)MODE_DCT_TRANSPOSE);
         run.wait();
         fft.wait();
@@ -385,6 +385,153 @@ void runDct2D(const float* rho, int N, float* a_uv, const char* xclbin_path) {
     std::vector<float> scratch((size_t)N * N);
     run_pass(rho, scratch.data());     // pass 1: rho     -> scratch
     run_pass(scratch.data(), a_uv);    // pass 2: scratch -> a_uv
+}
+
+// ---------------------------------------------------------------------------
+// Stage 4: inverse field solve (spectral multiply + IDCT/IDXST passes).
+// ---------------------------------------------------------------------------
+
+// One fused transform+transpose pass with an explicit transform_mode (tf = TFH_DCT/IDCT/
+// IDXST). Generalizes runDctTranspose; used by the isolated 4a/4b verifies.
+void runXformTranspose(const float* mat_in, int N, int tf,
+                       float* mat_out, const char* xclbin_path) {
+    const size_t mat_bytes = (size_t)N * N * sizeof(float);
+
+    xrt::device device(0);
+    xrt::uuid   uuid = device.load_xclbin(xclbin_path);
+    xrt::kernel top(device, uuid, "top");
+    xrt::graph  fft(device, uuid, "density_fft_graph");
+
+    xrt::bo d_node = xrt::bo(device, sizeof(coord_t), top.group_id(0));
+    xrt::bo d_nptr = xrt::bo(device, sizeof(int32_t), top.group_id(1));
+    xrt::bo d_pins = xrt::bo(device, sizeof(NodePin), top.group_id(2));
+    xrt::bo d_npin = xrt::bo(device, sizeof(NodePin), top.group_id(3));
+    xrt::bo d_lut  = xrt::bo(device, sizeof(float),   top.group_id(4));
+    xrt::bo d_bb   = xrt::bo(device, sizeof(NetBBox), top.group_id(5));
+    xrt::bo d_sums = xrt::bo(device, sizeof(NetSums), top.group_id(6));
+    xrt::bo d_grad = xrt::bo(device, sizeof(coord_t), top.group_id(7));
+    xrt::bo d_box  = xrt::bo(device, sizeof(NodeBox), top.group_id(8));
+    xrt::bo d_bd   = xrt::bo(device, sizeof(float),   top.group_id(9));
+    xrt::bo bo_in  = xrt::bo(device, mat_bytes, top.group_id(10));
+    xrt::bo bo_out = xrt::bo(device, mat_bytes, top.group_id(11));
+
+    std::memcpy(bo_in.map<void*>(), mat_in, mat_bytes);
+    bo_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    fft.run(N / DENSITY_LANES);
+    xrt::run run = top(d_node, d_nptr, d_pins, d_npin, d_lut, d_bb, d_sums, d_grad,
+                       d_box, d_bd, bo_in, bo_out,
+                       0.0f, 0.0f, 0, 0, 0, 0,                 // HPWL scalars (unused)
+                       0, 1.0f, 1.0f, 1.0f,                    // density scalars (unused)
+                       tf, N,                                  // dct_stage = transform_mode; num_frames = N
+                       (int)MODE_DCT_TRANSPOSE);
+    run.wait();
+    fft.wait();
+
+    bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::memcpy(mat_out, bo_out.map<void*>(), mat_bytes);
+}
+
+// Spectral multiply: a_uv -> BOTH fields (Ex_hat = axis 0/w_u, Ey_hat = axis 1/w_v), in one
+// device session (a_uv stays resident in bo_in). Pure PL (no AIE graph). Used by the 4c verify.
+void runSpectral(const float* a_uv, int N,
+                 float* Ex_hat, float* Ey_hat, const char* xclbin_path) {
+    const size_t mat_bytes = (size_t)N * N * sizeof(float);
+
+    xrt::device device(0);
+    xrt::uuid   uuid = device.load_xclbin(xclbin_path);
+    xrt::kernel top(device, uuid, "top");
+
+    xrt::bo d_node = xrt::bo(device, sizeof(coord_t), top.group_id(0));
+    xrt::bo d_nptr = xrt::bo(device, sizeof(int32_t), top.group_id(1));
+    xrt::bo d_pins = xrt::bo(device, sizeof(NodePin), top.group_id(2));
+    xrt::bo d_npin = xrt::bo(device, sizeof(NodePin), top.group_id(3));
+    xrt::bo d_lut  = xrt::bo(device, sizeof(float),   top.group_id(4));
+    xrt::bo d_bb   = xrt::bo(device, sizeof(NetBBox), top.group_id(5));
+    xrt::bo d_sums = xrt::bo(device, sizeof(NetSums), top.group_id(6));
+    xrt::bo d_grad = xrt::bo(device, sizeof(coord_t), top.group_id(7));
+    xrt::bo d_box  = xrt::bo(device, sizeof(NodeBox), top.group_id(8));
+    xrt::bo d_bd   = xrt::bo(device, sizeof(float),   top.group_id(9));
+    xrt::bo bo_in  = xrt::bo(device, mat_bytes, top.group_id(10));
+    xrt::bo bo_out = xrt::bo(device, mat_bytes, top.group_id(11));
+
+    std::memcpy(bo_in.map<void*>(), a_uv, mat_bytes);
+    bo_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    auto run_axis = [&](int axis, float* dst) {
+        xrt::run run = top(d_node, d_nptr, d_pins, d_npin, d_lut, d_bb, d_sums, d_grad,
+                           d_box, d_bd, bo_in, bo_out,
+                           0.0f, 0.0f, 0, 0, 0, 0,             // HPWL scalars (unused)
+                           0, 1.0f, 1.0f, 1.0f,                // density scalars (unused)
+                           axis, N,                            // dct_stage = axis; num_frames = N
+                           (int)MODE_SPECTRAL);
+        run.wait();
+        bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        std::memcpy(dst, bo_out.map<void*>(), mat_bytes);
+    };
+    run_axis(0, Ex_hat);
+    run_axis(1, Ey_hat);
+}
+
+// Full electrostatic field solve, all in ONE device/graph session (sw_emu can't reopen the
+// device/AIE-sim in one process). rho -> a_uv (2 fwd DCT passes) -> spectral (Ex_hat, Ey_hat)
+// -> inverse passes:  Ex = fused_IDXST(fused_IDCT(Ex_hat)),  Ey = fused_IDCT(fused_IDXST(Ey_hat)).
+// Each fused pass = transform-rows-then-transpose, mirroring compute_eField_DCT exactly.
+void runField(const float* rho, int N, float* Ex, float* Ey, const char* xclbin_path) {
+    const size_t mat_bytes = (size_t)N * N * sizeof(float);
+
+    xrt::device device(0);
+    xrt::uuid   uuid = device.load_xclbin(xclbin_path);
+    xrt::kernel top(device, uuid, "top");
+    xrt::graph  fft(device, uuid, "density_fft_graph");
+
+    xrt::bo d_node = xrt::bo(device, sizeof(coord_t), top.group_id(0));
+    xrt::bo d_nptr = xrt::bo(device, sizeof(int32_t), top.group_id(1));
+    xrt::bo d_pins = xrt::bo(device, sizeof(NodePin), top.group_id(2));
+    xrt::bo d_npin = xrt::bo(device, sizeof(NodePin), top.group_id(3));
+    xrt::bo d_lut  = xrt::bo(device, sizeof(float),   top.group_id(4));
+    xrt::bo d_bb   = xrt::bo(device, sizeof(NetBBox), top.group_id(5));
+    xrt::bo d_sums = xrt::bo(device, sizeof(NetSums), top.group_id(6));
+    xrt::bo d_grad = xrt::bo(device, sizeof(coord_t), top.group_id(7));
+    xrt::bo d_box  = xrt::bo(device, sizeof(NodeBox), top.group_id(8));
+    xrt::bo d_bd   = xrt::bo(device, sizeof(float),   top.group_id(9));
+    xrt::bo bo_in  = xrt::bo(device, mat_bytes, top.group_id(10));
+    xrt::bo bo_out = xrt::bo(device, mat_bytes, top.group_id(11));
+
+    // One pass: src -> dst. mode selects DCT/IDCT/IDXST fused pass (uses AIE) or spectral
+    // (PL-only); sub = transform_mode or axis. Scratch crosses via host (never bind one
+    // buffer to both gmem10-in and gmem11-out).
+    auto run_pass = [&](const float* src, float* dst, int mode, int sub) {
+        std::memcpy(bo_in.map<void*>(), src, mat_bytes);
+        bo_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        if (mode == (int)MODE_DCT_TRANSPOSE) fft.run(N / DENSITY_LANES);
+        xrt::run run = top(d_node, d_nptr, d_pins, d_npin, d_lut, d_bb, d_sums, d_grad,
+                           d_box, d_bd, bo_in, bo_out,
+                           0.0f, 0.0f, 0, 0, 0, 0,             // HPWL scalars (unused)
+                           0, 1.0f, 1.0f, 1.0f,                // density scalars (unused)
+                           sub, N,                             // dct_stage = transform_mode/axis; num_frames = N
+                           mode);
+        run.wait();
+        if (mode == (int)MODE_DCT_TRANSPOSE) fft.wait();
+        bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        std::memcpy(dst, bo_out.map<void*>(), mat_bytes);
+    };
+
+    std::vector<float> t1((size_t)N * N), a_uv((size_t)N * N);
+    std::vector<float> Ex_hat((size_t)N * N), Ey_hat((size_t)N * N);
+    std::vector<float> tE((size_t)N * N), tY((size_t)N * N);
+
+    // forward 2D DCT: rho -> a_uv
+    run_pass(rho,       t1.data(),     (int)MODE_DCT_TRANSPOSE, (int)TFH_DCT);
+    run_pass(t1.data(), a_uv.data(),   (int)MODE_DCT_TRANSPOSE, (int)TFH_DCT);
+    // spectral multiply: a_uv -> Ex_hat, Ey_hat
+    run_pass(a_uv.data(), Ex_hat.data(), (int)MODE_SPECTRAL, 0);
+    run_pass(a_uv.data(), Ey_hat.data(), (int)MODE_SPECTRAL, 1);
+    // inverse: Ex = IDXST_x(IDCT_y(Ex_hat)), Ey = IDCT_x(IDXST_y(Ey_hat))
+    run_pass(Ex_hat.data(), tE.data(), (int)MODE_DCT_TRANSPOSE, (int)TFH_IDCT);
+    run_pass(tE.data(),     Ex,        (int)MODE_DCT_TRANSPOSE, (int)TFH_IDXST);
+    run_pass(Ey_hat.data(), tY.data(), (int)MODE_DCT_TRANSPOSE, (int)TFH_IDXST);
+    run_pass(tY.data(),     Ey,        (int)MODE_DCT_TRANSPOSE, (int)TFH_IDCT);
 }
 
 } // namespace plalgo

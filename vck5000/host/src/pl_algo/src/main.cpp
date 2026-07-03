@@ -18,6 +18,7 @@
 #include "DensityVerify.hpp"
 #include "DCT1DVerify.hpp"
 #include "TransposeVerify.hpp"
+#include "FieldVerify.hpp"
 #include <cstring>
 #endif
 
@@ -31,6 +32,10 @@ int main(int argc, char** argv) {
         printf("       %s --transpose   <xclbin>\n", argv[0]);
         printf("       %s --dct-transpose <xclbin>\n", argv[0]);
         printf("       %s --auv         <xclbin>\n", argv[0]);
+        printf("       %s --idct-transpose  <xclbin>\n", argv[0]);
+        printf("       %s --idxst-transpose <xclbin>\n", argv[0]);
+        printf("       %s --spectral        <xclbin>\n", argv[0]);
+        printf("       %s --field           <xclbin>\n", argv[0]);
         return 1;
     }
 
@@ -55,6 +60,20 @@ int main(int argc, char** argv) {
     // Stage 3c composition: verify the forward 2D DCT (two fused passes) on a synthetic matrix.
     if (argc >= 3 && std::strcmp(argv[1], "--auv") == 0)
         return plalgo::runAuvVerify(argv[2]);
+
+    // Stage 4a/4b: verify the fused inverse passes (IDCT / IDXST + transpose).
+    if (argc >= 3 && std::strcmp(argv[1], "--idct-transpose") == 0)
+        return plalgo::runIdctTransposeVerify(argv[2]);
+    if (argc >= 3 && std::strcmp(argv[1], "--idxst-transpose") == 0)
+        return plalgo::runIdxstTransposeVerify(argv[2]);
+
+    // Stage 4c: verify the spectral multiply (a_uv -> Ex_hat, Ey_hat).
+    if (argc >= 3 && std::strcmp(argv[1], "--spectral") == 0)
+        return plalgo::runSpectralVerify(argv[2]);
+
+    // Stage 4d: verify the full field solve (rho -> Ex, Ey) vs compute_eField_DCT.
+    if (argc >= 3 && std::strcmp(argv[1], "--field") == 0)
+        return plalgo::runFieldVerify(argv[2]);
 #endif
 
 #ifdef USE_XILINX_XRT

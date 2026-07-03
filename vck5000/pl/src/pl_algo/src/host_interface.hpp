@@ -161,6 +161,11 @@ constexpr int DENSITY_NBINS = DENSITY_GRID * DENSITY_GRID;   // 1,048,576 (4 MB 
 constexpr int DENSITY_LANES = 8;   // AIE FFT pool width; must equal formats.hpp FFT_LANES
                                    // (and AIE_DENSITY_INSTANCES at build time)
 
+// Host copy of formats.hpp `transform_mode` (host TUs can't include formats.hpp, which pulls
+// HLS types). Passed to MODE_DCT_TRANSPOSE via the dct_stage arg. Distinct names from the
+// formats.hpp TF_* enum because top.cpp includes BOTH headers. Values MUST stay in sync.
+enum transform_mode_host { TFH_DCT = 1, TFH_IDCT = 2, TFH_IDXST = 3 };
+
 // ---- top() mode selector ---------------------------------------------------
 // One PL kernel serves multiple modules during bring-up; `mode` selects which.
 // (Stage 5 replaces this with the unified per-iteration datapath.)
@@ -169,9 +174,14 @@ enum top_mode { MODE_HPWL_GRAD = 0, MODE_DENSITY_BIN = 1, MODE_DCT_1D = 2,
                 MODE_TRANSPOSE = 4,      // Stage 3b: N x N matrix transpose (pure PL).
                                          // dct_stage selects variant: 0=naive, 1=tiled;
                                          // num_frames = N (matrix side); dct_in->dct_out.
-                MODE_DCT_TRANSPOSE = 5 };// Stage 3c: FUSED DCT row-pass + transpose (one
-                                         // pass = DCT all rows, written transposed).
-                                         // num_frames = N; dct_in -> dct_out (transposed).
+                MODE_DCT_TRANSPOSE = 5,  // Stage 3c/4: FUSED transform row-pass + transpose
+                                         // (one pass = transform all rows, written
+                                         // transposed). dct_stage carries the transform_mode
+                                         // (TF_DCT/TF_IDCT/TF_IDXST); num_frames = N;
+                                         // dct_in -> dct_out (transposed).
+                MODE_SPECTRAL = 6 };     // Stage 4: spectral multiply a_uv -> one field
+                                         // (dct_stage = axis: 0 = Ex/w_u, 1 = Ey/w_v).
+                                         // num_frames = N; dct_in (a_uv) -> dct_out (field).
 
 // ---- 1D DCT via the AIE FFT  (Stage 2 -- first AIE bring-up) ----------------
 // MODE_DCT_1D streams num_frames real rows of FFT_PTS points each through:

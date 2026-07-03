@@ -206,6 +206,29 @@ run-auv: $(XCLBIN) $(HOST_EXE)
 	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
 	$(HOST_EXE) --auv $(XCLBIN)
 
+# --- build + run the Stage 4 inverse field solve, sw_emu ---
+# AIE-using (FFT pool + PL<->AIE streams). Each target reuses the same xclbin -- rebuild it
+# once, then swap the --flag (skip the build/sw_emu rm between them if only the host changed).
+#   make run-<idct-transpose|idxst-transpose|spectral|field> AIE=pl_algo PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1 AIE_DENSITY_INSTANCES=8
+define STAGE4_RUN
+	mkdir -p $(BUILD_DIR)/$(TARGET)/run
+	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
+	cd $(BUILD_DIR)/$(TARGET)/run && \
+	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
+	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
+	$(HOST_EXE) $(1) $(XCLBIN)
+endef
+
+.PHONY: run-idct-transpose run-idxst-transpose run-spectral run-field
+run-idct-transpose: $(XCLBIN) $(HOST_EXE)
+	$(call STAGE4_RUN,--idct-transpose)
+run-idxst-transpose: $(XCLBIN) $(HOST_EXE)
+	$(call STAGE4_RUN,--idxst-transpose)
+run-spectral: $(XCLBIN) $(HOST_EXE)
+	$(call STAGE4_RUN,--spectral)
+run-field: $(XCLBIN) $(HOST_EXE)
+	$(call STAGE4_RUN,--field)
+
 
 # make dse
 # launch python script to perform Design Space Exploration

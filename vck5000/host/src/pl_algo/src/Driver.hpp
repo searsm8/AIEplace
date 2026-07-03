@@ -68,6 +68,21 @@ void runDctTranspose(const float* mat_in, int N,
 // passes (scratch crosses via host). rho, a_uv caller-allocated (N*N floats). AIE-using.
 void runDct2D(const float* rho, int N, float* a_uv, const char* xclbin_path);
 
+// Stage 4: one fused transform+transpose pass with an explicit transform_mode
+// (tf = TFH_DCT/TFH_IDCT/TFH_IDXST). mat_in, mat_out caller-allocated (N*N floats). AIE-using.
+void runXformTranspose(const float* mat_in, int N, int tf,
+                       float* mat_out, const char* xclbin_path);
+
+// Stage 4: spectral multiply a_uv -> BOTH fields (Ex_hat = w_u, Ey_hat = w_v) in one
+// session. a_uv, Ex_hat, Ey_hat caller-allocated (N*N floats). Pure PL (no AIE graph).
+void runSpectral(const float* a_uv, int N,
+                 float* Ex_hat, float* Ey_hat, const char* xclbin_path);
+
+// Stage 4: full electrostatic field solve (rho -> Ex, Ey) in one device/graph session:
+// forward 2D DCT, spectral multiply, and the four inverse IDCT/IDXST passes. rho, Ex, Ey
+// caller-allocated (N*N floats). AIE-using. Mirrors markv1 compute_eField_DCT.
+void runField(const float* rho, int N, float* Ex, float* Ey, const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DRIVER_HPP

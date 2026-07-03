@@ -22,6 +22,7 @@
 #include "modules/dct_1d.hpp"
 #include "modules/transpose.hpp"
 #include "modules/dct_transpose.hpp"
+#include "modules/spectral.hpp"
 
 using namespace plalgo;
 
@@ -161,13 +162,17 @@ void top(
         if (dct_stage == 0) transpose_naive(dct_in, dct_out);
         else                transpose_band(dct_in, dct_out);
     } else if (mode == MODE_DCT_TRANSPOSE) {
-        // Stage 3c: fused DCT row-pass + transpose. DCT all GRID rows via the 8-lane pool,
-        // written transposed. dct_in -> dct_out (transposed). num_frames unused (N=GRID).
-        dct_transpose_pass(dct_in, dct_out,
+        // Stage 3c/4: fused transform row-pass + transpose. Transform all GRID rows via the
+        // 8-lane pool, written transposed. dct_stage = transform_mode (TF_DCT/IDCT/IDXST);
+        // dct_in -> dct_out (transposed). num_frames unused (N=GRID).
+        dct_transpose_pass(dct_in, dct_out, dct_stage,
                            fft_to_aie_0, fft_to_aie_1, fft_to_aie_2, fft_to_aie_3,
                            fft_to_aie_4, fft_to_aie_5, fft_to_aie_6, fft_to_aie_7,
                            fft_from_aie_0, fft_from_aie_1, fft_from_aie_2, fft_from_aie_3,
                            fft_from_aie_4, fft_from_aie_5, fft_from_aie_6, fft_from_aie_7);
+    } else if (mode == MODE_SPECTRAL) {
+        // Stage 4: spectral multiply a_uv -> one field. dct_stage = axis (0=Ex/w_u, 1=Ey/w_v).
+        spectral_multiply(dct_in, dct_out, dct_stage);
     } else { // MODE_HPWL_GRAD
         hpwl_CU(node_pos, net_ptr, pins, npins, exp_lut, bb, sums, node_grad,
                 inv_gamma, inv_lut_step, lut_size, num_nets, num_movable, num_npins);
