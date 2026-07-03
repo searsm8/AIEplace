@@ -534,4 +534,52 @@ void runField(const float* rho, int N, float* Ex, float* Ey, const char* xclbin_
     run_pass(tY.data(),     Ey,        (int)MODE_DCT_TRANSPOSE, (int)TFH_IDCT);
 }
 
+// Stage 5: force gather -- per-movable-node density gradient = sum_bins overlap_area*eField.
+// Ports: node_grad out (gmem7), node_box (gmem8), eField_x = bin_density (gmem9), eField_y =
+// dct_in (gmem10). Pure PL (no AIE graph).
+void runForceGather(const NodeBox* node_box, int num_nodes, int num_movable,
+                    const float* eField_x, const float* eField_y,
+                    float bin_w, float bin_h,
+                    coord_t* node_grad, const char* xclbin_path) {
+    const size_t box_bytes  = (size_t)num_nodes    * sizeof(NodeBox);
+    const size_t fld_bytes  = (size_t)DENSITY_NBINS * sizeof(float);
+    const size_t grad_bytes = (size_t)num_movable  * sizeof(coord_t);
+
+    xrt::device device(0);
+    xrt::uuid   uuid = device.load_xclbin(xclbin_path);
+    xrt::kernel top(device, uuid, "top");
+
+    // Real buffers: node_grad (7, out), node_box (8), eField_x (9), eField_y (10). Rest dummies.
+    xrt::bo d_node = xrt::bo(device, sizeof(coord_t), top.group_id(0));
+    xrt::bo d_nptr = xrt::bo(device, sizeof(int32_t), top.group_id(1));
+    xrt::bo d_pins = xrt::bo(device, sizeof(NodePin), top.group_id(2));
+    xrt::bo d_npin = xrt::bo(device, sizeof(NodePin), top.group_id(3));
+    xrt::bo d_lut  = xrt::bo(device, sizeof(float),   top.group_id(4));
+    xrt::bo d_bb   = xrt::bo(device, sizeof(NetBBox), top.group_id(5));
+    xrt::bo d_sums = xrt::bo(device, sizeof(NetSums), top.group_id(6));
+    xrt::bo bo_grad = xrt::bo(device, grad_bytes, top.group_id(7));
+    xrt::bo bo_box  = xrt::bo(device, box_bytes,  top.group_id(8));
+    xrt::bo bo_efx  = xrt::bo(device, fld_bytes,  top.group_id(9));
+    xrt::bo bo_efy  = xrt::bo(device, fld_bytes,  top.group_id(10));
+    xrt::bo bo_dout = xrt::bo(device, sizeof(float), top.group_id(11)); // inert dummy
+
+    std::memcpy(bo_box.map<void*>(), node_box, box_bytes);
+    std::memcpy(bo_efx.map<void*>(), eField_x, fld_bytes);
+    std::memcpy(bo_efy.map<void*>(), eField_y, fld_bytes);
+    bo_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_efx.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_efy.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    xrt::run run = top(d_node, d_nptr, d_pins, d_npin, d_lut, d_bb, d_sums, bo_grad,
+                       bo_box, bo_efx, bo_efy, bo_dout,
+                       0.0f, 0.0f, 0, 0, num_movable, 0,      // HPWL scalars: num_movable used
+                       num_nodes, bin_w, bin_h, 0.0f,         // density scalars: bin_w/bin_h used
+                       0, 0,                                  // dct scalars (unused)
+                       (int)MODE_FORCE_GATHER);
+    run.wait();
+
+    bo_grad.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::memcpy(node_grad, bo_grad.map<void*>(), grad_bytes);
+}
+
 } // namespace plalgo

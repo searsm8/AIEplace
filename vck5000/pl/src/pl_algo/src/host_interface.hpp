@@ -179,9 +179,14 @@ enum top_mode { MODE_HPWL_GRAD = 0, MODE_DENSITY_BIN = 1, MODE_DCT_1D = 2,
                                          // transposed). dct_stage carries the transform_mode
                                          // (TF_DCT/TF_IDCT/TF_IDXST); num_frames = N;
                                          // dct_in -> dct_out (transposed).
-                MODE_SPECTRAL = 6 };     // Stage 4: spectral multiply a_uv -> one field
+                MODE_SPECTRAL = 6,       // Stage 4: spectral multiply a_uv -> one field
                                          // (dct_stage = axis: 0 = Ex/w_u, 1 = Ey/w_v).
                                          // num_frames = N; dct_in (a_uv) -> dct_out (field).
+                MODE_FORCE_GATHER = 7 }; // Stage 5: per-node density gradient = gather
+                                         // sum_bins overlap_area * eField. Reuses ports:
+                                         // eField_x = bin_density (gmem9), eField_y = dct_in
+                                         // (gmem10), node_box (gmem8) -> node_grad (gmem7).
+                                         // scalars: num_movable, bin_w, bin_h.
 
 // ---- 1D DCT via the AIE FFT  (Stage 2 -- first AIE bring-up) ----------------
 // MODE_DCT_1D streams num_frames real rows of FFT_PTS points each through:

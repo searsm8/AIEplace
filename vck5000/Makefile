@@ -219,7 +219,7 @@ define STAGE4_RUN
 	$(HOST_EXE) $(1) $(XCLBIN)
 endef
 
-.PHONY: run-idct-transpose run-idxst-transpose run-spectral run-field
+.PHONY: run-idct-transpose run-idxst-transpose run-spectral run-field run-force-gather
 run-idct-transpose: $(XCLBIN) $(HOST_EXE)
 	$(call STAGE4_RUN,--idct-transpose)
 run-idxst-transpose: $(XCLBIN) $(HOST_EXE)
@@ -228,6 +228,9 @@ run-spectral: $(XCLBIN) $(HOST_EXE)
 	$(call STAGE4_RUN,--spectral)
 run-field: $(XCLBIN) $(HOST_EXE)
 	$(call STAGE4_RUN,--field)
+# Stage 5a: force gather (PL-only, but rides the AIE=pl_algo xclbin via the mode flag).
+run-force-gather: $(XCLBIN) $(HOST_EXE)
+	$(call STAGE4_RUN,--force-gather)
 
 
 # make dse

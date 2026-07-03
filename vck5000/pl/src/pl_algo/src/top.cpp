@@ -23,6 +23,7 @@
 #include "modules/transpose.hpp"
 #include "modules/dct_transpose.hpp"
 #include "modules/spectral.hpp"
+#include "modules/force_gather.hpp"
 
 using namespace plalgo;
 
@@ -173,6 +174,10 @@ void top(
     } else if (mode == MODE_SPECTRAL) {
         // Stage 4: spectral multiply a_uv -> one field. dct_stage = axis (0=Ex/w_u, 1=Ey/w_v).
         spectral_multiply(dct_in, dct_out, dct_stage);
+    } else if (mode == MODE_FORCE_GATHER) {
+        // Stage 5: per-node density gradient. eField_x = bin_density (gmem9), eField_y =
+        // dct_in (gmem10), node geometry = node_box (gmem8) -> node_grad (gmem7).
+        force_gather(node_box, bin_density, dct_in, node_grad, num_movable, bin_w, bin_h);
     } else { // MODE_HPWL_GRAD
         hpwl_CU(node_pos, net_ptr, pins, npins, exp_lut, bb, sums, node_grad,
                 inv_gamma, inv_lut_step, lut_size, num_nets, num_movable, num_npins);

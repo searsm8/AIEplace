@@ -19,6 +19,7 @@
 #include "DCT1DVerify.hpp"
 #include "TransposeVerify.hpp"
 #include "FieldVerify.hpp"
+#include "ForceVerify.hpp"
 #include <cstring>
 #endif
 
@@ -36,6 +37,7 @@ int main(int argc, char** argv) {
         printf("       %s --idxst-transpose <xclbin>\n", argv[0]);
         printf("       %s --spectral        <xclbin>\n", argv[0]);
         printf("       %s --field           <xclbin>\n", argv[0]);
+        printf("       %s --force-gather    <xclbin>\n", argv[0]);
         return 1;
     }
 
@@ -74,6 +76,10 @@ int main(int argc, char** argv) {
     // Stage 4d: verify the full field solve (rho -> Ex, Ey) vs compute_eField_DCT.
     if (argc >= 3 && std::strcmp(argv[1], "--field") == 0)
         return plalgo::runFieldVerify(argv[2]);
+
+    // Stage 5a: verify the force gather (per-node density gradient) on synthetic data.
+    if (argc >= 3 && std::strcmp(argv[1], "--force-gather") == 0)
+        return plalgo::runForceGatherVerify(argv[2]);
 #endif
 
 #ifdef USE_XILINX_XRT

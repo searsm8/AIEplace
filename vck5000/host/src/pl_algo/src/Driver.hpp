@@ -83,6 +83,14 @@ void runSpectral(const float* a_uv, int N,
 // caller-allocated (N*N floats). AIE-using. Mirrors markv1 compute_eField_DCT.
 void runField(const float* rho, int N, float* Ex, float* Ey, const char* xclbin_path);
 
+// Stage 5: force gather -- per-movable-node density gradient = sum_bins overlap_area*eField.
+// node_box[num_nodes], eField_x/eField_y[GRID*GRID] (x-major), node_grad[num_movable] out
+// (caller-allocated). Pure PL (no AIE graph).
+void runForceGather(const NodeBox* node_box, int num_nodes, int num_movable,
+                    const float* eField_x, const float* eField_y,
+                    float bin_w, float bin_h,
+                    coord_t* node_grad, const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DRIVER_HPP
