@@ -403,13 +403,14 @@ Gradient Placer::computeElectrostaticForce(Node* node_p)
 {
     Gradient electro_force;
 
-    // for each bin that this node overlaps,
-    // compute electric force based on bin overlaps
+    // for each bin that this node overlaps, accumulate the field weighted by the
+    // node's OVERLAP AREA with that bin (bo.overlap). The area weighting is required:
+    // the force is q*E distributed over the covered bins by overlap, i.e.
+    // sum_bins overlap_area * eField -- confirmed vs DREAMPlace electric_force_cuda_kernel
+    // (area * field_map) and Xplace density_map_cuda_backward (overlap_area * grad_mat).
     for (BinOverlap bo : node_p->getBinOverlaps()) {
-        //Bin* bin = bo.bin;
-        float coeff = density_weight * bo.bin->local_density_weight;
+        float coeff = density_weight * bo.bin->local_density_weight * bo.overlap;
         electro_force += coeff * bo.bin->eField;
-        //electro_force.y += coeff * bin->eField.y;
     }
 
     return electro_force;
