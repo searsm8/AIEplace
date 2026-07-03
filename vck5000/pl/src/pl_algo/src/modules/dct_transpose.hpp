@@ -31,7 +31,7 @@
 // cosf/sinf that, after lane parallelism, was instantiated 8x in the recv datapath. Same
 // idea as the HPWL exp LUT. Reusable by dct_1d/dct_row_pass (single-lane, not yet ported).
 //
-// STAGE 4: the pass is now transform_mode-parameterized (`tf`) -- TF_DCT/TF_IDCT/TF_IDXST
+// STAGE 4: the pass is now transform_mode-parameterized (`xform`) -- TF_DCT/TF_IDCT/TF_IDXST
 // all share this one fused kernel and the single forward-FFT pool; only the PL send/recv
 // pre/post switch (see xform_send_lane/xform_recv_lane). The inverse field passes fuse
 // identically to the forward DCT. DEFERRED: Approach C step 2b (send||recv overlap).
@@ -60,26 +60,26 @@ static inline int xform_unshuf_idx(int j, int N) {
 //   TF_IDXST : same as IDCT but the input is reversed first (r_n = X_{N-n}, r_0 = X_0).
 // The twiddle (c,s) at n0/n1 is looked up once per beat by the caller (same n for all 8
 // lanes); for TF_DCT it is unused here.
-static inline void xform_send_lane(const float row[FFT_PTS], int b, int N, int tf,
-                                   float c0, float s0, float c1, float s1,
+static inline void xform_send_lane(const float row[FFT_PTS], int b, int N, int xform,
+                                   float cos0, float sin0, float cos1, float sin1,
                                    hls::stream<axis_t>& to) {
     const int n0 = 2 * b, n1 = 2 * b + 1;
     float re0, im0, re1, im1;
-    if (tf == TF_DCT) {
+    if (xform == TF_DCT) {
         re0 = row[dct_shuf_idx(n0, N)]; im0 = 0.0f;
         re1 = row[dct_shuf_idx(n1, N)]; im1 = 0.0f;
     } else {                                   // TF_IDCT / TF_IDXST
-        const int  i0 = (tf == TF_IDXST) ? (n0 == 0 ? 0 : N - n0) : n0;
-        const int  i1 = (tf == TF_IDXST) ? (N - n1)               : n1;  // n1>=1 always
-        const float x0 = row[i0] * (n0 == 0 ? 0.5f : 1.0f);   // halve the DC bin (z_0 *= 0.5)
-        const float x1 = row[i1];
-        re0 =  x0 * c0;  im0 = -x0 * s0;       // z_n = X_n * e^{-i*pi*n/2N}
-        re1 =  x1 * c1;  im1 = -x1 * s1;
+        const int  src0 = (xform == TF_IDXST) ? (n0 == 0 ? 0 : N - n0) : n0;
+        const int  src1 = (xform == TF_IDXST) ? (N - n1)               : n1;  // n1>=1 always
+        const float x0 = row[src0] * (n0 == 0 ? 0.5f : 1.0f);  // halve the DC bin (z_0 *= 0.5)
+        const float x1 = row[src1];
+        re0 =  x0 * cos0;  im0 = -x0 * sin0;   // z_n = X_n * e^{-i*pi*n/2N}
+        re1 =  x1 * cos1;  im1 = -x1 * sin1;
     }
-    ap_int<128> d;
-    d.range(31, 0)   = dct_f2b(re0);  d.range(63, 32)  = dct_f2b(im0);
-    d.range(95, 64)  = dct_f2b(re1);  d.range(127, 96) = dct_f2b(im1);
-    axis_t v; v.data = d; v.keep_all(); to.write(v);
+    ap_int<128> beat;
+    beat.range(31, 0)   = dct_f2b(re0);  beat.range(63, 32)  = dct_f2b(im0);
+    beat.range(95, 64)  = dct_f2b(re1);  beat.range(127, 96) = dct_f2b(im1);
+    axis_t v; v.data = beat; v.keep_all(); to.write(v);
 }
 
 // One RECV beat for one lane: read the FFT beat (128b AXIS = 2 complex points = 4 floats)
@@ -87,28 +87,28 @@ static inline void xform_send_lane(const float row[FFT_PTS], int b, int N, int t
 //   TF_DCT   : out_k = Re{ FFT_k * e^{-i*pi*k/2N} } = re*cos + im*sin, written at k (seq).
 //   TF_IDCT  : out = Re(F_j), scattered to band[unshuf(j)] (twiddle was on SEND).
 //   TF_IDXST : same as IDCT, then negate odd OUTPUT positions.
-// The twiddle (c,s) at j0/j1 is looked up once per beat by the caller (TF_DCT only). Writes
+// The twiddle (cos,sin) at j0/j1 is looked up once per beat by the caller (TF_DCT only). Writes
 // are addressed RAM writes (band[bank][col]); no runtime bit-offset packing (the LUT hog).
-static inline void xform_recv_lane(hls::stream<axis_t>& from, int b, int N, int tf,
-                                   float c0, float s0, float c1, float s1,
+static inline void xform_recv_lane(hls::stream<axis_t>& from, int b, int N, int xform,
+                                   float cos0, float sin0, float cos1, float sin1,
                                    float band[TILE][GRID], int rib_lane) {
-    ap_int<128> d = from.read().data;
-    const float re0 = dct_b2f(d.range(31, 0)),  im0 = dct_b2f(d.range(63, 32));
-    const float re1 = dct_b2f(d.range(95, 64)), im1 = dct_b2f(d.range(127, 96));
+    ap_int<128> beat = from.read().data;
+    const float re0 = dct_b2f(beat.range(31, 0)),  im0 = dct_b2f(beat.range(63, 32));
+    const float re1 = dct_b2f(beat.range(95, 64)), im1 = dct_b2f(beat.range(127, 96));
     const int j0 = 2 * b, j1 = 2 * b + 1;
-    if (tf == TF_DCT) {
-        band[rib_lane][j0] = re0 * c0 + im0 * s0;   // DCT_k0
-        band[rib_lane][j1] = re1 * c1 + im1 * s1;   // DCT_k1
-    } else {                                        // TF_IDCT / TF_IDXST
-        const int d0 = xform_unshuf_idx(j0, N);
-        const int d1 = xform_unshuf_idx(j1, N);
-        float v0 = re0, v1 = re1;                   // out = Re(F_j)
-        if (tf == TF_IDXST) {                       // negate odd output positions
-            if (d0 & 1) v0 = -v0;
-            if (d1 & 1) v1 = -v1;
+    if (xform == TF_DCT) {
+        band[rib_lane][j0] = re0 * cos0 + im0 * sin0;   // DCT_k0
+        band[rib_lane][j1] = re1 * cos1 + im1 * sin1;   // DCT_k1
+    } else {                                            // TF_IDCT / TF_IDXST
+        const int dst0 = xform_unshuf_idx(j0, N);
+        const int dst1 = xform_unshuf_idx(j1, N);
+        float val0 = re0, val1 = re1;                   // out = Re(F_j)
+        if (xform == TF_IDXST) {                        // negate odd output positions
+            if (dst0 & 1) val0 = -val0;
+            if (dst1 & 1) val1 = -val1;
         }
-        band[rib_lane][d0] = v0;
-        band[rib_lane][d1] = v1;
+        band[rib_lane][dst0] = val0;
+        band[rib_lane][dst1] = val1;
     }
 }
 
@@ -138,7 +138,7 @@ load:
 // batch (the window FFT needs the whole frame); overlapping send with recv is step 2b.
 static void dct_sendrecv_rows(const float row_BRAM[FFT_LANES][FFT_PTS],
                               const float twid_cos[FFT_PTS], const float twid_sin[FFT_PTS],
-                              float band[TILE][GRID], int batch, int tf,
+                              float band[TILE][GRID], int batch, int xform,
                               hls::stream<axis_t>& to0, hls::stream<axis_t>& to1,
                               hls::stream<axis_t>& to2, hls::stream<axis_t>& to3,
                               hls::stream<axis_t>& to4, hls::stream<axis_t>& to5,
@@ -157,38 +157,38 @@ send:
     for (int b = 0; b < BEATS; b++) {
 #pragma HLS PIPELINE II=1
         const int   n0 = 2 * b, n1 = 2 * b + 1;
-        const float c0 = twid_cos[n0], s0 = twid_sin[n0];
-        const float c1 = twid_cos[n1], s1 = twid_sin[n1];
-        xform_send_lane(row_BRAM[0], b, N, tf, c0, s0, c1, s1, to0);
-        xform_send_lane(row_BRAM[1], b, N, tf, c0, s0, c1, s1, to1);
-        xform_send_lane(row_BRAM[2], b, N, tf, c0, s0, c1, s1, to2);
-        xform_send_lane(row_BRAM[3], b, N, tf, c0, s0, c1, s1, to3);
-        xform_send_lane(row_BRAM[4], b, N, tf, c0, s0, c1, s1, to4);
-        xform_send_lane(row_BRAM[5], b, N, tf, c0, s0, c1, s1, to5);
-        xform_send_lane(row_BRAM[6], b, N, tf, c0, s0, c1, s1, to6);
-        xform_send_lane(row_BRAM[7], b, N, tf, c0, s0, c1, s1, to7);
+        const float cos0 = twid_cos[n0], sin0 = twid_sin[n0];
+        const float cos1 = twid_cos[n1], sin1 = twid_sin[n1];
+        xform_send_lane(row_BRAM[0], b, N, xform, cos0, sin0, cos1, sin1, to0);
+        xform_send_lane(row_BRAM[1], b, N, xform, cos0, sin0, cos1, sin1, to1);
+        xform_send_lane(row_BRAM[2], b, N, xform, cos0, sin0, cos1, sin1, to2);
+        xform_send_lane(row_BRAM[3], b, N, xform, cos0, sin0, cos1, sin1, to3);
+        xform_send_lane(row_BRAM[4], b, N, xform, cos0, sin0, cos1, sin1, to4);
+        xform_send_lane(row_BRAM[5], b, N, xform, cos0, sin0, cos1, sin1, to5);
+        xform_send_lane(row_BRAM[6], b, N, xform, cos0, sin0, cos1, sin1, to6);
+        xform_send_lane(row_BRAM[7], b, N, xform, cos0, sin0, cos1, sin1, to7);
     }
 recv:
     for (int b = 0; b < BEATS; b++) {
 #pragma HLS PIPELINE II=1
         const int   k0 = 2 * b, k1 = 2 * b + 1;
-        const float c0 = twid_cos[k0], s0 = twid_sin[k0];
-        const float c1 = twid_cos[k1], s1 = twid_sin[k1];
-        xform_recv_lane(from0, b, N, tf, c0, s0, c1, s1, band, rib + 0);
-        xform_recv_lane(from1, b, N, tf, c0, s0, c1, s1, band, rib + 1);
-        xform_recv_lane(from2, b, N, tf, c0, s0, c1, s1, band, rib + 2);
-        xform_recv_lane(from3, b, N, tf, c0, s0, c1, s1, band, rib + 3);
-        xform_recv_lane(from4, b, N, tf, c0, s0, c1, s1, band, rib + 4);
-        xform_recv_lane(from5, b, N, tf, c0, s0, c1, s1, band, rib + 5);
-        xform_recv_lane(from6, b, N, tf, c0, s0, c1, s1, band, rib + 6);
-        xform_recv_lane(from7, b, N, tf, c0, s0, c1, s1, band, rib + 7);
+        const float cos0 = twid_cos[k0], sin0 = twid_sin[k0];
+        const float cos1 = twid_cos[k1], sin1 = twid_sin[k1];
+        xform_recv_lane(from0, b, N, xform, cos0, sin0, cos1, sin1, band, rib + 0);
+        xform_recv_lane(from1, b, N, xform, cos0, sin0, cos1, sin1, band, rib + 1);
+        xform_recv_lane(from2, b, N, xform, cos0, sin0, cos1, sin1, band, rib + 2);
+        xform_recv_lane(from3, b, N, xform, cos0, sin0, cos1, sin1, band, rib + 3);
+        xform_recv_lane(from4, b, N, xform, cos0, sin0, cos1, sin1, band, rib + 4);
+        xform_recv_lane(from5, b, N, xform, cos0, sin0, cos1, sin1, band, rib + 5);
+        xform_recv_lane(from6, b, N, xform, cos0, sin0, cos1, sin1, band, rib + 6);
+        xform_recv_lane(from7, b, N, xform, cos0, sin0, cos1, sin1, band, rib + 7);
     }
 }
 
 // FILL task (Approach C producer): DCT the band's TILE rows into `band`. Step 2a: nested
 // DATAFLOW pipelines load ∥ send/recv across the TILE/FFT_LANES batches (row_BRAM is the
 // per-iteration ping-pong channel). `band` is fill's output channel to the outer dataflow.
-static void dct_fill_band(const float* mat_in, int tr, int tf,
+static void dct_fill_band(const float* mat_in, int tr, int xform,
                           const float twid_cos[FFT_PTS], const float twid_sin[FFT_PTS],
                           float band[TILE][GRID],
                           hls::stream<axis_t>& to0, hls::stream<axis_t>& to1,
@@ -206,7 +206,7 @@ batch_loop:
 #pragma HLS array_partition variable=row_BRAM complete dim=1          // 8 lane-banks
 #pragma HLS array_partition variable=row_BRAM cyclic factor=16 dim=2  // sink 16 floats/beat
         dct_load_rows(mat_in, tr, batch, row_BRAM);
-        dct_sendrecv_rows(row_BRAM, twid_cos, twid_sin, band, batch, tf,
+        dct_sendrecv_rows(row_BRAM, twid_cos, twid_sin, band, batch, xform,
                           to0, to1, to2, to3, to4, to5, to6, to7,
                           from0, from1, from2, from3, from4, from5, from6, from7);
     }
@@ -227,13 +227,13 @@ wr_o:
 }
 
 // Fused pass: transform every row band-by-band (8 lanes interleaved), each band written
-// TRANSPOSED. transform_mode `tf` selects DCT / IDCT / IDXST (all share the one forward
+// TRANSPOSED. transform_mode `xform` selects DCT / IDCT / IDXST (all share the one forward
 // FFT; only the PL send/recv pre/post switch). num_rows = GRID; host runs the AIE graph
 // g.run(GRID / DENSITY_LANES). Approach C (step 1): band-level DATAFLOW pipelines
 // consecutive bands -- writeback(N) overlaps fill(N+1) via the ping-ponged per-iteration
 // `band`. Two DCT passes = forward 2D DCT (a_uv); an IDCT then an IDXST pass (and the
 // mirror) = the Stage 4 inverse field solve.
-static void dct_transpose_pass(const float* mat_in, float* mat_out, int tf,
+static void dct_transpose_pass(const float* mat_in, float* mat_out, int xform,
                                hls::stream<axis_t>& to0, hls::stream<axis_t>& to1,
                                hls::stream<axis_t>& to2, hls::stream<axis_t>& to3,
                                hls::stream<axis_t>& to4, hls::stream<axis_t>& to5,
@@ -273,7 +273,7 @@ band_loop:
 #pragma HLS array_partition variable=band cyclic factor=4 dim=2 // recv's 2 writes/beat land in
         // distinct banks for both patterns: TF_DCT writes k0,k1 (stride 1); TF_IDCT/IDXST scatter
         // unshuf(2b),unshuf(2b+1) (stride 2, same parity). factor=4 separates both -> II=1 recv.
-        dct_fill_band(mat_in, tr, tf, twid_cos, twid_sin, band,
+        dct_fill_band(mat_in, tr, xform, twid_cos, twid_sin, band,
                       to0, to1, to2, to3, to4, to5, to6, to7,
                       from0, from1, from2, from3, from4, from5, from6, from7);
         dct_writeback_band(band, mat_out, tr);

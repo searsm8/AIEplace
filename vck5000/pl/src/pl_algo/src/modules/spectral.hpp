@@ -34,11 +34,11 @@ rows:
 #pragma HLS PIPELINE II=1
             const float w_v   = TWO_PI * v / N;
             const float denom = w_u * w_u + w_v * w_v;
-            const float a     = a_uv[u * N + v];
+            const float coeff = a_uv[u * N + v];
             float out;
             if (u == 0 && v == 0) out = 0.0f;                       // drop DC
-            else out = (axis == 0) ? (a * w_u / denom)              // Ex_hat
-                                   : (a * w_v / denom);             // Ey_hat
+            else out = (axis == 0) ? (coeff * w_u / denom)          // Ex_hat
+                                   : (coeff * w_v / denom);         // Ey_hat
             field[u * N + v] = out;
         }
     }
