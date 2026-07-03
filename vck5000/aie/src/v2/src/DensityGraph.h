@@ -88,17 +88,26 @@ class DensityGraph : public adf::graph {
   public:
     adf::input_plio fft_in[DENSITY_CHANNELS];
     adf::output_plio fft_out[DENSITY_CHANNELS];
-    adf::input_plio ifft_in[DENSITY_CHANNELS];
-    adf::output_plio ifft_out[DENSITY_CHANNELS];
+
+    adf::input_plio ifft_psi_in[DENSITY_CHANNELS];
+    adf::output_plio ifft_psi_out[DENSITY_CHANNELS];
+
+    adf::input_plio ifft_ksi_in[DENSITY_CHANNELS];
+    adf::output_plio ifft_ksi_out[DENSITY_CHANNELS];
+
+    adf::input_plio idxst_ksi_in[DENSITY_CHANNELS];
+    adf::output_plio idxst_ksi_out[DENSITY_CHANNELS];
 
     FFTGraph fft[DENSITY_CHANNELS];
-    IFFTGraph ifft[DENSITY_CHANNELS];
+    IFFTGraph ifft_psi[DENSITY_CHANNELS];
+    IFFTGraph ifft_ksi[DENSITY_CHANNELS];
+    IFFTGraph idxst_ksi[DENSITY_CHANNELS];
 
     DensityGraph() {
 
       for (int i = 0; i < DENSITY_CHANNELS; i++) {
 
-	fft[i].place((i%2)*((FFT_CASCADE_LEN/2)+1), (i & ~1));
+        fft[i].place((i%2)*((FFT_CASCADE_LEN/2)+1), (i & ~1));
 
         fft_in[i] = adf::input_plio::create("fft_in"+std::to_string(i), adf::plio_128_bits, "test_data/density/input.dat");
         fft_out[i] = adf::output_plio::create("fft_out"+std::to_string(i), adf::plio_128_bits, "test_data/density/golden.dat");
@@ -106,13 +115,29 @@ class DensityGraph : public adf::graph {
         adf::connect<adf::stream>(fft_in[i].out[0], fft[i].in);
         adf::connect<adf::stream>(fft[i].out, fft_out[i].in[0]);
 
-	ifft[i].place((i%2)*((FFT_CASCADE_LEN/2)+1)+12, (i & ~1));
+        ifft_psi[i].place((i%2)*((FFT_CASCADE_LEN/2)+1)+12, (i & ~1));
 
-        ifft_in[i] = adf::input_plio::create("ifft_in"+std::to_string(i), adf::plio_128_bits, "test_data/density/input.dat");
-        ifft_out[i] = adf::output_plio::create("ifft_out"+std::to_string(i), adf::plio_128_bits, "test_data/density/golden.dat");
+        ifft_psi_in[i] = adf::input_plio::create("ifft_psi_in"+std::to_string(i), adf::plio_128_bits, "test_data/density/input.dat");
+        ifft_psi_out[i] = adf::output_plio::create("ifft_psi_out"+std::to_string(i), adf::plio_128_bits, "test_data/density/golden.dat");
 
-        adf::connect<adf::stream>(ifft_in[i].out[0], ifft[i].in);
-        adf::connect<adf::stream>(ifft[i].out, ifft_out[i].in[0]);
+        adf::connect<adf::stream>(ifft_psi_in[i].out[0], ifft_psi[i].in);
+        adf::connect<adf::stream>(ifft_psi[i].out, ifft_psi_out[i].in[0]);
+
+        ifft_ksi[i].place((i%2)*((FFT_CASCADE_LEN/2)+1)+24, (i & ~1));
+
+        ifft_ksi_in[i] = adf::input_plio::create("ifft_ksi_in"+std::to_string(i), adf::plio_128_bits, "test_data/density/input.dat");
+        ifft_ksi_out[i] = adf::output_plio::create("ifft_ksi_out"+std::to_string(i), adf::plio_128_bits, "test_data/density/golden.dat");
+
+        adf::connect<adf::stream>(ifft_ksi_in[i].out[0], ifft_ksi[i].in);
+        adf::connect<adf::stream>(ifft_ksi[i].out, ifft_ksi_out[i].in[0]);
+
+        idxst_ksi[i].place((i%2)*((FFT_CASCADE_LEN/2)+1)+36, (i & ~1));
+
+        idxst_ksi_in[i] = adf::input_plio::create("idxst_ksi_in"+std::to_string(i), adf::plio_128_bits, "test_data/density/input.dat");
+        idxst_ksi_out[i] = adf::output_plio::create("idxst_ksi_out"+std::to_string(i), adf::plio_128_bits, "test_data/density/golden.dat");
+
+        adf::connect<adf::stream>(idxst_ksi_in[i].out[0], idxst_ksi[i].in);
+        adf::connect<adf::stream>(idxst_ksi[i].out, idxst_ksi_out[i].in[0]);
 
       }
     }
