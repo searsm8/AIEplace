@@ -91,6 +91,13 @@ void runForceGather(const NodeBox* node_box, int num_nodes, int num_movable,
                     float bin_w, float bin_h,
                     coord_t* node_grad, const char* xclbin_path);
 
+// Stage 5b: the full density gradient in one device/graph session -- node geometry ->
+// density_bin -> forward 2D DCT -> spectral -> inverse -> force_gather -> per-node density
+// gradient (node_grad[num_movable], caller-allocated). AIE-using.
+void runDensityGradient(const NodeBox* node_box, int num_nodes, int num_movable,
+                        float bin_w, float bin_h, float target_density,
+                        coord_t* node_grad, const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DRIVER_HPP

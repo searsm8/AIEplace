@@ -38,6 +38,7 @@ int main(int argc, char** argv) {
         printf("       %s --spectral        <xclbin>\n", argv[0]);
         printf("       %s --field           <xclbin>\n", argv[0]);
         printf("       %s --force-gather    <xclbin>\n", argv[0]);
+        printf("       %s --density-grad    <xclbin>\n", argv[0]);
         return 1;
     }
 
@@ -80,6 +81,10 @@ int main(int argc, char** argv) {
     // Stage 5a: verify the force gather (per-node density gradient) on synthetic data.
     if (argc >= 3 && std::strcmp(argv[1], "--force-gather") == 0)
         return plalgo::runForceGatherVerify(argv[2]);
+
+    // Stage 5b: verify the full density gradient pipeline end-to-end.
+    if (argc >= 3 && std::strcmp(argv[1], "--density-grad") == 0)
+        return plalgo::runDensityGradientVerify(argv[2]);
 #endif
 
 #ifdef USE_XILINX_XRT

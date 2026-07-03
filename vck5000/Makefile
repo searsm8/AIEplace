@@ -231,6 +231,10 @@ run-field: $(XCLBIN) $(HOST_EXE)
 # Stage 5a: force gather (PL-only, but rides the AIE=pl_algo xclbin via the mode flag).
 run-force-gather: $(XCLBIN) $(HOST_EXE)
 	$(call STAGE4_RUN,--force-gather)
+# Stage 5b: full density gradient end-to-end (density_bin -> field -> force_gather).
+.PHONY: run-density-grad
+run-density-grad: $(XCLBIN) $(HOST_EXE)
+	$(call STAGE4_RUN,--density-grad)
 
 
 # make dse

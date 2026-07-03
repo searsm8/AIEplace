@@ -9,6 +9,10 @@ namespace plalgo {
 
 int runForceGatherVerify(const char* xclbin_path);
 
+// Stage 5b: end-to-end density gradient (density_bin -> 2D DCT -> spectral -> inverse ->
+// force_gather) vs a scatter->naive-field->gather golden. Returns 0 on PASS.
+int runDensityGradientVerify(const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_FORCE_VERIFY_HPP

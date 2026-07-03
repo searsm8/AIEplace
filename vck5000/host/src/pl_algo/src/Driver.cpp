@@ -582,4 +582,95 @@ void runForceGather(const NodeBox* node_box, int num_nodes, int num_movable,
     std::memcpy(node_grad, bo_grad.map<void*>(), grad_bytes);
 }
 
+// Stage 5b: the full density gradient in ONE device/graph session -- node geometry ->
+// density_bin (rho) -> forward 2D DCT (a_uv) -> spectral (Ex_hat,Ey_hat) -> inverse
+// (Ex,Ey) -> force_gather -> per-movable-node density gradient. Intermediate matrices
+// cross via host. Ports: node_grad(7), node_box(8), bin_density(9) [rho then eField_x],
+// dct_in(10) [field in/out then eField_y], dct_out(11) [field out]. AIE-using.
+void runDensityGradient(const NodeBox* node_box, int num_nodes, int num_movable,
+                        float bin_w, float bin_h, float target_density,
+                        coord_t* node_grad, const char* xclbin_path) {
+    const int    N          = DENSITY_GRID;
+    const size_t box_bytes  = (size_t)num_nodes    * sizeof(NodeBox);
+    const size_t mat_bytes  = (size_t)N * N        * sizeof(float);
+    const size_t grad_bytes = (size_t)num_movable  * sizeof(coord_t);
+
+    xrt::device device(0);
+    xrt::uuid   uuid = device.load_xclbin(xclbin_path);
+    xrt::kernel top(device, uuid, "top");
+    xrt::graph  fft(device, uuid, "density_fft_graph");
+
+    xrt::bo d_node = xrt::bo(device, sizeof(coord_t), top.group_id(0));
+    xrt::bo d_nptr = xrt::bo(device, sizeof(int32_t), top.group_id(1));
+    xrt::bo d_pins = xrt::bo(device, sizeof(NodePin), top.group_id(2));
+    xrt::bo d_npin = xrt::bo(device, sizeof(NodePin), top.group_id(3));
+    xrt::bo d_lut  = xrt::bo(device, sizeof(float),   top.group_id(4));
+    xrt::bo d_bb   = xrt::bo(device, sizeof(NetBBox), top.group_id(5));
+    xrt::bo d_sums = xrt::bo(device, sizeof(NetSums), top.group_id(6));
+    xrt::bo bo_grad = xrt::bo(device, grad_bytes, top.group_id(7));
+    xrt::bo bo_box  = xrt::bo(device, box_bytes,  top.group_id(8));
+    xrt::bo bo_bd   = xrt::bo(device, mat_bytes,  top.group_id(9));   // rho, then eField_x
+    xrt::bo bo_din  = xrt::bo(device, mat_bytes,  top.group_id(10));  // field in/out, then eField_y
+    xrt::bo bo_dout = xrt::bo(device, mat_bytes,  top.group_id(11));  // field out
+
+    std::memcpy(bo_box.map<void*>(), node_box, box_bytes);
+    bo_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    // ---- density_bin: node_box -> bin_density (bo_bd) = rho ----
+    {
+        xrt::run run = top(d_node, d_nptr, d_pins, d_npin, d_lut, d_bb, d_sums, bo_grad,
+                           bo_box, bo_bd, bo_din, bo_dout,
+                           0.0f, 0.0f, 0, 0, num_movable, 0,
+                           num_nodes, bin_w, bin_h, target_density,
+                           0, 0, (int)MODE_DENSITY_BIN);
+        run.wait();
+    }
+    bo_bd.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::vector<float> rho((size_t)N * N);
+    std::memcpy(rho.data(), bo_bd.map<void*>(), mat_bytes);
+
+    // ---- field solve: rho -> Ex, Ey (crossing via bo_din -> bo_dout, scratch via host) ----
+    auto field_pass = [&](const float* src, float* dst, int mode, int sub) {
+        std::memcpy(bo_din.map<void*>(), src, mat_bytes);
+        bo_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        if (mode == (int)MODE_DCT_TRANSPOSE) fft.run(N / DENSITY_LANES);
+        xrt::run run = top(d_node, d_nptr, d_pins, d_npin, d_lut, d_bb, d_sums, bo_grad,
+                           bo_box, bo_bd, bo_din, bo_dout,
+                           0.0f, 0.0f, 0, 0, 0, 0,
+                           0, 1.0f, 1.0f, 1.0f,
+                           sub, N, mode);
+        run.wait();
+        if (mode == (int)MODE_DCT_TRANSPOSE) fft.wait();
+        bo_dout.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        std::memcpy(dst, bo_dout.map<void*>(), mat_bytes);
+    };
+
+    std::vector<float> t1((size_t)N*N), a_uv((size_t)N*N), Ex_hat((size_t)N*N), Ey_hat((size_t)N*N);
+    std::vector<float> tE((size_t)N*N), tY((size_t)N*N), Ex((size_t)N*N), Ey((size_t)N*N);
+    field_pass(rho.data(),    t1.data(),     (int)MODE_DCT_TRANSPOSE, (int)TFH_DCT);
+    field_pass(t1.data(),     a_uv.data(),   (int)MODE_DCT_TRANSPOSE, (int)TFH_DCT);
+    field_pass(a_uv.data(),   Ex_hat.data(), (int)MODE_SPECTRAL, 0);
+    field_pass(a_uv.data(),   Ey_hat.data(), (int)MODE_SPECTRAL, 1);
+    field_pass(Ex_hat.data(), tE.data(),     (int)MODE_DCT_TRANSPOSE, (int)TFH_IDCT);
+    field_pass(tE.data(),     Ex.data(),     (int)MODE_DCT_TRANSPOSE, (int)TFH_IDXST);
+    field_pass(Ey_hat.data(), tY.data(),     (int)MODE_DCT_TRANSPOSE, (int)TFH_IDXST);
+    field_pass(tY.data(),     Ey.data(),     (int)MODE_DCT_TRANSPOSE, (int)TFH_IDCT);
+
+    // ---- force_gather: eField_x = bo_bd(9), eField_y = bo_din(10), node_box(8) -> node_grad(7) ----
+    std::memcpy(bo_bd.map<void*>(),  Ex.data(), mat_bytes);
+    std::memcpy(bo_din.map<void*>(), Ey.data(), mat_bytes);
+    bo_bd.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    {
+        xrt::run run = top(d_node, d_nptr, d_pins, d_npin, d_lut, d_bb, d_sums, bo_grad,
+                           bo_box, bo_bd, bo_din, bo_dout,
+                           0.0f, 0.0f, 0, 0, num_movable, 0,
+                           num_nodes, bin_w, bin_h, 0.0f,
+                           0, 0, (int)MODE_FORCE_GATHER);
+        run.wait();
+    }
+    bo_grad.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::memcpy(node_grad, bo_grad.map<void*>(), grad_bytes);
+}
+
 } // namespace plalgo
