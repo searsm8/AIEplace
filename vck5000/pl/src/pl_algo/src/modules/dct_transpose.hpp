@@ -74,7 +74,8 @@ static inline void xform_send_lane(const float row[FFT_PTS], int b, int N, int x
         const float x0 = row[src0] * (n0 == 0 ? 0.5f : 1.0f);  // halve the DC bin (z_0 *= 0.5)
         const float x1 = row[src1];
         re0 =  x0 * cos0;  im0 = -x0 * sin0;   // z_n = X_n * e^{-i*pi*n/2N}
-        re1 =  x1 * cos1;  im1 = -x1 * sin1;
+        re1 =  x1 * cos1;  im1 = -x1 * sin1;   // <-- This negation on imaginary part is MAGICAL. 
+                                               // It is the conjugation of inputs, which turns the FFT into an IFFT.
     }
     ap_int<128> beat;
     beat.range(31, 0)   = dct_f2b(re0);  beat.range(63, 32)  = dct_f2b(im0);
@@ -102,7 +103,9 @@ static inline void xform_recv_lane(hls::stream<axis_t>& from, int b, int N, int 
     } else {                                            // TF_IDCT / TF_IDXST
         const int dst0 = xform_unshuf_idx(j0, N);
         const int dst1 = xform_unshuf_idx(j1, N);
-        float val0 = re0, val1 = re1;                   // out = Re(F_j)
+        // Here is where we would conjugate the output for IFFT, but since we only need the real part, 
+        // we can safely omit the conjugation and just take the Real part.
+        float val0 = re0, val1 = re1;                   // out = Re(F_j) = Re(conj(F_j)) -> No need to conjugate.
         if (xform == TF_IDXST) {                        // negate odd output positions
             if (dst0 & 1) val0 = -val0;
             if (dst1 & 1) val1 = -val1;
