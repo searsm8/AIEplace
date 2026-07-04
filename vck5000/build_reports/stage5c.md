@@ -169,6 +169,70 @@ final positions finite/in-bounds -> PASS (loop closes correctly)
 clamp). A longer run (6 iterations) is underway to (a) show real cell movement past the seed step and
 (b) confirm the large-α step stays stable. Results appended below when it completes.
 
-### Run 2 — 6 iterations (in progress)
+### Run 2 — 6 iterations, `mgc_pci_bridge32_b`. EXIT=0, PASS.
 
-_pending._
+```
+iter  HPWL         overflow  alpha   coeff
+ 1    8.80562e+08  0.9981    0.01    0.0000
+ 2    8.80560e+08  0.9999    4000    0.2818
+ 3    8.80232e+08  0.9995    4000    0.4340
+ 4    8.79977e+08  0.9989    4000    0.5311
+ 5    8.79573e+08  0.9983    4000    0.5988
+ 6    8.78953e+08  0.9975    4000    0.6489
+final positions finite/in-bounds; overflow decreasing -> PASS
+```
+
+**This is a clean, stable, monotonic descent — the whole placer works.**
+- **HPWL descends monotonically** from iter 2 (once the seed step is past): 8.8056e8 → 8.7895e8,
+  −0.19% over 6 iters and *accelerating* (−0.075% in iter 6 alone) as the Nesterov coeff ramps
+  0.00 → 0.28 → 0.43 → 0.53 → 0.60 → 0.65 (exactly the (a_k−1)/a_{k+1} recurrence).
+- **overflow declines steadily** from its iter-2 peak (0.9999 → 0.9975) — cells are beginning to
+  de-overlap even with λ still tiny (pure-wirelength phase; real spreading comes once λ grows).
+- **The α=4000 BB step is stable — no overshoot/explosion.** After α saturates the clamp at iter 2
+  (Δv≈0 following the tiny seed step), the large step at iters 2–6 moves cells in a
+  HPWL-reducing direction and the die clamp keeps everything in-bounds. So **BB-without-backtracking
+  is stable on this benchmark** for these iterations (a real-HW long run should still confirm it
+  over the full solve — see Stage 6 item 7).
+- Deterministic: the 2-iter run's iters 1–2 reproduce exactly here.
+
+**Conclusion (5c.6).** The full PL placement loop is functionally correct end-to-end in sw_emu:
+gradients → combine/precond/step → write-back → next-iteration gradients, with the host policy
+driving λ/α/γ/precond/momentum. HPWL and overflow both move the right way and the step is stable.
+Full convergence + final-quality comparison vs markv1 is the real-HW task (Stage 6, item 1).
+
+---
+
+## Stage 5c status & the next stage
+
+**Stage 5c (functional draft of the iteration loop) is complete.** Every sub-item is implemented,
+and everything that can be verified in sw_emu is verified:
+- 5c.1 combine, 5c.2 Nesterov+precond, 5c.3 memory_writer — `--iter-update` rel_rms 3.28e-08.
+- 5c.4 metrics — `--metrics` HPWL/overflow rel_err ~4e-09.
+- 5c.5 orchestration + 5c.6 loop — `--place` runs end-to-end, loop closes, HPWL matches the metrics
+  golden, policy scalars evolve per the recurrences.
+
+Per the project workflow (math → software golden → hardware draft → **hardware optimization**), the
+functional hardware draft is done. The next stage is **Stage 6: real-HW validation + hardware
+optimization**, roughly in priority order:
+
+1. **Real-hardware convergence (Geert's card).** The true completion of 5c.6: run the placement to
+   full convergence (50–200 iters) on real HW — infeasible in sw_emu — and compare final HPWL /
+   overflow against markv1's DSE numbers. This is the one remaining *correctness* gate.
+2. **Re-tune the λ / γ schedule for the 1024² grid.** The field magnitudes at 1024² differ from
+   markv1's 64² by orders of magnitude (this run's λ_init ≈ 3e-19). The *ratio*-based init is
+   scale-robust, but the multiplicative λ growth cadence and the γ schedule constants were tuned at
+   64² and should be re-checked at 1024² once real-HW iteration counts are available.
+3. **Re-enable fillers.** Excluded in v1 (standing pending item); materially affects density/quality.
+   Needed before a fair final-quality comparison vs markv1.
+4. **Fuse the density solve.** The 8-pass field solve currently round-trips each matrix through host
+   memory per iteration (~16 host↔device copies/iter). Fusing the passes into on-chip dataflow (and
+   widening the coord/matrix ports from 32-bit to 128-bit beats per DATAFLOW.md) is the biggest
+   throughput lever and the core of the "hardware optimization" stage.
+5. **Single-kernel iteration.** Collapse the per-iteration `MODE_*` dispatch into one fused datapath
+   (hpwl + density + step) once the multi-pass density is streamlined.
+6. **BB α on the PL.** Currently a host reduction (v1); move the ‖Δv‖/‖Δg‖ reduction onto the PL.
+7. **Backtracking / stability.** v1 has no backtracking; the BB α can saturate to the 4000 clamp
+   after a tiny step (seen at iter 2). The die clamp bounds it, but real-HW long runs should confirm
+   this doesn't cause overshoot — if it does, port markv1's Algorithm-2 backtracking.
+8. **Convergence + best-solution tracking** on the host (overflow-countdown + snapshot/restore),
+   currently minimal in `runPlacement`.
