@@ -98,6 +98,26 @@ void runDensityGradient(const NodeBox* node_box, int num_nodes, int num_movable,
                         float bin_w, float bin_h, float target_density,
                         coord_t* node_grad, const char* xclbin_path);
 
+// Stage 5c: one Nesterov step (iteration_update -> memory_writer). Inputs are the two
+// per-movable-node gradients at v_k, node_box ({x,y}=v_k anchor, {w,h}=cell size), the
+// committed u_k, and the per-node preconditioner weight; scalars lambda/alpha/coeff and
+// the die extents. Outputs u_out (u_{k+1}) and v_out (v_{k+1}), each caller-allocated
+// [num_movable]. Pure PL (no AIE graph).
+void runIterUpdate(int num_movable,
+                   const coord_t* g_hpwl, const coord_t* g_density,
+                   const NodeBox* node_box, const coord_t* u_k, const float* precond,
+                   float lambda, float alpha, float coeff, float die_xmax, float die_ymax,
+                   coord_t* u_out, coord_t* v_out, const char* xclbin_path);
+
+// Stage 5c: metrics reduce. node_pos[num_nodes] (positions to measure), net_ptr[num_nets+1]
+// + pins[num_pins] (CSR connectivity), bin_density[GRID*GRID] (rho). Writes out_hpwl and
+// out_overflow_sum (the raw sum_bins max(0,rho-target); host scales by bin_area/movable_area).
+// Pure PL (no AIE graph).
+void runMetrics(const coord_t* node_pos, const int* net_ptr, const NodePin* pins,
+                int num_nodes, int num_nets, int num_pins,
+                const float* bin_density, float target_density,
+                float* out_hpwl, float* out_overflow_sum, const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DRIVER_HPP

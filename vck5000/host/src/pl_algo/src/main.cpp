@@ -20,6 +20,8 @@
 #include "TransposeVerify.hpp"
 #include "FieldVerify.hpp"
 #include "ForceVerify.hpp"
+#include "IterVerify.hpp"
+#include "MetricsVerify.hpp"
 #include <cstring>
 #endif
 
@@ -39,6 +41,8 @@ int main(int argc, char** argv) {
         printf("       %s --field           <xclbin>\n", argv[0]);
         printf("       %s --force-gather    <xclbin>\n", argv[0]);
         printf("       %s --density-grad    <xclbin>\n", argv[0]);
+        printf("       %s --iter-update     <xclbin>\n", argv[0]);
+        printf("       %s --metrics    <benchmark_dir> <xclbin>\n", argv[0]);
         return 1;
     }
 
@@ -85,6 +89,10 @@ int main(int argc, char** argv) {
     // Stage 5b: verify the full density gradient pipeline end-to-end.
     if (argc >= 3 && std::strcmp(argv[1], "--density-grad") == 0)
         return plalgo::runDensityGradientVerify(argv[2]);
+
+    // Stage 5c.1/5c.2: verify one Nesterov step on synthetic data (no benchmark needed).
+    if (argc >= 3 && std::strcmp(argv[1], "--iter-update") == 0)
+        return plalgo::runIterUpdateVerify(argv[2]);
 #endif
 
 #ifdef USE_XILINX_XRT
@@ -110,6 +118,17 @@ int main(int argc, char** argv) {
                pk.header.num_movable, pk.header.num_nodes,
                pk.header.num_nets, pk.header.num_pins);
         return plalgo::runDensityVerify(db, pk, argv[3]);
+    }
+
+    // Stage 5c.4: verify the metrics reduce (HPWL on a real design, overflow on synthetic rho).
+    if (argc >= 4 && std::strcmp(argv[1], "--metrics") == 0) {
+        AIEplace::DataBase db(argv[2]);
+        db.printInfo();
+        plalgo::PackedDesign pk = plalgo::packDesign(db);
+        printf("[pack] M=%d  N=%d  nets=%d  pins=%d\n",
+               pk.header.num_movable, pk.header.num_nodes,
+               pk.header.num_nets, pk.header.num_pins);
+        return plalgo::runMetricsVerify(pk, argv[3]);
     }
 #endif
 

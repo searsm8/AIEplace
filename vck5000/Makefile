@@ -236,6 +236,21 @@ run-force-gather: $(XCLBIN) $(HOST_EXE)
 run-density-grad: $(XCLBIN) $(HOST_EXE)
 	$(call STAGE4_RUN,--density-grad)
 
+# Stage 5c.1/5c.2: one Nesterov step (iteration_update -> memory_writer), synthetic (PL-only).
+.PHONY: run-iter-update
+run-iter-update: $(XCLBIN) $(HOST_EXE)
+	$(call STAGE4_RUN,--iter-update)
+
+# Stage 5c.4: metrics reduce (HPWL on a benchmark, overflow on synthetic rho). PL-only.
+.PHONY: run-metrics
+run-metrics: $(XCLBIN) $(HOST_EXE)
+	mkdir -p $(BUILD_DIR)/$(TARGET)/run
+	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
+	cd $(BUILD_DIR)/$(TARGET)/run && \
+	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
+	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
+	$(HOST_EXE) --metrics $(BENCH) $(XCLBIN)
+
 
 # make dse
 # launch python script to perform Design Space Exploration

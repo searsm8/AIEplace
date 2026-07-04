@@ -673,4 +673,109 @@ void runDensityGradient(const NodeBox* node_box, int num_nodes, int num_movable,
     std::memcpy(node_grad, bo_grad.map<void*>(), grad_bytes);
 }
 
+// Stage 5c: one Nesterov step. Port aliasing (host_interface.hpp MODE_ITERATION_UPDATE):
+// u_k=node_pos(0), precond=exp_lut(4), g_hpwl=node_grad(7), node_box(8), v_out=bin_density(9),
+// g_density=dct_in(10), u_out=dct_out(11). Pure PL (no AIE graph).
+void runIterUpdate(int num_movable,
+                   const coord_t* g_hpwl, const coord_t* g_density,
+                   const NodeBox* node_box, const coord_t* u_k, const float* precond,
+                   float lambda, float alpha, float coeff, float die_xmax, float die_ymax,
+                   coord_t* u_out, coord_t* v_out, const char* xclbin_path) {
+    const int    M           = num_movable;
+    const size_t coord_bytes = (size_t)M * sizeof(coord_t);
+    const size_t box_bytes   = (size_t)M * sizeof(NodeBox);
+    const size_t prec_bytes  = (size_t)M * sizeof(float);
+
+    xrt::device device(0);
+    xrt::uuid   uuid = device.load_xclbin(xclbin_path);
+    xrt::kernel top(device, uuid, "top");
+
+    xrt::bo bo_uk   = xrt::bo(device, coord_bytes, top.group_id(0));   // u_k
+    xrt::bo d_nptr  = xrt::bo(device, sizeof(int32_t), top.group_id(1));
+    xrt::bo d_pins  = xrt::bo(device, sizeof(NodePin), top.group_id(2));
+    xrt::bo d_npin  = xrt::bo(device, sizeof(NodePin), top.group_id(3));
+    xrt::bo bo_prec = xrt::bo(device, prec_bytes,  top.group_id(4));   // precond
+    xrt::bo d_bb    = xrt::bo(device, sizeof(NetBBox), top.group_id(5));
+    xrt::bo d_sums  = xrt::bo(device, sizeof(NetSums), top.group_id(6));
+    xrt::bo bo_ghp  = xrt::bo(device, coord_bytes, top.group_id(7));   // g_hpwl
+    xrt::bo bo_box  = xrt::bo(device, box_bytes,   top.group_id(8));   // v_k + size
+    xrt::bo bo_vout = xrt::bo(device, coord_bytes, top.group_id(9));   // v_{k+1} out
+    xrt::bo bo_gden = xrt::bo(device, coord_bytes, top.group_id(10));  // g_density
+    xrt::bo bo_uout = xrt::bo(device, coord_bytes, top.group_id(11));  // u_{k+1} out
+
+    std::memcpy(bo_uk.map<void*>(),   u_k,       coord_bytes);
+    std::memcpy(bo_prec.map<void*>(), precond,   prec_bytes);
+    std::memcpy(bo_ghp.map<void*>(),  g_hpwl,    coord_bytes);
+    std::memcpy(bo_box.map<void*>(),  node_box,  box_bytes);
+    std::memcpy(bo_gden.map<void*>(), g_density, coord_bytes);
+    bo_uk.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_prec.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_ghp.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_gden.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    xrt::run run = top(bo_uk, d_nptr, d_pins, d_npin, bo_prec, d_bb, d_sums, bo_ghp,
+                       bo_box, bo_vout, bo_gden, bo_uout,
+                       lambda, alpha, 0, 0, M, 0,             // inv_gamma=lambda, inv_lut_step=alpha, num_movable=M
+                       0, coeff, die_xmax, die_ymax,          // bin_w=coeff, bin_h=die_xmax, target_density=die_ymax
+                       0, 0, (int)MODE_ITERATION_UPDATE);
+    run.wait();
+
+    bo_uout.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    bo_vout.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::memcpy(u_out, bo_uout.map<void*>(), coord_bytes);
+    std::memcpy(v_out, bo_vout.map<void*>(), coord_bytes);
+}
+
+// Stage 5c: metrics reduce. Ports: node_pos(0), net_ptr(1), pins(2), bin_density=rho(9),
+// out=dct_out(11). Pure PL (no AIE graph).
+void runMetrics(const coord_t* node_pos, const int* net_ptr, const NodePin* pins,
+                int num_nodes, int num_nets, int num_pins,
+                const float* bin_density, float target_density,
+                float* out_hpwl, float* out_overflow_sum, const char* xclbin_path) {
+    const size_t node_bytes = (size_t)num_nodes    * sizeof(coord_t);
+    const size_t nptr_bytes = (size_t)(num_nets+1) * sizeof(int32_t);
+    const size_t pins_bytes = (size_t)num_pins     * sizeof(NodePin);
+    const size_t bd_bytes   = (size_t)DENSITY_NBINS * sizeof(float);
+    const size_t out_bytes  = 2 * sizeof(float);
+
+    xrt::device device(0);
+    xrt::uuid   uuid = device.load_xclbin(xclbin_path);
+    xrt::kernel top(device, uuid, "top");
+
+    xrt::bo bo_node = xrt::bo(device, node_bytes, top.group_id(0));
+    xrt::bo bo_nptr = xrt::bo(device, nptr_bytes, top.group_id(1));
+    xrt::bo bo_pins = xrt::bo(device, pins_bytes, top.group_id(2));
+    xrt::bo d_npin  = xrt::bo(device, sizeof(NodePin), top.group_id(3));
+    xrt::bo d_lut   = xrt::bo(device, sizeof(float),   top.group_id(4));
+    xrt::bo d_bb    = xrt::bo(device, sizeof(NetBBox), top.group_id(5));
+    xrt::bo d_sums  = xrt::bo(device, sizeof(NetSums), top.group_id(6));
+    xrt::bo d_grad  = xrt::bo(device, sizeof(coord_t), top.group_id(7));
+    xrt::bo d_box   = xrt::bo(device, sizeof(NodeBox), top.group_id(8));
+    xrt::bo bo_bd   = xrt::bo(device, bd_bytes,  top.group_id(9));
+    xrt::bo d_din   = xrt::bo(device, sizeof(float), top.group_id(10));
+    xrt::bo bo_out  = xrt::bo(device, out_bytes, top.group_id(11));
+
+    std::memcpy(bo_node.map<void*>(), node_pos,    node_bytes);
+    std::memcpy(bo_nptr.map<void*>(), net_ptr,     nptr_bytes);
+    std::memcpy(bo_pins.map<void*>(), pins,        pins_bytes);
+    std::memcpy(bo_bd.map<void*>(),   bin_density, bd_bytes);
+    bo_node.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_nptr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_pins.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_bd.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    xrt::run run = top(bo_node, bo_nptr, bo_pins, d_npin, d_lut, d_bb, d_sums, d_grad,
+                       d_box, bo_bd, d_din, bo_out,
+                       0.0f, 0.0f, 0, num_nets, 0, 0,         // num_nets used
+                       0, 1.0f, 1.0f, target_density,         // target_density used
+                       0, 0, (int)MODE_METRICS);
+    run.wait();
+
+    bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    const float* o = bo_out.map<float*>();
+    *out_hpwl          = o[0];
+    *out_overflow_sum  = o[1];
+}
+
 } // namespace plalgo

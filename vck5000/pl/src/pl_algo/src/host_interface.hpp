@@ -182,11 +182,26 @@ enum top_mode { MODE_HPWL_GRAD = 0, MODE_DENSITY_BIN = 1, MODE_DCT_1D = 2,
                 MODE_SPECTRAL = 6,       // Stage 4: spectral multiply a_uv -> one field
                                          // (dct_stage = axis: 0 = Ex/w_u, 1 = Ey/w_v).
                                          // num_frames = N; dct_in (a_uv) -> dct_out (field).
-                MODE_FORCE_GATHER = 7 }; // Stage 5: per-node density gradient = gather
+                MODE_FORCE_GATHER = 7,   // Stage 5: per-node density gradient = gather
                                          // sum_bins overlap_area * eField. Reuses ports:
                                          // eField_x = bin_density (gmem9), eField_y = dct_in
                                          // (gmem10), node_box (gmem8) -> node_grad (gmem7).
                                          // scalars: num_movable, bin_w, bin_h.
+                MODE_ITERATION_UPDATE = 8, // Stage 5c: one Nesterov step (combine + precond +
+                                         // BB step + momentum + die clamp). DATAFLOW pair
+                                         // iteration_update -> memory_writer. Reuses ports:
+                                         // u_k = node_pos (gmem0), precond = exp_lut (gmem4),
+                                         // g_hpwl = node_grad (gmem7), {v_k,size} = node_box
+                                         // (gmem8), g_density = dct_in (gmem10); OUT: u_{k+1}
+                                         // = dct_out (gmem11), v_{k+1} = bin_density (gmem9).
+                                         // scalars: lambda=inv_gamma, alpha=inv_lut_step,
+                                         // coeff=bin_w, die_xmax=bin_h, die_ymax=target_density,
+                                         // num_movable.
+                MODE_METRICS = 9 };      // Stage 5c: reduce {HPWL, overflow_sum} for the host
+                                         // policy. HPWL from node_pos (gmem0) + net_ptr (gmem1)
+                                         // + pins (gmem2); overflow_sum from bin_density (gmem9).
+                                         // OUT: dct_out[0]=HPWL, dct_out[1]=overflow_sum (gmem11).
+                                         // scalars: num_nets, target_density.
 
 // ---- 1D DCT via the AIE FFT  (Stage 2 -- first AIE bring-up) ----------------
 // MODE_DCT_1D streams num_frames real rows of FFT_PTS points each through:

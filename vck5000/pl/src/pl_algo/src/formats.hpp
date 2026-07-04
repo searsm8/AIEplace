@@ -50,10 +50,12 @@ constexpr int COORDS_BEATS_PER_NODE = 1;
 constexpr int GRAD_BEATS_PER_NODE = 1;
 
 // ---- Nesterov state buffer (DDR) -------------------------------------------
-// Owned by Iteration Update. v1 layout: 2 beats per node.
-//   beat0 = | ux | uy | vx | vy |        (current u/v positions)
-//   beat1 = | prev_gx | prev_gy | --- | --- |
-constexpr int STATE_BEATS_PER_NODE = 2;
+// Owned by Iteration Update. v1 layout: the committed u positions only, one coord_t
+// (= | ux | uy |) per movable node. The look-ahead v lives in the canonical coords
+// buffer (stage 1) since the gradient pipeline is evaluated at v; v_k is passed to the
+// step via node_box.{x,y}. BB alpha is a host scalar in v1, so no on-PL prev-gradient
+// slot is kept (add one here if the BB reduction later moves onto the PL).
+constexpr int STATE_BEATS_PER_NODE = 1;
 
 // ---- Net / pin connectivity buffer (DDR, read-only) ------------------------
 // Variable-degree nets packed sequentially. Per net:

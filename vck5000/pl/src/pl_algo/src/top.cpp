@@ -24,8 +24,27 @@
 #include "modules/dct_transpose.hpp"
 #include "modules/spectral.hpp"
 #include "modules/force_gather.hpp"
+#include "modules/iteration_update.hpp"
+#include "modules/memory_writer.hpp"
+#include "modules/metrics.hpp"
 
 using namespace plalgo;
+
+// Stage 5c dataflow region: iteration_update (producer) -> stream -> memory_writer (consumer).
+// Kept as a dedicated function so #pragma HLS DATAFLOW sits at a canonical function-body top
+// level (not inside top()'s mode if/else chain). u_out and coords_out are distinct DDR bundles.
+static void iteration_step_df(const coord_t* g_hpwl, const coord_t* g_density,
+                              const NodeBox* node_box, const coord_t* u_in,
+                              const float* precond, coord_t* u_out, coord_t* coords_out,
+                              float lambda, float alpha, float coeff,
+                              float die_xmax, float die_ymax, int num_movable) {
+#pragma HLS DATAFLOW
+    hls::stream<coord_t> v_edge;
+#pragma HLS STREAM variable=v_edge depth=64
+    iteration_update(g_hpwl, g_density, node_box, u_in, precond, u_out,
+                     lambda, alpha, coeff, die_xmax, die_ymax, num_movable, v_edge);
+    memory_writer(coords_out, v_edge, num_movable);
+}
 
 extern "C" {
 void top(
@@ -178,6 +197,19 @@ void top(
         // Stage 5: per-node density gradient. eField_x = bin_density (gmem9), eField_y =
         // dct_in (gmem10), node geometry = node_box (gmem8) -> node_grad (gmem7).
         force_gather(node_box, bin_density, dct_in, node_grad, num_movable, bin_w, bin_h);
+    } else if (mode == MODE_ITERATION_UPDATE) {
+        // Stage 5c: one Nesterov step, streamed to the Memory Writer (single coords writer).
+        // Port aliasing (see host_interface.hpp MODE_ITERATION_UPDATE): u_k=node_pos(0),
+        // precond=exp_lut(4), g_hpwl=node_grad(7), {v_k,size}=node_box(8), g_density=dct_in(10);
+        // u_{k+1}=dct_out(11), v_{k+1}=bin_density(9). Scalars: lambda=inv_gamma, alpha=
+        // inv_lut_step, coeff=bin_w, die_xmax=bin_h, die_ymax=target_density.
+        iteration_step_df(node_grad, (const coord_t*)dct_in, node_box, node_pos, exp_lut,
+                          (coord_t*)dct_out, (coord_t*)bin_density,
+                          inv_gamma, inv_lut_step, bin_w, bin_h, target_density, num_movable);
+    } else if (mode == MODE_METRICS) {
+        // Stage 5c: reduce {HPWL, overflow_sum}. HPWL from node_pos(0)/net_ptr(1)/pins(2);
+        // overflow_sum from bin_density(9). Out: dct_out[0]=HPWL, dct_out[1]=overflow_sum.
+        metrics(node_pos, net_ptr, pins, bin_density, num_nets, target_density, dct_out);
     } else { // MODE_HPWL_GRAD
         hpwl_CU(node_pos, net_ptr, pins, npins, exp_lut, bb, sums, node_grad,
                 inv_gamma, inv_lut_step, lut_size, num_nets, num_movable, num_npins);

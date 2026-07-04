@@ -1,33 +1,30 @@
 #ifndef PL_ALGO_MEMORY_WRITER_HPP
 #define PL_ALGO_MEMORY_WRITER_HPP
 
-// Memory Writer module (black box for v1).
+// memory_writer -- Stage 5c: the SINGLE writer of the canonical node-coordinate buffer.
 //
-// Role: the SINGLE writer of the canonical node-coordinate buffer in DDR. The host
-// loads it once at startup; thereafter, each iteration the Iteration Update module
-// streams updated coordinates here and the Memory Writer commits them back into the
-// SAME DDR region (replaces the old host-side I/O module).
+// The host loads the coords buffer once at startup; thereafter each iteration the
+// Iteration Update module streams the updated probe positions v_{k+1} here and the
+// Memory Writer commits them into the coords buffer that the next iteration's gradient
+// pipeline reads. It is the consumer half of a DATAFLOW pair with iteration_update
+// (top.cpp wires the stream). Keeping coords single-writer is what lets the whole
+// iteration fuse into one kernel later (Stage 5c.5 note); for v1 it is one stage of the
+// MODE_ITERATION_UPDATE invocation.
 //
-// Inputs:
-//   coords_in : stream of updated node coordinates from Iteration Update,
-//               one beat per node = | x | y | pad | pad |  (see formats.hpp)
-//   num_nodes : number of movable nodes
-// Output:
-//   coords    : canonical DDR coordinate buffer (overwritten in place)
+// v1 layout: one movable node per coord_t (see host_interface.hpp) = | x | y |.
 
 #include "../formats.hpp"
+#include "../host_interface.hpp"
 
 namespace plalgo {
 
-static void memory_writer(beat_t* coords,
-                          hls::stream<axis_t>& coords_in,
-                          int num_nodes) {
-    // TODO: commit streamed coordinates to the canonical DDR buffer.
-    // Stub: drain the stream and write through so HLS keeps the ports live.
+static void memory_writer(coord_t* coords,               // [M] canonical coords (v), gmem9
+                          hls::stream<coord_t>& v_in,    // v_{k+1} from iteration_update
+                          int num_movable) {
 write_back:
-    for (int n = 0; n < num_nodes; n++) {
-        axis_t beat = coords_in.read();
-        coords[n] = beat.data;
+    for (int n = 0; n < num_movable; n++) {
+#pragma HLS PIPELINE
+        coords[n] = v_in.read();
     }
 }
 
