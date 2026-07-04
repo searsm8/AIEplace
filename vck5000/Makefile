@@ -251,6 +251,18 @@ run-metrics: $(XCLBIN) $(HOST_EXE)
 	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
 	$(HOST_EXE) --metrics $(BENCH) $(XCLBIN)
 
+# Stage 5c.5/5c.6: full placement loop for a few iterations on a benchmark. AIE-using.
+# Override iteration count with PLACE_ITERS. Needs the AIE=pl_algo xclbin.
+PLACE_ITERS ?= 2
+.PHONY: run-place
+run-place: $(XCLBIN) $(HOST_EXE)
+	mkdir -p $(BUILD_DIR)/$(TARGET)/run
+	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
+	cd $(BUILD_DIR)/$(TARGET)/run && \
+	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
+	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
+	$(HOST_EXE) --place $(BENCH) $(XCLBIN) $(PLACE_ITERS)
+
 
 # make dse
 # launch python script to perform Design Space Exploration

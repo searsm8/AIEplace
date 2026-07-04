@@ -118,6 +118,23 @@ void runMetrics(const coord_t* node_pos, const int* net_ptr, const NodePin* pins
                 const float* bin_density, float target_density,
                 float* out_hpwl, float* out_overflow_sum, const char* xclbin_path);
 
+// Stage 5c.5: the full ePlace placement loop, run in ONE device/graph session (sw_emu can't
+// reopen the device/AIE-sim in one process). Per iteration, at the probe positions v: hpwl_CU
+// -> g_hpwl, density solve -> g_density, host metrics {hpwl, overflow}, host policy (λ/α/γ/
+// precond/momentum, all from Placement.hpp), then iteration_update -> new u,v. Trajectory is
+// written to out_hpwl_hist / out_ovfl_hist (caller-allocated [max_iters]); the final committed
+// positions u to out_final_pos ([num_movable]). Returns the number of iterations actually run.
+// AIE-using. Definition includes Placement.hpp for the policy math.
+struct PlacementConfig;  // defined in Placement.hpp
+int runPlacement(const PlacementConfig& cfg,
+                 int num_nodes, int num_movable, int num_nets, int num_pins, int num_npins,
+                 const coord_t* node_pos_init, const NodeBox* node_box_init,
+                 const int* net_ptr, const NodePin* pins, const NodePin* npins,
+                 const float* exp_lut, int lut_size,
+                 const int* degree, const float* area, float avg_area,
+                 float* out_hpwl_hist, float* out_ovfl_hist, coord_t* out_final_pos,
+                 const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DRIVER_HPP

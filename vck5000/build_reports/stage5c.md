@@ -94,8 +94,43 @@ essentially exact.
 
 ## 5c.5 — host runPlacement orchestration
 
-**Status:** not started.
+**Status:** implemented; host compiles clean. Device run is 5c.6.
+
+**⚑ Single-session constraint (important).** The checkpoint notes sw_emu **cannot reopen the
+device/AIE-sim within one process**. The per-function drivers (runHpwlGradCU, runDensityGradient,
+…) each open the device, so the placement loop *cannot* call them iteratively. `runPlacement`
+(Driver.cpp) therefore opens the device+graph **once** and runs every iteration's ~12 passes in
+that single session — hpwl_CU → g_hpwl, density_bin → rho, 8-pass field solve → Ex/Ey,
+force_gather → g_density, then iteration_update → new u,v. Intermediate matrices cross via host
+(same pattern as runField/runDensityGradient). This is the right structure for v1's
+host-orchestrated multi-invocation design anyway.
+
+**Host policy** (`Placement.hpp`, pure POD/vector math, ABI-neutral so both the old-ABI setup in
+main.cpp and the new-ABI Driver.cpp include it) — every formula a direct transcription of markv1,
+audited against Xplace/DREAMPlace in 5c:
+- `initDensityWeight` = (Σ|g_wl| / Σ|g_density|)·init_mult
+- `bbStepLength` (BB α on host, v1) = ‖Δv‖/‖Δg_total‖, clamped [1e-4, 4000]
+- `updateGammaValue` = 10^((ovfl−0.1)·20/9−1)·base_γ
+- `momentumCoeff` = (a_k−1)/a_{k+1}, a_{k+1}=(1+√(4a_k²+1))/2
+- `updatePrecondWeights` = max(1, degree + precond_coef·λ·area/avg_area)  ← the audit's key PL gap
+- HPWL / overflow computed on host in-loop (the verified PL `metrics` module replicated in double
+  to avoid an extra device pass; identical result).
+
+**⚑ First-iteration choice.** The audit flagged that markv1 iteration 1 steps with the HPWL-only
+gradient (it skips `combineGradients` before the first step). `runPlacement` does the **clean**
+version (iter 1 combines with the freshly-initialized λ). So the pl_algo trajectory will differ
+slightly from markv1 at iters 1–2 by design; this is the corrected algorithm, not a bug.
+
+The loop is driven by `--place <bench> <xclbin> [max_iters]` (make `run-place`, `PLACE_ITERS`).
 
 ## 5c.6 — whole-placer verify vs markv1
 
-**Status:** not started.
+**Status:** run pending (below).
+
+**⚑ sw_emu feasibility.** A full ePlace solve is 50–200 iterations; each iteration here is one
+`--density-grad`-class evaluation (11 field passes), which the checkpoint clocks at 20–40 min in
+sw_emu. Full convergence in sw_emu is therefore **infeasible** (days) — it is a real-hardware task
+(Geert's card). The sw_emu deliverable is a **short trajectory run** (2–3 iterations) that proves
+the loop closes correctly: gradients feed the step, positions stay finite and in-bounds, and the
+HPWL/overflow trajectory is sane (ePlace HPWL *rises* early as cells spread from overlap; overflow
+falls). The per-module numerics were already verified exactly (5c.1–5c.4, Stage 5b).

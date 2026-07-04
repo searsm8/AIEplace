@@ -10,8 +10,11 @@
 
 #include "Driver.hpp"
 #include "host_interface.hpp"
+#include "Placement.hpp"
 
 #include <cstring>
+#include <cstdio>
+#include <cmath>
 #include <vector>
 
 #include "xrt/xrt_device.h"
@@ -776,6 +779,197 @@ void runMetrics(const coord_t* node_pos, const int* net_ptr, const NodePin* pins
     const float* o = bo_out.map<float*>();
     *out_hpwl          = o[0];
     *out_overflow_sum  = o[1];
+}
+
+// Stage 5c.5: the full placement loop in one device/graph session. See Driver.hpp.
+int runPlacement(const PlacementConfig& cfg,
+                 int num_nodes, int num_movable, int num_nets, int num_pins, int num_npins,
+                 const coord_t* node_pos_init, const NodeBox* node_box_init,
+                 const int* net_ptr, const NodePin* pins, const NodePin* npins,
+                 const float* exp_lut, int lut_size,
+                 const int* degree, const float* area, float avg_area,
+                 float* out_hpwl_hist, float* out_ovfl_hist, coord_t* out_final_pos,
+                 const char* xclbin_path) {
+    const int    N   = num_nodes, M = num_movable, NBINS = DENSITY_NBINS;
+    const int    G   = DENSITY_GRID;
+    const float  bin_area = cfg.bin_w * cfg.bin_h;
+    float total_movable_area = 0.0f;
+    for (int n = 0; n < M; n++) total_movable_area += area[n];
+
+    const size_t coordN = (size_t)N * sizeof(coord_t);
+    const size_t coordM = (size_t)M * sizeof(coord_t);
+    const size_t matB   = (size_t)NBINS * sizeof(float);      // 4 MB matrices
+    const size_t big    = matB > coordM ? matB : coordM;      // gmem9/10/11 max use
+    const size_t lutB   = (size_t)lut_size * sizeof(float);
+    const size_t lp4    = lutB > coordM ? lutB : coordM;      // gmem4: exp_lut or precond
+
+    xrt::device device(0);
+    xrt::uuid   uuid = device.load_xclbin(xclbin_path);
+    xrt::kernel top(device, uuid, "top");
+    xrt::graph  fft(device, uuid, "density_fft_graph");
+
+    xrt::bo b_np   = xrt::bo(device, coordN, top.group_id(0));   // node_pos (v) / u_k
+    xrt::bo b_ptr  = xrt::bo(device, (size_t)(num_nets+1)*sizeof(int32_t), top.group_id(1));
+    xrt::bo b_pin  = xrt::bo(device, (size_t)num_pins*sizeof(NodePin), top.group_id(2));
+    xrt::bo b_npin = xrt::bo(device, (size_t)(num_npins>0?num_npins:1)*sizeof(NodePin), top.group_id(3));
+    xrt::bo b_lut  = xrt::bo(device, lp4, top.group_id(4));      // exp_lut / precond
+    xrt::bo b_bb   = xrt::bo(device, (size_t)num_nets*sizeof(NetBBox), top.group_id(5));
+    xrt::bo b_sums = xrt::bo(device, (size_t)num_nets*sizeof(NetSums), top.group_id(6));
+    xrt::bo b_grad = xrt::bo(device, coordM, top.group_id(7));   // g_hpwl / g_density / node_grad
+    xrt::bo b_box  = xrt::bo(device, (size_t)N*sizeof(NodeBox), top.group_id(8));
+    xrt::bo b_bd   = xrt::bo(device, big, top.group_id(9));      // rho / Ex / v_out
+    xrt::bo b_din  = xrt::bo(device, big, top.group_id(10));     // field / Ey / g_density
+    xrt::bo b_dout = xrt::bo(device, big, top.group_id(11));     // field / u_out
+
+    // Static uploads (never change across iterations).
+    std::memcpy(b_ptr.map<void*>(),  net_ptr, (size_t)(num_nets+1)*sizeof(int32_t));
+    std::memcpy(b_pin.map<void*>(),  pins,    (size_t)num_pins*sizeof(NodePin));
+    if (num_npins > 0) std::memcpy(b_npin.map<void*>(), npins, (size_t)num_npins*sizeof(NodePin));
+    b_ptr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    b_pin.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    if (num_npins > 0) b_npin.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    // Host-side working state.
+    std::vector<coord_t> node_pos(node_pos_init, node_pos_init + N);   // [N]; movable prefix = v
+    std::vector<NodeBox> node_box(node_box_init, node_box_init + N);   // [N]; {x,y}=v, {w,h}=size
+    std::vector<coord_t> u(M), v(M), v_prev(M), u_out(M), v_out(M);
+    std::vector<coord_t> g_hpwl(M), g_density(M), gtot(M), gtot_prev(M);
+    std::vector<float>   precond(M), rho((size_t)NBINS);
+    std::vector<float>   t1((size_t)NBINS), a_uv((size_t)NBINS), Exh((size_t)NBINS), Eyh((size_t)NBINS);
+    std::vector<float>   tE((size_t)NBINS), tY((size_t)NBINS), Ex((size_t)NBINS), Ey((size_t)NBINS);
+    for (int n = 0; n < M; n++) { u[n] = node_pos_init[n]; v[n] = node_pos_init[n]; }
+
+    float gamma        = cfg.gamma_schedule ? 10.0f * cfg.base_gamma : cfg.base_gamma;
+    float lambda       = 1.0f;
+    float nesterov_ak  = 1.0f;
+    float precond_coef = 1.0f;
+    bool  have_prev    = false;
+
+    // One fused transform/spectral pass: src -> dst (scratch crosses via host, like runField).
+    auto field_pass = [&](const float* src, float* dst, int mode, int sub) {
+        std::memcpy(b_din.map<void*>(), src, matB);
+        b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        if (mode == (int)MODE_DCT_TRANSPOSE) fft.run(G / DENSITY_LANES);
+        xrt::run run = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
+                           b_box, b_bd, b_din, b_dout,
+                           0.0f, 0.0f, 0, 0, 0, 0, 0, 1.0f, 1.0f, 1.0f, sub, G, mode);
+        run.wait();
+        if (mode == (int)MODE_DCT_TRANSPOSE) fft.wait();
+        b_dout.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        std::memcpy(dst, b_dout.map<void*>(), matB);
+    };
+
+    int iters_run = 0;
+    for (int iter = 1; iter <= cfg.max_iters; iter++) {
+        const float inv_gamma    = 1.0f / gamma;
+        const float inv_lut_step = 1.0f / (PLACE_STEP_NORM * gamma);
+
+        // ---- push v into the movable prefix of node_pos and node_box ----
+        for (int n = 0; n < M; n++) {
+            node_pos[n] = v[n];
+            node_box[n].x = v[n].x; node_box[n].y = v[n].y;
+        }
+        std::memcpy(b_np.map<void*>(),  node_pos.data(), coordN);
+        std::memcpy(b_box.map<void*>(), node_box.data(), (size_t)N*sizeof(NodeBox));
+        std::memcpy(b_lut.map<void*>(), exp_lut, lutB);
+        b_np.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        b_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        b_lut.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+        // ---- HPWL gradient at v -> b_grad, read to host ----
+        { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
+                           b_box, b_bd, b_din, b_dout,
+                           inv_gamma, inv_lut_step, lut_size, num_nets, M, num_npins,
+                           N, cfg.bin_w, cfg.bin_h, cfg.target_density, 0, 0, (int)MODE_HPWL_GRAD);
+          r.wait(); }
+        b_grad.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        std::memcpy(g_hpwl.data(), b_grad.map<void*>(), coordM);
+
+        // ---- density gradient at v: density_bin -> rho, field solve, force_gather -> g_density ----
+        { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
+                           b_box, b_bd, b_din, b_dout,
+                           0.0f, 0.0f, 0, 0, M, 0, N, cfg.bin_w, cfg.bin_h, cfg.target_density,
+                           0, 0, (int)MODE_DENSITY_BIN);
+          r.wait(); }
+        b_bd.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        std::memcpy(rho.data(), b_bd.map<void*>(), matB);            // rho at v (for overflow)
+
+        field_pass(rho.data(), t1.data(),  (int)MODE_DCT_TRANSPOSE, (int)TFH_DCT);
+        field_pass(t1.data(),  a_uv.data(),(int)MODE_DCT_TRANSPOSE, (int)TFH_DCT);
+        field_pass(a_uv.data(), Exh.data(),(int)MODE_SPECTRAL, 0);
+        field_pass(a_uv.data(), Eyh.data(),(int)MODE_SPECTRAL, 1);
+        field_pass(Exh.data(), tE.data(),  (int)MODE_DCT_TRANSPOSE, (int)TFH_IDCT);
+        field_pass(tE.data(),  Ex.data(),  (int)MODE_DCT_TRANSPOSE, (int)TFH_IDXST);
+        field_pass(Eyh.data(), tY.data(),  (int)MODE_DCT_TRANSPOSE, (int)TFH_IDXST);
+        field_pass(tY.data(),  Ey.data(),  (int)MODE_DCT_TRANSPOSE, (int)TFH_IDCT);
+
+        std::memcpy(b_bd.map<void*>(),  Ex.data(), matB);            // eField_x = gmem9
+        std::memcpy(b_din.map<void*>(), Ey.data(), matB);            // eField_y = gmem10
+        b_bd.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
+                           b_box, b_bd, b_din, b_dout,
+                           0.0f, 0.0f, 0, 0, M, 0, N, cfg.bin_w, cfg.bin_h, 0.0f,
+                           0, 0, (int)MODE_FORCE_GATHER);
+          r.wait(); }
+        b_grad.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        std::memcpy(g_density.data(), b_grad.map<void*>(), coordM);
+
+        // ---- host metrics (verified PL metrics module replicated on host to save a pass) ----
+        const double hpwl = hostHPWL(node_pos.data(), net_ptr, pins, num_nets);
+        const double overflow = hostOverflow(rho.data(), NBINS, cfg.target_density,
+                                             bin_area, total_movable_area);
+        out_hpwl_hist[iter-1] = (float)hpwl;
+        out_ovfl_hist[iter-1] = (float)overflow;
+
+        // ---- host policy ----
+        if (iter == 1)
+            lambda = initDensityWeight(g_hpwl.data(), g_density.data(), M,
+                                       cfg.density_weight_init_multiplier);
+        for (int n = 0; n < M; n++) {
+            gtot[n].x = g_hpwl[n].x - lambda * g_density[n].x;
+            gtot[n].y = g_hpwl[n].y - lambda * g_density[n].y;
+        }
+        float alpha = have_prev
+            ? bbStepLength(v.data(), v_prev.data(), gtot.data(), gtot_prev.data(), M)
+            : cfg.init_step_length;
+        updatePrecondWeights(precond.data(), degree, area, M, avg_area, precond_coef, lambda);
+        const float coeff = momentumCoeff(nesterov_ak, cfg.enable_momentum);
+
+        printf("[place] iter %d: HPWL=%.6g overflow=%.4f lambda=%.4g alpha=%.4g coeff=%.4f gamma=%.4g\n",
+               iter, hpwl, overflow, lambda, alpha, coeff, gamma);
+
+        // ---- iteration_update: one Nesterov step -> u_{k+1}, v_{k+1} ----
+        std::memcpy(b_np.map<void*>(),   u.data(),         coordM);   // u_k          (gmem0)
+        std::memcpy(b_lut.map<void*>(),  precond.data(),   (size_t)M*sizeof(float)); // precond (gmem4)
+        std::memcpy(b_grad.map<void*>(), g_hpwl.data(),    coordM);   // g_hpwl       (gmem7)
+        std::memcpy(b_din.map<void*>(),  g_density.data(), coordM);   // g_density    (gmem10)
+        b_np.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        b_lut.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        b_grad.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
+                           b_box, b_bd, b_din, b_dout,
+                           lambda, alpha, 0, 0, M, 0, 0, coeff, cfg.die_x, cfg.die_y,
+                           0, 0, (int)MODE_ITERATION_UPDATE);
+          r.wait(); }
+        b_dout.sync(XCL_BO_SYNC_BO_FROM_DEVICE);   // u_{k+1}
+        b_bd.sync(XCL_BO_SYNC_BO_FROM_DEVICE);     // v_{k+1}
+        std::memcpy(u_out.data(), b_dout.map<void*>(), coordM);
+        std::memcpy(v_out.data(), b_bd.map<void*>(),   coordM);
+
+        // ---- advance: save prev for BB, commit u/v ----
+        v_prev = v; gtot_prev = gtot; have_prev = true;
+        u = u_out; v = v_out;
+
+        // ---- policy updates for next iteration ----
+        if (cfg.gamma_schedule) gamma = updateGammaValue((float)overflow, cfg.base_gamma);
+        if (overflow < 0.3 && precond_coef < 1024.0f && (iter % 20) == 0) precond_coef *= 2.0f;
+        iters_run = iter;
+    }
+
+    for (int n = 0; n < M; n++) out_final_pos[n] = u[n];
+    return iters_run;
 }
 
 } // namespace plalgo

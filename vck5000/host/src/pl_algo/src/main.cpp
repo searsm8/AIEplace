@@ -7,10 +7,17 @@
 // this comparison chain.
 
 #include "DataBase.h"
+#include "Grid.h"
 #include "Packer.hpp"
 #include <cstdio>
 #include <cmath>
+#include <cstdlib>
+#include <vector>
 #include <algorithm>
+
+#ifdef USE_XILINX_XRT
+#include "Placement.hpp"
+#endif
 
 #ifdef USE_XILINX_XRT
 #include "Driver.hpp"
@@ -43,6 +50,7 @@ int main(int argc, char** argv) {
         printf("       %s --density-grad    <xclbin>\n", argv[0]);
         printf("       %s --iter-update     <xclbin>\n", argv[0]);
         printf("       %s --metrics    <benchmark_dir> <xclbin>\n", argv[0]);
+        printf("       %s --place      <benchmark_dir> <xclbin> [max_iters]\n", argv[0]);
         return 1;
     }
 
@@ -129,6 +137,78 @@ int main(int argc, char** argv) {
                pk.header.num_movable, pk.header.num_nodes,
                pk.header.num_nets, pk.header.num_pins);
         return plalgo::runMetricsVerify(pk, argv[3]);
+    }
+
+    // Stage 5c.5/5c.6: run the full PL placement loop on a benchmark for a few iterations
+    // and sanity-check the trajectory. usage: --place <bench> <xclbin> [max_iters]
+    if (argc >= 4 && std::strcmp(argv[1], "--place") == 0) {
+        AIEplace::DataBase db(argv[2]);
+        db.printInfo();
+        plalgo::PackedDesign pk = plalgo::packDesign(db);
+        const int max_iters = (argc >= 5) ? std::atoi(argv[4]) : 2;
+
+        const int   G = plalgo::DENSITY_GRID;
+        AIEplace::Box die = db.getDieArea();
+        const float die_x = (float)die.getXsize(), die_y = (float)die.getYsize();
+        const int   N = pk.header.num_nodes, M = pk.header.num_movable;
+        const int   num_nets = pk.header.num_nets;
+        const int   num_pins = (int)pk.pins.size(), num_npins = (int)pk.npins.size();
+
+        // gamma from the initial coordinate span (matches HpwlGradVerify: 1% of the larger extent).
+        float maxx=-1e30f, minx=1e30f, maxy=-1e30f, miny=1e30f;
+        for (const auto& c : pk.node_pos) { maxx=std::max(maxx,c.x); minx=std::min(minx,c.x);
+                                            maxy=std::max(maxy,c.y); miny=std::min(miny,c.y); }
+        const float base_gamma = 0.01f * std::max(maxx-minx, maxy-miny);
+
+        // Normalized exp LUT (gamma-independent; only inv_lut_step depends on gamma).
+        const int GAMMA_MULT = 12;
+        const int lut_size = (int)(GAMMA_MULT / plalgo::PLACE_STEP_NORM) + 2;
+        std::vector<float> lut(lut_size);
+        for (int i = 0; i < lut_size; i++) lut[i] = std::exp(-(float)i * plalgo::PLACE_STEP_NORM);
+
+        // Per-movable-node preconditioner statics: degree (#nets) and area.
+        std::vector<int32_t> degree(M, 0);
+        for (const auto& r : pk.pins) if (r.node_idx >= 0 && r.node_idx < M) degree[r.node_idx]++;
+        std::vector<float> area(M);
+        float total_mov = 0.0f;
+        for (int n = 0; n < M; n++) { area[n] = pk.node_box[n].w * pk.node_box[n].h; total_mov += area[n]; }
+        const float avg_area = total_mov / std::max(1, M);
+
+        plalgo::PlacementConfig cfg{};
+        cfg.max_iters = max_iters; cfg.die_x = die_x; cfg.die_y = die_y;
+        cfg.bin_w = die_x / G; cfg.bin_h = die_y / G; cfg.target_density = 0.9f;
+        cfg.base_gamma = base_gamma; cfg.gamma_schedule = 0;
+        cfg.init_step_length = 0.01f; cfg.density_weight_init_multiplier = 0.01f;
+        cfg.enable_momentum = 1;
+
+        printf("[place] bench M=%d N=%d nets=%d die=%.1fx%.1f bin=%.4gx%.4g gamma=%.4g max_iters=%d\n",
+               M, N, num_nets, die_x, die_y, cfg.bin_w, cfg.bin_h, base_gamma, max_iters);
+
+        std::vector<float> hpwl_hist(max_iters, 0.0f), ovfl_hist(max_iters, 0.0f);
+        std::vector<plalgo::coord_t> final_pos(M);
+        const int ran = plalgo::runPlacement(cfg, N, M, num_nets, num_pins, num_npins,
+            pk.node_pos.data(), pk.node_box.data(), pk.net_ptr.data(), pk.pins.data(),
+            pk.npins.data(), lut.data(), lut_size, degree.data(), area.data(), avg_area,
+            hpwl_hist.data(), ovfl_hist.data(), final_pos.data(), argv[3]);
+
+        // Sanity: loop ran, final positions finite and inside the die (proves the loop closes
+        // correctly). Note ePlace HPWL rises early as cells spread; overflow should fall.
+        bool ok = ran > 0;
+        for (int n = 0; n < M && ok; n++) {
+            if (!std::isfinite(final_pos[n].x) || !std::isfinite(final_pos[n].y)) ok = false;
+            if (final_pos[n].x < -1.0f || final_pos[n].y < -1.0f ||
+                final_pos[n].x > die_x + 1.0f || final_pos[n].y > die_y + 1.0f) ok = false;
+        }
+        printf("[place] HPWL   trajectory:");
+        for (int i = 0; i < ran; i++) printf(" %.5g", hpwl_hist[i]);
+        printf("\n[place] overflow trajectory:");
+        for (int i = 0; i < ran; i++) printf(" %.4f", ovfl_hist[i]);
+        const bool ovfl_drop = ran >= 2 && ovfl_hist[ran-1] <= ovfl_hist[0];
+        printf("\n[place] %d iters run; final positions %s; overflow %s -> %s\n",
+               ran, ok ? "finite/in-bounds" : "BAD",
+               ovfl_drop ? "decreasing" : "(not strictly decreasing over this window)",
+               ok ? "PASS" : "FAIL");
+        return ok ? 0 : 1;
     }
 #endif
 
