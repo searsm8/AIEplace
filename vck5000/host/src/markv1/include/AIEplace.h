@@ -108,6 +108,12 @@ public:
     int convergence_iterations_remaining = -1; // countdown; -1 = not yet triggered
     float target_density;
 
+    // Divergence guard (XPlace need_to_early_stop / life): once the run starts climbing
+    // away from its best solution, each detection burns "life"; at zero we stop and
+    // restore the best placement instead of grinding through a divergent tail.
+    static constexpr int MAX_LIFE = 30;
+    int life = MAX_LIFE;
+
     // Execution tracking
     int iteration = 0;
     bool quiet; // if true, suppress all console output except errors (for DSE runs)
@@ -196,6 +202,7 @@ public:
     void updateGamma(float overflow);
     void updatePrecondWeights();
     bool checkOverflowPlateau(int window, float threshold);
+    bool checkDivergence(int window, float threshold);
 
     // Diagnostics
     void logStepDiagnostics();

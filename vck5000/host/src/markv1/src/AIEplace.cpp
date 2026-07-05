@@ -373,6 +373,49 @@ bool Placer::checkOverflowPlateau(int window, float threshold)
 
 
 /**
+ * @brief Detect divergence, mirroring XPlace check_divergence (param_scheduler.py).
+ *
+ * Fires only once the recent HPWL mean has climbed meaningfully above the best known
+ * HPWL (so the healthy early phase, where HPWL rises as cells spread, is not flagged)
+ * AND overflow is no longer making progress — it has grown past its best, plateaued
+ * high, or is fluctuating upward. Reference is the primary best (converged) if we have
+ * one, else the lowest-overflow fallback so the guard is useful even before convergence.
+ */
+bool Placer::checkDivergence(int window, float threshold)
+{
+    const BestSolution& best = best_primary.valid ? best_primary
+                             : best_fallback.valid ? best_fallback
+                             : best_primary;
+    if (!best.valid) return false;
+    if ((int)hpwl_history.size() <= window) return false;
+
+    auto hpwl_begin = hpwl_history.end() - window;
+    float wl_mean = std::accumulate(hpwl_begin, hpwl_history.end(), 0.0f) / window;
+    float wl_ratio = (wl_mean - best.hpwl) / (best.hpwl + 1e-8f);
+    if (wl_ratio <= threshold * 1.2f)
+        return false;  // HPWL still near its best → not diverging
+
+    // HPWL is rising above best; classify by how overflow behaves over the window.
+    auto ovfw_begin = ovfw_history.end() - window;
+    float ovfw_mean = std::accumulate(ovfw_begin, ovfw_history.end(), 0.0f) / window;
+    float ovfw_min  = *std::min_element(ovfw_begin, ovfw_history.end());
+    float ovfw_max  = *std::max_element(ovfw_begin, ovfw_history.end());
+    int rises = 0;
+    for (auto it = ovfw_begin + 1; it != ovfw_history.end(); ++it)
+        if (*it > *(it - 1)) rises++;
+    float ovfw_up_frac = (float)rises / (window - 1);
+
+    float ovfw_ratio = (ovfw_mean - std::max(overflow_threshold, best.overflow)) /
+                       (best.overflow + 1e-8f);
+
+    if (ovfw_ratio > threshold)                                  return true; // overflow grew past best
+    if ((ovfw_max - ovfw_min) / (ovfw_mean + 1e-8f) < threshold) return true; // plateaued high
+    if (ovfw_up_frac > 0.6f)                                     return true; // fluctuating upward
+    return false;
+}
+
+
+/**
  * @brief Update per-node preconditioner weights (diagonal preconditioner).
  *
  * Each node's gradient is divided by its precond_weight before the Nesterov step.
@@ -571,10 +614,12 @@ bool Placer::checkConvergence()
         return true;
     }
 
-    // Divergence detection: HPWL has regressed significantly from best known solution
+    // Divergence guard (XPlace need_to_early_stop / check_divergence).
     const BestSolution& best_ref = best_primary.valid ? best_primary
                                  : best_fallback.valid ? best_fallback
                                  : best_primary;
+
+    // Coarse backstop: HPWL has blown past 2x the best known solution.
     if (best_ref.valid && current_hpwl > 2.0f * best_ref.hpwl) {
         Logger::log_info("Stopping: divergence detected at iteration " +
                         std::to_string(iteration) +
@@ -582,6 +627,24 @@ bool Placer::checkConvergence()
                         " > 2x best " + std::to_string(best_ref.hpwl) +
                         " from iter " + std::to_string(best_ref.iteration) + ")");
         return true;
+    }
+
+    // Fine-grained guard, armed only once the run is in the near-converged band
+    // (overflow < 5x the stop threshold). During the high-overflow spreading phase
+    // HPWL naturally rises and overflow is noisy, which would otherwise be misread as
+    // divergence. Each detection burns 6 life; a hard overflow plateau ends it outright.
+    if (iteration > 100 && best_ref.valid && overflow < 5.0f * overflow_threshold) {
+        if (checkDivergence(3, 0.01f * overflow))
+            life -= 6;
+        if (overflow >= overflow_threshold && checkOverflowPlateau(50, 0.05f))
+            life -= MAX_LIFE;
+        if (life <= 0) {
+            Logger::log_info("Stopping: divergence guard exhausted at iteration " +
+                            std::to_string(iteration) + " (best HPWL " +
+                            std::to_string(best_ref.hpwl) + " from iter " +
+                            std::to_string(best_ref.iteration) + ")");
+            return true;
+        }
     }
 
     // Stagnation detection: DISABLED for now — need to let density weight grow
