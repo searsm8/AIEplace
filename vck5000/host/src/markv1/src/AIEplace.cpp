@@ -290,27 +290,37 @@ float Placer::computeLipshitzEstimate()
  */
 void Placer::updateDensityWeight()
 {
-    if(iteration % 3 != 0) // only update density_weight every few iterations since HPWL can be noisy
-    {
-        //Logger::log_detail("Skipping density_weight update on iteration " + std::to_string(iteration));
+    if (hpwl_history.size() < 2) return; // need a previous HPWL to measure the trend
+
+    // XPlace step_density_weight (param_scheduler.py): update λ EVERY iteration, slowing to
+    // every-3rd only in the early phase or while the forces are mid-balance
+    // (density_force_fraction ∈ (0.5, 0.95)). markv1's previous every-3rd-iteration cadence
+    // ramped λ ~3× too slowly, so the placement collapsed under wirelength for ~250 iterations
+    // before density had any effect.
+    bool slow_phase = (iteration < 50) ||
+                      (density_force_fraction > 0.5f && density_force_fraction < 0.95f);
+    if (slow_phase && (iteration % 3 != 0))
         return;
-    }
+
     float current_hpwl = hpwl_history.back();
-    float prev_hpwl = hpwl_history[hpwl_history.size() - 2]; // safe because we have warmup iterations
+    float prev_hpwl    = hpwl_history[hpwl_history.size() - 2];
+    float delta_hpwl   = current_hpwl - prev_hpwl;
 
-    float dw_min_step = cfg["params"]["density_weight_min_step"];
-    float dw_max_step = cfg["params"]["density_weight_max_step"];
-    float dw_multiplier = dw_max_step;
+    float dw_min_step = cfg["params"]["density_weight_min_step"]; // μ lower clamp (0.95)
+    float dw_max_step = cfg["params"]["density_weight_max_step"]; // μ growth base (1.05)
 
-    if (current_hpwl > prev_hpwl) // if HPWL is not improving,
-    {
-        // decrease multiplier to allow HPWL forces to have more influence
-        float hpwl_percent_change = 100.0f * (current_hpwl - prev_hpwl) / (prev_hpwl + 1e-8f); // avoid div by 0
-        dw_multiplier = std::max(dw_min_step, std::pow(dw_max_step, 1 - hpwl_percent_change));
+    // μ > 1 grows λ. Grow near the max rate (decaying toward 0.98·max) while wirelength is
+    // still improving; damp toward ~1.0 once wirelength worsens, so density does not
+    // overshoot and blow HPWL up (the late-run divergence observed before this change).
+    float mu;
+    if (delta_hpwl < 0.0f) {
+        mu = dw_max_step * std::max(std::pow(0.9999f, (float)iteration), 0.98f);
+    } else {
+        float rel_worsening = delta_hpwl / (prev_hpwl + 1e-8f);
+        mu = dw_max_step * std::clamp(std::pow(dw_max_step, -rel_worsening * 100.0f),
+                                      dw_min_step, dw_max_step);
     }
-
-    // perform the update
-    density_weight *= dw_multiplier;
+    density_weight *= mu;
 
     // Emergency 2x jolt: if overflow has plateaued at a high value, double density_weight
     // to break out of the stall. Modeled after XPlace's enlarge_density mechanism.
@@ -376,21 +386,36 @@ bool Placer::checkOverflowPlateau(int window, float threshold)
  */
 void Placer::updatePrecondWeights()
 {
-    if (!enable_preconditioning) return;
-
     float lambda_area_coef = precond_coef * density_weight;
+
+    // Accumulate the two force-mass components for density_force_fraction:
+    //   a1 = wirelength mass (pin count per node), a2 = density mass (λ · normalized area).
+    // density_force_fraction = ‖a2‖₁ / (‖a1‖₁ + ‖a2‖₁) ∈ [0,1] measures how balanced the
+    // wirelength and density forces are — the scale-invariant progress signal that drives
+    // the density-weight schedule (XPlace param_scheduler.update_precond_weight, "weighted_weight").
+    // Computed even when preconditioning is disabled, since the schedule still consumes it.
+    float a1_norm = 0.0f, a2_norm = 0.0f;
 
     for (auto item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         Node* node = item.second;
         float num_pins = (float)node->getNets().size();
         float norm_area = node->getArea() / avg_node_size;
-        node->precond_weight = std::max(1.0f, num_pins + lambda_area_coef * norm_area);
+        float a2 = lambda_area_coef * norm_area;
+        a1_norm += num_pins;
+        a2_norm += a2;
+        if (enable_preconditioning)
+            node->precond_weight = std::max(1.0f, num_pins + a2);
     }
     for (auto filler : db.getFillers()) {
         float norm_area = filler->getArea() / avg_node_size;
-        filler->precond_weight = std::max(1.0f, lambda_area_coef * norm_area);
+        float a2 = lambda_area_coef * norm_area;
+        a2_norm += a2;  // fillers carry no pins, so they add no wirelength mass
+        if (enable_preconditioning)
+            filler->precond_weight = std::max(1.0f, a2);
     }
+
+    density_force_fraction = a2_norm / (a1_norm + a2_norm + 1e-8f);
 }
 
 
@@ -454,13 +479,12 @@ void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist
     Logger::log_info("Initial placement: " + std::to_string(placed_count) +
                      " from benchmark, " + std::to_string(randomized_count) + " randomized");
 
-    // Place Fillers
+    // Place Fillers uniformly at random across the whole die (XPlace get_filler_pos):
+    // fillers must represent whitespace everywhere, so unlike the real cells they are NOT
+    // clustered at the center — spreading them seeds the density model with the vacant
+    // regions that the real cells should eventually flow into.
     for (auto filler : db.getFillers()) {
-        int x_offset = min_dist + rand()%(grid.getDieWidth()/2); // clustered around target
-        if(rand()%2 == 1) x_offset *= -1; // 50% chance to negate
-        int y_offset = min_dist + rand()%(grid.getDieHeight()/2); // clustered around target
-        if(rand()%2 == 1) y_offset *= -1; // 50% chance to negate
-        Position init_pos = target_pos + Position(x_offset, y_offset);
+        Position init_pos(rand() % grid.getDieWidth(), rand() % grid.getDieHeight());
         filler->initializeState(init_pos);
     }
 
@@ -495,6 +519,11 @@ void Placer::initializeDensityWeight()
         HPWL_L1_norm += fabs(partials.x) + fabs(partials.y);
 
         Gradient electro_force = computeElectrostaticForce(node_p);
+        density_L1_norm += fabs(electro_force.x) + fabs(electro_force.y);
+    }
+    // Fillers carry density force but no wirelength; XPlace's init balance counts them.
+    for (auto filler : db.getFillers()) {
+        Gradient electro_force = computeElectrostaticForce(filler);
         density_L1_norm += fabs(electro_force.x) + fabs(electro_force.y);
     }
 

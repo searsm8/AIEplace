@@ -1,6 +1,7 @@
 
 #include "DataBase.h"
 #include "Logger.h"
+#include <algorithm>
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -246,32 +247,54 @@ bool DataBase::readBookshelf()
 * Computes the total area of all components in the design and adds enough filler cells
 * to bring the filled area to target utilization.
 */
-bool DataBase::addFillers(float target_utilization) 
+bool DataBase::addFillers(float target_utilization)
 {
-    // find the smallest macro in the design to use as the filler cell
-    float min_macro_xsize = std::numeric_limits<float>::max();
-    float min_macro_ysize = std::numeric_limits<float>::max();
-
-    for(auto item : mm_macros)
-    {
-        MacroClass* macro_p = item.second;
-        if(macro_p->getXsize() < min_macro_xsize && macro_p->getYsize() < min_macro_ysize) {
-            min_macro_xsize = macro_p->getXsize();
-            min_macro_ysize = macro_p->getYsize();
-        }
+    // Filler cells occupy whitespace so real cells don't have to over-spread to hit the
+    // density target — without them overflow can't fall to the stop threshold. Size a filler
+    // like a typical movable standard cell (XPlace compute_filler_without_fence): each
+    // dimension is the trimmed mean of the movable cells' sizes, dropping the smallest and
+    // largest 5% so macros and min-width cells don't skew it. (The previous code sized the
+    // filler from the smallest *macro*, which yields ~0 fillers on standard-cell designs.)
+    std::vector<float> widths, heights;
+    for (auto item : mm_components) {
+        Component* comp = item.second;
+        if (comp->getStatus() == FIXED) continue;
+        widths.push_back(comp->getXsize());
+        heights.push_back(comp->getYsize());
+    }
+    if (widths.empty()) {
+        Logger::log_warning("No movable cells found — no fillers added.");
+        return false;
     }
 
-    MacroClass* filler_macro = new MacroClass("filler", min_macro_xsize, min_macro_ysize);
+    std::sort(widths.begin(), widths.end());
+    std::sort(heights.begin(), heights.end());
+    auto trimmed_mean = [](const std::vector<float>& sorted) {
+        int n = (int)sorted.size();
+        int lo = (int)(n * 0.05f), hi = (int)(n * 0.95f);
+        if (hi <= lo) { lo = 0; hi = n; }  // too few cells to trim: use the whole range
+        double sum = 0.0;
+        for (int i = lo; i < hi; i++) sum += sorted[i];
+        return (float)(sum / (hi - lo));
+    };
+    float filler_xsize = trimmed_mean(widths);
+    float filler_ysize = trimmed_mean(heights);  // std cells are ~1 row tall, so this ≈ row height
+
+    MacroClass* filler_macro = new MacroClass("filler", filler_xsize, filler_ysize);
     mm_macros.emplace(std::make_pair("filler_macroclass", filler_macro));
 
     Logger::log_info("Adding filler cells to database...");
+    Logger::log_info("Filler cell size: (" + PREC(filler_xsize) + ", " + PREC(filler_ysize) + ")");
 
+    // Fill the placeable whitespace up to the target utilization (XPlace: target_density *
+    // stdcell_placeable_area - mov_stdcell_area). With no movable macros this reduces to
+    // target_util * (die - fixed) - movable_area.
     float available_area = getDieArea().getArea() - m_total_fixed_area;
     float unfilled_area = available_area * target_utilization - m_total_movable_area;
     Logger::log_info("Available area (die - fixed): " + PREC(available_area));
     Logger::log_info("Total area to fill: " + PREC(unfilled_area));
 
-    int fillers_needed = unfilled_area / filler_macro->getArea();
+    int fillers_needed = std::max(0, (int)(unfilled_area / filler_macro->getArea()));
 
     for (int i = 0; i < fillers_needed; i++)
     {

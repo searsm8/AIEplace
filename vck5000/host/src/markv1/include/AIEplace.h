@@ -77,6 +77,8 @@ public:
     bool compare_hpwl_methods = false;
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
     float avg_node_size = 1.0f; // average cell area; normalizes preconditioner area term
+    float density_force_fraction = 0.0f; // density's share of total preconditioner force-mass, in [0,1]
+                                          // (0 = all wirelength, 1 = all density); XPlace calls this "weighted_weight"
 
     int die_size; // minimum of width and height of the die area
     int bins_per_row; // grid size
