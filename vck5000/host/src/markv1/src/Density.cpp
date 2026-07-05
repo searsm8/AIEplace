@@ -5,6 +5,8 @@
 #include "AIEplace.h"
 #include "DCT.h"
 #include <cmath>
+#include <algorithm>
+#include <vector>
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -397,6 +399,75 @@ void Placer::computeOverlaps()
 
     for (auto filler : db.getFillers())
         grid.computeBinOverlaps(filler);
+}
+
+/*
+ * @brief Masked overflow — XPlace's global-placement convergence metric.
+ *
+ * Same formula as Grid::computeTotalOverflow (sum of per-bin excess over
+ * target*bin_area, normalized by movable area), but built from a *masked* density map
+ * with two differences from the exact one:
+ *   1. Each movable cell's footprint is clamped to at least sqrt(2) bins per dimension
+ *      (XPlace: node_size.clamp(min = unit_len*sqrt(2))), with an area-conserving weight
+ *      (real_area / clamped_area) so total deposited area is unchanged. Sub-bin cells are
+ *      thus smeared to the grid resolution instead of spiking a single bin.
+ *   2. Fillers are excluded (XPlace computes overflow on the movable-connected map only).
+ * Fixed macros form a per-bin-capped baseline, matching computeOverlaps/clampFixedDensity.
+ *
+ * Why it matters: this is the smoothed density the electrostatic optimizer actually
+ * minimizes, so it descends cleanly to the stop threshold. The exact overflow re-measures
+ * with sharp physical footprints, whose sub-bin quantization spikes leave it floored well
+ * above threshold even for a well-spread placement (the markv1 "can't reach 0.07" effect).
+ */
+float Placer::computeMaskedOverflow()
+{
+    const int nx = grid.getBinsPerRow();
+    const int ny = grid.getBinsPerCol();
+    const float bin_w = grid.getBinWidth();
+    const float bin_h = grid.getBinHeight();
+    const float cap   = bin_w * bin_h * target_density;   // per-bin capacity
+    const float min_w = bin_w * (float)M_SQRT2;           // clamp each dim to >= sqrt(2)*bin
+    const float min_h = bin_h * (float)M_SQRT2;
+
+    std::vector<float> density(nx * ny, 0.0f);            // area deposited per bin
+
+    // Deposit a node's area over its (optionally clamped) footprint, centered on the cell.
+    auto deposit = [&](Node* node, bool clamp) {
+        float w = node->getXsize(), h = node->getYsize();
+        float cw = clamp ? std::max(w, min_w) : w;
+        float ch = clamp ? std::max(h, min_h) : h;
+        float weight = (cw > 0.0f && ch > 0.0f) ? (w * h) / (cw * ch) : 0.0f; // conserve total area
+        float cx = node->getProbeX() + 0.5f * w;
+        float cy = node->getProbeY() + 0.5f * h;
+        float xl = cx - 0.5f * cw, yl = cy - 0.5f * ch;
+        float xh = xl + cw,        yh = yl + ch;
+        int col_lo = std::max(0, (int)(xl / bin_w));
+        int col_hi = std::min(nx - 1, (int)(xh / bin_w));
+        int row_lo = std::max(0, (int)(yl / bin_h));
+        int row_hi = std::min(ny - 1, (int)(yh / bin_h));
+        for (int c = col_lo; c <= col_hi; c++) {
+            float ox = std::min(xh, (c + 1) * bin_w) - std::max(xl, c * bin_w);
+            if (ox <= 0.0f) continue;
+            for (int r = row_lo; r <= row_hi; r++) {
+                float oy = std::min(yh, (r + 1) * bin_h) - std::max(yl, r * bin_h);
+                if (oy <= 0.0f) continue;
+                density[c * ny + r] += ox * oy * weight;
+            }
+        }
+    };
+
+    // Fixed baseline at exact size, capped per bin (mirrors clampFixedDensity).
+    for (auto item : db.getComponents())
+        if (item.second->getStatus() == FIXED) deposit(item.second, false);
+    for (float& d : density) d = std::min(d, cap);
+
+    // Movable real cells, clamped footprints. Fillers intentionally excluded.
+    for (auto item : db.getComponents())
+        if (item.second->getStatus() != FIXED) deposit(item.second, true);
+
+    float overflow_area = 0.0f;
+    for (float d : density) overflow_area += std::max(0.0f, d - cap);
+    return overflow_area / (db.getTotalMovableArea() + 1e-8f);
 }
 
 Gradient Placer::computeElectrostaticForce(Node* node_p)

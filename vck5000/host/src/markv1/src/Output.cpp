@@ -373,9 +373,12 @@ void Placer::printFinalResults()
     // Calculate final metrics
     algo_time = Logger::getFunctionTime("run")/ 1e6; // Convert microseconds to seconds
     float final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
+    // Exact (physical) overflow — sharp footprints, the real spreading quality. Reported
+    // alongside the masked overflow that drove convergence (see computeMaskedOverflow).
     float final_overflow = grid.computeTotalOverflow(
                             target_density,
                             db.getTotalMovableArea());
+    float final_masked_overflow = computeMaskedOverflow();
     float total_runtime = getInterval(pgrm_start_time, getTime());
     float iteration_avg = (iteration > 0) ? total_runtime / iteration : 0.0f;
 
@@ -403,7 +406,8 @@ void Placer::printFinalResults()
         results.add_row(RowStream{} << "Initial HPWL" << std::scientific << std::setprecision(3) << m_initial_hpwl);
         results.add_row(RowStream{} << "HPWL improvement (%)" << std::fixed << std::setprecision(2) << hpwl_improvement);
     }
-    results.add_row(RowStream{} << "Final Overflow" << std::scientific << std::setprecision(3) << final_overflow);
+    results.add_row(RowStream{} << "Final Overflow (masked)" << std::scientific << std::setprecision(3) << final_masked_overflow);
+    results.add_row(RowStream{} << "Final Overflow (exact)" << std::scientific << std::setprecision(3) << final_overflow);
     if (chosen.valid) {
         std::string type = (&chosen == &best_primary) ? "primary" : "fallback";
         std::ostringstream best_str;
@@ -645,9 +649,10 @@ void Placer::initializeFocus()
 void Placer::recordIterationResults()
 {
     float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
-    float overflow = grid.computeTotalOverflow(
-                    target_density,
-                    db.getTotalMovableArea());
+    // Drive convergence off XPlace's masked overflow (clamped footprints, fillers excluded):
+    // the smoothed density the optimizer minimizes, which descends cleanly to the stop
+    // threshold. The exact overflow is reported separately as the physical result.
+    float overflow = computeMaskedOverflow();
 
     hpwl_history.push_back(hpwl);
     step_length_history.push_back(step_length);

@@ -679,18 +679,11 @@ bool Placer::checkConvergence()
         }
         convergence_iterations_remaining--;
 
-        // Accelerator: if HPWL has also plateaued, stop immediately
-        if ((int)hpwl_history.size() > convergence_window + 1) {
-            float old_hpwl = hpwl_history[hpwl_history.size() - convergence_window - 1];
-            float hpwl_improvement = (old_hpwl - current_hpwl) / old_hpwl;
-            if (hpwl_improvement < hpwl_improvement_threshold) {
-                Logger::log_info("Convergence achieved at iteration " +
-                                std::to_string(iteration) +
-                                " (overflow + HPWL both converged)");
-                return true;
-            }
-        }
-
+        // Run the full countdown after masked overflow first crosses the threshold, rather
+        // than stopping on the first crossing. HPWL is already plateaued by this point, so a
+        // HPWL-plateau early-out would stop immediately and leave overflow (and thus the
+        // physical spread) worse than it needs to be; the countdown lets overflow keep
+        // dropping toward XPlace's converged regime. (Mirrors XPlace's post-threshold life.)
         if (convergence_iterations_remaining <= 0) {
             Logger::log_info("Convergence achieved at iteration " +
                             std::to_string(iteration) +

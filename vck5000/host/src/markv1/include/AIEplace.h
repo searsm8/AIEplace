@@ -181,7 +181,8 @@ public:
     void compute_eField_DCT();
 
     void computeOverlaps();
-    
+    float computeMaskedOverflow();  // XPlace GP convergence metric (clamped footprints, no fillers)
+
 
     // Comparison functions for verification
     void compareDensityResults();
