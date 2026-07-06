@@ -22,43 +22,42 @@
 
 #include "../formats.hpp"
 #include "../host_interface.hpp"
+#include "node_footprint.hpp"
 
 namespace plalgo {
 
 constexpr int STRIP = 64;                  // x-values per strip; GRID/STRIP = 16 strips
 
-// Scatter one node's overlap into the strip accumulator acc_URAM[STRIP][GRID], for
-// the x-bins (columns) in [c0, c0+STRIP). Mirrors Grid::computeBinOverlaps.
+// Scatter one node's (area-conserving, clamped) density into the strip accumulator
+// acc_URAM[STRIP][GRID], for the x-bins (columns) in [c0, c0+STRIP). The footprint geometry
+// comes from node_footprint (shared with force_gather); a sub-bin cell is smeared to ~grid
+// resolution with weight = real_area/clamped_area, so no bin spikes. Mirrors the software
+// golden Grid::computeBinOverlaps with clamping enabled.
 static void bin_scatter(const NodeBox& nd, float bin_w, float bin_h, int c0,
                         float acc_URAM[STRIP][GRID]) {
-    // Node bounding box: lower-left (xl,yl) to upper-right (xh,yh).
-    const float xl = nd.x, yl = nd.y, xh = nd.x + nd.w, yh = nd.y + nd.h;
-    // Bin-index range the bbox spans, clamped to the grid (col = x-bin, row = y-bin).
+    float xl, yl, xh, yh, weight;
+    node_footprint(nd, bin_w, bin_h, xl, yl, xh, yh, weight);
+    // Bin-index range the footprint spans, clamped to the grid (col = x-bin, row = y-bin).
     int col_lo = (int)(xl / bin_w);  if (col_lo < 0)        col_lo = 0;   // first x-bin touched
     int col_hi = (int)(xh / bin_w);  if (col_hi > GRID - 1) col_hi = GRID - 1; // last x-bin touched
     int row_lo = (int)(yl / bin_h);  if (row_lo < 0)        row_lo = 0;   // first y-bin touched
     int row_hi = (int)(yh / bin_h);  if (row_hi > GRID - 1) row_hi = GRID - 1; // last y-bin touched
 
     const int c1 = c0 + STRIP;
-    // Fast path: node fits in a single bin -> area = w*h (matches Grid getArea()).
-    if (col_lo == col_hi && row_lo == row_hi) {
-        if (col_lo >= c0 && col_lo < c1) acc_URAM[col_lo - c0][row_lo] += nd.w * nd.h;
-        return;
-    }
-    // General case: exact rectangle intersection per covered bin, clipped to strip.
+    // Exact rectangle intersection per covered bin, clipped to the strip's columns.
     const int cs = col_lo > c0      ? col_lo : c0;       // first x-bin in this strip
     const int ce = col_hi < c1 - 1  ? col_hi : c1 - 1;   // last x-bin in this strip
     for (int col = cs; col <= ce; col++) {
         const float lx = col * bin_w, rx = lx + bin_w;   // this bin's x-extent [lx, rx)
-        // overlap width = intersection of node [xl,xh] with bin [lx,rx]
+        // overlap width = intersection of footprint [xl,xh] with bin [lx,rx]
         const float ox = (xh < rx ? xh : rx) - (xl > lx ? xl : lx);
-        if (ox <= 0) continue;                           // node doesn't reach this column
+        if (ox <= 0) continue;                           // footprint doesn't reach this column
         for (int row = row_lo; row <= row_hi; row++) {
             const float ly = row * bin_h, ry = ly + bin_h; // this bin's y-extent [ly, ry)
-            // overlap height = intersection of node [yl,yh] with bin [ly,ry]
+            // overlap height = intersection of footprint [yl,yh] with bin [ly,ry]
             const float oy = (yh < ry ? yh : ry) - (yl > ly ? yl : ly);
-            if (oy <= 0) continue;                       // node doesn't reach this row
-            acc_URAM[col - c0][row] += ox * oy;          // add the rectangular overlap area
+            if (oy <= 0) continue;                       // footprint doesn't reach this row
+            acc_URAM[col - c0][row] += ox * oy * weight; // area-conserving density deposit
         }
     }
 }

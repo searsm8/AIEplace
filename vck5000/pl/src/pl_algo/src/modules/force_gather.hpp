@@ -27,42 +27,37 @@
 
 #include "../formats.hpp"
 #include "../host_interface.hpp"
+#include "node_footprint.hpp"
 
 namespace plalgo {
 
-// Gather one node's force: field summed over its overlapped bins, weighted by overlap area.
+// Gather one node's force: field summed over its (clamped, area-conserving) footprint bins,
+// weighted by the deposited overlap. This is the exact adjoint of bin_scatter, so it uses the
+// SAME node_footprint geometry -- the same clamped footprint and area-conserving weight.
 // eField_x / eField_y are GRID x GRID, x-major (idx = col*GRID + row), matching bin_density.
 static void node_gather(const NodeBox& nd, const float* eField_x, const float* eField_y,
                         float bin_w, float bin_h, float& grad_x, float& grad_y) {
-    // Node bounding box: lower-left (xl,yl) to upper-right (xh,yh). Same as bin_scatter.
-    const float xl = nd.x, yl = nd.y, xh = nd.x + nd.w, yh = nd.y + nd.h;
+    float xl, yl, xh, yh, weight;
+    node_footprint(nd, bin_w, bin_h, xl, yl, xh, yh, weight);
     int col_lo = (int)(xl / bin_w);  if (col_lo < 0)        col_lo = 0;   // first x-bin touched
     int col_hi = (int)(xh / bin_w);  if (col_hi > GRID - 1) col_hi = GRID - 1; // last x-bin touched
     int row_lo = (int)(yl / bin_h);  if (row_lo < 0)        row_lo = 0;   // first y-bin touched
     int row_hi = (int)(yh / bin_h);  if (row_hi > GRID - 1) row_hi = GRID - 1; // last y-bin touched
 
     float acc_x = 0.0f, acc_y = 0.0f;
-    // Fast path: node fits in a single bin -> overlap area = w*h (matches bin_scatter).
-    if (col_lo == col_hi && row_lo == row_hi) {
-        const int idx = col_lo * GRID + row_lo;
-        const float area = nd.w * nd.h;
-        acc_x = area * eField_x[idx];
-        acc_y = area * eField_y[idx];
-    } else {
-        // General case: exact rectangle intersection per covered bin (mirrors bin_scatter).
-        for (int col = col_lo; col <= col_hi; col++) {
-            const float lx = col * bin_w, rx = lx + bin_w;   // this bin's x-extent [lx, rx)
-            const float ox = (xh < rx ? xh : rx) - (xl > lx ? xl : lx);   // x-overlap width
-            if (ox <= 0) continue;
-            for (int row = row_lo; row <= row_hi; row++) {
-                const float ly = row * bin_h, ry = ly + bin_h; // this bin's y-extent [ly, ry)
-                const float oy = (yh < ry ? yh : ry) - (yl > ly ? yl : ly);   // y-overlap height
-                if (oy <= 0) continue;
-                const float area = ox * oy;                  // node-bin overlap area
-                const int   idx  = col * GRID + row;
-                acc_x += area * eField_x[idx];
-                acc_y += area * eField_y[idx];
-            }
+    // Exact rectangle intersection per covered bin (mirrors bin_scatter's deposit).
+    for (int col = col_lo; col <= col_hi; col++) {
+        const float lx = col * bin_w, rx = lx + bin_w;   // this bin's x-extent [lx, rx)
+        const float ox = (xh < rx ? xh : rx) - (xl > lx ? xl : lx);   // x-overlap width
+        if (ox <= 0) continue;
+        for (int row = row_lo; row <= row_hi; row++) {
+            const float ly = row * bin_h, ry = ly + bin_h; // this bin's y-extent [ly, ry)
+            const float oy = (yh < ry ? yh : ry) - (yl > ly ? yl : ly);   // y-overlap height
+            if (oy <= 0) continue;
+            const float area = ox * oy * weight;         // area-conserving deposit (matches scatter)
+            const int   idx  = col * GRID + row;
+            acc_x += area * eField_x[idx];
+            acc_y += area * eField_y[idx];
         }
     }
     grad_x = acc_x;

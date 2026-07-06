@@ -25,23 +25,44 @@ constexpr int N_BINS  = GRID * GRID;
 
 struct NodeBox { float x, y, w, h; };  // lower-left anchor + size (host_interface.hpp)
 
-// Per-node scatter mirroring Grid::computeBinOverlaps, restricted to columns (x-bins)
-// in [clip_lo, clip_hi). add(col,row,area) accumulates one bin's overlap.
+constexpr bool ENABLE_DENSITY_CLAMP = true;   // mirror node_footprint.hpp
+
+// Clamped, area-conserving, on-grid footprint (mirrors modules/node_footprint.hpp).
+static void node_footprint(const NodeBox& nd, float bin_w, float bin_h,
+                           float& xl, float& yl, float& xh, float& yh, float& weight) {
+    const float w = nd.w, h = nd.h;
+    float cw = w, ch = h;
+    weight = 1.0f;
+    if (ENABLE_DENSITY_CLAMP) {
+        const float SQRT2 = 1.41421356f;
+        const float min_w = bin_w * SQRT2, min_h = bin_h * SQRT2;
+        cw = std::max(w, min_w);
+        ch = std::max(h, min_h);
+        weight = (cw > 0.0f && ch > 0.0f) ? (w * h) / (cw * ch) : 0.0f;
+    }
+    const float grid_w = GRID * bin_w, grid_h = GRID * bin_h;
+    xl = nd.x + 0.5f * w - 0.5f * cw;
+    yl = nd.y + 0.5f * h - 0.5f * ch;
+    if (xl + cw > grid_w) xl = grid_w - cw;
+    if (yl + ch > grid_h) yl = grid_h - ch;
+    if (xl < 0.0f) xl = 0.0f;
+    if (yl < 0.0f) yl = 0.0f;
+    xh = xl + cw;
+    yh = yl + ch;
+}
+
+// Per-node scatter over the clamped footprint, restricted to columns (x-bins) in
+// [clip_lo, clip_hi). add(col,row,area) accumulates one bin's area-conserving deposit.
 template <class AddFn>
 static void scatter(const NodeBox& nd, float bin_w, float bin_h,
                     int clip_lo, int clip_hi, AddFn add) {
-    const float xl = nd.x, yl = nd.y, xh = nd.x + nd.w, yh = nd.y + nd.h;
+    float xl, yl, xh, yh, weight;
+    node_footprint(nd, bin_w, bin_h, xl, yl, xh, yh, weight);
     const int col_lo = std::max(0, (int)(xl / bin_w));
     const int col_hi = std::min(GRID - 1, (int)(xh / bin_w));
     const int row_lo = std::max(0, (int)(yl / bin_h));
     const int row_hi = std::min(GRID - 1, (int)(yh / bin_h));
 
-    // Fast path: node fits in a single bin -> area = w*h (matches Grid getArea()).
-    if (col_lo == col_hi && row_lo == row_hi) {
-        if (col_lo >= clip_lo && col_lo < clip_hi) add(col_lo, row_lo, nd.w * nd.h);
-        return;
-    }
-    // General case: exact rectangle intersection per covered bin.
     const int cs = std::max(col_lo, clip_lo), ce = std::min(col_hi, clip_hi - 1);
     for (int col = cs; col <= ce; col++) {
         const float ox = std::min(xh, (col + 1) * bin_w) - std::max(xl, col * bin_w);
@@ -49,7 +70,7 @@ static void scatter(const NodeBox& nd, float bin_w, float bin_h,
         for (int row = row_lo; row <= row_hi; row++) {
             const float oy = std::min(yh, (row + 1) * bin_h) - std::max(yl, row * bin_h);
             if (oy <= 0) continue;
-            add(col, row, ox * oy);
+            add(col, row, ox * oy * weight);
         }
     }
 }
