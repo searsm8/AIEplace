@@ -60,9 +60,26 @@ density-distribution gap**: at matched masked overflow markv1 lands a more-clust
 placement — adaptec2 exact 0.19, adaptec1 exact 0.24, vs XPlace ~0.115 — and HPWL is still ~+14% on
 adaptec2. Ruled OUT already: **finer grid** (256-bin adaptec1 exact stayed 0.205 ≈ 64-bin) and the
 **preconditioner** (clamp+precond adaptec1 HPWL 8.64e7 WORSE, exact 0.168; `enable_preconditioning`
-stays FALSE). Next step (session (1)): dump markv1 vs XPlace bin-density maps at matched masked
-overflow on adaptec2 and compare WHERE the spread differs — this is a genuine force/density
-difference, not a stop-criterion artifact.
+stays FALSE).
+
+**Full 1024² CPU grid — measured, impractical (2026-07-06).** The CPU DCT path uses `DCT_naive`/
+`IDCT_naive`/`IDXST_naive` (O(N²) per 1D transform → O(N³)/iter). At 1024 that's ~4 min/iter
+(measured on adaptec1: 1 iter in ~4.5 min), so a converged run is ~24 h. Not worth it as-is and the
+256-bin result predicts little exact-overflow gain. To actually use the 1024 grid the DCT must be
+FFT-accelerated (O(N log N)) — a separate task. Config knob works: `"bins_per_row": 1024` (runtime,
+CPU path is grid-agnostic).
+
+**Density-dump instrumentation DONE (2026-07-06, commit 61ad581).** markv1 `Placer::dumpBinDensity`
+(config `dump_density:true`) writes masked+exact real-cell ρ CSVs (fillers excluded) at the restored
+best; XPlace side is an env-gated dump (`XPLACE_DUMP_DENSITY=1`, `~/phd/Xplace/src/run_placement_nesterov.py`,
+writes `~/aieplace_tmp/<bench>_density_exact.npy` + meta). Compare with `vck5000/tools/compare_density.py`.
+**First adaptec1 result:** robust signal = markv1 forms local hotspots up to **2.9× capacity** (18% of
+core bins over target) while XPlace caps at **~1.1×** (9% over) — matches markv1 exact 0.23 vs XPlace
+0.115. CAVEAT: absolute utilization not yet apples-to-apples — markv1 is a 64-bin grid over the core
+die, XPlace a 512-bin grid padded to power-of-2 (empty margins), so coverage differs. NEXT: rebin both
+final placements over the identical die bbox at one resolution before drawing spatial conclusions;
+then chase why markv1 permits >2× local pile-ups (candidate: density-force magnitude / gradient
+clamping vs XPlace, not the stop criterion).
 
 ## PL port status + next gate
 
