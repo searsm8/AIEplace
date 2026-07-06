@@ -86,6 +86,26 @@ dump mismatch — NOT a real spreading defect. Residual gap is small (peaks + ~4
 overflow still drops with finer grid: 64→0.221, 512→0.164, 1024→0.097; but that's measured at the run's
 own resolution, so cross-grid exact-overflow numbers aren't directly comparable.)
 
+### Tests A & B: the peak residual was a stopping-point artifact; real gap is ~5% HPWL (2026-07-06)
+Ran three adaptec1@512 arms, fixed seed 42 (baseline dirs under `results/single_runs/adaptec1/`):
+- **Test A (stop-point):** lower `convergence_overflow_threshold` 0.07→0.04 so markv1 spreads further.
+  Baseline (stop 0.07, masked ovfw 0.064): max_util **3.56×**, overflow_mass 0.061, exact ovfw 0.162,
+  HPWL 7.338e7. Low-stop (masked ovfw 0.040 ≈ XPlace's 0.042): max_util **2.68×** (→ XPlace 2.37),
+  overflow_mass **0.042** (< XPlace 0.050), exact ovfw **0.111** (≈ XPlace 0.115), HPWL 7.418e7 (+1.1%).
+  ⇒ **The sharper-peaks / higher-exact-overflow residual was mostly because markv1 stopped spreading
+  earlier.** At matched overflow, markv1's physical spread MATCHES XPlace (even slightly better
+  overflow_mass/over-cap). Heatmap `cmp_LOWSTOP.png`.
+- **Test B (preconditioner):** `enable_preconditioning:true` at 512 is CATASTROPHIC — never converged
+  (700 iters, overflow floored masked 0.51/exact 0.55, HPWL 1.11e8). With the normalized field λ ramps
+  large, and precond_weight=max(1,pins+λ·area) then massively damps the density force → no spreading.
+  **Preconditioner ruled OUT** (stays FALSE); it is not the peak lever.
+
+**Net:** neither test points at the density-force computation, so the force-diff harness is NOT the
+priority. Spread ≈ XPlace at matched overflow. **The one genuine remaining residual is ~5% HPWL**
+(markv1 7.42e7 vs XPlace 7.06e7 at matched spread) — a wirelength-efficiency gap, candidates: WA-γ
+schedule, WL-gradient formulation, or the optimizer settling at a WL-worse local optimum. Chase there,
+not in the density force.
+
 ## THE remaining gap (exploratory — do with Mark steering)
 
 Now that both converge at XPlace's *masked* overflow, the residual is the **exact-overflow /
