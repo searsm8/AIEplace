@@ -9,8 +9,8 @@ std::vector<float> DCT_naive   (std::vector<float> input);
 std::vector<float> IDCT_naive  (std::vector<float> input);
 std::vector<float> IDXST_naive (std::vector<float> input);
 
-std::vector<float> DCT_fft     (std::vector<float> input);
-std::vector<float> IDCT_fft    (std::vector<float> input);
-std::vector<float> IDXST_fft   (std::vector<float> input);
+std::vector<float> DCT_fft     (std::vector<float> input, bool normalize = false);
+std::vector<float> IDCT_fft    (std::vector<float> input, bool normalize = false);
+std::vector<float> IDXST_fft   (std::vector<float> input, bool normalize = false);
 
 AIEPLACE_NAMESPACE_END

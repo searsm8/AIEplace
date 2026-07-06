@@ -137,6 +137,7 @@ Placer::Placer(std::string config_filepath)
             enable_momentum = cfg["params"]["enable_momentum"];
             enable_preconditioning = cfg["params"].value("enable_preconditioning", true);
             enable_density_clamp = cfg["params"].value("enable_density_clamp", true);
+            dct_normalize = cfg["params"].value("dct_normalize", false);
             convergence_window = cfg["params"]["convergence_window"];
             convergence_iterations = cfg["params"].value("convergence_iterations", 30);
             max_backtracking_attempts = cfg["params"]["backtrack_max_tries"];
@@ -487,7 +488,10 @@ void Placer::iterationReset()
 void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist)
 {
     Logger::log_trace("Begin initializePlacement()");
-    std::srand(std::time(nullptr)); // use current time as seed for random generator
+    // Fixed seed (random_seed >= 0) gives identical initial placement across runs — needed for
+    // controlled A/B tests; default -1 keeps the time-based seed.
+    int seed = cfg["params"].value("random_seed", -1);
+    std::srand(seed >= 0 ? (unsigned)seed : (unsigned)std::time(nullptr));
 
     Table top;
     top.add_row(RowStream{} << "Initial Placement");

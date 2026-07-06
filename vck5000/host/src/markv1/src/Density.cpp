@@ -309,15 +309,15 @@ void Placer::compute_a_uv_DCT()
     std::vector< std::vector<float> > temp;
     std::vector< std::vector<float> > a_uv;
 
-    // Perform 1-D DCT on rows of density (rho) matrix
+    // Perform 1-D DCT on rows of density (rho) matrix (FFT, O(N log N); verified == DCT_naive)
     for (int row_index = 0; row_index < grid.getBinsPerCol(); row_index++)
-        temp.push_back(DCT_naive(density[row_index]));
+        temp.push_back(DCT_fft(density[row_index], dct_normalize));
 
     temp = transpose(temp);
 
     // Perform 1-D DCT on transposed matrix
     for (int col_index = 0; col_index < grid.getBinsPerRow(); col_index++)
-        a_uv.push_back(DCT_naive(temp[col_index]));
+        a_uv.push_back(DCT_fft(temp[col_index], dct_normalize));
 
     a_uv = transpose(a_uv);
 
@@ -351,10 +351,10 @@ void Placer::compute_eField_DCT()
         }
     }
 
-    // compute IDCT on all rows of Ex, and IDXST on all rows of Ey
+    // compute IDCT on all rows of Ex, and IDXST on all rows of Ey (FFT; verified == naive)
     for (int row_index = 0; row_index < num_rows; row_index++) {
-        Ex[row_index] = IDCT_naive (Ex[row_index]);
-        Ey[row_index] = IDXST_naive(Ey[row_index]);
+        Ex[row_index] = IDCT_fft (Ex[row_index], dct_normalize);
+        Ey[row_index] = IDXST_fft(Ey[row_index], dct_normalize);
     }
 
     Ex = transpose(Ex);
@@ -362,8 +362,8 @@ void Placer::compute_eField_DCT()
 
     // compute IDCT on all rows of Ey, and IDXST on all rows of Ex
     for (int row_index = 0; row_index < num_rows; row_index++) {
-        Ex[row_index] = IDXST_naive (Ex[row_index]);
-        Ey[row_index] = IDCT_naive(Ey[row_index]);
+        Ex[row_index] = IDXST_fft (Ex[row_index], dct_normalize);
+        Ey[row_index] = IDCT_fft(Ey[row_index], dct_normalize);
     }
 
     Ex = transpose(Ex);
