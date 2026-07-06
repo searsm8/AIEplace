@@ -402,24 +402,23 @@ void Placer::computeOverlaps()
 }
 
 /*
- * @brief Masked overflow — XPlace's global-placement convergence metric.
+ * @brief Overflow metric with fillers excluded. clamp=true gives XPlace's *masked* overflow
+ * (the global-placement convergence signal); clamp=false gives the *exact* physical overflow.
  *
- * Same formula as Grid::computeTotalOverflow (sum of per-bin excess over
- * target*bin_area, normalized by movable area), but built from a *masked* density map
- * with two differences from the exact one:
- *   1. Each movable cell's footprint is clamped to at least sqrt(2) bins per dimension
- *      (XPlace: node_size.clamp(min = unit_len*sqrt(2))), with an area-conserving weight
- *      (real_area / clamped_area) so total deposited area is unchanged. Sub-bin cells are
- *      thus smeared to the grid resolution instead of spiking a single bin.
- *   2. Fillers are excluded (XPlace computes overflow on the movable-connected map only).
- * Fixed macros form a per-bin-capped baseline, matching computeOverlaps/clampFixedDensity.
+ * Same formula as Grid::computeTotalOverflow (sum of per-bin excess over target*bin_area,
+ * normalized by movable area), evaluated on an independently-built density map so the two
+ * variants can be reported side by side. When clamp=true each movable cell's footprint is
+ * inflated to at least sqrt(2) bins per dimension with an area-conserving weight
+ * (real_area/clamped_area) and shifted to stay in-die — matching Grid::computeBinOverlaps —
+ * so sub-bin cells are smeared to grid resolution rather than spiking a single bin. Fixed
+ * macros form a per-bin-capped baseline (mirrors clampFixedDensity); fillers are excluded.
  *
- * Why it matters: this is the smoothed density the electrostatic optimizer actually
+ * Why masked matters: it is the smoothed density the electrostatic optimizer actually
  * minimizes, so it descends cleanly to the stop threshold. The exact overflow re-measures
- * with sharp physical footprints, whose sub-bin quantization spikes leave it floored well
- * above threshold even for a well-spread placement (the markv1 "can't reach 0.07" effect).
+ * with sharp footprints, whose sub-bin quantization spikes leave it floored above threshold
+ * even for a well-spread placement (the markv1 "can't reach 0.07" effect).
  */
-float Placer::computeMaskedOverflow()
+float Placer::computeOverflow(bool clamp)
 {
     const int nx = grid.getBinsPerRow();
     const int ny = grid.getBinsPerCol();
@@ -428,19 +427,25 @@ float Placer::computeMaskedOverflow()
     const float cap   = bin_w * bin_h * target_density;   // per-bin capacity
     const float min_w = bin_w * (float)M_SQRT2;           // clamp each dim to >= sqrt(2)*bin
     const float min_h = bin_h * (float)M_SQRT2;
+    const float grid_w = nx * bin_w;
+    const float grid_h = ny * bin_h;
 
     std::vector<float> density(nx * ny, 0.0f);            // area deposited per bin
 
-    // Deposit a node's area over its (optionally clamped) footprint, centered on the cell.
-    auto deposit = [&](Node* node, bool clamp) {
+    // Deposit a node's area over its (optionally clamped) footprint, centered on the cell and
+    // shifted to stay in-die (kept in sync with Grid::computeBinOverlaps).
+    auto deposit = [&](Node* node, bool clamp_node) {
         float w = node->getXsize(), h = node->getYsize();
-        float cw = clamp ? std::max(w, min_w) : w;
-        float ch = clamp ? std::max(h, min_h) : h;
+        float cw = clamp_node ? std::max(w, min_w) : w;
+        float ch = clamp_node ? std::max(h, min_h) : h;
         float weight = (cw > 0.0f && ch > 0.0f) ? (w * h) / (cw * ch) : 0.0f; // conserve total area
-        float cx = node->getProbeX() + 0.5f * w;
-        float cy = node->getProbeY() + 0.5f * h;
-        float xl = cx - 0.5f * cw, yl = cy - 0.5f * ch;
-        float xh = xl + cw,        yh = yl + ch;
+        float xl = node->getProbeX() + 0.5f * w - 0.5f * cw;
+        float yl = node->getProbeY() + 0.5f * h - 0.5f * ch;
+        if (xl + cw > grid_w) xl = grid_w - cw;
+        if (yl + ch > grid_h) yl = grid_h - ch;
+        if (xl < 0.0f) xl = 0.0f;
+        if (yl < 0.0f) yl = 0.0f;
+        float xh = xl + cw, yh = yl + ch;
         int col_lo = std::max(0, (int)(xl / bin_w));
         int col_hi = std::min(nx - 1, (int)(xh / bin_w));
         int row_lo = std::max(0, (int)(yl / bin_h));
@@ -461,9 +466,9 @@ float Placer::computeMaskedOverflow()
         if (item.second->getStatus() == FIXED) deposit(item.second, false);
     for (float& d : density) d = std::min(d, cap);
 
-    // Movable real cells, clamped footprints. Fillers intentionally excluded.
+    // Movable real cells (clamped when requested). Fillers intentionally excluded.
     for (auto item : db.getComponents())
-        if (item.second->getStatus() != FIXED) deposit(item.second, true);
+        if (item.second->getStatus() != FIXED) deposit(item.second, clamp);
 
     float overflow_area = 0.0f;
     for (float d : density) overflow_area += std::max(0.0f, d - cap);

@@ -374,11 +374,9 @@ void Placer::printFinalResults()
     algo_time = Logger::getFunctionTime("run")/ 1e6; // Convert microseconds to seconds
     float final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
     // Exact (physical) overflow — sharp footprints, the real spreading quality. Reported
-    // alongside the masked overflow that drove convergence (see computeMaskedOverflow).
-    float final_overflow = grid.computeTotalOverflow(
-                            target_density,
-                            db.getTotalMovableArea());
-    float final_masked_overflow = computeMaskedOverflow();
+    // alongside the masked overflow that drove convergence (see computeOverflow).
+    float final_overflow = computeOverflow(false);
+    float final_masked_overflow = computeOverflow(true);
     float total_runtime = getInterval(pgrm_start_time, getTime());
     float iteration_avg = (iteration > 0) ? total_runtime / iteration : 0.0f;
 
@@ -652,7 +650,7 @@ void Placer::recordIterationResults()
     // Drive convergence off XPlace's masked overflow (clamped footprints, fillers excluded):
     // the smoothed density the optimizer minimizes, which descends cleanly to the stop
     // threshold. The exact overflow is reported separately as the physical result.
-    float overflow = computeMaskedOverflow();
+    float overflow = computeOverflow(true);   // masked (clamped) — the convergence signal
 
     hpwl_history.push_back(hpwl);
     step_length_history.push_back(step_length);

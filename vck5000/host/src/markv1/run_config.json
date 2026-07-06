@@ -34,6 +34,7 @@
     "enable_momentum": true,          // whether to use momentum in the optimization (Nesterov Accelerated Gradient)
     "enable_filler": true,             // whether to include filler cells in placement (XPlace always does)
     "enable_preconditioning": false,   // diagonal preconditioner: damps large macro movement (XPlace-style)
+    "enable_density_clamp": true,      // clamp sub-bin cells to ~bin size in the density solve (XPlace expand_ratio); smooths the force
 
     // Hyperparameters
     "init_gamma": 4,

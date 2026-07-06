@@ -45,50 +45,52 @@ void Grid::iterationReset()
  */
 void Grid::computeBinOverlaps(Node* node_p)
 {
-    // Node bounding box (lower-left anchor at probe position)
-    float node_xl = node_p->getProbeX();
-    float node_yl = node_p->getProbeY();
-    float node_xh = node_xl + node_p->getXsize();
-    float node_yh = node_yl + node_p->getYsize();
+    float w = node_p->getXsize();
+    float h = node_p->getYsize();
 
-    // Bin index range the node spans (clamped to grid bounds)
+    // Footprint: exact, or (when clamping) inflated to at least sqrt(2) bins per dimension
+    // with an area-conserving weight = real_area / clamped_area (XPlace's expand_ratio).
+    // Clamping smooths sub-bin cells to the grid resolution, so the density field — and hence
+    // the electrostatic force/gradient the optimizer follows — has no sub-bin spikes. Macros
+    // already exceed the clamp, so they are unaffected (weight stays 1). Must stay in sync with
+    // Placer::computeOverflow, which applies the same clamp to the masked overflow metric.
+    float cw = w, ch = h, weight = 1.0f;
+    if (m_clamp_density) {
+        const float SQRT2 = 1.41421356f;
+        cw = std::max(w, m_bin_width  * SQRT2);
+        ch = std::max(h, m_bin_height * SQRT2);
+        weight = (cw > 0.0f && ch > 0.0f) ? (w * h) / (cw * ch) : 0.0f;
+    }
+
+    // Footprint centered on the cell, shifted to stay inside the die so edge cells still
+    // deposit their full area-conserving mass (matches XPlace pre_normalize clamping).
+    float grid_w = m_bins_per_row * m_bin_width;
+    float grid_h = m_bins_per_col * m_bin_height;
+    float node_xl = node_p->getProbeX() + 0.5f * w - 0.5f * cw;
+    float node_yl = node_p->getProbeY() + 0.5f * h - 0.5f * ch;
+    if (node_xl + cw > grid_w) node_xl = grid_w - cw;
+    if (node_yl + ch > grid_h) node_yl = grid_h - ch;
+    if (node_xl < 0.0f) node_xl = 0.0f;
+    if (node_yl < 0.0f) node_yl = 0.0f;
+    float node_xh = node_xl + cw;
+    float node_yh = node_yl + ch;
+
     int col_lo = std::max(0, (int)(node_xl / m_bin_width));
     int col_hi = std::min(m_bins_per_row - 1, (int)(node_xh / m_bin_width));
     int row_lo = std::max(0, (int)(node_yl / m_bin_height));
     int row_hi = std::min(m_bins_per_col - 1, (int)(node_yh / m_bin_height));
 
-    // Fast path: node fits in a single bin — skip intersection math
-    if (col_lo == col_hi && row_lo == row_hi) {
-        float area = node_p->getArea();
-        Bin& bin = m_bins[col_lo][row_lo];
-        bin.total_overlap += area;
-        bin.overlapping_nodes.push_back(node_p);
-        node_p->addBinOverlap(&bin, area);
-        return;
-    }
-
-    // General case: node spans multiple bins — compute exact intersection
     for (int col = col_lo; col <= col_hi; col++) {
         float bin_xl = col * m_bin_width;
-        float bin_xh = bin_xl + m_bin_width;
-
-        // Intersection width = overlap of [node_xl, node_xh] and [bin_xl, bin_xh]
-        float overlap_xl = std::max(node_xl, bin_xl);
-        float overlap_xh = std::min(node_xh, bin_xh);
-        float overlap_w  = overlap_xh - overlap_xl;
-        if (overlap_w <= 0) continue;
+        float overlap_w = std::min(node_xh, bin_xl + m_bin_width) - std::max(node_xl, bin_xl);
+        if (overlap_w <= 0.0f) continue;
 
         for (int row = row_lo; row <= row_hi; row++) {
             float bin_yl = row * m_bin_height;
-            float bin_yh = bin_yl + m_bin_height;
+            float overlap_h = std::min(node_yh, bin_yl + m_bin_height) - std::max(node_yl, bin_yl);
+            if (overlap_h <= 0.0f) continue;
 
-            // Intersection height
-            float overlap_yl = std::max(node_yl, bin_yl);
-            float overlap_yh = std::min(node_yh, bin_yh);
-            float overlap_h  = overlap_yh - overlap_yl;
-            if (overlap_h <= 0) continue;
-
-            float overlap_area = overlap_w * overlap_h;
+            float overlap_area = overlap_w * overlap_h * weight;  // area-conserving deposit
             Bin& bin = m_bins[col][row];
             bin.total_overlap += overlap_area;
             bin.overlapping_nodes.push_back(node_p);

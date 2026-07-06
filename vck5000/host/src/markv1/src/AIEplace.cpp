@@ -136,6 +136,7 @@ Placer::Placer(std::string config_filepath)
             enable_backtracking = cfg["params"]["enable_backtracking"];
             enable_momentum = cfg["params"]["enable_momentum"];
             enable_preconditioning = cfg["params"].value("enable_preconditioning", true);
+            enable_density_clamp = cfg["params"].value("enable_density_clamp", true);
             convergence_window = cfg["params"]["convergence_window"];
             convergence_iterations = cfg["params"].value("convergence_iterations", 30);
             max_backtracking_attempts = cfg["params"]["backtrack_max_tries"];
@@ -231,6 +232,7 @@ Placer::Placer(std::string config_filepath)
             createRunOutputStructure();
 
             grid = Grid(db.getDieArea(), bins_per_row, bins_per_row);
+            grid.setClampDensity(enable_density_clamp);
 
             die_size = min( grid.getDieWidth(), grid.getDieHeight() );
 

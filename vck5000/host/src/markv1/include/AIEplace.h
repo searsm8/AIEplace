@@ -74,6 +74,7 @@ public:
     bool enable_backtracking;
     bool enable_momentum;
     bool enable_preconditioning;
+    bool enable_density_clamp;   // clamp sub-bin cells in the density solve (XPlace expand_ratio)
     bool compare_hpwl_methods = false;
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
     float avg_node_size = 1.0f; // average cell area; normalizes preconditioner area term
@@ -181,7 +182,8 @@ public:
     void compute_eField_DCT();
 
     void computeOverlaps();
-    float computeMaskedOverflow();  // XPlace GP convergence metric (clamped footprints, no fillers)
+    float computeOverflow(bool clamp);  // overflow metric, fillers excluded; clamp=true = XPlace
+                                        // masked (GP convergence), clamp=false = exact (physical)
 
 
     // Comparison functions for verification

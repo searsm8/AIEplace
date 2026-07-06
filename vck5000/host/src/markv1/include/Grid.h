@@ -16,6 +16,7 @@ private:
     int m_bins_per_row;
     int m_bins_per_col;
     float m_bin_width, m_bin_height;
+    bool m_clamp_density = true; // clamp sub-bin cells to >= sqrt(2) bins (area-conserving)
     std::vector<std::vector<Bin> > m_bins; // 2D grid of bins to compute eField
 
 public:
@@ -38,6 +39,7 @@ public:
     int getDieHeight() { return m_die_area.getYsize(); }
     float getBinWidth() { return m_bin_width; }
     float getBinHeight() { return m_bin_height; }
+    void setClampDensity(bool clamp) { m_clamp_density = clamp; }
 
     void iterationReset();
 
