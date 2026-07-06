@@ -1,4 +1,4 @@
-# Checkpoint — markv1 algorithm ~XPlace on adaptec1; clamp reflected into PL (2026-07-05)
+# Checkpoint — markv1 ~XPlace on adaptec1+adaptec2 (divergence-guard fix); clamp reflected into PL (2026-07-06)
 
 Branch `pl_algo`. The markv1 CPU golden has been brought most of the way to XPlace quality by
 porting XPlace's control layer + density smoothing, and the key change (density-force clamping) is
@@ -34,22 +34,35 @@ Commits this session (all on `pl_algo`, markv1 golden unless noted):
     overflow stalled ~0.10, divergence guard stopped it at iter 332; XPlace ran 926 iters to 0.049).
 - markv1 = 64-bin grid, CPU, no preconditioner. XPlace = GPU, finer grid, preconditioner on.
 
-## THE open problem (start here next session)
+## RESOLVED 2026-07-06: adaptec2 "stall" was a divergence-guard false-fire (commit 73cbe36)
 
-markv1's spreading dynamics **stall on harder designs** — adaptec2 floors at masked overflow ~0.10
-and can't push lower, while XPlace reaches 0.049. Even on adaptec1 that converges, markv1's *exact*
-overflow (0.20) is worse than XPlace's (0.115): at the same masked overflow markv1 lands a
-more-clustered, less-legalizable placement. Ruled OUT as fixes:
-- **Finer grid**: 256-bin adaptec1 left exact overflow at 0.205 (≈ 64-bin) — not a grid artifact.
-- **Preconditioner**: clamp+precond on adaptec1 gave HPWL 8.64e7 (WORSE than clamp-only 7.10e7),
-  exact 0.168 — trades HPWL for a little spread, doesn't close it. (`enable_preconditioning` stays FALSE.)
+Hypothesis (a) was the binding constraint. The adaptec2 "floor at masked overflow ~0.10" was NOT a
+spreading stall — the run was **killed mid-descent**. At iter 332 (where it stopped) masked overflow
+was 0.101 and dropping ~2%/iter (0.120→0.106→0.104→0.101 over the prior 8 iters), HPWL still
+improving, and max_iterations was 700. Root cause: `checkDivergence` referenced `best_fallback`
+(lowest-overflow-so-far) when no converged solution existed. On a smooth monotonic descent
+best_fallback ≈ the newest sample, so a trailing 3-iter mean always reads "worse than best" on BOTH
+HPWL and overflow → guard false-fires, burns life, dies. XPlace never hits this: its `check_divergence`
+returns False whenever `best_metric["hpwl"]==inf` (no below-threshold sol yet). **Fix:** key the guard
+off `best_primary` only; skip when it's invalid. Post-convergence protection is unchanged.
 
-Open hypotheses to test: (a) the **divergence guard is too aggressive** on hard designs (adaptec2
-stopped at 332 vs XPlace 926 — try raising `MAX_LIFE`/loosening `checkDivergence`, or the XPlace
-`life` countdown that keeps improving past first threshold-cross); (b) push masked below ~0.05 like
-XPlace rather than stopping at first crossing; (c) a genuine **force/density-distribution difference**
-— best diagnosed by dumping markv1 vs XPlace bin-density maps at matched overflow and comparing. Do
-this with Mark steering; it's exploratory.
+Results after fix (masked-overflow convergence; both now stop via the normal 30-iter countdown):
+- **adaptec2**: was killed iter 332 @ masked 0.101 / HPWL 9.53e7 (never converged). Now CONVERGES
+  iter 380 @ masked **0.049** (== XPlace 0.049) / HPWL **9.01e7** (−5.5%). Gap to XPlace GP 7.90e7:
+  +21% → **+14%**.
+- **adaptec1** (regression check): still converges, HPWL 7.16e7 @ masked 0.064 (was 7.10e7 — within
+  random-init noise). No regression.
+
+## THE remaining gap (exploratory — do with Mark steering)
+
+Now that both converge at XPlace's *masked* overflow, the residual is the **exact-overflow /
+density-distribution gap**: at matched masked overflow markv1 lands a more-clustered, less-legalizable
+placement — adaptec2 exact 0.19, adaptec1 exact 0.24, vs XPlace ~0.115 — and HPWL is still ~+14% on
+adaptec2. Ruled OUT already: **finer grid** (256-bin adaptec1 exact stayed 0.205 ≈ 64-bin) and the
+**preconditioner** (clamp+precond adaptec1 HPWL 8.64e7 WORSE, exact 0.168; `enable_preconditioning`
+stays FALSE). Next step (session (1)): dump markv1 vs XPlace bin-density maps at matched masked
+overflow on adaptec2 and compare WHERE the spread differs — this is a genuine force/density
+difference, not a stop-criterion artifact.
 
 ## PL port status + next gate
 
