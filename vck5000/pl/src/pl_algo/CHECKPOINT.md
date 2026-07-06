@@ -1,5 +1,36 @@
 # Checkpoint — pl_algo Stage 5c COMPLETE; pivoting to markv1 CPU validation + full algorithm review
 
+## UPDATE 2026-07-05 — markv1 algorithm brought to ~XPlace parity; clamp reflected into PL
+The markv1 CPU review (plan A/B below) is largely done, and it produced a real quality milestone.
+Commits on `pl_algo`: 3f4145a (XPlace per-iteration density-weight schedule + fixed fillers),
+0608864 (XPlace *masked overflow* as the convergence metric), f3510ef (divergence guard),
+32ebea7 (clamp cell footprints in the density FORCE), 0237e57 (reflect the clamp into the PL).
+
+Key findings:
+- **markv1 now converges and ~matches XPlace.** adaptec1 GP HPWL 1.09e8 (start) → **7.10e7**, vs
+  XPlace GP 7.06e7 (within ~1%). Generalizes: pci_bridge32_a −9.7%, fft_a −5.9%.
+- **The two unlocks** were XPlace's *masked overflow* (overflow measured on clamped-footprint density
+  — sub-bin cells smeared to grid resolution; the smoothed field the optimizer actually minimizes, so
+  it reaches stop_overflow; exact overflow floored ~0.12) and the *clamped density force* (same
+  clamp applied to ρ/the gradient — kills sub-bin gradient spikes → stability + lower HPWL). The
+  clamp recipe (inflate to √2 bins, weight = real/clamped area) is XPlace/DREAMPlace *code*, not in
+  their papers.
+- Preconditioner: implemented, `enable_preconditioning` default FALSE — it hurt HPWL untuned.
+- We built + ran **XPlace itself** on this box for a direct reference (see auto-memory
+  `xplace_build_and_run`): system CUDA 12.3, conda base torch, `-DCMAKE_CXX_ABI=1`, PIC lefdef
+  override, `pip install pulp igraph`, run with `< /dev/null`.
+
+PL port status (commit 0237e57): new `src/modules/node_footprint.hpp` (shared clamped-footprint
+geometry); `density_bin.hpp`/`force_gather.hpp` use it (gather is the scatter's adjoint); `metrics.hpp`
+overflow is now masked for free (clamped ρ, fillers already excluded). `model/density_bin_model.cpp`
+strip-vs-naive PASS bit-exact. **HLS C-synth `make PL=pl_algo TARGET=hw`: SYNCHK 0 errors**, density
+loops II=1, node_gather inner intersection II=5 (optimization target — sub-bin cells now touch ~4 bins).
+Next PL gates: finish C-synth/.xo, then sw_emu vs the (new) Grid golden; the 1024-bin PL grid should
+also shrink the masked↔exact overflow gap seen on the coarse 64-bin CPU runs.
+
+Run how-to for the CPU golden: auto-memory `markv1_cpu_run_gotchas` (pty wrapper, persistent config
+path). Milestone detail: auto-memory `clamped_density_force_milestone`.
+
 ## Where we are
 The **entire ePlace iteration** runs on the PL/AIE, sw_emu-verified end to end (see
 `build_reports/stage5c.md`). A 6-iteration `--place` run on `mgc_pci_bridge32_b` gives a clean,
