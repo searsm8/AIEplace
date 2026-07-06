@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cassert>
 #include <numeric>
+#include <random>
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -203,7 +204,9 @@ Placer::Placer(std::string config_filepath)
 #endif
 
             // Initialize database by reading LEF and DEF design files
-            db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
+            bool enable_pin_offsets = cfg["params"].value("enable_pin_offsets", true);
+            Logger::log_info(std::string("Pin offsets: ") + (enable_pin_offsets ? "enabled" : "disabled"));
+            db = DataBase(input_dir, enable_pin_offsets); // TODO: Database initialization should be multithreaded?
 
             // Benchmark-specified maximum_utilization overrides config default
             if (db.getMaximumUtilization() > 0.0f) {
@@ -506,6 +509,18 @@ void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist
     float bin_area_16th = grid.getBinWidth() * grid.getBinHeight() / 16;
     int placed_count = 0, randomized_count = 0;
 
+    // init_method selects how UNPLACED movable cells are seeded:
+    //   "uniform_box"   — legacy: uniform offset within a box of half-width max_dist.
+    //   "random_center" — XPlace-style tight Gaussian cluster at the die center
+    //                    (per-axis sigma = 0.001 * die span). Relies on the density
+    //                    force to spread the near-coincident cells over early iterations.
+    std::string init_method = cfg["params"].value("init_method", std::string("uniform_box"));
+    Logger::log_info("Movable-cell init_method: " + init_method);
+    std::mt19937 gauss_gen(seed >= 0 ? (unsigned)seed : (unsigned)std::time(nullptr));
+    std::normal_distribution<float> gauss(0.0f, 1.0f);
+    float gauss_sigma_x = grid.getDieWidth() * 0.001f;
+    float gauss_sigma_y = grid.getDieHeight() * 0.001f;
+
     for (auto item : db.getComponents()) {
         Component* comp = item.second;
 
@@ -516,12 +531,18 @@ void Placer::initializePlacement(Position target_pos, int min_dist, int max_dist
             comp->initializeState(comp->next.node_pos); // use position from DEF parser
             placed_count++;
         } else {
-            int range = std::max(1, max_dist - min_dist);
-            int x_offset = min_dist + rand() % range;
-            if(rand()%2 == 1) x_offset *= -1;
-            int y_offset = min_dist + rand() % range;
-            if(rand()%2 == 1) y_offset *= -1;
-            Position init_pos = target_pos + Position(x_offset, y_offset);
+            Position init_pos;
+            if (init_method == "random_center") {
+                init_pos = target_pos + Position(gauss(gauss_gen) * gauss_sigma_x,
+                                                 gauss(gauss_gen) * gauss_sigma_y);
+            } else {
+                int range = std::max(1, max_dist - min_dist);
+                int x_offset = min_dist + rand() % range;
+                if(rand()%2 == 1) x_offset *= -1;
+                int y_offset = min_dist + rand() % range;
+                if(rand()%2 == 1) y_offset *= -1;
+                init_pos = target_pos + Position(x_offset, y_offset);
+            }
             comp->initializeState(init_pos);
             randomized_count++;
         }

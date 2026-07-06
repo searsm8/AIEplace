@@ -35,12 +35,22 @@
     "enable_filler": true,             // whether to include filler cells in placement (XPlace always does)
     "enable_preconditioning": false,   // diagonal preconditioner: damps large macro movement (XPlace-style)
     "enable_density_clamp": true,      // clamp sub-bin cells to ~bin size in the density solve (XPlace expand_ratio); smooths the force
+    "enable_pin_offsets": true,        // use per-pin offsets (bookshelf: center-relative; LEF/DEF: macro RECT) in HPWL + WL gradient; false = all pins at node origin (legacy)
 
     // Hyperparameters
     "init_gamma": 4,
     "gamma_schedule": true, // if true, gamma follows overflow-driven schedule (XPlace-style); starts at 10x init_gamma
     "max_threads": 1, // multithreading not yet implemented
-    "init_spread": 0.25, // fraction of die width for initial node spread
+    "init_method": "random_center", // initial placement of movable cells:
+                                  //   "uniform_box"   — uniform offset in a box of half-width
+                                  //                     init_spread*min(W,H) around die center.
+                                  //   "random_center" — XPlace-style tight Gaussian cluster at
+                                  //                     center (sigma = 0.001*die span).
+                                  // A/B (adaptec1/bigblue1/fft_b/pci_bridge32_a, seed 42): quality
+                                  // near-identical (uniform edged 3/4 by <2%), but we default to
+                                  // random_center to stay as close to XPlace's setup as possible
+                                  // while chasing its results — later tuning may depend on it.
+    "init_spread": 0.25, // fraction of die width for initial node spread (uniform_box only)
     "init_step_length": 0.1, // small first step for calibration
     "density_weight_init_multiplier": 8e-5, // multiplier used to set density penalty
                                             // 0.01 means that density will contribute about 1% as much
