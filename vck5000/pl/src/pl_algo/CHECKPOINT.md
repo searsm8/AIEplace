@@ -53,7 +53,7 @@ Results after fix (masked-overflow convergence; both now stop via the normal 30-
 - **adaptec1** (regression check): still converges, HPWL 7.16e7 @ masked 0.064 (was 7.10e7 — within
   random-init noise). No regression.
 
-## 1024-grid placement CLOSES the spreading gap (2026-07-06)
+## Spreading gap was mostly an artifact — markv1 ≈ XPlace at matched conditions (2026-07-06)
 
 Ran adaptec1 to convergence at 1024² (DCT FFT + dct_normalize=true): 685 iters, 1.96 s/iter (~22 min).
 Result vs the earlier 64-bin and XPlace:
@@ -63,15 +63,28 @@ Result vs the earlier 64-bin and XPlace:
 | markv1 1024| 7.44e7 | 0.058 | **0.097** | **1.02×** | **0.4%** |
 | XPlace 512 | 7.06e7 | 0.042 | 0.115 | 1.09× | 8.9% |
 
-**The fine grid eliminates the clustering.** markv1-1024 exact overflow 0.097 (< XPlace 0.115, and
-measured on a *finer* grid so the true spread is even better), local hotspots gone (max 2.87×→1.02×,
-over-cap 18%→0.4%). So the "markv1 lands a more-clustered placement" gap was a **64-bin grid-resolution
-artifact after all** — optimizing at the hardware's real 1024² grid spreads cleanly. Cost: ~5% HPWL
-(7.44e7 vs 7.06e7) and convergence is slower/stressed (λ ramps to ~3e7; masked≈exact at fine grid
-because the √2·bin clamp barely smears at 1024). Density heatmap: `tools/adaptec1_1024_vs_xplace.png`.
-NOTE the compare is still coverage-confounded (markv1 grid = core die filled edge-to-edge; XPlace 512
-grid padded with empty margins → mean_util 0.80 vs 0.33) — the hotspot/over-cap metrics are the
-coverage-robust part. Remaining nit for a clean apples-to-apples: crop XPlace's map to the die bbox.
+The 1024 numbers looked like a big win, BUT that compared markv1@1024 to XPlace@512 (finer vs coarser
+grid) with the density maps using different cell sets. The proper apples-to-apples below revises this.
+
+### Apples-to-apples: matched grid + matched cell set (the honest result)
+Two corrections applied: (1) **markv1 now runs each design at XPlace's per-design grid** (adaptec1=512,
+adaptec2=1024, bigblue3/4=2048 — from XPlace `utils/setup_dataset.py`); XPlace's grid = die bbox, NO
+padding. (2) The earlier coverage confound was NOT grid extent — it was that **XPlace's density dump
+excluded fixed macros while markv1's included them.** Added fixed macros to XPlace's dump
+(`init_density_map` capped at target + movable; `run_placement_nesterov.py`, env-gated).
+
+adaptec1, **both at 512, both fixed+movable**: mean_util 0.80 vs 0.76 (matched — confound gone), std
+0.447 vs 0.451 (identical uniformity), over-cap bins 14.0% vs 16.8% (markv1 *fewer*), overflow_mass
+0.061 vs 0.050, max_util 3.6× vs 2.4×. HPWL 7.34e7 vs 7.06e7 (+3.9%), exact overflow 0.164 vs 0.115.
+Heatmap `tools/adaptec1_512_matched.png`: the maps are **nearly identical** (macros, central cluster,
+column profiles all track).
+
+**Corrected conclusion:** at matched grid + cell set, **markv1's placement ≈ XPlace's** — comparable
+spread, slightly sharper single-bin peaks (max 3.6× vs 2.4×) and modestly higher overflow/HPWL (~+4%).
+The dramatic "2.9× vs 1.1× hotspot gap" was an ARTIFACT of markv1@64-bin vs XPlace@512 + the fixed-macro
+dump mismatch — NOT a real spreading defect. Residual gap is small (peaks + ~4% HPWL). (markv1 exact
+overflow still drops with finer grid: 64→0.221, 512→0.164, 1024→0.097; but that's measured at the run's
+own resolution, so cross-grid exact-overflow numbers aren't directly comparable.)
 
 ## THE remaining gap (exploratory — do with Mark steering)
 
