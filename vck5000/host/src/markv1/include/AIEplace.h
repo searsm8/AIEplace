@@ -182,8 +182,11 @@ public:
     void compute_eField_DCT();
 
     void computeOverlaps();
-    float computeOverflow(bool clamp);  // overflow metric, fillers excluded; clamp=true = XPlace
-                                        // masked (GP convergence), clamp=false = exact (physical)
+    float computeOverflow(bool clamp, std::vector<float>* out_density = nullptr);
+                                        // overflow metric, fillers excluded; clamp=true = XPlace
+                                        // masked (GP convergence), clamp=false = exact (physical).
+                                        // out_density (optional): area deposited per bin (col*ny+row).
+    void dumpBinDensity(const std::string& path_prefix); // ρ maps (masked+exact) for XPlace compare
 
 
     // Comparison functions for verification

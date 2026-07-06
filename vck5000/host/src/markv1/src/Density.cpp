@@ -418,7 +418,7 @@ void Placer::computeOverlaps()
  * with sharp footprints, whose sub-bin quantization spikes leave it floored above threshold
  * even for a well-spread placement (the markv1 "can't reach 0.07" effect).
  */
-float Placer::computeOverflow(bool clamp)
+float Placer::computeOverflow(bool clamp, std::vector<float>* out_density)
 {
     const int nx = grid.getBinsPerRow();
     const int ny = grid.getBinsPerCol();
@@ -472,7 +472,43 @@ float Placer::computeOverflow(bool clamp)
 
     float overflow_area = 0.0f;
     for (float d : density) overflow_area += std::max(0.0f, d - cap);
+
+    if (out_density) *out_density = density; // area deposited per bin, index = col*ny + row
+
     return overflow_area / (db.getTotalMovableArea() + 1e-8f);
+}
+
+/**
+ * @brief Dump the real-cell bin-density map ρ for offline comparison with XPlace.
+ *
+ * Writes two CSVs — masked (clamped footprints, the smoothed field the optimizer
+ * minimizes) and exact (sharp footprints, the physical density) — at the current
+ * (restored best) placement, using the same deposit as computeOverflow (fillers
+ * excluded, fixed baseline capped). ρ = deposited_area / bin_area, so ρ = 1 means a
+ * bin exactly at target_density-normalized capacity. Layout: one text row per grid
+ * row y (0 = bottom), comma-separated over columns x (0 = left).
+ */
+void Placer::dumpBinDensity(const std::string& path_prefix)
+{
+    const int nx = grid.getBinsPerRow();
+    const int ny = grid.getBinsPerCol();
+    const float bin_area = grid.getBinWidth() * grid.getBinHeight();
+
+    for (bool clamp : {true, false}) {
+        std::vector<float> density;
+        computeOverflow(clamp, &density); // fills density[col*ny + row] (area per bin)
+
+        std::string fname = path_prefix + (clamp ? "_rho_masked.csv" : "_rho_exact.csv");
+        std::ofstream out(fname);
+        for (int r = 0; r < ny; r++) {
+            for (int c = 0; c < nx; c++)
+                out << (c ? "," : "") << (density[c * ny + r] / bin_area);
+            out << "\n";
+        }
+        Logger::log_info("Dumped " + std::string(clamp ? "masked" : "exact") +
+                         " bin-density map (" + std::to_string(nx) + "x" +
+                         std::to_string(ny) + ") -> " + fname);
+    }
 }
 
 Gradient Placer::computeElectrostaticForce(Node* node_p)

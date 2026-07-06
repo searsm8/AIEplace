@@ -377,6 +377,13 @@ void Placer::printFinalResults()
     // alongside the masked overflow that drove convergence (see computeOverflow).
     float final_overflow = computeOverflow(false);
     float final_masked_overflow = computeOverflow(true);
+
+    // Optional: dump the restored-best bin-density map (masked + exact) for offline
+    // comparison against XPlace. Gated by config so normal runs are unaffected.
+    if (cfg["params"].contains("dump_density") && cfg["params"]["dump_density"]) {
+        dumpBinDensity((output_dir / (db.getBenchmarkName() + "_density")).string());
+    }
+
     float total_runtime = getInterval(pgrm_start_time, getTime());
     float iteration_avg = (iteration > 0) ? total_runtime / iteration : 0.0f;
 
