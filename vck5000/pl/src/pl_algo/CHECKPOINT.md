@@ -1,139 +1,102 @@
-# Checkpoint — pl_algo Stage 5c COMPLETE; pivoting to markv1 CPU validation + full algorithm review
+# Checkpoint — markv1 algorithm ~XPlace on adaptec1; clamp reflected into PL (2026-07-05)
 
-## UPDATE 2026-07-05 — markv1 algorithm brought to ~XPlace parity; clamp reflected into PL
-The markv1 CPU review (plan A/B below) is largely done, and it produced a real quality milestone.
-Commits on `pl_algo`: 3f4145a (XPlace per-iteration density-weight schedule + fixed fillers),
-0608864 (XPlace *masked overflow* as the convergence metric), f3510ef (divergence guard),
-32ebea7 (clamp cell footprints in the density FORCE), 0237e57 (reflect the clamp into the PL).
+Branch `pl_algo`. The markv1 CPU golden has been brought most of the way to XPlace quality by
+porting XPlace's control layer + density smoothing, and the key change (density-force clamping) is
+reflected into the PL modules and passes HLS C-synth. **HPWL parity is real but design-dependent —
+do not overclaim.**
 
-Key findings:
-- **markv1 now converges; matches XPlace on adaptec1 but NOT universally.** adaptec1 GP HPWL
-  1.09e8 (start) → **7.10e7** vs XPlace GP 7.06e7 (~1%, direct head-to-head). The clamp reliably
-  improves markv1-vs-markv1 (pci_bridge32_a −9.7%, fft_a −5.9%), BUT full XPlace parity is
-  design-dependent: adaptec2 markv1 9.53e7 vs XPlace 7.90e7 (+21%) and did not converge (masked
-  overflow stalled ~0.10, guard stopped it at iter 332; XPlace ran 926 iters to masked 0.049).
-  Ruled out for the remaining spread/robustness gap: finer grid (256-bin exact overflow unchanged)
-  and preconditioner (clamp+precond made HPWL worse). Real open item, needs density-map comparison.
-- **The two unlocks** were XPlace's *masked overflow* (overflow measured on clamped-footprint density
-  — sub-bin cells smeared to grid resolution; the smoothed field the optimizer actually minimizes, so
-  it reaches stop_overflow; exact overflow floored ~0.12) and the *clamped density force* (same
-  clamp applied to ρ/the gradient — kills sub-bin gradient spikes → stability + lower HPWL). The
-  clamp recipe (inflate to √2 bins, weight = real/clamped area) is XPlace/DREAMPlace *code*, not in
-  their papers.
-- Preconditioner: implemented, `enable_preconditioning` default FALSE — it hurt HPWL untuned.
-- We built + ran **XPlace itself** on this box for a direct reference (see auto-memory
-  `xplace_build_and_run`): system CUDA 12.3, conda base torch, `-DCMAKE_CXX_ABI=1`, PIC lefdef
-  override, `pip install pulp igraph`, run with `< /dev/null`.
+## Current state (what's done, verified, committed)
 
-PL port status (commit 0237e57): new `src/modules/node_footprint.hpp` (shared clamped-footprint
-geometry); `density_bin.hpp`/`force_gather.hpp` use it (gather is the scatter's adjoint); `metrics.hpp`
-overflow is now masked for free (clamped ρ, fillers already excluded). `model/density_bin_model.cpp`
-strip-vs-naive PASS bit-exact. **HLS C-synth `make PL=pl_algo TARGET=hw`: SYNCHK 0 errors**, density
-loops II=1, node_gather inner intersection II=5 (optimization target — sub-bin cells now touch ~4 bins).
-Next PL gates: finish C-synth/.xo, then sw_emu vs the (new) Grid golden; the 1024-bin PL grid should
-also shrink the masked↔exact overflow gap seen on the coarse 64-bin CPU runs.
+Commits this session (all on `pl_algo`, markv1 golden unless noted):
+- `3f4145a` XPlace per-iteration density-weight schedule + fixed filler sizing (was every-3rd; fillers
+  were sized from the smallest macro → 0 on std-cell designs; now trimmed-mean movable-cell size).
+- `0608864` **masked overflow** as the convergence metric — markv1 CONVERGES for the first time.
+- `f3510ef` XPlace-style divergence guard (`check_divergence` + `life`), armed only in the
+  near-converged band (`overflow < 5×stop`) so spreading isn't misread.
+- `32ebea7` **clamp cell footprints in the density FORCE** (the −8% HPWL win).
+- `0237e57` reflect the clamp into the PL modules.
+- checkpoint/doc updates (`719fd63`, `4cb5245`).
 
-Run how-to for the CPU golden: auto-memory `markv1_cpu_run_gotchas` (pty wrapper, persistent config
-path). Milestone detail: auto-memory `clamped_density_force_milestone`.
+**Two load-bearing ideas (both are XPlace/DREAMPlace *code*, not in their papers):**
+1. **Masked overflow** — measure overflow on a *clamped-footprint* density map: each sub-bin cell is
+   inflated to ≥√2 bins per dim with weight = real_area/clamped_area (area conserved), so it smears
+   to grid resolution instead of spiking one bin. This is the smoothed field the optimizer actually
+   minimizes, so it reaches `stop_overflow`. The *exact* (sharp-footprint) overflow floors ~0.12 even
+   for a good placement — that was the whole "markv1 can't converge" symptom.
+2. **Clamped density force** — apply the SAME clamp to ρ / the electrostatic gradient (XPlace
+   `expand_ratio`). Removes sub-bin gradient spikes → stability → tighter placement → lower HPWL.
 
-## Where we are
-The **entire ePlace iteration** runs on the PL/AIE, sw_emu-verified end to end (see
-`build_reports/stage5c.md`). A 6-iteration `--place` run on `mgc_pci_bridge32_b` gives a clean,
-stable, monotonic HPWL descent with the BB/Nesterov step behaving correctly. That closes the
-functional hardware *draft*.
+**Results (GP, best HPWL, masked-overflow convergence):**
+- Clamp is a robust markv1-vs-markv1 win: adaptec1 7.71e7→7.10e7 (−8%), pci_bridge32_a −9.7%, fft_a −5.9%.
+- Direct XPlace head-to-heads (we BUILT + ran XPlace on this box — see memory `xplace_build_and_run`):
+  - **adaptec1**: markv1 7.10e7 vs XPlace GP 7.06e7 → matches (~1%).
+  - **adaptec2**: markv1 9.53e7 vs XPlace 7.90e7 (**+21%**) AND markv1 did NOT converge (masked
+    overflow stalled ~0.10, divergence guard stopped it at iter 332; XPlace ran 926 iters to 0.049).
+- markv1 = 64-bin grid, CPU, no preconditioner. XPlace = GPU, finer grid, preconditioner on.
 
-**Decision (2026-07-04): pause PL work and turn back to the pure-software (markv1) reference.**
-Getting a full PL iteration running is a milestone, but before investing in hardware optimization
-we want to confirm the *algorithm itself* is as good as it can be on CPU. markv1 is the golden
-reference the whole PL design is checked against — if the software has quality bugs (like the
-`overlap_area` force-gather bug we already caught), they propagate into the PL. So the active work
-moves to running full CPU placements in markv1, finding and fixing quality issues, and then
-reviewing the optimizer (Nesterov + backtracking) in depth.
+## THE open problem (start here next session)
 
-## Active plan (this is what to work on next)
+markv1's spreading dynamics **stall on harder designs** — adaptec2 floors at masked overflow ~0.10
+and can't push lower, while XPlace reaches 0.049. Even on adaptec1 that converges, markv1's *exact*
+overflow (0.20) is worse than XPlace's (0.115): at the same masked overflow markv1 lands a
+more-clustered, less-legalizable placement. Ruled OUT as fixes:
+- **Finer grid**: 256-bin adaptec1 left exact overflow at 0.205 (≈ 64-bin) — not a grid artifact.
+- **Preconditioner**: clamp+precond on adaptec1 gave HPWL 8.64e7 (WORSE than clamp-only 7.10e7),
+  exact 0.168 — trades HPWL for a little spread, doesn't close it. (`enable_preconditioning` stays FALSE.)
 
-### A. markv1 CPU-only full placements (item 3)
-Run markv1 end-to-end on CPU (no AIE, `partials_compute_method`/`density_compute_method` = CPU)
-across benchmarks and confirm the algorithm converges well.
-- Build: `cd vck5000 && make host HOST=markv1` (no XRT needed for CPU-only). Run via its config
-  (see markv1 `run_config.json` / the DSE harness `dse.py`).
-- Sanity vs references: HPWL and overflow trajectories should match ePlace behavior — HPWL rises
-  early as cells spread, overflow falls below the stop threshold, converges in ~50–200 iters.
-  Compare final HPWL against the DSE baseline table in auto-memory `architecture` / MEMORY.md
-  (adaptec1 ~1.09e8 vs XPlace 7.3e7 — there is a real quality gap to investigate).
-- **Hunt for more correctness bugs like the force-gather `overlap_area` miss.** Candidate areas to
-  scrutinize (cross-check against Xplace/DREAMPlace, the source of truth):
-  1. Density force scale/sign end-to-end (`computeElectrostaticForce` now has `overlap_area`, but
-     re-verify the field solve normalization + `local_density_weight` usage vs the fixed force).
-  2. Preconditioner (`updatePrecondWeights`) — area normalization by `avg_node_size` vs XPlace's
-     coordinate normalization by `site_width`; confirm the O(1) scaling is right.
-  3. Overflow metric exactness (`computeTotalOverflow`) and the γ/λ schedules
-     (`updateGamma`, `updateDensityWeight`) vs `param_scheduler.py`.
-  4. Fillers are DISABLED (standing pending item) — re-enable and verify; they materially change
-     density/quality and the HPWL-vs-XPlace gap.
-  5. Pin offsets: auto-memory `pin_architecture` notes all pins sit at the component origin (LEF
-     pin data discarded) — this understates HPWL/HPWL-gradient for macros; likely a real quality bug.
+Open hypotheses to test: (a) the **divergence guard is too aggressive** on hard designs (adaptec2
+stopped at 332 vs XPlace 926 — try raising `MAX_LIFE`/loosening `checkDivergence`, or the XPlace
+`life` countdown that keeps improving past first threshold-cross); (b) push masked below ~0.05 like
+XPlace rather than stopping at first crossing; (c) a genuine **force/density-distribution difference**
+— best diagnosed by dumping markv1 vs XPlace bin-density maps at matched overflow and comparing. Do
+this with Mark steering; it's exploratory.
 
-### B. Full algorithm review — Nesterov + backtracking (item 4)
-After CPU placements look healthy, review the optimizer in depth (this extends the 5c audit, which
-only checked the *step math*, not the full solver dynamics):
-- **Nesterov** (`performNextStep`, `stepAllNodes`, `Node::step`): momentum recurrence, warmup
-  (momentum/backtracking disabled for first N iters), the first-iteration HPWL-only quirk the audit
-  flagged (markv1 skips `combineGradients` before the first step — decide keep vs fix).
-- **Backtracking** (`performNextStep` do-while, Algorithm 2): the BB/Lipschitz line search. Note
-  markv1's `computeLipshitzEstimate` is the ePlace *nobb* Lipschitz step `‖Δv‖/‖Δg‖` (matches
-  DREAMPlace `step_nobb`), NOT the BB-short step `s·y/y·y` (`step_bb`). Decide whether to adopt the
-  true BB step, and whether v1's "no backtracking" is leaving quality/stability on the table (the PL
-  6-iter run saw α saturate to the 4000 clamp — a place backtracking would normally intervene).
-- References (source of truth): `~/phd/Xplace/src/{nesterov_optimizer,param_scheduler,calculator,
-  initializer}.py`, `~/phd/DREAMPlace/dreamplace/NesterovAcceleratedGradientOptimizer.py`.
-- Any fix lands in markv1 (the golden) first, then is reflected back into the PL design.
+## PL port status + next gate
 
-### C. Hardware deployment (item 2 — DEFERRED until Mark confirms remote access)
-Question raised: *can we build targeting hardware and transfer only the executable + xclbin?*
-**Short answer: mostly yes, with caveats — it is not a bare two-file copy.** The target needs a
-compatible runtime, not just the artifacts. Checklist for when we deploy:
-- **Build:** `make all TARGET=hw AIE=pl_algo PL=pl_algo HOST=pl_algo BUILD_XRT=1
-  AIE_DENSITY_INSTANCES=8` → produces the `hw` xclbin (PL bitstream + AIE) and the host `.exe`.
-  This is a long place-and-route build (hours), unlike sw_emu.
-- **What must exist on the target card/host:**
-  - The **VCK5000 platform/shell** flashed on the card, matching the build platform
-    (`xilinx_vck5000_gen4x8_qdma_2_202220_1`).
-  - **XRT installed** (matching major version) — provides `libxrt_coreutil.so` the host links.
-  - A **compatible `libstdc++`/glibc** — the host mixes GLIBCXX ABIs (old for Limbo, new for XRT);
-    if the target OS/GCC differs from the build box this can break. Building on a box matching the
-    target (or Geert's environment) is the safe path.
-  - The **benchmark input files** (DEF/LEF/bookshelf) and any run config — these are read at runtime,
-    not baked into the exe.
-- **What travels inside the exe:** the Limbo parser libs are static (`.a` in `markv1/lib`), so they
-  do NOT need to be on the target. Only the dynamic libs above do.
-- **No emulation env on hw:** drop `XCL_EMULATION_MODE` / `emconfig.json` (those are sw_emu-only).
-- **Risk ranking:** platform-shell mismatch > XRT version mismatch > libstdc++/glibc ABI mismatch.
-  Mitigation if the target env is unknown: statically link libstdc++ (`-static-libstdc++
-  -static-libgcc`) to shrink the runtime dependency to just XRT + the platform shell.
+- New `src/modules/node_footprint.hpp` = shared clamped-footprint geometry. `density_bin.hpp`
+  (bin_scatter) and `force_gather.hpp` (node_gather, the scatter's adjoint) both use it.
+  `metrics.hpp` overflow is now masked for free (sums clamped ρ, fillers already excluded).
+- `model/density_bin_model.cpp` updated → strip-tiled vs naive still **PASS bit-exact** (GRID=1024).
+- **HLS C-synth `make PL=pl_algo TARGET=hw` → SYNCHK 0 errors, `top.xo` built** (Gate 1 pass). Density
+  loops II=1; node_gather inner intersection II=5 (sub-bin cells now touch ~4 bins — an optimization
+  target, not a correctness issue).
+- **Next PL gate: sw_emu** — verify the clamped density/force numerically vs the *new* Grid golden on
+  a real benchmark (long-running; not started). Then re-tune λ/γ for the 1024² grid; the PL's fine
+  grid may or may not shrink the exact-overflow gap (64→256-bin CPU didn't, so don't assume it will).
 
-## Stage 6 (PL hardware optimization) — deferred, not abandoned
-When PL work resumes (after A/B and hardware bring-up): re-tune λ/γ schedule for the 1024² grid,
-re-enable fillers on the PL, fuse the 8-pass density solve + widen ports to 128-bit beats,
-single-kernel iteration, BB α on the PL, backtracking if B concludes it's needed. Full detail was
-in the prior checkpoint / `build_reports/stage5c.md` "Stage 6 plan".
+## Build / run how-to
+- **markv1 CPU golden:** `make host HOST=markv1` (no XRT). Run under a pty (the parser hangs on
+  non-tty stdout): `script -qec './build/hw/host/markv1/aieplace_markv1.exe <cfg>' <log>`. Put temp
+  configs in `~/aieplace_tmp/` (WSL `/tmp` is wiped between calls). Config template
+  `host/src/markv1/run_config.json`; per-iter log `iterations.dat`, summary `run_summary.md`. Key new
+  knobs: `enable_density_clamp` (true), `enable_preconditioning` (false), `enable_filler` (true).
+  Details: memory `markv1_cpu_run_gotchas`.
+- **PL C-synth:** `source /tools/Xilinx/Vitis/2022.2/settings64.sh`;
+  `export PLATFORM_REPO_PATHS=$HOME/xilinx_local/opt/xilinx/platforms`; `cd pl && make PL=pl_algo TARGET=hw`.
+- **XPlace reference:** memory `xplace_build_and_run` (system CUDA 12.3, conda base torch,
+  `-DCMAKE_CXX_ABI=1`, PIC lefdef override, `pip install pulp igraph`, run with `< /dev/null`).
+  `data/raw/ispd2005` is symlinked to the AIEplace benchmarks.
 
-## Stage 5c artifacts (for reference)
-- **PL modules:** `pl/src/pl_algo/src/modules/{iteration_update,memory_writer,metrics}.hpp` (new),
-  `top.cpp` (`iteration_step_df`, MODE_ITERATION_UPDATE/MODE_METRICS), `host_interface.hpp`
-  (port aliasing), `formats.hpp`, `DATAFLOW.md`.
-- **Host:** `host/src/pl_algo/src/{Placement.hpp, Driver.cpp (runPlacement), IterVerify, MetricsVerify,
-  main.cpp}`. Flags: `--iter-update`, `--metrics`, `--place <bench> <xclbin> [iters]`
-  (make `run-iter-update` / `run-metrics` / `run-place`).
-- **Verified sw_emu:** all prior flags + `--iter-update` (3.28e-08), `--metrics` (~4e-09),
-  `--place` (6-iter stable descent). Commits f81212b, b1bfd92, b5c2e75, edcc81a.
+## Hardware deployment (deferred — needs Mark/Geert's card)
+`make all TARGET=hw AIE=pl_algo PL=pl_algo HOST=pl_algo BUILD_XRT=1 AIE_DENSITY_INSTANCES=8` → hw
+xclbin + host exe (hours-long P&R). Target needs: VCK5000 shell matching
+`xilinx_vck5000_gen4x8_qdma_2_202220_1`, matching XRT, compatible libstdc++/glibc (host mixes ABIs),
+and the benchmark input files at runtime. Limbo parser libs are static (travel in the exe). Risk
+ranking: platform-shell > XRT version > libstdc++/glibc ABI; mitigate with `-static-libstdc++ -static-libgcc`.
 
 ## Key references
-- **markv1 CPU golden:** `host/src/markv1/src/AIEplace.cpp`, `Density.cpp`, `Partials.cpp`,
-  `include/Node.h`; DSE harness `vck5000/dse.py`.
-- **Source of truth:** Xplace `~/phd/Xplace/src/*.py`, DREAMPlace
-  `~/phd/DREAMPlace/dreamplace/*`.
-- **Auto-memory:** `pl_algo_stage5c`, `pl_algo_5c_algo_audit`, `pl_algo_force_gather`,
-  `pl_algo_density_manager`, `architecture`, `pin_architecture`.
+- **markv1 golden:** `host/src/markv1/src/{AIEplace,Density,Partials,Output,Grid}.cpp`, `include/{Node,AIEplace,Grid}.h`.
+- **Source of truth:** XPlace `~/phd/Xplace/src/{param_scheduler,calculator,evaluator,database,nesterov_optimizer,initializer}.py`.
+- **Auto-memory:** `clamped_density_force_milestone`, `markv1_nonconvergence_vs_xplace`,
+  `xplace_build_and_run`, `markv1_cpu_run_gotchas`, `pl_algo_density_manager`, `pl_algo_stage5c`.
 
-Stage 5c done, clean tree. Next active work: markv1 CPU placements (A) + optimizer review (B).
+---
+
+## Stage 5c reference (PL hardware draft — still current)
+The full ePlace iteration runs on PL/AIE, sw_emu-verified end to end. PL modules:
+`src/modules/{density_bin,dct_1d,dct_transpose,transpose,force_gather,hpwl_gradient,iteration_update,
+memory_writer,metrics}.hpp`, `node_footprint.hpp` (new), `top.cpp`, `host_interface.hpp`, `formats.hpp`,
+`DATAFLOW.md`. Host driver `host/src/pl_algo/src/{Placement.hpp,Driver.cpp,main.cpp}`; flags
+`--iter-update`/`--metrics`/`--place <bench> <xclbin> [iters]`. Prior sw_emu verified commits:
+f81212b, b1bfd92, b5c2e75, edcc81a. Stage 6 (PL optimization) when hardware work resumes: re-tune
+λ/γ for 1024², fuse the 8-pass density solve, widen ports to 128-bit beats, BB α on PL.
