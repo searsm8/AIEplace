@@ -75,7 +75,7 @@ public:
     bool enable_momentum;
     bool enable_preconditioning;
     bool enable_density_clamp;   // clamp sub-bin cells in the density solve (XPlace expand_ratio)
-    bool dct_normalize = false;  // apply 1/N per DCT (bounds intermediates; global scale absorbed by lambda)
+    bool dct_normalize = true;   // apply 1/N per DCT (bounds intermediates; global scale absorbed by lambda)
     bool compare_hpwl_methods = false;
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
     float avg_node_size = 1.0f; // average cell area; normalizes preconditioner area term
