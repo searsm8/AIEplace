@@ -53,6 +53,26 @@ Results after fix (masked-overflow convergence; both now stop via the normal 30-
 - **adaptec1** (regression check): still converges, HPWL 7.16e7 @ masked 0.064 (was 7.10e7 — within
   random-init noise). No regression.
 
+## 1024-grid placement CLOSES the spreading gap (2026-07-06)
+
+Ran adaptec1 to convergence at 1024² (DCT FFT + dct_normalize=true): 685 iters, 1.96 s/iter (~22 min).
+Result vs the earlier 64-bin and XPlace:
+| grid | HPWL | masked ovfw | exact ovfw | max_util | over-cap bins |
+|------|------|-------------|------------|----------|---------------|
+| markv1 64  | 7.09e7 | 0.041 | 0.221 | 2.87× | 18% |
+| markv1 1024| 7.44e7 | 0.058 | **0.097** | **1.02×** | **0.4%** |
+| XPlace 512 | 7.06e7 | 0.042 | 0.115 | 1.09× | 8.9% |
+
+**The fine grid eliminates the clustering.** markv1-1024 exact overflow 0.097 (< XPlace 0.115, and
+measured on a *finer* grid so the true spread is even better), local hotspots gone (max 2.87×→1.02×,
+over-cap 18%→0.4%). So the "markv1 lands a more-clustered placement" gap was a **64-bin grid-resolution
+artifact after all** — optimizing at the hardware's real 1024² grid spreads cleanly. Cost: ~5% HPWL
+(7.44e7 vs 7.06e7) and convergence is slower/stressed (λ ramps to ~3e7; masked≈exact at fine grid
+because the √2·bin clamp barely smears at 1024). Density heatmap: `tools/adaptec1_1024_vs_xplace.png`.
+NOTE the compare is still coverage-confounded (markv1 grid = core die filled edge-to-edge; XPlace 512
+grid padded with empty margins → mean_util 0.80 vs 0.33) — the hotspot/over-cap metrics are the
+coverage-robust part. Remaining nit for a clean apples-to-apples: crop XPlace's map to the die bbox.
+
 ## THE remaining gap (exploratory — do with Mark steering)
 
 Now that both converge at XPlace's *masked* overflow, the residual is the **exact-overflow /
