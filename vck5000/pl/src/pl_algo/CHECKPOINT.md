@@ -62,12 +62,21 @@ adaptec2. Ruled OUT already: **finer grid** (256-bin adaptec1 exact stayed 0.205
 **preconditioner** (clamp+precond adaptec1 HPWL 8.64e7 WORSE, exact 0.168; `enable_preconditioning`
 stays FALSE).
 
-**Full 1024² CPU grid — measured, impractical (2026-07-06).** The CPU DCT path uses `DCT_naive`/
-`IDCT_naive`/`IDXST_naive` (O(N²) per 1D transform → O(N³)/iter). At 1024 that's ~4 min/iter
-(measured on adaptec1: 1 iter in ~4.5 min), so a converged run is ~24 h. Not worth it as-is and the
-256-bin result predicts little exact-overflow gain. To actually use the 1024 grid the DCT must be
-FFT-accelerated (O(N log N)) — a separate task. Config knob works: `"bins_per_row": 1024` (runtime,
-CPU path is grid-agnostic).
+**Full 1024² CPU grid — now practical, DCT FFT-accelerated (2026-07-06, commit a47aadc).** The naive
+CPU DCT was O(N³)/iter (~4 min/iter @ 1024 → ~24 h/run). Implemented `DCT_fft`/`IDCT_fft`/`IDXST_fft`
+(Makhoul, one length-N radix-2 FFT; `DCT.cpp`), verified ≡ naive to ~1e-6 for N=2..1024, and switched
+`compute_a_uv_DCT`/`compute_eField_DCT` to them. **Now ~2 s/iter @ 1024 (~100× faster)** — a converged
+1024 run is ~15 min. `"bins_per_row": 1024` works.
+
+Also added **optional 1/N-per-DCT normalization** (`dct_normalize`, default false) to bound
+intermediate magnitudes, and a `random_seed` config (default -1) for controlled A/B. **A/B on adaptec1
+(seed 42):** iters 1-5 bit-identical (HPWL/ovfw/step/backtracks); `density_weight` differs by exactly
+N⁴ (64⁴=1.68e7: 3.06e-10 vs 5.13e-3) → pure global scaling absorbed by λ, as expected. Both converge
+~7.16-7.18e7 @ masked ~0.04. Normalized keeps λ O(1) and the field sane (unnormalized balloons ~N⁴,
+which loses float precision at N=1024 — so **turn `dct_normalize` on when running 1024**). NOTE:
+default is still false pending review — flipping it rescales λ (schedule is ratio-based so dynamics are
+unchanged, but any absolute-λ expectations shift). **PAUSED here for review before the apples-to-apples
+same-resolution density comparison.**
 
 **Density-dump instrumentation DONE (2026-07-06, commit 61ad581).** markv1 `Placer::dumpBinDensity`
 (config `dump_density:true`) writes masked+exact real-cell ρ CSVs (fillers excluded) at the restored
