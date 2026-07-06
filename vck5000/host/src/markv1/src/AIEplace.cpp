@@ -385,10 +385,13 @@ bool Placer::checkOverflowPlateau(int window, float threshold)
  */
 bool Placer::checkDivergence(int window, float threshold)
 {
-    const BestSolution& best = best_primary.valid ? best_primary
-                             : best_fallback.valid ? best_fallback
-                             : best_primary;
-    if (!best.valid) return false;
+    // Reference the CONVERGED best only (XPlace check_divergence returns False while
+    // best_metric["hpwl"] is inf). best_fallback tracks the newest lowest-overflow point,
+    // so on a healthy monotonic descent a trailing-mean-vs-newest comparison always reads
+    // "worse than best" on both HPWL and overflow and false-fires the guard — that killed
+    // adaptec2 at iter 332 with overflow still dropping ~2%/iter toward the 0.07 threshold.
+    if (!best_primary.valid) return false;
+    const BestSolution& best = best_primary;
     if ((int)hpwl_history.size() <= window) return false;
 
     auto hpwl_begin = hpwl_history.end() - window;
