@@ -7,8 +7,13 @@ Commits on `pl_algo`: 3f4145a (XPlace per-iteration density-weight schedule + fi
 32ebea7 (clamp cell footprints in the density FORCE), 0237e57 (reflect the clamp into the PL).
 
 Key findings:
-- **markv1 now converges and ~matches XPlace.** adaptec1 GP HPWL 1.09e8 (start) → **7.10e7**, vs
-  XPlace GP 7.06e7 (within ~1%). Generalizes: pci_bridge32_a −9.7%, fft_a −5.9%.
+- **markv1 now converges; matches XPlace on adaptec1 but NOT universally.** adaptec1 GP HPWL
+  1.09e8 (start) → **7.10e7** vs XPlace GP 7.06e7 (~1%, direct head-to-head). The clamp reliably
+  improves markv1-vs-markv1 (pci_bridge32_a −9.7%, fft_a −5.9%), BUT full XPlace parity is
+  design-dependent: adaptec2 markv1 9.53e7 vs XPlace 7.90e7 (+21%) and did not converge (masked
+  overflow stalled ~0.10, guard stopped it at iter 332; XPlace ran 926 iters to masked 0.049).
+  Ruled out for the remaining spread/robustness gap: finer grid (256-bin exact overflow unchanged)
+  and preconditioner (clamp+precond made HPWL worse). Real open item, needs density-map comparison.
 - **The two unlocks** were XPlace's *masked overflow* (overflow measured on clamped-footprint density
   — sub-bin cells smeared to grid resolution; the smoothed field the optimizer actually minimizes, so
   it reaches stop_overflow; exact overflow floored ~0.12) and the *clamped density force* (same
