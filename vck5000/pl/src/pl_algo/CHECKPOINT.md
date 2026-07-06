@@ -1,194 +1,124 @@
-# Checkpoint — markv1 ~XPlace on adaptec1+adaptec2 (divergence-guard fix); clamp reflected into PL (2026-07-06)
+# Checkpoint — markv1 GP ≈ XPlace at matched conditions; only ~5% HPWL residual left (2026-07-06)
 
-Branch `pl_algo`. The markv1 CPU golden has been brought most of the way to XPlace quality by
-porting XPlace's control layer + density smoothing, and the key change (density-force clamping) is
-reflected into the PL modules and passes HLS C-synth. **HPWL parity is real but design-dependent —
-do not overclaim.**
+Branch `pl_algo`. The markv1 CPU golden now matches XPlace quality closely once compared fairly. This
+session: fixed the adaptec2 non-convergence, FFT-accelerated the DCT (1024 grid now practical), added
+density-map instrumentation, and — through a careful apples-to-apples comparison — showed the
+"markv1 is more clustered than XPlace" narrative was largely a **measurement artifact**. The one real
+remaining gap is a modest ~5% wirelength (HPWL) difference.
 
-## Current state (what's done, verified, committed)
+## The bottom line (what to tell the next session)
+At **matched grid resolution + matched cell set + matched overflow**, markv1's global placement is
+essentially on par with XPlace on physical spread. The prior "2.9× hotspots vs 1.1×" gap was an
+artifact of (1) markv1 running at 64-bin while XPlace ran at 512, (2) the density dumps using different
+cell sets (XPlace's excluded fixed macros), and (3) comparing at each placer's own stopping point.
+Fix all three and the density maps are nearly identical. **The genuine residual is ~5% HPWL** (adaptec1:
+markv1 7.42e7 vs XPlace 7.06e7 at matched spread) — a wirelength-efficiency gap, NOT a spreading or
+density-force defect. **Next: chase the ~5% HPWL** — candidates are the WA-γ (wirelength-smoothing)
+schedule, the WL-gradient formulation (`Partials.cpp`), or the optimizer settling at a WL-worse local
+optimum. Do NOT chase the electrostatic force (Tests A/B below cleared it).
 
-Commits this session (all on `pl_algo`, markv1 golden unless noted):
-- `3f4145a` XPlace per-iteration density-weight schedule + fixed filler sizing (was every-3rd; fillers
-  were sized from the smallest macro → 0 on std-cell designs; now trimmed-mean movable-cell size).
-- `0608864` **masked overflow** as the convergence metric — markv1 CONVERGES for the first time.
-- `f3510ef` XPlace-style divergence guard (`check_divergence` + `life`), armed only in the
-  near-converged band (`overflow < 5×stop`) so spreading isn't misread.
-- `32ebea7` **clamp cell footprints in the density FORCE** (the −8% HPWL win).
-- `0237e57` reflect the clamp into the PL modules.
-- checkpoint/doc updates (`719fd63`, `4cb5245`).
+## Done, verified, committed this session (all on `pl_algo`)
+- `73cbe36` **Divergence-guard fix.** adaptec2's "stall at masked overflow ~0.10" was a false-fire:
+  `checkDivergence` keyed off `best_fallback` (newest lowest-overflow point), so on a smooth descent a
+  trailing 3-iter mean always read "worse than best" → guard burned life and killed the run mid-descent
+  (iter 332, overflow still dropping ~2%/iter, max_iter was 700). Fixed to key off `best_primary` only
+  (mirrors XPlace `check_divergence` returning False while no converged sol). Result: **adaptec2 now
+  CONVERGES** (iter 380, masked 0.049 == XPlace 0.049, HPWL 9.53e7→9.01e7). adaptec1 unaffected.
+- `a47aadc` **FFT DCT.** `DCT_fft`/`IDCT_fft`/`IDXST_fft` (Makhoul, one length-N radix-2 FFT; `DCT.cpp`),
+  verified ≡ the naive transforms to ~1e-6 for N=2..1024. `compute_a_uv_DCT`/`compute_eField_DCT` now use
+  them. Naive O(N³)/iter (~4 min/iter @1024) → **~2 s/iter @1024 (~100×)**; a converged 1024 run is ~15-22
+  min. `"bins_per_row": 1024` works (CPU path is grid-agnostic).
+- `972a726` **`dct_normalize` default true.** 1/N-per-DCT normalization; A/B proved it's a pure global
+  scale absorbed by λ (iters 1-5 bit-identical; density_weight differs by exactly N⁴). Keeps λ O(1) and
+  the field at a sane magnitude — critical at 1024 (unnormalized field balloons ~N⁴, loses float precision).
+- `61ad581` **Density-dump instrumentation** + `tools/compare_density.py` (see Tooling below).
+- Checkpoint/finding commits: `442d66b`, `adefcc5`, + this rewrite. `random_seed` config added (default
+  -1 = time-based) for controlled A/B.
 
-**Two load-bearing ideas (both are XPlace/DREAMPlace *code*, not in their papers):**
-1. **Masked overflow** — measure overflow on a *clamped-footprint* density map: each sub-bin cell is
-   inflated to ≥√2 bins per dim with weight = real_area/clamped_area (area conserved), so it smears
-   to grid resolution instead of spiking one bin. This is the smoothed field the optimizer actually
-   minimizes, so it reaches `stop_overflow`. The *exact* (sharp-footprint) overflow floors ~0.12 even
-   for a good placement — that was the whole "markv1 can't converge" symptom.
-2. **Clamped density force** — apply the SAME clamp to ρ / the electrostatic gradient (XPlace
-   `expand_ratio`). Removes sub-bin gradient spikes → stability → tighter placement → lower HPWL.
+## The apples-to-apples comparison (the honest result)
+Three corrections made the markv1-vs-XPlace density comparison fair:
+1. **Match XPlace's per-design grid.** XPlace hard-codes grid per design in `Xplace/utils/setup_dataset.py`
+   (adaptec1=512, adaptec2=1024, bigblue3/4=2048); its grid spans exactly the die bbox, no padding. markv1
+   now runs each design at that resolution.
+2. **Match the cell set.** The mean-level confound was NOT grid extent — markv1's `computeOverflow`/
+   `dumpBinDensity` deposits a capped fixed-macro baseline + movable, while XPlace's dump was movable-only
+   (adaptec1 is 43% fixed area). Added fixed macros to XPlace's dump (`init_density_map`.clamp(0,target) +
+   movable; `~/phd/Xplace/src/run_placement_nesterov.py`, env-gated `XPLACE_DUMP_DENSITY=1`).
+3. **Match overflow (Test A).** Compare at the same spreading level, not each placer's stopping point.
 
-**Results (GP, best HPWL, masked-overflow convergence):**
-- Clamp is a robust markv1-vs-markv1 win: adaptec1 7.71e7→7.10e7 (−8%), pci_bridge32_a −9.7%, fft_a −5.9%.
-- Direct XPlace head-to-heads (we BUILT + ran XPlace on this box — see memory `xplace_build_and_run`):
-  - **adaptec1**: markv1 7.10e7 vs XPlace GP 7.06e7 → matches (~1%).
-  - **adaptec2**: markv1 9.53e7 vs XPlace 7.90e7 (**+21%**) AND markv1 did NOT converge (masked
-    overflow stalled ~0.10, divergence guard stopped it at iter 332; XPlace ran 926 iters to 0.049).
-- markv1 = 64-bin grid, CPU, no preconditioner. XPlace = GPU, finer grid, preconditioner on.
+**adaptec1, both @512, both fixed+movable, matched overflow** (markv1 stop 0.07→0.04, masked ovfw 0.040
+≈ XPlace 0.042): max_util 2.68× vs 2.37×, overflow_mass 0.042 vs 0.050 (markv1 lower), over-cap 14% vs
+17%, std 0.41 vs 0.45, exact overflow 0.111 vs 0.115 — **spread matches**. HPWL 7.42e7 vs 7.06e7 (+5%).
+Heatmaps: `tools/adaptec1_512_matched.png` (at each's own stop) and `tools/adaptec1_512_matched_overflow.png`.
 
-## RESOLVED 2026-07-06: adaptec2 "stall" was a divergence-guard false-fire (commit 73cbe36)
+### Tests A & B (ruling out hypotheses for the peak/HPWL residual)
+- **Test A (stopping point) — CONFIRMED.** Lowering markv1's stop 0.07→0.04 so it spreads to XPlace's
+  overflow dropped max_util 3.56×→2.68× and exact overflow 0.162→0.111 (≈ XPlace) for only +1.1% HPWL. So
+  the sharper-peaks residual was mostly markv1 stopping earlier, not a force defect.
+- **Test B (preconditioner) — RULED OUT (harmful).** `enable_preconditioning:true` @512 never converges
+  (overflow floors ~0.51, HPWL 1.11e8): the large normalized-field λ makes `precond_weight=max(1,pins+λ·area)`
+  crush the density force. Stays FALSE.
+- **⇒ Neither implicates the density-force code; the force-diff harness is NOT the priority.** The real
+  residual is the ~5% HPWL (wirelength efficiency).
 
-Hypothesis (a) was the binding constraint. The adaptec2 "floor at masked overflow ~0.10" was NOT a
-spreading stall — the run was **killed mid-descent**. At iter 332 (where it stopped) masked overflow
-was 0.101 and dropping ~2%/iter (0.120→0.106→0.104→0.101 over the prior 8 iters), HPWL still
-improving, and max_iterations was 700. Root cause: `checkDivergence` referenced `best_fallback`
-(lowest-overflow-so-far) when no converged solution existed. On a smooth monotonic descent
-best_fallback ≈ the newest sample, so a trailing 3-iter mean always reads "worse than best" on BOTH
-HPWL and overflow → guard false-fires, burns life, dies. XPlace never hits this: its `check_divergence`
-returns False whenever `best_metric["hpwl"]==inf` (no below-threshold sol yet). **Fix:** key the guard
-off `best_primary` only; skip when it's invalid. Post-convergence protection is unchanged.
+## Open next step
+**Chase the ~5% HPWL gap** (markv1 vs XPlace at matched spread). Start by diffing markv1's wirelength
+path against XPlace: the WA (weighted-average) γ schedule (`updateGamma`), the WL-gradient
+(`Partials.cpp` `computeHpwlPartials_CPU`), and the Nesterov/BB step settings. A matched-overflow HPWL
+comparison across a few benchmarks (adaptec2 @1024, pci_bridge32_a) would confirm the gap is universal
+and its size, before deciding where to intervene.
 
-Results after fix (masked-overflow convergence; both now stop via the normal 30-iter countdown):
-- **adaptec2**: was killed iter 332 @ masked 0.101 / HPWL 9.53e7 (never converged). Now CONVERGES
-  iter 380 @ masked **0.049** (== XPlace 0.049) / HPWL **9.01e7** (−5.5%). Gap to XPlace GP 7.90e7:
-  +21% → **+14%**.
-- **adaptec1** (regression check): still converges, HPWL 7.16e7 @ masked 0.064 (was 7.10e7 — within
-  random-init noise). No regression.
+## Tooling added this session
+- **markv1 density dump:** config `"dump_density": true` → `Placer::dumpBinDensity` (Density.cpp) writes
+  `<results_dir>/<bench>/<ts>_cpu_cpu/<bench>_density_rho_{masked,exact}.csv` (ρ = area/bin_area, fixed
+  baseline capped + movable, fillers excluded) at the restored best. Reuses `computeOverflow(clamp, out)`.
+- **XPlace density dump:** `XPLACE_DUMP_DENSITY=1` env → `~/aieplace_tmp/<bench>_density_exact.npy` + `_meta.json`.
+- **compare:** `python tools/compare_density.py MARKV1_EXACT_CSV XPLACE_NPY --meta META --out PNG --grid N`
+  → side-by-side heatmaps, over-cap masks, difference, marginal profiles, printed stats.
+- **`random_seed`** (params, default -1) for identical init across A/B arms.
 
-## Spreading gap was mostly an artifact — markv1 ≈ XPlace at matched conditions (2026-07-06)
-
-Ran adaptec1 to convergence at 1024² (DCT FFT + dct_normalize=true): 685 iters, 1.96 s/iter (~22 min).
-Result vs the earlier 64-bin and XPlace:
-| grid | HPWL | masked ovfw | exact ovfw | max_util | over-cap bins |
-|------|------|-------------|------------|----------|---------------|
-| markv1 64  | 7.09e7 | 0.041 | 0.221 | 2.87× | 18% |
-| markv1 1024| 7.44e7 | 0.058 | **0.097** | **1.02×** | **0.4%** |
-| XPlace 512 | 7.06e7 | 0.042 | 0.115 | 1.09× | 8.9% |
-
-The 1024 numbers looked like a big win, BUT that compared markv1@1024 to XPlace@512 (finer vs coarser
-grid) with the density maps using different cell sets. The proper apples-to-apples below revises this.
-
-### Apples-to-apples: matched grid + matched cell set (the honest result)
-Two corrections applied: (1) **markv1 now runs each design at XPlace's per-design grid** (adaptec1=512,
-adaptec2=1024, bigblue3/4=2048 — from XPlace `utils/setup_dataset.py`); XPlace's grid = die bbox, NO
-padding. (2) The earlier coverage confound was NOT grid extent — it was that **XPlace's density dump
-excluded fixed macros while markv1's included them.** Added fixed macros to XPlace's dump
-(`init_density_map` capped at target + movable; `run_placement_nesterov.py`, env-gated).
-
-adaptec1, **both at 512, both fixed+movable**: mean_util 0.80 vs 0.76 (matched — confound gone), std
-0.447 vs 0.451 (identical uniformity), over-cap bins 14.0% vs 16.8% (markv1 *fewer*), overflow_mass
-0.061 vs 0.050, max_util 3.6× vs 2.4×. HPWL 7.34e7 vs 7.06e7 (+3.9%), exact overflow 0.164 vs 0.115.
-Heatmap `tools/adaptec1_512_matched.png`: the maps are **nearly identical** (macros, central cluster,
-column profiles all track).
-
-**Corrected conclusion:** at matched grid + cell set, **markv1's placement ≈ XPlace's** — comparable
-spread, slightly sharper single-bin peaks (max 3.6× vs 2.4×) and modestly higher overflow/HPWL (~+4%).
-The dramatic "2.9× vs 1.1× hotspot gap" was an ARTIFACT of markv1@64-bin vs XPlace@512 + the fixed-macro
-dump mismatch — NOT a real spreading defect. Residual gap is small (peaks + ~4% HPWL). (markv1 exact
-overflow still drops with finer grid: 64→0.221, 512→0.164, 1024→0.097; but that's measured at the run's
-own resolution, so cross-grid exact-overflow numbers aren't directly comparable.)
-
-### Tests A & B: the peak residual was a stopping-point artifact; real gap is ~5% HPWL (2026-07-06)
-Ran three adaptec1@512 arms, fixed seed 42 (baseline dirs under `results/single_runs/adaptec1/`):
-- **Test A (stop-point):** lower `convergence_overflow_threshold` 0.07→0.04 so markv1 spreads further.
-  Baseline (stop 0.07, masked ovfw 0.064): max_util **3.56×**, overflow_mass 0.061, exact ovfw 0.162,
-  HPWL 7.338e7. Low-stop (masked ovfw 0.040 ≈ XPlace's 0.042): max_util **2.68×** (→ XPlace 2.37),
-  overflow_mass **0.042** (< XPlace 0.050), exact ovfw **0.111** (≈ XPlace 0.115), HPWL 7.418e7 (+1.1%).
-  ⇒ **The sharper-peaks / higher-exact-overflow residual was mostly because markv1 stopped spreading
-  earlier.** At matched overflow, markv1's physical spread MATCHES XPlace (even slightly better
-  overflow_mass/over-cap). Heatmap `cmp_LOWSTOP.png`.
-- **Test B (preconditioner):** `enable_preconditioning:true` at 512 is CATASTROPHIC — never converged
-  (700 iters, overflow floored masked 0.51/exact 0.55, HPWL 1.11e8). With the normalized field λ ramps
-  large, and precond_weight=max(1,pins+λ·area) then massively damps the density force → no spreading.
-  **Preconditioner ruled OUT** (stays FALSE); it is not the peak lever.
-
-**Net:** neither test points at the density-force computation, so the force-diff harness is NOT the
-priority. Spread ≈ XPlace at matched overflow. **The one genuine remaining residual is ~5% HPWL**
-(markv1 7.42e7 vs XPlace 7.06e7 at matched spread) — a wirelength-efficiency gap, candidates: WA-γ
-schedule, WL-gradient formulation, or the optimizer settling at a WL-worse local optimum. Chase there,
-not in the density force.
-
-## THE remaining gap (exploratory — do with Mark steering)
-
-Now that both converge at XPlace's *masked* overflow, the residual is the **exact-overflow /
-density-distribution gap**: at matched masked overflow markv1 lands a more-clustered, less-legalizable
-placement — adaptec2 exact 0.19, adaptec1 exact 0.24, vs XPlace ~0.115 — and HPWL is still ~+14% on
-adaptec2. Ruled OUT already: **finer grid** (256-bin adaptec1 exact stayed 0.205 ≈ 64-bin) and the
-**preconditioner** (clamp+precond adaptec1 HPWL 8.64e7 WORSE, exact 0.168; `enable_preconditioning`
-stays FALSE).
-
-**Full 1024² CPU grid — now practical, DCT FFT-accelerated (2026-07-06, commit a47aadc).** The naive
-CPU DCT was O(N³)/iter (~4 min/iter @ 1024 → ~24 h/run). Implemented `DCT_fft`/`IDCT_fft`/`IDXST_fft`
-(Makhoul, one length-N radix-2 FFT; `DCT.cpp`), verified ≡ naive to ~1e-6 for N=2..1024, and switched
-`compute_a_uv_DCT`/`compute_eField_DCT` to them. **Now ~2 s/iter @ 1024 (~100× faster)** — a converged
-1024 run is ~15 min. `"bins_per_row": 1024` works.
-
-Also added **optional 1/N-per-DCT normalization** (`dct_normalize`, default false) to bound
-intermediate magnitudes, and a `random_seed` config (default -1) for controlled A/B. **A/B on adaptec1
-(seed 42):** iters 1-5 bit-identical (HPWL/ovfw/step/backtracks); `density_weight` differs by exactly
-N⁴ (64⁴=1.68e7: 3.06e-10 vs 5.13e-3) → pure global scaling absorbed by λ, as expected. Both converge
-~7.16-7.18e7 @ masked ~0.04. Normalized keeps λ O(1) and the field sane (unnormalized balloons ~N⁴,
-which loses float precision at N=1024 — so **turn `dct_normalize` on when running 1024**). NOTE:
-default is still false pending review — flipping it rescales λ (schedule is ratio-based so dynamics are
-unchanged, but any absolute-λ expectations shift). **PAUSED here for review before the apples-to-apples
-same-resolution density comparison.**
-
-**Density-dump instrumentation DONE (2026-07-06, commit 61ad581).** markv1 `Placer::dumpBinDensity`
-(config `dump_density:true`) writes masked+exact real-cell ρ CSVs (fillers excluded) at the restored
-best; XPlace side is an env-gated dump (`XPLACE_DUMP_DENSITY=1`, `~/phd/Xplace/src/run_placement_nesterov.py`,
-writes `~/aieplace_tmp/<bench>_density_exact.npy` + meta). Compare with `vck5000/tools/compare_density.py`.
-**First adaptec1 result:** robust signal = markv1 forms local hotspots up to **2.9× capacity** (18% of
-core bins over target) while XPlace caps at **~1.1×** (9% over) — matches markv1 exact 0.23 vs XPlace
-0.115. CAVEAT: absolute utilization not yet apples-to-apples — markv1 is a 64-bin grid over the core
-die, XPlace a 512-bin grid padded to power-of-2 (empty margins), so coverage differs. NEXT: rebin both
-final placements over the identical die bbox at one resolution before drawing spatial conclusions;
-then chase why markv1 permits >2× local pile-ups (candidate: density-force magnitude / gradient
-clamping vs XPlace, not the stop criterion).
-
-## PL port status + next gate
-
-- New `src/modules/node_footprint.hpp` = shared clamped-footprint geometry. `density_bin.hpp`
-  (bin_scatter) and `force_gather.hpp` (node_gather, the scatter's adjoint) both use it.
-  `metrics.hpp` overflow is now masked for free (sums clamped ρ, fillers already excluded).
-- `model/density_bin_model.cpp` updated → strip-tiled vs naive still **PASS bit-exact** (GRID=1024).
+## PL port status + next gate (unchanged this session)
+- `src/modules/node_footprint.hpp` = shared clamped-footprint geometry; `density_bin.hpp` (bin_scatter)
+  and `force_gather.hpp` (node_gather, the adjoint) both use it. `metrics.hpp` overflow is masked for free.
+- `model/density_bin_model.cpp`: strip-tiled vs naive PASS bit-exact (GRID=1024).
 - **HLS C-synth `make PL=pl_algo TARGET=hw` → SYNCHK 0 errors, `top.xo` built** (Gate 1 pass). Density
-  loops II=1; node_gather inner intersection II=5 (sub-bin cells now touch ~4 bins — an optimization
-  target, not a correctness issue).
-- **Next PL gate: sw_emu** — verify the clamped density/force numerically vs the *new* Grid golden on
-  a real benchmark (long-running; not started). Then re-tune λ/γ for the 1024² grid; the PL's fine
-  grid may or may not shrink the exact-overflow gap (64→256-bin CPU didn't, so don't assume it will).
+  loops II=1; node_gather inner intersection II=5 (sub-bin cells touch ~4 bins — an opt target).
+- **Next PL gate: sw_emu** — verify clamped density/force vs the Grid golden on a real benchmark
+  (long-running; not started). Then re-tune λ/γ for 1024². Note the FFT DCT is a *software golden*
+  acceleration; the PL/AIE still uses the AIE FFT for the transform.
 
 ## Build / run how-to
-- **markv1 CPU golden:** `make host HOST=markv1` (no XRT). Run under a pty (the parser hangs on
-  non-tty stdout): `script -qec './build/hw/host/markv1/aieplace_markv1.exe <cfg>' <log>`. Put temp
-  configs in `~/aieplace_tmp/` (WSL `/tmp` is wiped between calls). Config template
-  `host/src/markv1/run_config.json`; per-iter log `iterations.dat`, summary `run_summary.md`. Key new
-  knobs: `enable_density_clamp` (true), `enable_preconditioning` (false), `enable_filler` (true).
-  Details: memory `markv1_cpu_run_gotchas`.
+- **markv1 CPU golden:** `make host HOST=markv1` (no XRT). Run under a pty (parser hangs on non-tty
+  stdout): `script -qec './build/hw/host/markv1/aieplace_markv1.exe <cfg>' <log>`. Temp configs in
+  `~/aieplace_tmp/` (WSL `/tmp` is wiped between calls). Template `host/src/markv1/run_config.json`.
+  Key knobs: `bins_per_row` (per-design, match XPlace), `dct_normalize` (true), `enable_density_clamp`
+  (true), `enable_preconditioning` (false), `enable_filler` (true), `dump_density`, `random_seed`.
+  Details: memory `markv1_cpu_run_gotchas`. When launching watch-loops, `pgrep -x aieplace_markv1`.
 - **PL C-synth:** `source /tools/Xilinx/Vitis/2022.2/settings64.sh`;
   `export PLATFORM_REPO_PATHS=$HOME/xilinx_local/opt/xilinx/platforms`; `cd pl && make PL=pl_algo TARGET=hw`.
 - **XPlace reference:** memory `xplace_build_and_run` (system CUDA 12.3, conda base torch,
-  `-DCMAKE_CXX_ABI=1`, PIC lefdef override, `pip install pulp igraph`, run with `< /dev/null`).
-  `data/raw/ispd2005` is symlinked to the AIEplace benchmarks.
+  `-DCMAKE_CXX_ABI=1`, PIC lefdef override, `pip install pulp igraph`, run with `< /dev/null`; density
+  dump via `XPLACE_DUMP_DENSITY=1`). `data/raw/ispd2005` symlinked to the AIEplace benchmarks.
 
 ## Hardware deployment (deferred — needs Mark/Geert's card)
-`make all TARGET=hw AIE=pl_algo PL=pl_algo HOST=pl_algo BUILD_XRT=1 AIE_DENSITY_INSTANCES=8` → hw
-xclbin + host exe (hours-long P&R). Target needs: VCK5000 shell matching
-`xilinx_vck5000_gen4x8_qdma_2_202220_1`, matching XRT, compatible libstdc++/glibc (host mixes ABIs),
-and the benchmark input files at runtime. Limbo parser libs are static (travel in the exe). Risk
-ranking: platform-shell > XRT version > libstdc++/glibc ABI; mitigate with `-static-libstdc++ -static-libgcc`.
+`make all TARGET=hw AIE=pl_algo PL=pl_algo HOST=pl_algo BUILD_XRT=1 AIE_DENSITY_INSTANCES=8`. Needs a
+VCK5000 shell matching `xilinx_vck5000_gen4x8_qdma_2_202220_1`, matching XRT, compatible libstdc++/glibc.
+Risk: platform-shell > XRT version > libstdc++/glibc ABI; mitigate `-static-libstdc++ -static-libgcc`.
 
 ## Key references
-- **markv1 golden:** `host/src/markv1/src/{AIEplace,Density,Partials,Output,Grid}.cpp`, `include/{Node,AIEplace,Grid}.h`.
-- **Source of truth:** XPlace `~/phd/Xplace/src/{param_scheduler,calculator,evaluator,database,nesterov_optimizer,initializer}.py`.
-- **Auto-memory:** `clamped_density_force_milestone`, `markv1_nonconvergence_vs_xplace`,
-  `xplace_build_and_run`, `markv1_cpu_run_gotchas`, `pl_algo_density_manager`, `pl_algo_stage5c`.
+- **markv1 golden:** `host/src/markv1/src/{AIEplace,Density,Partials,Output,Grid,DCT}.cpp`,
+  `include/{Node,AIEplace,Grid,DCT}.h`.
+- **Source of truth:** XPlace `~/phd/Xplace/src/{param_scheduler,calculator,evaluator,database,nesterov_optimizer,initializer}.py`, grid sizes `utils/setup_dataset.py`.
+- **Auto-memory:** `dct_fft_acceleration`, `density_map_comparison`, `markv1_nonconvergence_vs_xplace`,
+  `clamped_density_force_milestone`, `xplace_build_and_run`, `markv1_cpu_run_gotchas`, `pl_algo_stage5c`.
 
 ---
 
 ## Stage 5c reference (PL hardware draft — still current)
-The full ePlace iteration runs on PL/AIE, sw_emu-verified end to end. PL modules:
+Full ePlace iteration runs on PL/AIE, sw_emu-verified end to end. PL modules:
 `src/modules/{density_bin,dct_1d,dct_transpose,transpose,force_gather,hpwl_gradient,iteration_update,
-memory_writer,metrics}.hpp`, `node_footprint.hpp` (new), `top.cpp`, `host_interface.hpp`, `formats.hpp`,
+memory_writer,metrics}.hpp`, `node_footprint.hpp`, `top.cpp`, `host_interface.hpp`, `formats.hpp`,
 `DATAFLOW.md`. Host driver `host/src/pl_algo/src/{Placement.hpp,Driver.cpp,main.cpp}`; flags
 `--iter-update`/`--metrics`/`--place <bench> <xclbin> [iters]`. Prior sw_emu verified commits:
-f81212b, b1bfd92, b5c2e75, edcc81a. Stage 6 (PL optimization) when hardware work resumes: re-tune
-λ/γ for 1024², fuse the 8-pass density solve, widen ports to 128-bit beats, BB α on PL.
+f81212b, b1bfd92, b5c2e75, edcc81a. Stage 6 (PL optimization): re-tune λ/γ for 1024², fuse the 8-pass
+density solve, widen ports to 128-bit beats, BB α on PL.
