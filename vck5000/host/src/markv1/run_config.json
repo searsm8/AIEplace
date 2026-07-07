@@ -36,10 +36,12 @@
     "enable_preconditioning": false,   // diagonal preconditioner: damps large macro movement (XPlace-style)
     "enable_density_clamp": true,      // clamp sub-bin cells to ~bin size in the density solve (XPlace expand_ratio); smooths the force
     "enable_pin_offsets": true,        // use per-pin offsets (bookshelf: center-relative; LEF/DEF: macro RECT) in HPWL + WL gradient; false = all pins at node origin (legacy)
+    "dct_normalize": true,             // 1/N-per-DCT scaling; keeps field O(1) and lambda interpretable (essential at 1024, pure lambda-absorbed rescale)
 
     // Hyperparameters
-    "init_gamma": 4,
-    "gamma_schedule": true, // if true, gamma follows overflow-driven schedule (XPlace-style); starts at 10x init_gamma
+    "init_gamma": 4, // plays XPlace's wa_coeff role; with gamma_bin_scaled, base_gamma = init_gamma*(bin_w+bin_h)
+    "gamma_schedule": true, // if true, gamma follows overflow-driven schedule (XPlace-style); starts at 10x base_gamma
+    "gamma_bin_scaled": true, // XPlace-style: tie base_gamma to bin size (bin_w+bin_h); false = legacy bare init_gamma constant
     "max_threads": 1, // multithreading not yet implemented
     "init_method": "random_center", // initial placement of movable cells:
                                   //   "uniform_box"   — uniform offset in a box of half-width

@@ -18,8 +18,10 @@ from typing import Any, Union, List, Tuple
 # A good default 4 or 8 to speed up DSE on a typical multi-core machine without overwhelming it.
 MAX_PARALLEL = 8
 
-# Default config file (same one used for single runs — supports // and # comments)
-CONFIG_PATH = "host/run_config.json"
+# Compiled placer binary (current markv1 build) and the base config it reads.
+# Both paths are relative to vck5000/, which is where this script must be run from.
+EXE_PATH = "build/hw/host/markv1/aieplace_markv1.exe"
+CONFIG_PATH = "host/src/markv1/run_config.json"
 
 
 # =============================================================================
@@ -65,22 +67,15 @@ dse_sweep = OrderedDict([
     #    "ispd2015/mgc_pci_bridge32_b",  #   29K nodes
     #])),
 
-    # Smaller subset, largest-first for efficient parallel scheduling:
+    # Gamma-schedule A/B: XPlace-style grid-tied base_gamma vs legacy bare constant.
+    # adaptec1 @512 (XPlace grid), stop matched to XPlace masked overflow, fixed seed.
     ("benchmark", (["input"], [
-        "ispd2005/bigblue4",            # 2.2M nodes
-        "ispd2015/mgc_superblue11_a",   #  927K nodes
-        "ispd2015/mgc_superblue14",    #  613K nodes
-        "ispd2005/adaptec4",           #  495K nodes
-        "ispd2005/bigblue1",            #  278K nodes
         "ispd2005/adaptec1",            #  211K nodes
-        "ispd2015/mgc_matrix_mult_b",   #  146K nodes
-        "ispd2015/mgc_matrix_mult_1",  #  155K nodes
-        "ispd2015/mgc_edit_dist_a",     #  127K nodes
-        "ispd2015/mgc_des_perf_1",      #  113K nodes
-        "ispd2015/mgc_fft_1",           #   32K nodes
-        "ispd2015/mgc_fft_a",           #   31K nodes
-        "ispd2015/mgc_pci_bridge32_a", #   30K nodes
     ])),
+    ("bins_per_row",                   (["params"], [512])),   # adaptec1 = XPlace grid
+    ("convergence_overflow_threshold", (["params"], [0.04])),  # match XPlace masked stop
+    ("random_seed",                    (["params"], [42])),    # identical init for a clean A/B
+    ("gamma_bin_scaled",               (["params"], [True, False])),
 
     # Uncomment to sweep additional parameters:
     # (<param_name>, ([section_path], [values_to_sweep]))
@@ -90,8 +85,11 @@ dse_sweep = OrderedDict([
     #("enable_momentum",  (["params"], [True, False])),
     #("enable_preconditioning",  (["params"], [True, False])),
     #("enable_filler",     (["params"], [True, False])),
-    ("gamma_schedule",     (["params"], [True, False])),
+    #("gamma_schedule",     (["params"], [True, False])),
+    #("init_gamma",         (["params"], [1, 2, 4, 8, 16])),  # wa_coeff multiplier (with gamma_bin_scaled)
+    #("init_method",        (["params"], ["uniform_box", "random_center"])),
 
+    #("init_method",             (["params"], ["uniform_box", "random_center"])),
     #("init_step_length",        (["params"], [0.001, 0.01, 0.1, 1.0])),
     #("init_spread",              (["params"], [0.5, 0.4, 0.3, 0.25])),
     #("convergence_min_iterations", (["params"], [50, 100, 200])),
@@ -262,7 +260,7 @@ def run_AIEplace(args=None):
     if args is None:
         args = []
 
-    command = ['bin/AIEplace.exe'] + args
+    command = [EXE_PATH] + args
     print(f"DSE: Running {command}")
 
     result = subprocess.run(command)
@@ -286,7 +284,7 @@ class ParallelRun:
         """Launch the subprocess with stdout/stderr discarded."""
         self.t0 = time.time()
         self.process = subprocess.Popen(
-            ['bin/AIEplace.exe', self.config_path],
+            [EXE_PATH, self.config_path],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -300,6 +298,39 @@ class ParallelRun:
         elapsed = time.time() - self.t0
         success = self.process.returncode == 0
         return (self.run_num, self.combo_str, success, elapsed)
+
+
+def write_markdown_summary(sweep_dir, rows, dse_cols):
+    """
+    Write results.md — a GitHub-flavored markdown table of the sweep, sorted by
+    design then best HPWL. Persisted alongside results.csv so a human or an LLM can
+    read the collated outcome after the run without re-parsing per-run files.
+    """
+    # Include the XPlace-comparison columns when the exe emitted them (we are chasing
+    # XPlace, so ratio-to-XPlace is the headline metric when available).
+    optional = [c for c in ("XPlace HPWL", "Ratio") if rows and c in rows[0]]
+    cols = ["Design"] + dse_cols + ["Iters", "Best HPWL", "Best OVFW", "Best Iter"] + optional
+
+    lines = [
+        f"# DSE sweep results",
+        "",
+        f"Swept parameters: {', '.join(dse_cols) if dse_cols else '(none)'}  |  {len(rows)} runs",
+        "",
+        "| " + " | ".join(cols) + " |",
+        "| " + " | ".join("---" for _ in cols) + " |",
+    ]
+    for r in rows:
+        lines.append("| " + " | ".join(str(r.get(c, "")) for c in cols) + " |")
+
+    hpwls = [float(r["Best HPWL"]) for r in rows if r.get("Best HPWL") not in (None, "", "N/A")]
+    if hpwls:
+        lines += ["", f"**HPWL range:** {min(hpwls):.3e} — {max(hpwls):.3e} "
+                      f"({max(hpwls)/min(hpwls):.2f}x spread)"]
+
+    md_path = os.path.join(sweep_dir, "results.md")
+    with open(md_path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"  Markdown summary:   {md_path}")
 
 
 # =============================================================================
@@ -426,21 +457,26 @@ def dse():
         if rows:
             # Detect which DSE parameter columns exist (dynamic — works for any sweep)
             fixed_cols = {"Design", "Iters", "Final HPWL", "Best Iter", "Best HPWL", "Best OVFW",
+                          "XPlace HPWL", "Ratio",
                           "Gamma", "Net Count", "Node Count", "HPWL_Graph", "Combined_Graph",
                           "Placement_GIF", "Total Runtime (sec)", "DB IO Time (sec)",
                           "Algorithm Time (sec)", "Iteration Avg (sec)", "Partials AIE Time (sec)",
                           "Memory Usage (MB)", "Output Dir", "Timestamp"}
             dse_cols = [k for k in rows[0].keys() if k and k not in fixed_cols]
+            # XPlace-comparison columns (emitted by the exe when a reference HPWL is known);
+            # shown last since ratio-to-XPlace is the headline metric while chasing XPlace.
+            xplace_cols = [c for c in ("XPlace HPWL", "Ratio") if c in rows[0]]
+            table_cols = ["Design"] + dse_cols + ["Iters", "Best HPWL", "Best Iter", "Best OVFW"] + xplace_cols
 
             # Build format string dynamically
             col_widths = {"Design": 22, "Iters": 5, "Best HPWL": 10, "Best Iter": 8,
                           "Best OVFW": 8}
-            for dc in dse_cols:
+            for dc in dse_cols + xplace_cols:
                 col_widths[dc] = max(len(dc), max(len(str(r.get(dc, ""))) for r in rows)) + 1
 
             # Header
             header_parts = []
-            for col in ["Design"] + dse_cols + ["Iters", "Best HPWL", "Best Iter", "Best OVFW"]:
+            for col in table_cols:
                 w = col_widths.get(col, 12)
                 header_parts.append(f"{col:<{w}}")
             header_line = "  ".join(header_parts)
@@ -451,7 +487,7 @@ def dse():
             # Data rows
             for r in rows:
                 parts = []
-                for col in ["Design"] + dse_cols + ["Iters", "Best HPWL", "Best Iter", "Best OVFW"]:
+                for col in table_cols:
                     w = col_widths.get(col, 12)
                     val = r.get(col, "")
                     parts.append(f"{val:<{w}}")
@@ -465,6 +501,9 @@ def dse():
                 print(f"  HPWL range:     {min(hpwls):.3e} — {max(hpwls):.3e}  ({max(hpwls)/min(hpwls):.1f}x spread)")
             if ovfws:
                 print(f"  Overflow range:  {min(ovfws):.3f} — {max(ovfws):.3f}")
+
+            # Persist the same collated data as markdown for later human/LLM review.
+            write_markdown_summary(sweep_dir, rows, dse_cols)
     else:
         print(f"\n  (No results.csv found — all runs may have failed)")
 

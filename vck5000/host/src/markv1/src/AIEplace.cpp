@@ -111,11 +111,11 @@ Placer::Placer(std::string config_filepath)
             printWelcomeBanner();
             Logger::log_info("Reading runtime configuration from: " + config_filepath);
 
-            // Read hyperparameters
+            // Read hyperparameters. gamma/base_gamma are finalized after the grid is built
+            // (gamma_bin_scaled ties base_gamma to the bin geometry — see after grid creation).
             base_gamma    = cfg["params"]["init_gamma"];
             gamma_schedule = cfg["params"].value("gamma_schedule", false);
-            gamma     = gamma_schedule ? 10.0f * base_gamma : base_gamma;
-            inv_gamma = 1.0f / gamma;
+            gamma_bin_scaled = cfg["params"].value("gamma_bin_scaled", true);
             step_length = cfg["params"]["init_step_length"];
             density_weight = 1.0f; // will be updated on iteration 1 after computing gradients
 
@@ -124,9 +124,6 @@ Placer::Placer(std::string config_filepath)
             density_method = cfg["params"]["density_compute_method"];
             Logger::log_info("Partials compute method: " + partials_method);
             Logger::log_info("Density compute method:  " + density_method);
-
-            if (partials_method == "simple")
-                initHpwlLut();
 
             // Read Convergence criteria
             max_iterations = cfg["params"]["convergence_max_iterations"];
@@ -237,6 +234,23 @@ Placer::Placer(std::string config_filepath)
 
             grid = Grid(db.getDieArea(), bins_per_row, bins_per_row);
             grid.setClampDensity(enable_density_clamp);
+
+            // Finalize the WA smoothing length. XPlace ties the wirelength-smoothing scale to the
+            // bin geometry: base_gamma = wa_coeff*(unit_len_x+unit_len_y) (param_scheduler.py), so
+            // gamma tracks grid resolution. markv1's init_gamma plays XPlace's wa_coeff role.
+            // With gamma_bin_scaled=false the legacy bare-constant base_gamma is used, which makes
+            // the WA ~(bin_w+bin_h)x sharper than XPlace's (near winner-take-all) and mis-scaled vs
+            // the grid. gamma_schedule starts gamma at 10x base (overflow~1) and shrinks it as
+            // overflow drops (updateGamma).
+            if (gamma_bin_scaled)
+                base_gamma = base_gamma * (grid.getBinWidth() + grid.getBinHeight());
+            gamma     = gamma_schedule ? 10.0f * base_gamma : base_gamma;
+            inv_gamma = 1.0f / gamma;
+            if (partials_method == "simple")
+                initHpwlLut();
+            Logger::log_info("WA gamma: base_gamma=" + std::to_string(base_gamma) +
+                             " (bin_scaled=" + std::string(gamma_bin_scaled ? "true" : "false") +
+                             "), initial gamma=" + std::to_string(gamma));
 
             die_size = min( grid.getDieWidth(), grid.getDieHeight() );
 
