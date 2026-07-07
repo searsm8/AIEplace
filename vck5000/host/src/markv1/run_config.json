@@ -34,6 +34,7 @@
     "enable_momentum": true,          // whether to use momentum in the optimization (Nesterov Accelerated Gradient)
     "enable_filler": true,             // whether to include filler cells in placement (XPlace always does)
     "enable_preconditioning": false,   // diagonal preconditioner: damps large macro movement (XPlace-style)
+    "precond_coef_escalation": true,   // double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef); false = diagnostic (fixed precond_coef)
     "enable_density_clamp": true,      // clamp sub-bin cells to ~bin size in the density solve (XPlace expand_ratio); smooths the force
     "enable_pin_offsets": true,        // use per-pin offsets (bookshelf: center-relative; LEF/DEF: macro RECT) in HPWL + WL gradient; false = all pins at node origin (legacy)
     "dct_normalize": true,             // 1/N-per-DCT scaling; keeps field O(1) and lambda interpretable (essential at 1024, pure lambda-absorbed rescale)

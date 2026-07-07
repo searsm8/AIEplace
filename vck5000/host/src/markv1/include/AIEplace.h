@@ -75,6 +75,7 @@ public:
     bool enable_backtracking;
     bool enable_momentum;
     bool enable_preconditioning;
+    bool precond_coef_escalation = true; // double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef)
     bool enable_density_clamp;   // clamp sub-bin cells in the density solve (XPlace expand_ratio)
     bool dct_normalize = true;   // apply 1/N per DCT (bounds intermediates; global scale absorbed by lambda)
     bool compare_hpwl_methods = false;

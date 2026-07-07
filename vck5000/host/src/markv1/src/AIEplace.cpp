@@ -134,6 +134,7 @@ Placer::Placer(std::string config_filepath)
             enable_backtracking = cfg["params"]["enable_backtracking"];
             enable_momentum = cfg["params"]["enable_momentum"];
             enable_preconditioning = cfg["params"].value("enable_preconditioning", true);
+            precond_coef_escalation = cfg["params"].value("precond_coef_escalation", true);
             enable_density_clamp = cfg["params"].value("enable_density_clamp", true);
             dct_normalize = cfg["params"].value("dct_normalize", true);
             convergence_window = cfg["params"]["convergence_window"];
@@ -370,7 +371,8 @@ void Placer::updateDensityWeight()
 
     // Escalate preconditioner: double precond_coef every 20 iterations once overflow < 0.3
     // This progressively tightens macro movement in late placement (XPlace param_scheduler.py:340-347)
-    if (enable_preconditioning && ovfw_history.back() < 0.3f && precond_coef < 1024.0f) {
+    if (enable_preconditioning && precond_coef_escalation &&
+        ovfw_history.back() < 0.3f && precond_coef < 1024.0f) {
         if (iteration % 20 == 0) {
             precond_coef *= 2.0f;
             Logger::log_detail("Preconditioner escalation: precond_coef=" + PREC(precond_coef));
