@@ -74,8 +74,7 @@ dse_sweep = OrderedDict([
     ])),
     ("bins_per_row",                   (["params"], [512])),   # adaptec1 = XPlace grid
     ("convergence_overflow_threshold", (["params"], [0.04])),  # match XPlace masked stop
-    ("random_seed",                    (["params"], [42])),    # identical init for a clean A/B
-    ("gamma_bin_scaled",               (["params"], [True, False])),
+    ("random_seed",                    (["params"], [42])),    # identical init
 
     # Uncomment to sweep additional parameters:
     # (<param_name>, ([section_path], [values_to_sweep]))
@@ -98,6 +97,25 @@ dse_sweep = OrderedDict([
     #("partials_compute_method", (["params"], ["cpu", "simple"])),
 
 ])
+
+
+# =============================================================================
+# Explicit one-off runs (in ADDITION to the Cartesian product above)
+# =============================================================================
+# Each dict is one run: a set of {param: value} overrides applied to the base
+# run_config.json. Use this for specific configs the product can't express — e.g.
+# per-benchmark grids, or a hand-picked combination. "benchmark" goes in the
+# "input" section (and is prefixed with host/benchmarks/); every other key goes in
+# "params". Add an optional "label" to name the run in the results table.
+#
+# Example — each benchmark at its own XPlace grid, in a single sweep:
+#   explicit_runs = [
+#     {"label": "adaptec1@512", "benchmark": "ispd2005/adaptec1", "bins_per_row": 512},
+#     {"label": "adaptec2@1024","benchmark": "ispd2005/adaptec2", "bins_per_row": 1024},
+#     {"label": "bigblue4@2048","benchmark": "ispd2005/bigblue4", "bins_per_row": 2048},
+#   ]
+explicit_runs = [
+]
 
 
 # =============================================================================
@@ -155,24 +173,34 @@ def load_config(path: str) -> dict:
     stripped = re.sub(r',\s*([}\]])', r'\1', stripped)
     return json.loads(stripped)
 
-def update_info_string(config: dict, config_path: str, run_num: int, total_runs: int) -> None:
+def write_run_config(config: dict, config_path: str, run_num: int, total_runs: int,
+                     columns: list, section_for, label=None) -> None:
     """
-    Build a DSE_info string from the current config values of all swept parameters
-    and write it into config["output"]["DSE_info"], then save the config file.
+    Write a run's config with a DSE_info block, then save the file.
+
+    The exe turns DSE_info lines 3+ into results.csv columns, and results.csv is
+    append-mode with a single shared header — so EVERY run must emit the same column
+    set in the same order or the CSV misaligns. `columns` is that shared set (the union
+    of all params that vary across the whole sweep, incl. explicit runs); each run fills
+    in its own value (blank if the param isn't present). Line 1 = progress, line 2 =
+    benchmark (skipped by the exe; the Design column already carries it). If `label` is
+    not None a "run" column is emitted for every run (empty for unlabeled product runs).
     """
     if "output" not in config:
         return
 
-    parts = [f"DSE sweep progress={run_num} of {total_runs}"]
-    for param_name, (section_list, _) in dse_sweep.items():
+    bench = str(config.get("input", {}).get("benchmark", "")).rsplit('/', 1)[-1]
+    parts = [f"DSE sweep progress={run_num} of {total_runs}", f"benchmark={bench}"]
+    if label is not None:
+        parts.append(f"run={label}")
+    for param in columns:
+        if param == "benchmark":
+            continue  # represented by the Design column, not a data column
         section = config
-        for key in section_list:
-            section = section.get(key, {})
-        if isinstance(section, dict) and param_name in section:
-            value = section[param_name]
-            if param_name == "benchmark":
-                value = str(value).rsplit('/', 1)[-1]
-            parts.append(f"{param_name}={value}")
+        for key in section_for(param):
+            section = section.get(key, {}) if isinstance(section, dict) else {}
+        val = section[param] if isinstance(section, dict) and param in section else ""
+        parts.append(f"{param}={val}")
 
     config["output"]["DSE_info"] = "\n".join(parts)
 
@@ -348,19 +376,45 @@ def dse():
     # Load the single config file (strips // and # comments)
     base_config = load_config(CONFIG_PATH)
 
-    # Extract param names, sections, and value lists from the sweep config
+    # Section lookup for any parameter: sweep dims carry their own section; explicit-run
+    # params default to "input" for benchmark and "params" for everything else.
+    sweep_sections = {p: dse_sweep[p][0] for p in dse_sweep}
+    def section_for(param):
+        if param in sweep_sections:
+            return sweep_sections[param]
+        return ["input"] if param == "benchmark" else ["params"]
+
+    # Build the full run list: Cartesian product of dse_sweep + explicit one-off runs.
+    # Each run is (overrides {param: value}, label); product runs are unlabeled (None).
     param_names = list(dse_sweep.keys())
-    sections = [dse_sweep[p][0] for p in param_names]
     value_lists = [dse_sweep[p][1] for p in param_names]
+    runs = []
+    if param_names:
+        for combo in itertools.product(*value_lists):
+            runs.append((dict(zip(param_names, combo)), None))
+    for spec in explicit_runs:
+        spec = dict(spec)
+        label = str(spec.pop("label", "explicit"))
+        runs.append((spec, label))
+    total_runs = len(runs)
 
-    # Cartesian product of all parameter value lists
-    all_combos = list(itertools.product(*value_lists))
-    total_runs = len(all_combos)
+    if total_runs == 0:
+        print("DSE: nothing to run (dse_sweep and explicit_runs are both empty).")
+        return
 
-    print(f"DSE: {len(param_names)} parameters, {total_runs} total configurations")
-    for p in param_names:
-        n = len(dse_sweep[p][1])
-        print(f"  {p}: {n} value{'s' if n != 1 else ''}")
+    # Shared column set so the appended results.csv stays aligned: sweep params first
+    # (order preserved), then any explicit-only params (first-seen). "run" label column
+    # is emitted for all runs when any run is labeled (i.e. when there are explicit runs).
+    columns = list(param_names)
+    for overrides, _ in runs:
+        for p in overrides:
+            if p not in columns:
+                columns.append(p)
+    has_labels = any(lbl is not None for _, lbl in runs)
+
+    n_product = total_runs - len(explicit_runs)
+    print(f"DSE: {len(param_names)} swept param(s) -> {n_product} product run(s) "
+          f"+ {len(explicit_runs)} explicit run(s) = {total_runs} total")
 
     parallel = min(MAX_PARALLEL, total_runs)
     print(f"DSE: Running with {parallel} parallel workers")
@@ -381,26 +435,26 @@ def dse():
 
     print(f"DSE: Preparing {total_runs} config files...")
     benchmark_path = "host/benchmarks/"
-    for run_num, combo in enumerate(all_combos, 1):
+    for run_num, (overrides, label) in enumerate(runs, 1):
         # Deep-copy the base config for this run
         config = copy.deepcopy(base_config)
 
-        # Apply each parameter value from the sweep
-        for param_name, section, value in zip(param_names, sections, combo):
-            actual_value = value
-            if param_name == "benchmark":
-                actual_value = benchmark_path + value
-            # Navigate to the target section and set the value
+        # Apply this run's parameter overrides
+        for param, value in overrides.items():
+            actual_value = benchmark_path + value if param == "benchmark" else value
             target = config
-            for key in section:
+            for key in section_for(param):
                 target = target[key]
-            target[param_name] = actual_value
+            target[param] = actual_value
 
         # Write the clean (comment-free) JSON config for this run
         run_config_path = os.path.join(config_dir, f"run_{run_num:03d}.json")
-        update_info_string(config, run_config_path, run_num, total_runs)
+        write_run_config(config, run_config_path, run_num, total_runs, columns,
+                         section_for, label=(label or "") if has_labels else None)
 
-        combo_str = "  ".join(f"{p}={v}" for p, v in zip(param_names, combo))
+        combo_str = "  ".join(f"{p}={v}" for p, v in overrides.items())
+        if label is not None:
+            combo_str += f"  [{label}]"
         pending.append(ParallelRun(run_num, combo_str, run_config_path))
 
     # Launch runs with a simple Popen worker pool
