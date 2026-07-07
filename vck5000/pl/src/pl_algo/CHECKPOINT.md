@@ -1,4 +1,39 @@
-# Checkpoint — markv1 GP ≈ XPlace at matched conditions; only ~5% HPWL residual left (2026-07-06)
+# Checkpoint — markv1 GP now ≈ XPlace across the suite (6/7 within ~2%); grid-tied γ was the lever (2026-07-07)
+
+## 2026-07-07 session — closed most of the HPWL gap
+Two wirelength fixes landed in the markv1 golden, both verified via `tools/dse.py` and committed on
+`pl_algo`, taking adaptec1 from +5% to +1.6% vs local XPlace GP and the whole suite to near-parity:
+- **`6b5a924` grid-tied WA γ (the big lever).** XPlace sets `base_gamma = wa_coeff·(bin_w+bin_h)`;
+  markv1 used a bare `init_gamma=4` constant → WA ~42× too sharp (near winner-take-all) and mis-scaled
+  with grid. New `gamma_bin_scaled` flag (default true): `base_gamma = init_gamma·(bin_w+bin_h)`,
+  finalized after the grid is built. adaptec1@512 7.322e7→**7.171e7 (−2.1%)**; adaptec2@1024 legacy
+  γ *couldn't even spread* (stalled exact 0.25) while grid-tied converged (exact 0.089). See
+  auto-memory `gamma_bin_scaled_milestone`.
+- **`3121b58` pin offsets** (bookshelf center-relative→LL; `enable_pin_offsets` flag). ~0.2% — correct
+  to have, NOT the gap. See `pin_architecture`.
+- **`c9c8a41` dse.py `explicit_runs`** — per-run configs alongside the Cartesian product (solves
+  per-design grids in one sweep). See `dse_sweep_tool`.
+- **init_gamma multiplier + BB α clamp both ruled out** (flat optimum at wa_coeff≈4; clamp not binding).
+- **Best defaults baked into `run_config.json`:** gamma_bin_scaled, dct_normalize, enable_pin_offsets.
+
+**Suite scorecard (each design @ its XPlace grid, best defaults, ratio vs XPlace published HPWL):**
+adaptec1 0.98 · bigblue1 1.01 · matmult_b 0.99 · des_perf_a 1.01 · fft_b 0.93 · pci_bridge32_a 0.99 ·
+**adaptec2@1024 1.20 (outlier).** The converged designs (adaptec1/bigblue1/matmult_b @ ovfw~0.04) are
+within 1-2%.
+
+**adaptec2 outlier = a 1024-GRID effect, not the design.** 2×2 (design×grid @ masked 0.04): adaptec2
+**@512 = 8.327e7 (ratio 1.02)** but @1024 = 9.729e7 (1.20); adaptec1 is grid-robust (0.98→0.99). At the
+SAME exact spread adaptec2 loses ~17% HPWL going 512→1024. **ROOT-CAUSED:** grid-tied γ (∝1/N) over-sharpens at 1024 for γ-sensitive adaptec2. adaptec2@1024
+init_gamma sweep: ig4→9.729e7 (1.20), **ig8→8.512e7 (1.05), ig16→8.519e7** — doubling init_gamma
+(restoring the 512 absolute γ≈16) recovers −12.5% HPWL. adaptec1 is γ-flat so grid-robust. Default
+init_gamma=4 left UNCHANGED (matches XPlace, optimal at 512, ig8 unverified suite-wide). **TOP NEXT
+ITEM (gates the PL @1024):** re-sweep suite at init_gamma 6/8 for a safe higher default, OR make
+base_gamma scale gentler than 1/N (tie to a physical length, ~grid-independent), then re-verify.
+Details: `gamma_bin_scaled_milestone`.
+
+---
+
+# (prior) Checkpoint — markv1 GP ≈ XPlace at matched conditions; only ~5% HPWL residual left (2026-07-06)
 
 Branch `pl_algo`. The markv1 CPU golden now matches XPlace quality closely once compared fairly. This
 session: fixed the adaptec2 non-convergence, FFT-accelerated the DCT (1024 grid now practical), added
