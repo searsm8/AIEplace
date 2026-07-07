@@ -67,14 +67,7 @@ dse_sweep = OrderedDict([
     #    "ispd2015/mgc_pci_bridge32_b",  #   29K nodes
     #])),
 
-    # Gamma-schedule A/B: XPlace-style grid-tied base_gamma vs legacy bare constant.
-    # adaptec1 @512 (XPlace grid), stop matched to XPlace masked overflow, fixed seed.
-    ("benchmark", (["input"], [
-        "ispd2005/adaptec1",            #  211K nodes
-    ])),
-    ("bins_per_row",                   (["params"], [512])),   # adaptec1 = XPlace grid
-    ("convergence_overflow_threshold", (["params"], [0.04])),  # match XPlace masked stop
-    ("random_seed",                    (["params"], [42])),    # identical init
+    # (empty) — γ-ref-grid verification runs the per-design grids via explicit_runs below.
 
     # Uncomment to sweep additional parameters:
     # (<param_name>, ([section_path], [values_to_sweep]))
@@ -115,6 +108,19 @@ dse_sweep = OrderedDict([
 #     {"label": "bigblue4@2048","benchmark": "ispd2005/bigblue4", "bins_per_row": 2048},
 #   ]
 explicit_runs = [
+    # γ-ref-grid verification (grid-independent base_gamma, gamma_ref_grid=512).
+    # Each design at its XPlace grid; seed 42, stop masked-overflow 0.04 (matches the
+    # prior scorecard). @512 runs must reproduce the tuned scorecard bit-for-bit (ref=512
+    # ⇒ base_gamma unchanged at 512); adaptec2@1024 is the target (expect 1.20 → ~1.05).
+    {"label": "adaptec1@512",   "benchmark": "ispd2005/adaptec1",          "bins_per_row": 512,  "convergence_overflow_threshold": 0.04, "random_seed": 42},
+    {"label": "adaptec1@1024",  "benchmark": "ispd2005/adaptec1",          "bins_per_row": 1024, "convergence_overflow_threshold": 0.04, "random_seed": 42},
+    {"label": "adaptec2@512",   "benchmark": "ispd2005/adaptec2",          "bins_per_row": 512,  "convergence_overflow_threshold": 0.04, "random_seed": 42},
+    {"label": "adaptec2@1024",  "benchmark": "ispd2005/adaptec2",          "bins_per_row": 1024, "convergence_overflow_threshold": 0.04, "random_seed": 42},
+    {"label": "bigblue1@512",   "benchmark": "ispd2005/bigblue1",          "bins_per_row": 512,  "convergence_overflow_threshold": 0.04, "random_seed": 42},
+    {"label": "matmult_b@512",  "benchmark": "ispd2015/mgc_matrix_mult_b", "bins_per_row": 512,  "convergence_overflow_threshold": 0.04, "random_seed": 42},
+    {"label": "des_perf_a@512", "benchmark": "ispd2015/mgc_des_perf_a",    "bins_per_row": 512,  "convergence_overflow_threshold": 0.04, "random_seed": 42},
+    {"label": "fft_b@512",      "benchmark": "ispd2015/mgc_fft_b",         "bins_per_row": 512,  "convergence_overflow_threshold": 0.04, "random_seed": 42},
+    {"label": "pci_bridge32_a@512", "benchmark": "ispd2015/mgc_pci_bridge32_a", "bins_per_row": 512, "convergence_overflow_threshold": 0.04, "random_seed": 42},
 ]
 
 

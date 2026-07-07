@@ -116,6 +116,7 @@ Placer::Placer(std::string config_filepath)
             base_gamma    = cfg["params"]["init_gamma"];
             gamma_schedule = cfg["params"].value("gamma_schedule", false);
             gamma_bin_scaled = cfg["params"].value("gamma_bin_scaled", true);
+            gamma_ref_grid   = cfg["params"].value("gamma_ref_grid", 512.0f);
             step_length = cfg["params"]["init_step_length"];
             density_weight = 1.0f; // will be updated on iteration 1 after computing gradients
 
@@ -236,15 +237,20 @@ Placer::Placer(std::string config_filepath)
             grid = Grid(db.getDieArea(), bins_per_row, bins_per_row);
             grid.setClampDensity(enable_density_clamp);
 
-            // Finalize the WA smoothing length. XPlace ties the wirelength-smoothing scale to the
-            // bin geometry: base_gamma = wa_coeff*(unit_len_x+unit_len_y) (param_scheduler.py), so
-            // gamma tracks grid resolution. markv1's init_gamma plays XPlace's wa_coeff role.
-            // With gamma_bin_scaled=false the legacy bare-constant base_gamma is used, which makes
-            // the WA ~(bin_w+bin_h)x sharper than XPlace's (near winner-take-all) and mis-scaled vs
-            // the grid. gamma_schedule starts gamma at 10x base (overflow~1) and shrinks it as
-            // overflow drops (updateGamma).
+            // Finalize the WA smoothing length. gamma is a physical length (the softmax temperature
+            // of the WA HPWL surrogate); the optimal ABSOLUTE gamma tracks the layout, not the bin
+            // count. XPlace ties base_gamma to bin size (base_gamma = wa_coeff*(unit_len_x+unit_len_y),
+            // param_scheduler.py) which is proportional to 1/N; that over-sharpens at fine grids for
+            // gamma-sensitive designs (adaptec2@1024 lost ~12% HPWL vs @512). We instead reference the
+            // bin geometry to a FIXED grid (gamma_ref_grid, default 512) so base_gamma is
+            // grid-INDEPENDENT: base_gamma = init_gamma*(die_w+die_h)/gamma_ref_grid. At the reference
+            // grid this equals the bin-tied form exactly (bin_w+bin_h == die_span/gamma_ref_grid), so
+            // the tuned @512 suite is unchanged; at other resolutions the absolute gamma is preserved.
+            // markv1's init_gamma plays XPlace's wa_coeff role. gamma_bin_scaled=false = legacy bare
+            // constant. gamma_schedule starts gamma at 10x base (overflow~1) and shrinks it as overflow
+            // drops (updateGamma).
             if (gamma_bin_scaled)
-                base_gamma = base_gamma * (grid.getBinWidth() + grid.getBinHeight());
+                base_gamma = base_gamma * (grid.getDieWidth() + grid.getDieHeight()) / gamma_ref_grid;
             gamma     = gamma_schedule ? 10.0f * base_gamma : base_gamma;
             inv_gamma = 1.0f / gamma;
             if (partials_method == "simple")

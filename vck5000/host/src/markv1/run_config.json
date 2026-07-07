@@ -42,7 +42,8 @@
     // Hyperparameters
     "init_gamma": 4, // plays XPlace's wa_coeff role; with gamma_bin_scaled, base_gamma = init_gamma*(bin_w+bin_h)
     "gamma_schedule": true, // if true, gamma follows overflow-driven schedule (XPlace-style); starts at 10x base_gamma
-    "gamma_bin_scaled": true, // XPlace-style: tie base_gamma to bin size (bin_w+bin_h); false = legacy bare init_gamma constant
+    "gamma_bin_scaled": true, // tie base_gamma to bin geometry referenced to gamma_ref_grid (grid-independent); false = legacy bare init_gamma constant
+    "gamma_ref_grid": 512, // reference grid for gamma_bin_scaled: base_gamma = init_gamma*(die_w+die_h)/gamma_ref_grid; keeps absolute gamma grid-independent (512 matches the tuned suite)
     "max_threads": 1, // multithreading not yet implemented
     "init_method": "random_center", // initial placement of movable cells:
                                   //   "uniform_box"   — uniform offset in a box of half-width

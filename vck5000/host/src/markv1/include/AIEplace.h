@@ -67,7 +67,8 @@ public:
     float gamma, inv_gamma; // smoothness factor for WA gradient; updated each iteration if gamma_schedule enabled
     float base_gamma;       // reference gamma from config; schedule varies around this
     bool gamma_schedule;    // if true, gamma follows overflow-driven schedule (XPlace-style)
-    bool gamma_bin_scaled;  // if true, base_gamma = init_gamma*(bin_w+bin_h) (XPlace wa_coeff*unit_len); else bare init_gamma
+    bool gamma_bin_scaled;  // if true, base_gamma tied to bin geometry referenced to gamma_ref_grid (grid-independent); else bare init_gamma
+    float gamma_ref_grid;   // reference grid for gamma_bin_scaled: base_gamma = init_gamma*die_span/gamma_ref_grid (grid-independent absolute gamma)
 
     int backtrack_steps = 0;
     int max_backtracking_attempts;
