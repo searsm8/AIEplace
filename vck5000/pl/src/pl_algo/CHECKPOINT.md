@@ -34,6 +34,49 @@ at 512 AND 1024, then re-verify the suite. (XPlace uses ∝1/N yet runs adaptec2
 always-on preconditioner compensates; markv1 precond is OFF. Confirm before changing scaling.)
 Details: `gamma_bin_scaled_milestone`.
 
+## Preconditioner thread (investigated deeply, stays OFF) — see `preconditioner_bb_fix`
+Chased whether a working preconditioner is how XPlace tolerates the sharp 1/N γ at 1024. Findings:
+- **`b20a2cc` BB/precond consistency fix (real bug, kept).** `computeLipshitzEstimate` used the RAW
+  gradient for α=‖Δv‖/‖Δg‖ but `Node::step` moves by the PRECONDITIONED gradient — inconsistent, made α
+  too small so cells under-moved. Now differences the preconditioned gradient. **Inert when precond OFF
+  (precond_weight=1), verified OFF baselines bit-identical.** Helped precond-ON a lot but insufficient.
+- **`43264a2` `precond_coef_escalation` toggle (diagnostic, default true = XPlace-faithful).** XPlace
+  DOES use the same overflow<0.3 doubling (param_scheduler.py:340-347). Disabling it is design-dependent:
+  matmult_b converges to 0.98 (beats precond-off!) but adaptec1/2 over-spread and HPWL explodes. So the
+  escalation is a legit knob, not the bug.
+- **Raw-area alpha_2 fix TRIED → WORSE, REVERTED.** Set a2=λ·precond_coef·getArea() (raw, = XPlace
+  site²-area since ISPD2005 site_width=1). Over-damped (precond ON floored 0.29-0.59) AND perturbed
+  precond-OFF adaptec2 via the shared density_force_fraction. **Reverted; nothing left in tree.**
+- **CONCLUSION:** markv1 works in raw DBU; XPlace in site-width-normalized coords. `precond_weight =
+  num_pins + λ·area` adds a scale-invariant COUNT to a scale-dependent AREA, so their balance is set by
+  the coordinate scale — plus non-covariant landmines (`max(1,·)` floor, absolute schedule constants).
+  The preconditioner can't be fixed by the area term alone; it needs the FULL site-width coordinate
+  normalization (so λ lives in the site frame). Large, invasive, **poor ROI — leave precond OFF.**
+  (γ was fixable in DBU because it's a pure length = one covariant rescale; precond mixes count+area.)
+
+## NEXT STEPS (agreed plan, in order)
+1. **γ-scaling generalization (the last golden HPWL gap; gates the PL @1024).** Make `base_gamma` scale
+   gentler than 1/N so one config is optimal at 512 AND 1024 — e.g. tie to a physical length (site pitch
+   or die_span/REF_N with REF~512) instead of `(bin_w+bin_h)`. Verify adaptec2@1024 recovers toward 1.05
+   AND the @512 suite doesn't regress (the init_gamma=8 re-sweep showed a fixed constant can't do both;
+   a scaling change should). Land in golden, then reflect into the PL. Use `dse.py` (per-design grids via
+   `explicit_runs`) for the suite re-verify.
+2. **PL port (the actual project).** Reflect the session's golden fixes — grid-tied γ, pin offsets, the
+   verified schedule — into the `pl_algo` PL modules, then re-verify the PL against the golden via sw_emu,
+   then toward real HW. The golden (markv1) is now a trustworthy reference. See Stage 5c reference below
+   for the PL module layout.
+3. **Find an open-source detailed placer (NEW idea).** markv1 does global placement only; the last ~1-2%
+   vs XPlace's *published* numbers is detailed placement / legalization, which markv1 lacks. Rather than
+   build DP, adopt a literature-standard open-source detailed placer (candidates to evaluate:
+   **ABCDPlace** / DREAMPlace's DP, **NTUplace3/4**, **FastDP**, or **OpenROAD's `detailed_placement`
+   (opendp)**). Feed markv1/PL GP output → legalize+DP → compare final legal HPWL to XPlace post-DP
+   (Output.cpp's `xplace_hpwl` map is post-DP). This makes the head-to-head fully apples-to-apples and
+   gives a deployable legal placement.
+
+**Bottom line for the wirelength chase:** essentially DONE. Every quick GP lever is exhausted; markv1 GP
+≈ XPlace. Remaining substantive work = the γ-scaling fix (#1), then the PL port (#2), with the DP placer
+(#3) to close the final published-number gap and legalize.
+
 ---
 
 # (prior) Checkpoint — markv1 GP ≈ XPlace at matched conditions; only ~5% HPWL residual left (2026-07-06)
