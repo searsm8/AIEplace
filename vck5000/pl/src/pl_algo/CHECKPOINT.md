@@ -1,4 +1,31 @@
-# Checkpoint — markv1 GP now ≈ XPlace across the suite (6/7 within ~2%); grid-tied γ was the lever (2026-07-07)
+# Checkpoint — γ-scaling generalized (grid-independent); adaptec2@1024 outlier FIXED 1.20→1.05; whole suite now ≈ XPlace (2026-07-07)
+
+## 2026-07-07 (later) — γ-scaling generalization DONE (NEXT STEP #1 complete), commit `8ce73d2`
+Closed the last golden HPWL gap. `base_gamma` was tied to bin size (∝1/N), so the ABSOLUTE WA
+smoothing length halved 512→1024 and over-sharpened γ-sensitive designs. Made it **grid-INDEPENDENT**
+by referencing the bin geometry to a fixed grid: `base_gamma = init_gamma·(die_w+die_h)/gamma_ref_grid`
+(new config `gamma_ref_grid`, default 512; AIEplace.cpp finalize block). At the 512 reference this
+equals the old bin-tied form exactly, so the tuned @512 suite is **bit-identical**; at 1024 γ is held
+at the 512 absolute value. A fixed init_gamma constant couldn't do both grids (the init_gamma=8 re-sweep
+regressed @512); a *scaling* change does — exactly as predicted.
+
+**Verified via `dse.py` explicit_runs (seed 42, stop masked-ovfw 0.04, each design at its XPlace grid):**
+- **adaptec2@1024 1.20 → 1.05** (9.729e7 → 8.512e7, γ 8.1 → 16.3) — matches the manual init_gamma=8
+  recovery, now automatic. The outlier is gone.
+- **@512 suite bit-identical** (no regression): adaptec1 0.98 (γ12.2), adaptec2 1.02 (γ15.3), bigblue1
+  1.01, matmult_b 0.99, des_perf_a 1.01, fft_b 0.93, pci_bridge32_a 0.99.
+- adaptec1@1024 0.99 (grid-robust control, unchanged; γ now 13.8 vs old 8.1 — grid-indep γ active but
+  harmless where γ is flat).
+
+**FULL SCORECARD NOW (ratio vs XPlace published):** adaptec1@512 0.98 · adaptec1@1024 0.99 ·
+adaptec2@512 1.02 · **adaptec2@1024 1.05** · bigblue1 1.01 · matmult_b 0.99 · des_perf_a 1.01 ·
+fft_b 0.93 · pci_bridge32_a 0.99. Every design 0.93–1.05; no outliers. **Wirelength chase DONE.**
+**NEXT = step #2, the PL port** (reflect grid-tied+grid-indep γ, pin offsets, verified schedule into the
+pl_algo PL modules; re-verify vs golden via sw_emu). Details in `gamma_bin_scaled_milestone`.
+
+---
+
+# (prior) Checkpoint — markv1 GP now ≈ XPlace across the suite (6/7 within ~2%); grid-tied γ was the lever (2026-07-07)
 
 ## 2026-07-07 session — closed most of the HPWL gap
 Two wirelength fixes landed in the markv1 golden, both verified via `tools/dse.py` and committed on
@@ -55,13 +82,10 @@ Chased whether a working preconditioner is how XPlace tolerates the sharp 1/N γ
   (γ was fixable in DBU because it's a pure length = one covariant rescale; precond mixes count+area.)
 
 ## NEXT STEPS (agreed plan, in order)
-1. **γ-scaling generalization (the last golden HPWL gap; gates the PL @1024).** Make `base_gamma` scale
-   gentler than 1/N so one config is optimal at 512 AND 1024 — e.g. tie to a physical length (site pitch
-   or die_span/REF_N with REF~512) instead of `(bin_w+bin_h)`. Verify adaptec2@1024 recovers toward 1.05
-   AND the @512 suite doesn't regress (the init_gamma=8 re-sweep showed a fixed constant can't do both;
-   a scaling change should). Land in golden, then reflect into the PL. Use `dse.py` (per-design grids via
-   `explicit_runs`) for the suite re-verify.
-2. **PL port (the actual project).** Reflect the session's golden fixes — grid-tied γ, pin offsets, the
+1. **γ-scaling generalization — ✅ DONE (commit `8ce73d2`, see top of file).** Made `base_gamma`
+   grid-independent via `gamma_ref_grid=512` (`base_gamma = init_gamma·(die_w+die_h)/gamma_ref_grid`).
+   adaptec2@1024 1.20→1.05, @512 suite bit-identical. Verified across the suite via dse.py explicit_runs.
+2. **← YOU ARE HERE. PL port (the actual project).** Reflect the session's golden fixes — grid-tied γ, pin offsets, the
    verified schedule — into the `pl_algo` PL modules, then re-verify the PL against the golden via sw_emu,
    then toward real HW. The golden (markv1) is now a trustworthy reference. See Stage 5c reference below
    for the PL module layout.
