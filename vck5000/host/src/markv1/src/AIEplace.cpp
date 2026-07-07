@@ -282,9 +282,15 @@ float Placer::computeLipshitzEstimate()
         float dy = node->next.probe_pos.y - node->current.probe_pos.y;
         pos_norm_sq += dx*dx + dy*dy;
 
-        // ||∇f(v̂_{k+1}) - ∇f(v_k)||²
-        float dgx = node->next.probe_grad.x - node->current.probe_grad.x;
-        float dgy = node->next.probe_grad.y - node->current.probe_grad.y;
+        // ||∇f(v̂_{k+1}) - ∇f(v_k)||² of the PRECONDITIONED gradient — must match Node::step,
+        // which moves by (1/precond_weight)·grad. The BB estimate α=‖Δv‖/‖Δg‖ is only valid when
+        // Δg is the same map that is stepped; using the raw gradient here makes α too small when
+        // preconditioning is on (P≥1 ⇒ raw grad larger), starving the step so density never spreads.
+        // precond_weight is fixed within the iteration, so dividing the difference is exact; it is
+        // 1.0 when preconditioning is off, leaving that path unchanged.
+        float inv_pw = 1.0f / node->precond_weight;
+        float dgx = inv_pw * (node->next.probe_grad.x - node->current.probe_grad.x);
+        float dgy = inv_pw * (node->next.probe_grad.y - node->current.probe_grad.y);
         grad_norm_sq += dgx*dgx + dgy*dgy;
     };
 
