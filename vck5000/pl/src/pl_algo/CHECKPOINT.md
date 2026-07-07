@@ -25,10 +25,13 @@ within 1-2%.
 **@512 = 8.327e7 (ratio 1.02)** but @1024 = 9.729e7 (1.20); adaptec1 is grid-robust (0.98→0.99). At the
 SAME exact spread adaptec2 loses ~17% HPWL going 512→1024. **ROOT-CAUSED:** grid-tied γ (∝1/N) over-sharpens at 1024 for γ-sensitive adaptec2. adaptec2@1024
 init_gamma sweep: ig4→9.729e7 (1.20), **ig8→8.512e7 (1.05), ig16→8.519e7** — doubling init_gamma
-(restoring the 512 absolute γ≈16) recovers −12.5% HPWL. adaptec1 is γ-flat so grid-robust. Default
-init_gamma=4 left UNCHANGED (matches XPlace, optimal at 512, ig8 unverified suite-wide). **TOP NEXT
-ITEM (gates the PL @1024):** re-sweep suite at init_gamma 6/8 for a safe higher default, OR make
-base_gamma scale gentler than 1/N (tie to a physical length, ~grid-independent), then re-verify.
+(restoring the 512 absolute γ≈16) recovers −12.5% HPWL. adaptec1 is γ-flat so grid-robust. init_gamma=8
+suite re-sweep: fixes adaptec2@1024 (1.20→**1.05**) but REGRESSES @512 designs (matmult_b +1.2%, pci
++1.8%) → NOT a safe default; **kept init_gamma=4 (no code change).** **TOP NEXT ITEM (gates the PL
+@1024): fix the γ SCALING, not the constant** — base_gamma ∝ 1/N (grid-tied) over-sharpens at high N;
+make it scale gentler (∝ die_span/REF_N or tie to site pitch, ~grid-independent) so one config is right
+at 512 AND 1024, then re-verify the suite. (XPlace uses ∝1/N yet runs adaptec2@1024 fine — likely its
+always-on preconditioner compensates; markv1 precond is OFF. Confirm before changing scaling.)
 Details: `gamma_bin_scaled_milestone`.
 
 ---
