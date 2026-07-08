@@ -22,9 +22,13 @@
   Nesterov-coeff/λ-trend+plateau-jolt, scalar C++, builds under g++ & HLS) verified BIT-FOR-BIT vs
   markv1: `dump_schedule_trace` hook (Output.cpp `dumpScheduleTrace` + BB norms from
   computeLipshitzEstimate) → `model/sched_verify.cpp` offline replay. adaptec1@512, 752 iters, all 4
-  outputs EXACT. Confirmed the dff closed form; caught the plateau jolt firing ~iter114. NEXT: S5
-  (convergence stop + divergence guards), S1/S2 (metrics ratio, iteration_update BB norm outputs),
-  then resident-loop wiring. Details: auto-memory `pl_port_plan_and_suite_snapshot`.
+  outputs EXACT. Confirmed the dff closed form; caught the plateau jolt firing ~iter114.
+- **S5 DONE (commit 1c24244): param_scheduler feature-complete.** Full checkConvergence (best
+  tracking + overflow countdown + divergence-guard `life` + backstops) → stop flag. Verified on two
+  stop paths: adaptec1 countdown @752, fft_b divergence-guard @836, both match golden; schedule still
+  EXACT. dff refactored to an INPUT (sched_dff produces it on PL). NEXT: S1 (metrics overflow-ratio),
+  S2 (iteration_update BB-norm outputs), then resident-loop wiring. Auto-memory
+  `pl_port_plan_and_suite_snapshot`.
 
 ## 2026-07-07 (later) — γ-scaling generalization DONE (NEXT STEP #1 complete), commit `8ce73d2`
 Closed the last golden HPWL gap. `base_gamma` was tied to bin size (∝1/N), so the ABSOLUTE WA
