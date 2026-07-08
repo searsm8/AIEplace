@@ -107,21 +107,47 @@ dse_sweep = OrderedDict([
 #     {"label": "adaptec2@1024","benchmark": "ispd2005/adaptec2", "bins_per_row": 1024},
 #     {"label": "bigblue4@2048","benchmark": "ispd2005/bigblue4", "bins_per_row": 2048},
 #   ]
-explicit_runs = [
-    # γ-ref-grid verification (grid-independent base_gamma, gamma_ref_grid=512).
-    # Each design at its XPlace grid; seed 42, stop masked-overflow 0.04 (matches the
-    # prior scorecard). @512 runs must reproduce the tuned scorecard bit-for-bit (ref=512
-    # ⇒ base_gamma unchanged at 512); adaptec2@1024 is the target (expect 1.20 → ~1.05).
-    {"label": "adaptec1@512",   "benchmark": "ispd2005/adaptec1",          "bins_per_row": 512,  "convergence_overflow_threshold": 0.04, "random_seed": 42},
-    {"label": "adaptec1@1024",  "benchmark": "ispd2005/adaptec1",          "bins_per_row": 1024, "convergence_overflow_threshold": 0.04, "random_seed": 42},
-    {"label": "adaptec2@512",   "benchmark": "ispd2005/adaptec2",          "bins_per_row": 512,  "convergence_overflow_threshold": 0.04, "random_seed": 42},
-    {"label": "adaptec2@1024",  "benchmark": "ispd2005/adaptec2",          "bins_per_row": 1024, "convergence_overflow_threshold": 0.04, "random_seed": 42},
-    {"label": "bigblue1@512",   "benchmark": "ispd2005/bigblue1",          "bins_per_row": 512,  "convergence_overflow_threshold": 0.04, "random_seed": 42},
-    {"label": "matmult_b@512",  "benchmark": "ispd2015/mgc_matrix_mult_b", "bins_per_row": 512,  "convergence_overflow_threshold": 0.04, "random_seed": 42},
-    {"label": "des_perf_a@512", "benchmark": "ispd2015/mgc_des_perf_a",    "bins_per_row": 512,  "convergence_overflow_threshold": 0.04, "random_seed": 42},
-    {"label": "fft_b@512",      "benchmark": "ispd2015/mgc_fft_b",         "bins_per_row": 512,  "convergence_overflow_threshold": 0.04, "random_seed": 42},
-    {"label": "pci_bridge32_a@512", "benchmark": "ispd2015/mgc_pci_bridge32_a", "bins_per_row": 512, "convergence_overflow_threshold": 0.04, "random_seed": 42},
-]
+def _full_suite():
+    """Full 28-benchmark snapshot: every design with a known XPlace reference, each at
+    its XPlace grid (setup_dataset.py). seed 42, stop masked-overflow 0.04. Ordered
+    largest-first (by node count) so the long jobs start first (LPT makespan)."""
+    grid = {  # design -> (benchmark path, XPlace num_bin)
+        "bigblue4":        ("ispd2005/bigblue4",           2048),
+        "mgc_superblue12": ("ispd2015/mgc_superblue12",    1024),
+        "bigblue3":        ("ispd2005/bigblue3",           2048),
+        "mgc_superblue11_a":("ispd2015/mgc_superblue11_a",  512),
+        "mgc_superblue16_a":("ispd2015/mgc_superblue16_a",  512),
+        "mgc_superblue14": ("ispd2015/mgc_superblue14",     512),
+        "bigblue2":        ("ispd2005/bigblue2",           1024),
+        "mgc_superblue19": ("ispd2015/mgc_superblue19",     512),
+        "adaptec4":        ("ispd2005/adaptec4",           1024),
+        "adaptec3":        ("ispd2005/adaptec3",           1024),
+        "bigblue1":        ("ispd2005/bigblue1",            512),
+        "adaptec2":        ("ispd2005/adaptec2",           1024),
+        "adaptec1":        ("ispd2005/adaptec1",            512),
+        "mgc_matrix_mult_1":("ispd2015/mgc_matrix_mult_1",  512),
+        "mgc_matrix_mult_2":("ispd2015/mgc_matrix_mult_2",  512),
+        "mgc_matrix_mult_a":("ispd2015/mgc_matrix_mult_a",  512),
+        "mgc_matrix_mult_b":("ispd2015/mgc_matrix_mult_b",  512),
+        "mgc_matrix_mult_c":("ispd2015/mgc_matrix_mult_c",  512),
+        "mgc_edit_dist_a": ("ispd2015/mgc_edit_dist_a",     512),
+        "mgc_des_perf_1":  ("ispd2015/mgc_des_perf_1",      512),
+        "mgc_des_perf_b":  ("ispd2015/mgc_des_perf_b",      512),
+        "mgc_des_perf_a":  ("ispd2015/mgc_des_perf_a",      512),
+        "mgc_fft_1":       ("ispd2015/mgc_fft_1",           512),
+        "mgc_fft_2":       ("ispd2015/mgc_fft_2",           512),
+        "mgc_fft_a":       ("ispd2015/mgc_fft_a",           512),
+        "mgc_fft_b":       ("ispd2015/mgc_fft_b",           512),
+        "mgc_pci_bridge32_a":("ispd2015/mgc_pci_bridge32_a",512),
+        "mgc_pci_bridge32_b":("ispd2015/mgc_pci_bridge32_b",512),
+    }
+    return [
+        {"label": f"{name}@{n}", "benchmark": path, "bins_per_row": n,
+         "convergence_overflow_threshold": 0.04, "random_seed": 42}
+        for name, (path, n) in grid.items()
+    ]
+
+explicit_runs = _full_suite()
 
 
 # =============================================================================
@@ -434,8 +460,10 @@ def dse():
     config_dir = os.path.join(sweep_dir, "configs")
     os.makedirs(config_dir, exist_ok=True)
 
-    # DSE overrides applied to every run (quiet mode, DSE_info placeholder)
+    # DSE overrides applied to every run (quiet + headless mode, DSE_info placeholder)
     base_config["output"]["quiet"] = True
+    base_config["output"]["visualize"] = False   # sweeps are headless; per-frame render is slow
+    base_config.setdefault("output", {})
     base_config["output"]["results_dir"] = sweep_dir
     base_config.setdefault("output", {}).setdefault("DSE_info", "")
 
