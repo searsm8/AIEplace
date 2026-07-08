@@ -17,6 +17,10 @@ using json = nlohmann::json;
 #include <fstream>
 #include <sstream>
 
+// PL port param_scheduler (scalar, cmath-only). Included by the golden so the schedule can be
+// sourced from the PL module behind use_pl_scheduler -- the closed-loop drop-in check (S6 step 0).
+#include "modules/param_scheduler.hpp"
+
 #define DEVICE_ID 0 // Device ID to find VCK5000
 
 #ifdef CREATE_VISUALIZATION
@@ -88,6 +92,17 @@ public:
     // schedule-trace dump can hand the PL param_scheduler port the exact inputs it must reproduce.
     float last_pos_norm_sq = 0.0f;  // ||v_{k+1} - v_k||^2 (preconditioned-consistent)
     float last_grad_norm_sq = 0.0f; // ||g(v_{k+1}) - g(v_k)||^2 (preconditioned)
+
+    // PL param_scheduler drop-in (S6 step 0). When use_pl_scheduler, the metric-driven schedule
+    // (gamma, lambda, BB alpha, convergence stop) is sourced from the PL module instead of the
+    // native updateGamma/updateDensityWeight/computeLipshitzEstimate/checkConvergence, closing the
+    // loop with real (CPU) gradients. momentum stays native (pure a_k recurrence). A correct drop-in
+    // reproduces the native run bit-for-bit. last_g*_L1 feed the module's iteration-1 lambda init.
+    bool  use_pl_scheduler = false;
+    plalgo::SchedState  pl_sched_state;
+    plalgo::SchedParams pl_sched_params;
+    int   pl_stop = 0;
+    float last_gwl_L1 = 0.0f, last_gden_L1 = 0.0f;
 
     int die_size; // minimum of width and height of the die area
     int bins_per_row; // grid size

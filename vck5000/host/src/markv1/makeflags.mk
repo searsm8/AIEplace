@@ -14,6 +14,9 @@ HOST_DEPS = $(HOST_OBJS:.o=.d)
 
 # General
 CPPFLAGS += -I $(HOST_DIR)/include
+# pl_algo module headers -- param_scheduler.hpp (scalar, cmath-only) is included by the golden
+# behind use_pl_scheduler for the closed-loop drop-in check (PL port S6 step 0).
+CPPFLAGS += -I$(PROJECT_ROOT)/pl/src/pl_algo/src
 CPPFLAGS += -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/
 
 CXXFLAGS += -std=c++2a

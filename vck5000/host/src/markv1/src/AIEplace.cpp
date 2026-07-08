@@ -32,7 +32,9 @@ void Placer::run()
     while( !converged )
     {
         performIteration();
-        converged = checkConvergence();
+        // Convergence from the PL param_scheduler stop flag (set in performIteration) when the
+        // drop-in is active; else the native checkConvergence. (S6 step 0 closed-loop check.)
+        converged = use_pl_scheduler ? (pl_stop != 0) : checkConvergence();
     }
 
 }
@@ -67,9 +69,27 @@ void Placer::performIteration()
     recordIterationResults();
     printIterationResults();
 
-    if (gamma_schedule)
-        updateGamma(ovfw_history.back());
-    updateDensityWeight();
+    if (use_pl_scheduler) {
+        // Source the metric-driven schedule from the PL param_scheduler module instead of the native
+        // updateGamma/updateDensityWeight/computeLipshitzEstimate-clamp/checkConvergence, closing the
+        // loop with real CPU gradients. dff is the density_force_fraction updatePrecondWeights just
+        // set; the BB norms are what computeLipshitzEstimate stored this iteration. Momentum stays
+        // native. A correct drop-in reproduces the native run bit-for-bit.
+        float ig, al, co, la; int stop;
+        plalgo::param_scheduler(pl_sched_state, pl_sched_params,
+                                hpwl_history.back(), ovfw_history.back(),
+                                last_pos_norm_sq, last_grad_norm_sq, density_force_fraction,
+                                last_gwl_L1, last_gden_L1, ig, al, co, la, stop);
+        inv_gamma      = ig;
+        gamma          = 1.0f / ig;
+        step_length    = al;
+        density_weight = la;
+        pl_stop        = stop;
+    } else {
+        if (gamma_schedule)
+            updateGamma(ovfw_history.back());
+        updateDensityWeight();
+    }
 
     // After the γ/λ updates: the scalars now hold the values the NEXT iteration will consume.
     // Dump them (with the inputs that produced them) so the PL param_scheduler port can be
@@ -266,6 +286,23 @@ Placer::Placer(std::string config_filepath)
                              "), initial gamma=" + std::to_string(gamma));
 
             die_size = min( grid.getDieWidth(), grid.getDieHeight() );
+
+            // PL param_scheduler drop-in (S6 step 0): seed the module's config + state from the same
+            // knobs the native schedule uses, now that base_gamma is finalized. dff is passed in each
+            // call (from density_force_fraction), so dff_coef is unused here.
+            use_pl_scheduler = cfg["params"].value("use_pl_scheduler", false);
+            pl_sched_params.base_gamma       = base_gamma;
+            pl_sched_params.min_step         = cfg["params"]["density_weight_min_step"];
+            pl_sched_params.max_step         = cfg["params"]["density_weight_max_step"];
+            pl_sched_params.init_multiplier  = cfg["params"]["density_weight_init_multiplier"];
+            pl_sched_params.dff_coef         = 0.0f; // unused: dff passed in from density_force_fraction
+            pl_sched_params.enable_momentum  = enable_momentum ? 1 : 0;
+            pl_sched_params.overflow_threshold = overflow_threshold;
+            pl_sched_params.min_iters        = min_iterations;
+            pl_sched_params.max_iters        = max_iterations;
+            pl_sched_params.conv_iters       = convergence_iterations;
+            pl_sched_params.max_life         = 30; // MAX_LIFE
+            plalgo::sched_state_init(pl_sched_state, pl_sched_params);
 
             #ifdef CREATE_VISUALIZATION
                 initializeFocus();
@@ -638,6 +675,8 @@ void Placer::initializeDensityWeight()
 
     float initial_multiplier = cfg["params"]["density_weight_init_multiplier"];
     density_weight = (HPWL_L1_norm / (density_L1_norm + 1e-8f)) * initial_multiplier;
+    last_gwl_L1  = HPWL_L1_norm;    // exposed for the PL param_scheduler iteration-1 lambda init
+    last_gden_L1 = density_L1_norm;
 
     Logger::log_info("Initial HPWL gradient L1 norm: " + std::to_string(HPWL_L1_norm));
     Logger::log_info("Initial density gradient L1 norm: " + std::to_string(density_L1_norm));
