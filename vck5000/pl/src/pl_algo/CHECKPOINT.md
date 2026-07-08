@@ -31,9 +31,14 @@
   the last per-iter host dependency); S1 was just a multiply in the loop. `DATAFLOW.md` now has the
   device-resident loop design. `model/synth_check.{cpp,tcl}` C-synthesizes the control core
   (bb_reduce+param_scheduler, resident SchedState): **SYNCHK 0 err, Fmax 411 MHz, bb_loop II=1.** All
-  resident-loop CONTROL modules synthesizable. NEXT = **S6**: compose datapath + control into one
-  resident `top` loop with the AIE FFT per iteration, sw_emu-verify vs golden (needs Vitis/AIE env).
-  Auto-memory `pl_port_plan_and_suite_snapshot`.
+  resident-loop CONTROL modules synthesizable.
+- **S6 STEP 0 DONE (commit 1099134): closed-loop drop-in validated.** markv1 `use_pl_scheduler` flag
+  sources its schedule from param_scheduler.hpp (scalar, golden `#include`s it directly). adaptec1
+  (countdown stop) AND fft_b (divergence-guard stop) **BIT-IDENTICAL** to native — param_scheduler is
+  a complete, correct drop-in with real gradients feeding back (not just trace replay). NEXT = S6
+  steps 1-2 (sw_emu, needs Vitis/AIE env): add param_scheduler+bb_reduce as kernel modes in the
+  host-driven loop (step 1), then collapse to a resident on-device N-iteration loop (step 2), verify
+  vs golden. Auto-memory `pl_port_plan_and_suite_snapshot`.
 
 ## 2026-07-07 (later) — γ-scaling generalization DONE (NEXT STEP #1 complete), commit `8ce73d2`
 Closed the last golden HPWL gap. `base_gamma` was tied to bin size (∝1/N), so the ABSOLUTE WA
