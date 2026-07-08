@@ -39,10 +39,12 @@ remaining
 0.04-converged bigblues (bigblue4 @0.0398 = 1.09) are the one real ~9% gap left, consistent with the
 earlier "large grid" theme even after the γ fix — a candidate for future attention.
 
-Context: markv1 is **global placement only** (no detailed placement / legalization), and the XPlace
-reference is **post-DP**. So ~1.0 is effectively at-parity, and the residual is largely the DP gap
-(checkpoint NEXT-STEP #3 — adopt an open-source detailed placer to close it and make the comparison
-fully apples-to-apples).
+Context: markv1 is **global placement only** (no legalization, no detailed placement); the XPlace
+reference is **post-legalization+DP**. Legalization *increases* HPWL and DP claws only *some* of it
+back, so XPlace's number carries a legalization penalty markv1's raw GP does not — a ~1.0 ratio means
+markv1's GP is at/ahead of XPlace's own GP. So adopting an open-source legalizer+DP (NEXT-STEP #3)
+is for **legality and an apples-to-apples legal-vs-legal comparison, NOT to reduce wirelength** — in
+fact it will raise markv1's HPWL. (This corrects an earlier "close the DP gap" framing.)
 
 *(All 28 designs present. mgc_matrix_mult_a crashed once during the oversubscribed peak and was
 re-run standalone; on the re-run it early-stopped at 178 iters / overflow 0.198 — a divergence-guard

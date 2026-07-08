@@ -25,9 +25,19 @@ lines = [
     "(grid-indep γ, dct_normalize, pin offsets; precond OFF), each at its XPlace grid, "
     "seed 42, stop masked-overflow 0.04.",
     "",
-    "Ratio = markv1 GP best HPWL / XPlace **published** reference (post-DP for ISPD2005). "
-    "markv1 is global placement only (no detailed placement), so ~1.0 is at-parity and "
-    "<1.0 means markv1's GP HPWL is below XPlace's *legalized* number.",
+    "Ratio = markv1 GP best HPWL / XPlace **published** reference (post-legalization+DP for "
+    "ISPD2005). markv1 is **global placement only** (no legalization, no detailed placement).",
+    "",
+    "**Reading the ratio (corrected 2026-07-08).** The academic flow is GP -> legalization (LG) "
+    "-> detailed placement (DP). LG *increases* HPWL (it removes overlaps and snaps cells to legal "
+    "rows/sites, displacing them from the WL-optimal continuous GP solution); DP then *claws back* "
+    "some of that (local swap/reorder refinement), but the net LG+DP result is typically still "
+    "**above** the raw GP HPWL. So XPlace's published number carries a legalization penalty that "
+    "markv1's raw GP does not. A markv1 ratio of ~1.0 therefore means markv1's GP is at or *ahead "
+    "of* XPlace's own GP -- markv1 is being compared against XPlace's inflated legal number. "
+    "Corollary: adding LG+DP to markv1 would *raise* its HPWL (worsen these ratios); its value is "
+    "**legality** (a usable, overlap-free placement) and an apples-to-apples legal-vs-legal "
+    "comparison, NOT wirelength reduction. Refs: RePlAce (TCAD 2019), ABCDPlace (TCAD 2020).",
     "",
     "| Design | Grid | Iters | Best HPWL | Overflow | XPlace ref | Ratio |",
     "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
