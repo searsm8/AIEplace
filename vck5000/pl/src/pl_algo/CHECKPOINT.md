@@ -18,6 +18,13 @@
   converged at golden quality — porting the tuned schedule faithfully IS the task. `density_force_
   fraction` has a closed form when precond OFF (always). Verify each stage vs a recorded golden trace.
   See auto-memory `pl_port_plan_and_suite_snapshot`.
+- **PL PORT STARTED — S3+S4 done & verified (commit 63ec945).** `param_scheduler.hpp` (γ/BB-α/
+  Nesterov-coeff/λ-trend+plateau-jolt, scalar C++, builds under g++ & HLS) verified BIT-FOR-BIT vs
+  markv1: `dump_schedule_trace` hook (Output.cpp `dumpScheduleTrace` + BB norms from
+  computeLipshitzEstimate) → `model/sched_verify.cpp` offline replay. adaptec1@512, 752 iters, all 4
+  outputs EXACT. Confirmed the dff closed form; caught the plateau jolt firing ~iter114. NEXT: S5
+  (convergence stop + divergence guards), S1/S2 (metrics ratio, iteration_update BB norm outputs),
+  then resident-loop wiring. Details: auto-memory `pl_port_plan_and_suite_snapshot`.
 
 ## 2026-07-07 (later) — γ-scaling generalization DONE (NEXT STEP #1 complete), commit `8ce73d2`
 Closed the last golden HPWL gap. `base_gamma` was tied to bin size (∝1/N), so the ABSOLUTE WA
