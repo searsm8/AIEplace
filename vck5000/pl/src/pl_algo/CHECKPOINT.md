@@ -1,5 +1,24 @@
 # Checkpoint — γ-scaling generalized (grid-independent); adaptec2@1024 outlier FIXED 1.20→1.05; whole suite now ≈ XPlace (2026-07-07)
 
+## 2026-07-08 — full-suite snapshot + PL-port plan (task batch after the γ fix)
+- **Full 28-design suite snapshot DONE** (`tools/dse.py` `_full_suite()` → `tools/make_scorecard.py`;
+  results at `results/DSE_20260707_185300/scorecard.md`, copied to `MARK_TO_REVIEW/`). Every design
+  at its XPlace grid, seed 42, stop 0.04. **markv1 GP ≈ XPlace across the board: mean ratio 1.014,
+  median 1.020, 22/27 within ±5%, 17/27 within ±2%**, range 0.93 (fft_b, a win) → 1.09 (bigblue4).
+  Weakest = the **bigblue family** (bigblue2 1.07 / bigblue3 1.08 / bigblue4 1.09) — largest designs
+  at the finest grids; bigblue3 didn't converge (floored ovfw 0.183) so its number is unmatched-spread.
+  The tuning generalizes well beyond the original 7-design scorecard (large superblues 1.02–1.06).
+  (mgc_matrix_mult_a crashed once during the oversubscribed peak; re-ran to fill the 28th.) The one
+  real residual gap = converged bigblue4 @0.0398 = 1.09 (a "large grid" item even post-γ-fix).
+- **PL algorithm-port plan written** = `MARK_TO_REVIEW/PL_PORT_PLAN.md` (NEXT STEP #2 planning).
+  Move the ePlace *control* onto PL: `iteration_update` (add BB reduction norms), `metrics` (finish
+  overflow-ratio), NEW `param_scheduler` (γ/λ-trend/coeff/BB-α/convergence). **Key finding: the
+  current PL schedule `host/src/pl_algo/src/Placement.hpp` is a REDUCED STUB** missing markv1's tuned
+  λ-trend + plateau jolt + divergence guards; Stage 5c only ran ~6 iters, so the PL has never
+  converged at golden quality — porting the tuned schedule faithfully IS the task. `density_force_
+  fraction` has a closed form when precond OFF (always). Verify each stage vs a recorded golden trace.
+  See auto-memory `pl_port_plan_and_suite_snapshot`.
+
 ## 2026-07-07 (later) — γ-scaling generalization DONE (NEXT STEP #1 complete), commit `8ce73d2`
 Closed the last golden HPWL gap. `base_gamma` was tied to bin size (∝1/N), so the ABSOLUTE WA
 smoothing length halved 512→1024 and over-sharpened γ-sensitive designs. Made it **grid-INDEPENDENT**
