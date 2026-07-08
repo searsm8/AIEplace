@@ -35,6 +35,40 @@ reads the status beat back between iterations. The on-PL iteration loop is retai
 this policy can later migrate onto the PL (gamma becomes a ROM indexed by overflow) with
 no change to the datapath.
 
+## Device-resident iteration loop (target; supersedes the v1 host-owned control)
+The whole schedule + convergence now lives on the PL in `modules/param_scheduler.hpp` (verified
+bit-for-bit vs the markv1 golden), and the Barzilai-Borwein step norms reduce on-device in
+`modules/bb_reduce.hpp`. So the loop can run **fully on the device**: host uploads the static design
+once, the kernel runs N iterations with **no per-iteration round-trip**, host downloads final coords
+once. This removes ~8 XRT kernel-launches/iter (~50-100us each) + the schedule sync per iteration --
+the reason the schedule was moved on-chip (residency, not speed).
+
+**Per-iteration order (one gradient eval per iteration, at the current probe v_k):**
+1. HPWL gradient: `hpwl_CU(v_k, inv_gamma_k)` -> g_hpwl        (inv_gamma_k from scheduler, iter k-1)
+2. Density solve: bin_scatter(v_k) -> DCT/IDCT/IDXST via AIE FFT -> `force_gather` -> g_density
+3. `bb_reduce(v_k, v_{k-1}, g_hpwl, g_density, g_total_{k-1}, precond, lambda_k)`
+   -> pos_norm_sq, grad_norm_sq, and materializes g_total_k (= g_total_prev for iter k+1)
+4. `metrics(v_k, bin_density)` -> HPWL, overflow_sum; loop forms overflow = sum*bin_area/movable_area
+5. `param_scheduler(state, hpwl, overflow, pos_norm_sq, grad_norm_sq, dff=sched_dff(lambda,c))`
+   -> inv_gamma_{k+1}, alpha_{k+1}, coeff_{k+1}, lambda_{k+1}, **stop**
+6. `iteration_update(v_k, g_hpwl, g_density, alpha_k, coeff_k, lambda_k)` -> v_{k+1} (Memory Writer)
+7. carry state: v_{k-1} <- v_k, g_total_{k-1} <- g_total_k, SchedState persists; if `stop`, exit.
+
+**Resident state** (no host between iterations): `SchedState` (lambda, nesterov_ak, prev_hpwl,
+best_primary/fallback, life, conv_remaining, 64-deep hpwl/ovfw rings) truly on-chip; the M-sized
+`v_prev[M]` and `g_total_prev[M]` stay DDR-resident (too big on-chip at M~1e6).
+
+**Host boundary (once each):** upload design + config scalars incl. `base_gamma`,
+`dff_coef = precond_coef*K/total_pins` (K = sum movable+filler normalized areas),
+`overflow_threshold`, `bin_area`, `movable_area`; download final coords + status (final HPWL/overflow,
+stop reason, iters). Precond stays OFF (precond[n]=1), so no per-node preconditioner pass and `dff`
+uses the closed form `sched_dff`.
+
+**Status:** control modules (param_scheduler, bb_reduce, metrics, iteration_update) built; the
+bb_reduce + param_scheduler core C-synthesizes (`model/synth_check.{cpp,tcl}`). Remaining = compose
+the datapath (stages 1-3) + control into one resident `top` loop with the AIE FFT streaming per
+iteration, then sw_emu-verify the trajectory vs the golden (needs the Vitis/AIE env).
+
 ## Open format decisions (to finalize as modules are implemented)
 - AoS vs SoA and 1-vs-2 nodes per beat for the coord/gradient buffers.
 - Exact net packet grouping for the AIE HPWL graph (mirror markv1 `prepareNetGroup`).
