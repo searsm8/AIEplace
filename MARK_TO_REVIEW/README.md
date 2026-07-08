@@ -62,8 +62,13 @@ runs headless). Each design folder has:
 - `placement_animation.gif` — the full run animated (first 10 iters, then every 15th).
 - `step_length_history.png` — the Barzilai-Borwein step length over the run.
 
-Designs: `mgc_fft_a` (macro-dominated, clean), `mgc_pci_bridge32_a` (hard low-density),
-`mgc_matrix_mult_b` (mid-size, converges — may still be rendering).
+Designs:
+- `mgc_fft_a` — macro-dominated, clean spreading.
+- `mgc_matrix_mult_b` — macro-heavy, fully converged (overflow 0.029).
+- `mgc_pci_bridge32_a` — hard low-target-density, uniform spread (floors above 0.04).
+- `bigblue4` — the **flagship giant**: 2.2M cells at 2048 grid, the hardest design in the suite,
+  converged to overflow 0.042. Movable cells fill the channels between a dense field of fixed
+  macros. Ratio 1.09 vs XPlace (the one real large-grid residual).
 
 ---
 
