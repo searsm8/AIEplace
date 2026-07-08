@@ -74,16 +74,26 @@ int main(int argc, char** argv) {
     p.base_gamma = rows[0].base_gamma;
     p.min_step = 0.95f; p.max_step = 1.05f; p.init_multiplier = 8e-5f;
     p.dff_coef = (float)c_med; p.enable_momentum = 1;
+    // convergence config: the trace was produced with stop 0.04; the rest are markv1 defaults.
+    p.overflow_threshold = 0.04f; p.min_iters = 50; p.max_iters = 1200;
+    p.conv_iters = 30; p.max_life = 30;
 
-    SchedState st; sched_state_init(st);
+    SchedState st; sched_state_init(st, p);
 
     double e_ig=0, e_al=0, e_co=0, e_la=0; int worst_ig=0, worst_la=0;
+    int first_stop = -1, premature_stop = -1; // first iter my scheduler asserts stop
     for (size_t i = 0; i < rows.size(); i++) {
         const Row& r = rows[i];
-        float inv_gamma, alpha, coeff, lambda;
+        float inv_gamma, alpha, coeff, lambda; int stop;
         float g_wl = 0, g_den = 0;
-        param_scheduler(st, p, r.hpwl, r.overflow, r.pos2, r.grad2, g_wl, g_den,
-                        inv_gamma, alpha, coeff, lambda);
+        // Feed the golden density_force_fraction to isolate the lambda-trend logic; the closed
+        // form that produces dff on the PL (sched_dff) is validated separately below.
+        param_scheduler(st, p, r.hpwl, r.overflow, r.pos2, r.grad2, r.dff, g_wl, g_den,
+                        inv_gamma, alpha, coeff, lambda, stop);
+        if (stop) {
+            if (first_stop < 0) first_stop = r.iter;
+            if ((size_t)(i + 1) < rows.size() && premature_stop < 0) premature_stop = r.iter;
+        }
         // iteration 1: the lambda-init L1 norms aren't in the trace, so seed both the state and the
         // compared value from the golden init (the trend is what we verify, from iteration 2 on).
         if (r.iter == 1) { st.lambda = r.density_weight; lambda = r.density_weight; }
@@ -102,8 +112,29 @@ int main(int argc, char** argv) {
            e_ig, worst_ig, e_al, e_la, worst_la);
     printf("max abs err  coeff=%.3e\n", e_co);
 
+    // Convergence: the golden run STOPPED at the last recorded iteration, so the scheduler's stop
+    // flag must first fire exactly there -- not earlier (premature stop), not never.
+    const int golden_stop = rows.back().iter;
+    printf("stop flag: golden stopped at iter %d, scheduler first stop at iter %d%s\n",
+           golden_stop, first_stop,
+           premature_stop >= 0 ? "  [PREMATURE]" : (first_stop < 0 ? "  [NEVER]" : ""));
+
+    // Closed-form dff fidelity: sched_dff(lambda_prev, c_med) vs golden density_force_fraction.
+    // (The real PL uses the exact c = precond_coef*K/total_pins; here c is fit from the trace.)
+    double e_dff = 0;
+    for (size_t i = 1; i < rows.size(); i++) {
+        float got = sched_dff(rows[i-1].density_weight, (float)c_med);
+        double e = relerr(got, rows[i].dff);
+        if (e > e_dff) e_dff = e;
+    }
+    printf("closed-form dff max rel err vs golden: %.3e\n", e_dff);
+
     const double TOL = 1e-4;
-    bool ok = e_ig < TOL && e_al < TOL && e_la < TOL && e_co < TOL;
-    printf("%s  (%zu iterations, tol %.0e)\n", ok ? "PASS" : "FAIL", rows.size(), TOL);
+    bool sched_ok = e_ig < TOL && e_al < TOL && e_la < TOL && e_co < TOL;
+    bool conv_ok  = (first_stop == golden_stop) && (premature_stop < 0);
+    bool ok = sched_ok && conv_ok;
+    printf("%s  (%zu iterations, tol %.0e; schedule %s, convergence %s)\n",
+           ok ? "PASS" : "FAIL", rows.size(), TOL,
+           sched_ok ? "ok" : "FAIL", conv_ok ? "ok" : "FAIL");
     return ok ? 0 : 1;
 }
