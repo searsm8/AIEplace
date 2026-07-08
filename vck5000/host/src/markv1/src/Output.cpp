@@ -131,6 +131,30 @@ void Placer::printIterationResults()
     hpwl_file.close();
 }
 
+// Append one row of the schedule's per-iteration inputs and outputs to schedule_trace.csv.
+// This is the golden trace the PL param_scheduler port is verified against (offline, no device):
+// given the INPUTS a scheduler consumes at iteration k (hpwl, overflow, the two BB norms,
+// density_force_fraction) plus its persistent state, it must reproduce the OUTPUTS this row
+// records (gamma/inv_gamma, step_length=alpha, momentum_coeff, density_weight=lambda). Written
+// at the END of performIteration, so gamma/density_weight already hold the NEXT iteration's values.
+void Placer::dumpScheduleTrace() {
+    std::ofstream f;
+    fs::path path = output_dir;
+    f.open(path.append("schedule_trace.csv"), std::ios_base::app);
+    if (iteration == 1)
+        f << "iter,hpwl,overflow,pos_norm_sq,grad_norm_sq,density_force_fraction,"
+             "base_gamma,gamma,inv_gamma,step_length,nesterov_ak,momentum_coeff,density_weight\n";
+    f << std::scientific << std::setprecision(9)
+      << iteration << ','
+      << hpwl_history.back()    << ',' << ovfw_history.back()   << ','
+      << last_pos_norm_sq       << ',' << last_grad_norm_sq     << ','
+      << density_force_fraction << ',' << base_gamma            << ','
+      << gamma                  << ',' << inv_gamma             << ','
+      << step_length            << ',' << nesterov_ak           << ','
+      << momentum_coeff         << ',' << density_weight        << '\n';
+    f.close();
+}
+
 void Placer::plotHistories() {
 #ifdef CREATE_VISUALIZATION
     fs::path graph_dir = output_dir / "graphs";

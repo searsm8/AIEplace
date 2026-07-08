@@ -70,6 +70,12 @@ void Placer::performIteration()
     if (gamma_schedule)
         updateGamma(ovfw_history.back());
     updateDensityWeight();
+
+    // After the γ/λ updates: the scalars now hold the values the NEXT iteration will consume.
+    // Dump them (with the inputs that produced them) so the PL param_scheduler port can be
+    // verified offline, iteration-by-iteration, against this golden trace. Gated by config.
+    if (cfg["output"].value("dump_schedule_trace", false))
+        dumpScheduleTrace();
 }
 
 
@@ -308,6 +314,8 @@ float Placer::computeLipshitzEstimate()
     for (auto filler : db.getFillers())
         accumulate(filler);
 
+    last_pos_norm_sq  = pos_norm_sq;   // exposed for the schedule-trace dump (PL param_scheduler port)
+    last_grad_norm_sq = grad_norm_sq;
     float estimate = sqrtf(pos_norm_sq) / sqrtf(grad_norm_sq + 1e-8f);
     Logger::log_detail("New steplength estimate: " + PREC_P(estimate, 4));
     return std::clamp(estimate, 0.0001f, 4000.0f);

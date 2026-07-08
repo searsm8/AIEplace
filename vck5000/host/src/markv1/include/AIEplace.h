@@ -84,6 +84,10 @@ public:
     float avg_node_size = 1.0f; // average cell area; normalizes preconditioner area term
     float density_force_fraction = 0.0f; // density's share of total preconditioner force-mass, in [0,1]
                                           // (0 = all wirelength, 1 = all density); XPlace calls this "weighted_weight"
+    // BB-step raw sums from the last computeLipshitzEstimate (before the sqrt/clamp), exposed so the
+    // schedule-trace dump can hand the PL param_scheduler port the exact inputs it must reproduce.
+    float last_pos_norm_sq = 0.0f;  // ||v_{k+1} - v_k||^2 (preconditioned-consistent)
+    float last_grad_norm_sq = 0.0f; // ||g(v_{k+1}) - g(v_k)||^2 (preconditioned)
 
     int die_size; // minimum of width and height of the die area
     int bins_per_row; // grid size
@@ -216,6 +220,7 @@ public:
 
     // Diagnostics
     void logStepDiagnostics();
+    void dumpScheduleTrace(); // append this iteration's schedule I/O for the PL param_scheduler port verify
 
     // Bookkeeping and visualization
     void recordIterationResults();
