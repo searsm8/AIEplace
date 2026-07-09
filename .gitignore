@@ -29,3 +29,7 @@ __pycache__/
 /vck5000/aie/Work/
 /vck5000/aie/x86simulator_output/
 /vck5000/aie/golden_data/
+
+# local scratch / review staging (not for the repo)
+/OVERNIGHT_WORK/
+/MARK_TO_REVIEW/
