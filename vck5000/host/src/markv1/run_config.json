@@ -37,7 +37,18 @@
     "precond_coef_escalation": true,   // double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef); false = diagnostic (fixed precond_coef)
     "enable_density_clamp": true,      // clamp sub-bin cells to ~bin size in the density solve (XPlace expand_ratio); smooths the force
     "enable_pin_offsets": true,        // use per-pin offsets (bookshelf: center-relative; LEF/DEF: macro RECT) in HPWL + WL gradient; false = all pins at node origin (legacy)
-    "dct_normalize": true,             // 1/N-per-DCT scaling; keeps field O(1) and lambda interpretable (essential at 1024, pure lambda-absorbed rescale)
+    "dct_normalize": true,             // 1/N per FORWARD DCT (bounds a_uv; global scale absorbed by lambda)
+    "dct_normalize_inverse": true,     // 1/N per INVERSE transform in the field solve. true = legacy (default):
+                                       // the inverse re-applies the forward 1/N, so the field carries a spurious
+                                       // extra 1/N^2 vs the naive DREAMPlace Eq-3c/3d field -> density force ~N^2
+                                       // too weak -> lambda ~N^2 inflated (adaptec1@512 lambda_init 1.68e-5 vs
+                                       // XPlace 3.4e-9). false = field-faithful inverse: matches compute_eField_naive/
+                                       // DREAMPlace, lands lambda within ~50x of XPlace (6e-11..3.4 vs 3.4e-9..82).
+                                       // Quality-neutral at 512 (adaptec1 -0.3%) but the lambda-scale shift moves
+                                       // where density_force_fraction crosses the skip_update thresholds and
+                                       // REGRESSES adaptec2@1024 ~3.5% at matched overflow. Do NOT flip the default
+                                       // without retuning the skip_update schedule for the new lambda frame + a full
+                                       // suite re-verify. Kept as an opt-in for lambda interpretability / PL-port.
 
     // Hyperparameters
     "init_gamma": 4, // plays XPlace's wa_coeff role; with gamma_bin_scaled, base_gamma = init_gamma*(bin_w+bin_h)

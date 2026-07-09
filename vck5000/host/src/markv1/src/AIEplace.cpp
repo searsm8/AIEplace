@@ -174,6 +174,7 @@ Placer::Placer(std::string config_filepath)
             precond_coef_escalation = cfg["params"].value("precond_coef_escalation", true);
             enable_density_clamp = cfg["params"].value("enable_density_clamp", true);
             dct_normalize = cfg["params"].value("dct_normalize", true);
+            dct_normalize_inverse = cfg["params"].value("dct_normalize_inverse", true);
             convergence_window = cfg["params"]["convergence_window"];
             convergence_iterations = cfg["params"].value("convergence_iterations", 30);
             max_backtracking_attempts = cfg["params"]["backtrack_max_tries"];

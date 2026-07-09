@@ -82,7 +82,17 @@ public:
     bool enable_preconditioning;
     bool precond_coef_escalation = true; // double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef)
     bool enable_density_clamp;   // clamp sub-bin cells in the density solve (XPlace expand_ratio)
-    bool dct_normalize = true;   // apply 1/N per DCT (bounds intermediates; global scale absorbed by lambda)
+    bool dct_normalize = true;   // apply 1/N per forward DCT (bounds a_uv intermediates; global scale absorbed by lambda)
+    bool dct_normalize_inverse = true; // apply 1/N per INVERSE transform (IDCT/IDXST) in the field solve.
+                                       // true = legacy: the inverse re-applies the forward's 1/N, so the
+                                       // field carries an extra 1/N^2 vs the naive DREAMPlace Eq-3c/3d field
+                                       // (compute_eField_naive) → density force ~N^2 too weak → lambda ~N^2
+                                       // inflated (adaptec1@512 lambda_init 1.68e-5 vs XPlace 3.4e-9). The
+                                       // scale is absorbed by lambda so GP is unaffected, but it mis-scales
+                                       // the preconditioner's lambda*area term. false = the field-faithful
+                                       // inverse (matches compute_eField_naive / DREAMPlace): lambda lands
+                                       // within ~50x of XPlace instead of ~5000x. Quality-neutral (lambda-
+                                       // absorbed); verify a precond-off A/B before flipping the default.
     bool compare_hpwl_methods = false;
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
     float avg_node_size = 1.0f; // average cell area; normalizes preconditioner area term
