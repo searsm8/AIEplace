@@ -29,6 +29,24 @@ No coordinate/field normalization was made — unnecessary and would have risked
 (it perturbs `density_force_fraction` → the `skip_update` schedule). See auto-memory
 `preconditioner_bb_fix` (updated).
 
+**DCT inverse-normalization fix (commit `dbeb58e`, opt-in flag `dct_normalize_inverse`).** Investigated
+the λ-magnitude gap (markv1 λ_init 1.68e-5 vs XPlace 3.4e-9): markv1's field solve re-applied the
+forward DCT's 1/N on the INVERSE transforms too, so the field carried a spurious extra 1/N² vs the naive
+DREAMPlace Eq-3c/3d field (`compute_eField_naive`) — density force ~N² too weak, λ ~N² inflated.
+Confirmed against the references: XPlace (`dct2_fft2`) and DREAMPlace (`idct_2N` does `mul_(N)`) apply
+1/N on the FORWARD DCT but the inverse does NOT re-apply it (density→field round-trip nets to ~1, not
+1/N⁴). Also confirmed **both references run ISPD2005 in raw DBU** — XPlace `site_width=100` is a
+GCD-based integer-precision scale (`file_bkshf_db.cpp` "Scale Bookshelf with 100") that
+`prescale_by_site_width` divides back out for the analytical frame; DREAMPlace `scale_factor: 1.0` in all
+ISPD2005 configs. New flag `dct_normalize_inverse` (default **true** = legacy, bit-identical): setting it
+**false** gives the field-faithful inverse → λ lands within ~50× of XPlace (adaptec1@512 6e-11→3.4,
+adaptec2@1024 4.7e-11→4.6). Quality-neutral at 512 (adaptec1 −0.3%) but the λ-scale shift moves where
+`density_force_fraction` crosses the `skip_update` thresholds and **regresses adaptec2@1024 ~3.5% at
+matched overflow** (schedule-sensitive design). ⇒ **stays opt-in**; flipping the default needs a
+skip_update-schedule retune for the new λ frame + a suite re-verify. (Preconditioner works in either
+frame via the BB-clamp fix; with the faithful inverse precond-ON converges 7.109e7@0.039 on adaptec1@512
+and BB step_len peaks at only 1.2e4 vs 1.0e7, since λ no longer runs away.)
+
 **Defaults / follow-ups:**
 - `enable_preconditioning` stays **false** by default: precond is a WASH on ISPD2005 (all macros FIXED —
   precond only damps *movable* macros), same conclusion as XPlace. It is now FUNCTIONAL for mixed-size
