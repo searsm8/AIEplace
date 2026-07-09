@@ -366,7 +366,12 @@ float Placer::computeLipshitzEstimate()
     last_grad_norm_sq = grad_norm_sq;
     float estimate = sqrtf(pos_norm_sq) / sqrtf(grad_norm_sq + 1e-8f);
     Logger::log_detail("New steplength estimate: " + PREC_P(estimate, 4));
-    return std::clamp(estimate, 0.0001f, 4000.0f);
+    // Scale the upper clamp by the mean preconditioner weight. Node::step moves by
+    // grad/precond_weight, so with preconditioning on the BB step α must grow ∝ precond_weight
+    // to keep the physical displacement bounded; a fixed 4000 cap starves the step once
+    // precond_weight (∝ λ·area) grows late in the run, freezing the cells. precond_weight_mean
+    // is exactly 1.0 when preconditioning is off, so this leaves the precond-off path unchanged.
+    return std::clamp(estimate, 0.0001f, 4000.0f * precond_weight_mean);
 }
 
 
@@ -525,6 +530,7 @@ void Placer::updatePrecondWeights()
     // the density-weight schedule (XPlace param_scheduler.update_precond_weight, "weighted_weight").
     // Computed even when preconditioning is disabled, since the schedule still consumes it.
     float a1_norm = 0.0f, a2_norm = 0.0f;
+    double pw_sum = 0.0; int pw_count = 0;  // mean precond weight (=1 when off) for the BB clamp
 
     for (auto item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
@@ -536,6 +542,8 @@ void Placer::updatePrecondWeights()
         a2_norm += a2;
         if (enable_preconditioning)
             node->precond_weight = std::max(1.0f, num_pins + a2);
+        pw_sum += node->precond_weight;  // 1.0 when precond off (Node default, never overwritten)
+        pw_count++;
     }
     for (auto filler : db.getFillers()) {
         float norm_area = filler->getArea() / avg_node_size;
@@ -543,9 +551,12 @@ void Placer::updatePrecondWeights()
         a2_norm += a2;  // fillers carry no pins, so they add no wirelength mass
         if (enable_preconditioning)
             filler->precond_weight = std::max(1.0f, a2);
+        pw_sum += filler->precond_weight;
+        pw_count++;
     }
 
     density_force_fraction = a2_norm / (a1_norm + a2_norm + 1e-8f);
+    precond_weight_mean = pw_count ? (float)(pw_sum / pw_count) : 1.0f;
 }
 
 
