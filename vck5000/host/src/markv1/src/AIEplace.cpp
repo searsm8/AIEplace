@@ -175,6 +175,8 @@ Placer::Placer(std::string config_filepath)
             enable_density_clamp = cfg["params"].value("enable_density_clamp", true);
             dct_normalize = cfg["params"].value("dct_normalize", true);
             dct_normalize_inverse = cfg["params"].value("dct_normalize_inverse", true);
+            precond_raw_area = cfg["params"].value("precond_raw_area", false);
+            dff_force_ratio  = cfg["params"].value("dff_force_ratio", false);
             convergence_window = cfg["params"]["convergence_window"];
             convergence_iterations = cfg["params"].value("convergence_iterations", 30);
             max_backtracking_attempts = cfg["params"]["backtrack_max_tries"];
@@ -533,12 +535,15 @@ void Placer::updatePrecondWeights()
     float a1_norm = 0.0f, a2_norm = 0.0f;
     double pw_sum = 0.0; int pw_count = 0;  // mean precond weight (=1 when off) for the BB clamp
 
+    // Area term for a2 (precond_weight + area-mass dff). precond_raw_area=false: legacy area/avg_node_size
+    // (keeps a2 O(1) per cell). true: RAW area, matching XPlace alpha_2 = pcoef·λ·mov_node_area — the
+    // coordinate-scale-invariant form (markv1 runs in the same raw-DBU frame as XPlace).
     for (auto item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         Node* node = item.second;
         float num_pins = (float)node->getNets().size();
-        float norm_area = node->getArea() / avg_node_size;
-        float a2 = lambda_area_coef * norm_area;
+        float area = precond_raw_area ? node->getArea() : node->getArea() / avg_node_size;
+        float a2 = lambda_area_coef * area;
         a1_norm += num_pins;
         a2_norm += a2;
         if (enable_preconditioning)
@@ -547,8 +552,8 @@ void Placer::updatePrecondWeights()
         pw_count++;
     }
     for (auto filler : db.getFillers()) {
-        float norm_area = filler->getArea() / avg_node_size;
-        float a2 = lambda_area_coef * norm_area;
+        float area = precond_raw_area ? filler->getArea() : filler->getArea() / avg_node_size;
+        float a2 = lambda_area_coef * area;
         a2_norm += a2;  // fillers carry no pins, so they add no wirelength mass
         if (enable_preconditioning)
             filler->precond_weight = std::max(1.0f, a2);
@@ -556,7 +561,14 @@ void Placer::updatePrecondWeights()
         pw_count++;
     }
 
-    density_force_fraction = a2_norm / (a1_norm + a2_norm + 1e-8f);
+    // density_force_fraction: force-magnitude ratio (dff_force_ratio, field-norm invariant) or the
+    // legacy area-mass ratio. The force ratio uses the PREVIOUS iteration's committed gradient L1 norms
+    // (last_g*_L1, refreshed each combineGradients / seeded by initializeDensityWeight on iteration 1),
+    // since updatePrecondWeights runs before this iteration's performNextStep→combineGradients.
+    if (dff_force_ratio)
+        density_force_fraction = last_gden_L1 / (last_gwl_L1 + last_gden_L1 + 1e-8f);
+    else
+        density_force_fraction = a2_norm / (a1_norm + a2_norm + 1e-8f);
     precond_weight_mean = pw_count ? (float)(pw_sum / pw_count) : 1.0f;
 }
 
@@ -836,13 +848,25 @@ bool Placer::checkConvergence()
  */
 void Placer::combineGradients()
 {
+    // Refresh the committed-gradient L1 norms while both force components are in hand:
+    // last_gwl_L1 = Σ‖∇wl‖₁ (probe_grad before the subtraction), last_gden_L1 = Σ‖λ·∇den‖₁ (the
+    // electrostatic force, which already carries λ). The force-ratio dff (next iteration) reads these.
+    float gwl_L1 = 0.0f, gden_L1 = 0.0f;
     for (auto item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
-        item.second->next.probe_grad -= computeElectrostaticForce(item.second);
+        Gradient& g = item.second->next.probe_grad;
+        gwl_L1 += fabsf(g.x) + fabsf(g.y);
+        Gradient electro = computeElectrostaticForce(item.second);
+        gden_L1 += fabsf(electro.x) + fabsf(electro.y);
+        g -= electro;
     }
     for (auto filler : db.getFillers()) {
-        filler->next.probe_grad -= computeElectrostaticForce(filler);
+        Gradient electro = computeElectrostaticForce(filler);
+        gden_L1 += fabsf(electro.x) + fabsf(electro.y);  // fillers carry density force, no wirelength
+        filler->next.probe_grad -= electro;
     }
+    last_gwl_L1  = gwl_L1;
+    last_gden_L1 = gden_L1;
 }
 
 

@@ -49,6 +49,18 @@
                                        // REGRESSES adaptec2@1024 ~3.5% at matched overflow. Do NOT flip the default
                                        // without retuning the skip_update schedule for the new lambda frame + a full
                                        // suite re-verify. Kept as an opt-in for lambda interpretability / PL-port.
+    "precond_raw_area": false,         // preconditioner/dff density-mass area term. false = legacy area/avg_node_size;
+                                       // true = RAW node area (XPlace-faithful alpha_2 = pcoef*lambda*mov_node_area).
+                                       // The /avg_node_size was a spurious deviation (markv1 is in the same raw-DBU
+                                       // frame as XPlace); raw area is coordinate-scale-invariant like weighted_weight.
+    "dff_force_ratio": false,          // density_force_fraction basis. false = legacy area-mass a2/(a1+a2);
+                                       // true = force-magnitude ratio ||lambda*grad_den||1 / (||grad_wl||1 +
+                                       // ||lambda*grad_den||1), computed from the committed gradients each iteration.
+                                       // The force ratio is INVARIANT to the field-normalization constant, so it
+                                       // decouples the skip_update schedule from dct_normalize_inverse (kills the
+                                       // adaptec2@1024 regression). With dff_force_ratio + precond_raw_area ON, the
+                                       // faithful inverse is quality-neutral (adaptec1@512 legacy-inv vs faithful-inv
+                                       // both 7.130e7). Legacy defaults kept pending a full-suite re-baseline.
 
     // Hyperparameters
     "init_gamma": 4, // plays XPlace's wa_coeff role; with gamma_bin_scaled, base_gamma = init_gamma*(bin_w+bin_h)

@@ -94,6 +94,17 @@ public:
                                        // within ~50x of XPlace instead of ~5000x. Quality-neutral (lambda-
                                        // absorbed); verify a precond-off A/B before flipping the default.
     bool compare_hpwl_methods = false;
+    bool precond_raw_area = false; // preconditioner/dff area term: false = legacy area/avg_node_size,
+                                   // true = raw node area (XPlace-faithful: alpha_2 = pcoef·λ·mov_node_area).
+                                   // The /avg_node_size normalization was a spurious deviation — markv1
+                                   // runs in the SAME raw-DBU frame as XPlace, so raw area is coordinate-
+                                   // scale-invariant like XPlace's weighted_weight (area·S² and λ·1/S² cancel).
+    bool dff_force_ratio = false;  // density_force_fraction basis: false = legacy area-mass a2/(a1+a2),
+                                   // true = force-magnitude ‖λ·∇den‖₁ / (‖∇wl‖₁ + ‖λ·∇den‖₁). The force
+                                   // ratio is INVARIANT to the field-normalization constant (field→C·field
+                                   // ⇒ λ→λ/C, so λ·∇den is unchanged), making the skip_update schedule
+                                   // independent of dct_normalize_inverse. Uses the previous iteration's
+                                   // committed gradients (updatePrecondWeights runs before combineGradients).
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
     float avg_node_size = 1.0f; // average cell area; normalizes preconditioner area term
     float density_force_fraction = 0.0f; // density's share of total preconditioner force-mass, in [0,1]
