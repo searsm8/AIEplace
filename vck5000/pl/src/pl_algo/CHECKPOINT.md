@@ -22,8 +22,9 @@ when preconditioning is off**, so the precond-OFF path is a bit-identical no-op 
 OFF 7.172e7@0.039 unchanged). Results (seed 42, stop 0.04, precond ON vs OFF):
 - adaptec1@512:  OFF 7.172e7@0.039 → **ON 7.139e7@0.039 (−0.5%, converges)**  (was: stalled 8.51e7@0.189)
 - adaptec2@1024: OFF 8.509e7@0.040 → **ON 8.386e7@0.040 (−1.4%, converges)** (was: catastrophic 2.0e8@0.324)
+- bigblue1@512:  OFF 8.975e7@0.040 → **ON 8.944e7@0.039 (−0.3%, converges)** (generalization check)
 
-⇒ **precond ON now converges within ~1.5% of OFF (slightly better on both), matching XPlace's wash.**
+⇒ **precond ON now converges within ~1.5% of OFF (slightly better on all three), matching XPlace's wash.**
 No coordinate/field normalization was made — unnecessary and would have risked the tuned OFF results
 (it perturbs `density_force_fraction` → the `skip_update` schedule). See auto-memory
 `preconditioner_bb_fix` (updated).
