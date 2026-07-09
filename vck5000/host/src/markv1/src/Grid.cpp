@@ -93,7 +93,6 @@ void Grid::computeBinOverlaps(Node* node_p)
             float overlap_area = overlap_w * overlap_h * weight;  // area-conserving deposit
             Bin& bin = m_bins[col][row];
             bin.total_overlap += overlap_area;
-            bin.overlapping_nodes.push_back(node_p);
             node_p->addBinOverlap(&bin, overlap_area);
         }
     }

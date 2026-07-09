@@ -381,6 +381,7 @@ void Placer::compute_eField_DCT()
 
 void Placer::computeOverlaps()
 {
+    TIME_FUNCTION();
     Logger::log_trace("Begin computeOverlaps()");
 
     // Pass 1: Fixed components — their density is clamped so bins fully covered
