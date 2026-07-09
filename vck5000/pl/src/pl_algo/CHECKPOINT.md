@@ -1,3 +1,48 @@
+# HANDOFF (2026-07-08 late) — next priority = XPlace-style coordinate normalization (to fix the preconditioner)
+
+## Where things stand
+- **Golden schedule CHANGED:** performIteration now throttles γ AND λ together via one `skip_update`
+  gate (commits b300e09, and 669d135 reconciled the PL `param_scheduler` to match — verified
+  bit-identical drop-in). markv1 built **-O2** now (makeflags). The **full-suite snapshot is STALE**
+  (was γ-every-iter) — re-run it AFTER the normalization work, not before.
+- **PL port: paused, in good shape.** `param_scheduler` (schedule+convergence) verified bit-exact +
+  closed-loop bit-identical; `bb_reduce` (on-device BB norms) C-synth clean (Fmax 411MHz, II=1);
+  resident-loop dataflow documented. Remaining = S6 steps 1-2 (sw_emu). Leave as-is per Mark.
+- **Preconditioner re-tested (2026-07-08) — see `preconditioner_bb_fix`.** ePlace-origin diagonal
+  Hessian `pins + λ·area`. markv1 precond ON still DIVERGES under the new golden (adaptec1 706/0.188/
+  9.46e7; adaptec2 catastrophic 920/0.324/2.0e8). XPlace precond on/off = a WASH on adaptec1 (~0.1%),
+  and XPlace's disable path was BROKEN (never run without it; patched locally in ~/phd/Xplace).
+
+## THE TASK: match XPlace's site-width coordinate normalization (queued as an overnight task)
+**Goal:** normalize markv1's coordinates the way XPlace does so the preconditioner (and λ schedule)
+are well-scaled and precond stops diverging — the root cause per the 5c audit ("markv1 works in raw
+DBU; XPlace in site-width-normalized coords; `pins + λ·area` mixes a scale-free count with a
+scale-dependent area, so the balance is set by the arbitrary DBU scale").
+
+**XPlace mechanism (`~/phd/Xplace/src/database.py`):**
+- `prescale_by_site_width()` (:554) divides ALL geometry (die_info, node_pos/lpos, node_size,
+  pin_rel_cpos/lpos, pin_size, region_boxes) by `site_width`; `prescale()` (:568) optionally further
+  divides by die span → unit square. Both accumulate into `die_scale`.
+- `hpwl_scale = die_scale/site_width` (:602) un-normalizes HPWL back to raw DBU for reporting.
+- `unit_len` (bin size) and `node_area` (:604) live in the normalized frame; `bin_area=prod(unit_len)`.
+- **GOTCHA:** adaptec1 `.scl` says `Sitewidth=1`, but XPlace's log reports "Site Width = 100" — XPlace
+  applies an INTERNAL scale (investigate its `scale_factor`/`microns`/DEF units). markv1 tracks NO
+  site width (grep: DataBase.cpp has none) — pure raw bookshelf DBU. So step 1 = reverse-engineer
+  XPlace's effective coordinate scale (die_scale / hpwl_scale / unit_len) for adaptec1 and match it.
+
+**markv1 change points:** DataBase (scale all geometry at load; store the factor), Grid (die bounds,
+bin sizes), base_gamma (a length — rescales), density solve (bin coords), HPWL output (un-scale via
+hpwl_scale), DEF writer + Visualizer (un-scale positions), filler sizes, pin offsets. Absolute
+schedule constants (init_step_length, etc.) may need retuning in the new frame. Then reflect into the
+PL `param_scheduler`/`bb_reduce` if constants shift.
+
+**Verification:** precond ON in the normalized frame should CONVERGE on adaptec1/adaptec2 and land
+within ~1% of precond OFF (matching XPlace's wash), ideally helping on macro-heavy designs. Then
+re-run the full suite (new golden + normalization) and re-compare to XPlace. Method: markv1 A/B via
+`dse.py`/direct runs, seed 42, stop 0.04; XPlace A/B already wired (precond patches in ~/phd/Xplace).
+
+---
+
 # Checkpoint — γ-scaling generalized (grid-independent); adaptec2@1024 outlier FIXED 1.20→1.05; whole suite now ≈ XPlace (2026-07-07)
 
 ## 2026-07-08 — full-suite snapshot + PL-port plan (task batch after the γ fix)
