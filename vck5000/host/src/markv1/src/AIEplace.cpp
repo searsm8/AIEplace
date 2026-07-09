@@ -307,6 +307,7 @@ Placer::Placer(std::string config_filepath)
             pl_sched_params.init_multiplier  = cfg["params"]["density_weight_init_multiplier"];
             pl_sched_params.dff_coef         = 0.0f; // unused: dff passed in from density_force_fraction
             pl_sched_params.enable_momentum  = enable_momentum ? 1 : 0;
+            pl_sched_params.gamma_schedule   = gamma_schedule ? 1 : 0;
             pl_sched_params.overflow_threshold = overflow_threshold;
             pl_sched_params.min_iters        = min_iterations;
             pl_sched_params.max_iters        = max_iterations;

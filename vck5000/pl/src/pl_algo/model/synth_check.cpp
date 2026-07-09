@@ -54,7 +54,7 @@ extern "C" void synth_check(
 
     SchedParams p;
     p.base_gamma = base_gamma; p.min_step = 0.95f; p.max_step = 1.05f;
-    p.init_multiplier = 8e-5f; p.dff_coef = dff_coef; p.enable_momentum = 1;
+    p.init_multiplier = 8e-5f; p.dff_coef = dff_coef; p.enable_momentum = 1; p.gamma_schedule = 1;
     p.overflow_threshold = overflow_threshold; p.min_iters = 50; p.max_iters = 1200;
     p.conv_iters = 30; p.max_life = 30;
 

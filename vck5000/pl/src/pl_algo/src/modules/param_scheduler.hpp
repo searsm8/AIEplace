@@ -35,6 +35,7 @@ static const int SCHED_RING = 64; // history depth (>= the largest window: check
 struct SchedState {
     // --- schedule ---
     float lambda;       // density weight in use (updated in place to the next iteration's value)
+    float inv_gamma;    // held 1/gamma; recomputed only on non-skipped iterations (shared skip_update)
     float nesterov_ak;  // Nesterov a_k accumulator (markv1 starts at 1.0)
     float prev_hpwl;    // previous iteration's HPWL (trend sign for the lambda mu)
     int   iteration;    // 0 before the first call; the call for iteration k sets it to k
@@ -56,6 +57,7 @@ struct SchedParams {
     float init_multiplier;   // density_weight_init_multiplier (8e-5)
     float dff_coef;          // c = precond_coef*K/total_pins; dff = c*lambda/(1+c*lambda)
     int   enable_momentum;   // 0/1
+    int   gamma_schedule;    // 0/1; if 1 initial gamma = 10*base_gamma (else base_gamma)
     // convergence
     float overflow_threshold; // masked-overflow stop (0.04)
     int   min_iters;          // convergence_min_iterations (50)
@@ -78,6 +80,9 @@ static inline float sched_dff(float lambda, float dff_coef) {
 
 static inline void sched_state_init(SchedState& st, const SchedParams& p) {
     st.lambda = 1.0f; st.nesterov_ak = 1.0f; st.prev_hpwl = 0.0f; st.iteration = 0;
+    // Initial gamma matches the golden ctor: 10x base under the schedule, else base. Held until the
+    // first non-skipped iteration recomputes it (gamma is now throttled by the shared skip_update).
+    st.inv_gamma = 1.0f / ((p.gamma_schedule ? 10.0f : 1.0f) * p.base_gamma);
     st.last_jolt_iter = -1000000;
     st.bp_hpwl = st.bp_ovfw = 1e30f; st.bp_valid = 0;
     st.bf_hpwl = st.bf_ovfw = 1e30f; st.bf_valid = 0;
@@ -153,9 +158,18 @@ static void param_scheduler(
     }
 
     // ===== schedule =====
-    // (a) gamma: gamma = 10^((overflow-0.1)*20/9 - 1) * base_gamma; inv_gamma = 1/gamma
-    const float coef  = std::pow(10.0f, (overflow - 0.1f) * (20.0f / 9.0f) - 1.0f);
-    inv_gamma_out = 1.0f / (coef * p.base_gamma);
+    // Shared skip_update gate (matches the golden performIteration): on 2 of every 3 iterations in
+    // the early stage (k<50) or while the WL/density forces are mid-balance (dff in (0.5,0.95)),
+    // FREEZE both gamma and lambda together (XPlace step() freezes lambda, gamma, precond together).
+    const bool skip_update = ((k < 50) || (dff > 0.5f && dff < 0.95f)) && (k % 3 != 0);
+
+    // (a) gamma: gamma = 10^((overflow-0.1)*20/9 - 1) * base_gamma; recomputed only when not skipping,
+    // else held at its previous value (throttled with lambda). inv_gamma is used the NEXT iteration.
+    if (!skip_update) {
+        const float coef = std::pow(10.0f, (overflow - 0.1f) * (20.0f / 9.0f) - 1.0f);
+        st.inv_gamma = 1.0f / (coef * p.base_gamma);
+    }
+    inv_gamma_out = st.inv_gamma;
 
     // (b) alpha: clamp(sqrt(||dv||^2)/sqrt(||dg||^2 + 1e-8), 1e-4, 4000)
     float alpha = std::sqrt(pos_norm_sq) / std::sqrt(grad_norm_sq + 1e-8f);
@@ -174,8 +188,8 @@ static void param_scheduler(
     } else {
         // dff is supplied by the caller (sched_dff on the current lambda), mirroring markv1 where
         // updateDensityWeight reads the density_force_fraction updatePrecondWeights already computed.
-        const bool slow_phase = (k < 50) || (dff > 0.5f && dff < 0.95f);
-        if (!(slow_phase && (k % 3 != 0))) {
+        // Same skip_update gate as gamma above -- the two are frozen together.
+        if (!skip_update) {
             const float dHPWL = hpwl - st.prev_hpwl;
             float mu;
             if (dHPWL < 0.0f) {
