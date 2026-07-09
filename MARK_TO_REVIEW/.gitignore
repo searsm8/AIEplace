@@ -1,4 +1,0 @@
-# Review artifacts: track the markdown write-ups, not the large rendered binaries.
-visualizations/
-*.png
-*.gif

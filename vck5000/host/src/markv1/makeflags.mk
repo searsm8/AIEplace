@@ -21,8 +21,8 @@ CPPFLAGS += -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/
 
 CXXFLAGS += -std=c++2a
 CXXFLAGS += -g
-CXXFLAGS += -O0 # optimization level, 0 means no optimization
-#CXXFLAGS += -O1 # optimization level, 3 means full optimization
+#CXXFLAGS += -O0 # optimization level, 0 means no optimization
+CXXFLAGS += -O2 # optimization level (experiment: was -O0; perturbs golden low bits)
 #CXXFLAGS += -Wall
 
 LDFLAGS += -L$(HOST_DIR)/lib
