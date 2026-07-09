@@ -109,13 +109,6 @@ public:
     float avg_node_size = 1.0f; // average cell area; normalizes preconditioner area term
     float density_force_fraction = 0.0f; // density's share of total preconditioner force-mass, in [0,1]
                                           // (0 = all wirelength, 1 = all density); XPlace calls this "weighted_weight"
-    float precond_weight_mean = 1.0f;     // mean diagonal preconditioner weight over movable nodes+fillers
-                                          // (=1.0 exactly when preconditioning is off). Scales the BB
-                                          // step-length upper clamp: Node::step moves by grad/precond_weight,
-                                          // so as precond_weight grows (∝ λ·area late in the run) the BB
-                                          // step α must grow ∝ precond_weight to keep the physical
-                                          // displacement bounded; a fixed clamp starves the step and freezes
-                                          // the cells (the precond-ON stall). No-op when precond is off.
     // BB-step raw sums from the last computeLipshitzEstimate (before the sqrt/clamp), exposed so the
     // schedule-trace dump can hand the PL param_scheduler port the exact inputs it must reproduce.
     float last_pos_norm_sq = 0.0f;  // ||v_{k+1} - v_k||^2 (preconditioned-consistent)
