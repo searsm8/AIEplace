@@ -1,4 +1,44 @@
-# HANDOFF (2026-07-08 late) — next priority = XPlace-style coordinate normalization (to fix the preconditioner)
+# RESOLVED (2026-07-09) — preconditioner fixed; the coordinate-normalization hypothesis was WRONG
+
+**The preconditioner now converges (commit `2a8b482`).** The 2026-07-08 plan below assumed markv1
+works in a different (raw-DBU) coordinate frame than XPlace and that a site-width normalization was
+needed. **That premise is empirically false** — I measured both:
+- **Frames already match.** XPlace adaptec1: `site_width=100, die_scale=100` ⇒ its working coords are
+  raw bookshelf DBU (die≈10.7k, mean node area≈175, `bin_area≈436`). markv1: die≈11.2k, avg area≈176.8,
+  **identical total pins 9.2351e5**. Same frame. So a coordinate normalization would do nothing.
+- **The real gap was λ magnitude, not coordinates.** markv1 λ_init=1.68e-5 vs XPlace 3.4e-9 (~4900×
+  larger) because markv1's DCT field path (`dct_normalize=true`) applies 1/N on all four transforms
+  (~1/N⁴), making the density field ~4900× weaker; λ compensates (larger). This is absorbed by λ for
+  the force balance (precond-OFF unaffected) and did **not** need fixing for the goal.
+- **Actual failure mode = the Barzilai-Borwein step-length upper clamp (4000).** `Node::step` moves by
+  `grad/precond_weight`, so the BB estimate `α=‖Δv‖/‖Δg/precond_weight‖` must grow ∝ precond_weight to
+  keep displacement bounded. As λ grows, `precond_weight≈precond_coef·λ·area` climbs, α pins at the 4000
+  cap, the effective step `α/precond_weight` collapses → cells freeze → overflow stalls → λ runs away
+  (verified via `step_len` pinned at 4000 while `density_weight` grew to 2e5 in the precond-ON run).
+
+**Fix (commit `2a8b482`, surgical, markv1 `AIEplace.cpp`/`AIEplace.h`):** scale the BB clamp upper bound
+by `precond_weight_mean` (mean diagonal precond weight over movable nodes+fillers). It is **exactly 1.0
+when preconditioning is off**, so the precond-OFF path is a bit-identical no-op (verified: adaptec1@512
+OFF 7.172e7@0.039 unchanged). Results (seed 42, stop 0.04, precond ON vs OFF):
+- adaptec1@512:  OFF 7.172e7@0.039 → **ON 7.139e7@0.039 (−0.5%, converges)**  (was: stalled 8.51e7@0.189)
+- adaptec2@1024: OFF 8.509e7@0.040 → **ON 8.386e7@0.040 (−1.4%, converges)** (was: catastrophic 2.0e8@0.324)
+
+⇒ **precond ON now converges within ~1.5% of OFF (slightly better on both), matching XPlace's wash.**
+No coordinate/field normalization was made — unnecessary and would have risked the tuned OFF results
+(it perturbs `density_force_fraction` → the `skip_update` schedule). See auto-memory
+`preconditioner_bb_fix` (updated).
+
+**Defaults / follow-ups:**
+- `enable_preconditioning` stays **false** by default: precond is a WASH on ISPD2005 (all macros FIXED —
+  precond only damps *movable* macros), same conclusion as XPlace. It is now FUNCTIONAL for mixed-size
+  designs with movable macros. No suite re-run needed for this change (it is a no-op for the default OFF
+  config; the 28-design snapshot is unaffected).
+- **PL port note:** if preconditioning is ever enabled on the PL, `bb_reduce`'s step-length clamp needs
+  the same `precond_weight_mean` scaling. Currently precond is OFF on the PL path too, so this is inert.
+
+---
+
+# (SUPERSEDED by the above) HANDOFF (2026-07-08 late) — coordinate normalization hypothesis
 
 ## Where things stand
 - **Golden schedule CHANGED:** performIteration now throttles γ AND λ together via one `skip_update`
