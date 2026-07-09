@@ -86,9 +86,19 @@ void Placer::performIteration()
         density_weight = la;
         pl_stop        = stop;
     } else {
-        if (gamma_schedule)
-            updateGamma(ovfw_history.back());
-        updateDensityWeight();
+        // Xplace param_scheduler.step(): one shared skip_update flag throttles the density-weight,
+        // gamma (wa_coeff), and precond-coef updates together — freezing all three on 2 of every 3
+        // iterations during the early stage (iter<50) or while the wirelength/density forces are
+        // mid-balance (density_force_fraction ∈ (0.5,0.95)). markv1 previously scoped this gate to
+        // density_weight only, letting gamma sharpen 3x too fast early and over-clumping the cells.
+        bool skip_update = ((iteration < 50) ||
+                            (density_force_fraction > 0.5f && density_force_fraction < 0.95f))
+                           && (iteration % 3 != 0);
+        if (!skip_update) {
+            if (gamma_schedule)
+                updateGamma(ovfw_history.back());
+            updateDensityWeight();
+        }
     }
 
     // After the γ/λ updates: the scalars now hold the values the NEXT iteration will consume.
@@ -370,16 +380,10 @@ void Placer::updateDensityWeight()
 {
     if (hpwl_history.size() < 2) return; // need a previous HPWL to measure the trend
 
-    // XPlace step_density_weight (param_scheduler.py): update λ EVERY iteration, slowing to
-    // every-3rd only in the early phase or while the forces are mid-balance
-    // (density_force_fraction ∈ (0.5, 0.95)). markv1's previous every-3rd-iteration cadence
-    // ramped λ ~3× too slowly, so the placement collapsed under wirelength for ~250 iterations
-    // before density had any effect.
-    bool slow_phase = (iteration < 50) ||
-                      (density_force_fraction > 0.5f && density_force_fraction < 0.95f);
-    if (slow_phase && (iteration % 3 != 0))
-        return;
-
+    // XPlace step_density_weight (param_scheduler.py). The every-3rd-iteration slow-phase throttle
+    // is now applied by the shared skip_update flag in performIteration (matching Xplace step(),
+    // which freezes λ, gamma, and precond_coef together), so this function updates unconditionally
+    // once called.
     float current_hpwl = hpwl_history.back();
     float prev_hpwl    = hpwl_history[hpwl_history.size() - 2];
     float delta_hpwl   = current_hpwl - prev_hpwl;
