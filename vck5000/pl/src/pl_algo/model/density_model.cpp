@@ -2,11 +2,11 @@
 //
 // Purpose: prove, in pure host C++ (no HLS, no AIE), that the Makhoul
 // "shuffle + forward-FFT + twiddle" recipe ported from the markv1 AIE kernels
-// reproduces the markv1 CPU golden transforms exactly, in 1D and then in the
+// reproduces the sw_only CPU golden transforms exactly, in 1D and then in the
 // full 2D electrostatic-field pipeline. This pins down the FFT normalization and
 // the DC-halving convention in software before any slow HLS/AIE build.
 //
-// Golden = the DCT-PATH functions from host/src/markv1/src/DCT.cpp +
+// Golden = the DCT-PATH functions from host/src/sw_only/src/DCT.cpp +
 // the pipeline of Density.cpp::compute_a_uv_DCT / compute_eField_DCT
 // (NOT the *_naive direct-sum field path, NOT *_naive with 1/N). Global scale is
 // absorbed by density_weight downstream, so we gate on rel_rms vs this golden.
@@ -54,7 +54,7 @@ static void fft(std::vector<cd>& a, int sign) {
     }
 }
 
-// ---- markv1 CPU golden transforms (copied verbatim from DCT.cpp) -----------
+// ---- sw_only CPU golden transforms (copied verbatim from DCT.cpp) -----------
 static std::vector<double> DCT_naive(const std::vector<double>& in) {
     int N = (int)in.size();
     std::vector<double> r(N);
@@ -188,9 +188,9 @@ int main() {
     std::mt19937 rng(12345);
     std::uniform_real_distribution<double> uni(0.0, 1.0);
 
-    printf("== Stage 0: density math model (Makhoul recipe vs markv1 golden) ==\n\n");
+    printf("== Stage 0: density math model (Makhoul recipe vs sw_only golden) ==\n\n");
 
-    // ---- 1D tests (N=1024 HW size, and N=64 markv1 BINS_PER_ROW) ----
+    // ---- 1D tests (N=1024 HW size, and N=64 sw_only BINS_PER_ROW) ----
     printf("1D transforms (rel_rms = ||makhoul - naive|| / ||naive||):\n");
     for (int N : {64, 1024}) {
         std::vector<double> x(N);
@@ -201,7 +201,7 @@ int main() {
         printf("  N=%-5d  DCT=%.3e  IDCT=%.3e  IDXST=%.3e\n", N, d_dct, d_idct, d_idxs);
     }
 
-    // ---- 2D field pipeline (N=64, matches markv1 BINS_PER_ROW) ----
+    // ---- 2D field pipeline (N=64, matches sw_only BINS_PER_ROW) ----
     // golden = naive transforms; test = makhoul transforms; same pipeline structure.
     int N = 64;
     Mat rho(N, std::vector<double>(N));

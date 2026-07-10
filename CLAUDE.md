@@ -18,19 +18,21 @@ Anything touching the repo build, the toolchain, or Linux tools must go through 
 AIEplace ports the ePlace analytical placement algorithm onto the AMD Versal VCK5000
 (Programmable Logic + AI Engines) for acceleration. Design variants live under
 `vck5000/{aie,pl,host}/src/<variant>/`, selected by the make vars `AIE=`/`PL=`/`HOST=`
-(default `markv1`).
+(host defaults to `sw_only`; `AIE`/`PL` default to `markv1`).
 
-- **`markv1`** — the working, tuned software + partial-offload reference. Golden reference used
-  to verify the new design, but still under construction to match XPlace.
+- **`sw_only`** (`HOST=sw_only`) — the working, tuned software-only golden reference: the full
+  placement iteration on the CPU. Golden reference used to verify the new design, but still
+  under construction to match XPlace. (Renamed from `markv1`; the partial-offload hardware
+  kernels it was co-developed with remain under `AIE=markv1`/`PL=markv1`.)
 - **`pl_algo`** — the new PL-centric design (git branch `pl_algo`): the entire placement
   iteration runs on the PL; the AIE does only the FFT and the HPWL gradient graph.
 
 ## Algorithm goal: mimic XPlace as closely as possible
-markv1's placement algorithm should track the XPlace reference (`~/phd/Xplace/src/`) as
+sw_only's placement algorithm should track the XPlace reference (`~/phd/Xplace/src/`) as
 faithfully as possible. Prefer matching XPlace's formulation over ad-hoc heuristics or
 "crutches" that XPlace does not use — e.g. XPlace bounds the Barzilai-Borwein step with its
-backtracking line search alone and applies **no magnitude clamp**, so markv1 does the same
-(the fixed `[0.0001, 4000]` step clamp was removed). When markv1 diverges from XPlace, that
+backtracking line search alone and applies **no magnitude clamp**, so sw_only does the same
+(the fixed `[0.0001, 4000]` step clamp was removed). When sw_only diverges from XPlace, that
 divergence should be deliberate and documented, not an accidental workaround.
 
 ## pl_algo current state (2026-06)
@@ -42,10 +44,10 @@ divergence should be deliberate and documented, not an accidental workaround.
   `DATAFLOW.md` and `formats.hpp`).
 - **Next step = Gate 1:** synthesize the top kernel with
   `cd vck5000/pl && make PL=pl_algo TARGET=hw` (HLS C-synthesis; needs no emulation). Then fill
-  modules one at a time, each verified against the markv1 CPU reference.
+  modules one at a time, each verified against the sw_only CPU reference.
 
 ## Key design decisions
-- Hardware grid is **1024×1024** (markv1 used 64). Matrices (bin density, Ex, Ey) are
+- Hardware grid is **1024×1024** (sw_only used 64). Matrices (bin density, Ex, Ey) are
   **DDR-resident**, streamed in row tiles; on-chip RAM holds only working tiles.
 - DCT/IDCT/IDXST **pre/post-processing runs in PL; the AIE does only the FFT** (one
   forward-FFT config; the transform_mode FSM lives entirely in the PL). IDXST is
@@ -68,7 +70,7 @@ divergence should be deliberate and documented, not an accidental workaround.
   `LD_LIBRARY_PATH`.
 
 ## Verification references
-- markv1 CPU golden functions: `computeHpwlPartials_CPU` (`Partials.cpp`),
+- sw_only CPU golden functions: `computeHpwlPartials_CPU` (`Partials.cpp`),
   `compute_eField_DCT` (`Density.cpp`), `computeOverlaps`.
 - Toy bring-up templates (outside this repo, both build + emulate cleanly):
   `~/phd/toy_design` (pure-PL vadd) and `~/phd/toy_aie` (minimal AIE + PL). See auto-memory

@@ -421,7 +421,7 @@ void Placer::computeOverlaps()
  * Why smoothed matters: it is the smoothed density the electrostatic optimizer actually
  * minimizes, so it descends cleanly to the stop threshold. The exact overflow re-measures
  * with sharp footprints, whose sub-bin quantization spikes leave it floored above threshold
- * even for a well-spread placement (the markv1 "can't reach 0.07" effect).
+ * even for a well-spread placement (the sw_only "can't reach 0.07" effect).
  */
 float Placer::computeOverflow(bool clamp, std::vector<float>* out_density)
 {

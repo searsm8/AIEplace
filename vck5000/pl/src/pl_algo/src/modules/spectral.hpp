@@ -3,7 +3,7 @@
 
 // spectral -- Stage 4: the ePlace spectral multiply that turns the density spectrum a_uv
 // into a field spectrum (Ex_hat or Ey_hat), the step between the forward 2D DCT and the
-// inverse field passes. Reference: markv1 Density.cpp::compute_eField_DCT.
+// inverse field passes. Reference: sw_only Density.cpp::compute_eField_DCT.
 //
 //   Ex_hat[u][v] = a_uv[u][v] * w_u / (w_u^2 + w_v^2)
 //   Ey_hat[u][v] = a_uv[u][v] * w_v / (w_u^2 + w_v^2)

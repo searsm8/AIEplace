@@ -5,7 +5,7 @@
 // GRID x GRID bin-density grid rho (the ePlace charge density).
 //
 // Grid-strip tiled along x: a STRIP x GRID accumulator (256 KB) lives on-chip and
-// nodes are re-streamed once per strip (~16x). Two-pass per strip, matching markv1
+// nodes are re-streamed once per strip (~16x). Two-pass per strip, matching sw_only
 // Density.cpp::computeOverlaps: fixed nodes first, clamp each bin to
 // target_density*bin_area, then movable nodes on top. Per-node scatter mirrors
 // Grid::computeBinOverlaps (fast path for sub-bin cells, else exact rect

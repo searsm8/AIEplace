@@ -6,7 +6,7 @@ off is flagged **⚑**.
 Context: Stage 5b left the full **gradient** (g_hpwl + g_density) built and sw_emu-verified.
 Stage 5c adds the **iteration loop**: combine the gradients, take the Nesterov/BB step, write
 coordinates back, reduce metrics, run the host λ/α/convergence policy, and verify the whole
-placer against markv1. The 5c algorithm audit (memory `pl_algo_5c_algo_audit`) found markv1
+placer against sw_only. The 5c algorithm audit (memory `pl_algo_5c_algo_audit`) found sw_only
 faithful to Xplace/DREAMPlace; the only real gap to carry to the PL was the **preconditioner**
 (built into `iteration_update` from the start), plus pinning the combine sign and dropping the
 vestigial per-bin `local_density_weight` (Xplace has none).
@@ -18,9 +18,9 @@ vestigial per-bin `local_density_weight` (Xplace has none).
 **Status:** implemented; sw_emu verify in progress.
 
 Implemented as one module, `pl/src/pl_algo/src/modules/iteration_update.hpp`, mirroring three
-markv1 functions run back-to-back (`AIEplace.cpp`, `Node.h`):
+sw_only functions run back-to-back (`AIEplace.cpp`, `Node.h`):
 
-| markv1 | iteration_update |
+| sw_only | iteration_update |
 |---|---|
 | `combineGradients` | `g_total = g_hpwl − λ·g_density` (per-node) |
 | `Node::step` | `pg = g_total/precond`; `u_{k+1} = v_k − α·pg`; `v_{k+1} = u_{k+1} + coeff·(u_{k+1}−u_k)` |
@@ -29,13 +29,13 @@ markv1 functions run back-to-back (`AIEplace.cpp`, `Node.h`):
 Key fidelity points (all from the audit):
 - **Sign is `−`**: the eField sign convention bakes Xplace's `+=` into the field. A wrong sign
   would flip the step direction and fail the verify.
-- **No per-bin `local_density_weight`**: Xplace has none; markv1's is a constant `1` that
+- **No per-bin `local_density_weight`**: Xplace has none; sw_only's is a constant `1` that
   self-cancels. Dropped. `g_density` from `force_gather` is the pure `Σ overlap·eField`.
 - **Preconditioner built in**: `pg = g_total / precond_weight[n]`. The host supplies the per-node
   weight `max(1, num_pins + precond_coef·λ·area/avg_area)` (host owns the precond_coef/λ schedule
   for v1). This was *the* PL gap the audit flagged.
-- **Momentum uses the UNCLAMPED u_{k+1}** then both are clamped — matches markv1's step/clamp order.
-- **v is the anchor**: gradients are evaluated at the probe positions v (markv1 convention), so
+- **Momentum uses the UNCLAMPED u_{k+1}** then both are clamped — matches sw_only's step/clamp order.
+- **v is the anchor**: gradients are evaluated at the probe positions v (sw_only convention), so
   `node_box` carries v_k (its {x,y}) and the cell size (its {w,h}); u_k is a separate committed
   buffer. The step emits u_{k+1} and STREAMS v_{k+1} to the Memory Writer (5c.3).
 
@@ -76,7 +76,7 @@ of the MODE_ITERATION_UPDATE invocation.
 - **HPWL** = Σ_nets (max_x−min_x)+(max_y−min_y), segmented bbox reduce over nets, pin position =
   `node_pos[node_idx] + {off_x,off_y}` (mirrors hpwl_CU phase A1 and DataBase HPWL).
 - **overflow_sum** = Σ_bins max(0, rho−target). The host scales by `bin_area/total_movable_area`
-  to form the ePlace overflow ratio (markv1 `Grid::computeTotalOverflow` — the bin_area and the
+  to form the ePlace overflow ratio (sw_only `Grid::computeTotalOverflow` — the bin_area and the
   movable-area normalization stay on the host, matching "host owns the schedule").
 - Totals accumulate in **double** (a float sum over ~1e6 nets/bins is order-dependent to ~0.3%;
   the metric drives convergence, so it must be reproducible), narrowed to float on readback.
@@ -106,7 +106,7 @@ force_gather → g_density, then iteration_update → new u,v. Intermediate matr
 host-orchestrated multi-invocation design anyway.
 
 **Host policy** (`Placement.hpp`, pure POD/vector math, ABI-neutral so both the old-ABI setup in
-main.cpp and the new-ABI Driver.cpp include it) — every formula a direct transcription of markv1,
+main.cpp and the new-ABI Driver.cpp include it) — every formula a direct transcription of sw_only,
 audited against Xplace/DREAMPlace in 5c:
 - `initDensityWeight` = (Σ|g_wl| / Σ|g_density|)·init_mult
 - `bbStepLength` (BB α on host, v1) = ‖Δv‖/‖Δg_total‖, clamped [1e-4, 4000]
@@ -116,14 +116,14 @@ audited against Xplace/DREAMPlace in 5c:
 - HPWL / overflow computed on host in-loop (the verified PL `metrics` module replicated in double
   to avoid an extra device pass; identical result).
 
-**⚑ First-iteration choice.** The audit flagged that markv1 iteration 1 steps with the HPWL-only
+**⚑ First-iteration choice.** The audit flagged that sw_only iteration 1 steps with the HPWL-only
 gradient (it skips `combineGradients` before the first step). `runPlacement` does the **clean**
 version (iter 1 combines with the freshly-initialized λ). So the pl_algo trajectory will differ
-slightly from markv1 at iters 1–2 by design; this is the corrected algorithm, not a bug.
+slightly from sw_only at iters 1–2 by design; this is the corrected algorithm, not a bug.
 
 The loop is driven by `--place <bench> <xclbin> [max_iters]` (make `run-place`, `PLACE_ITERS`).
 
-## 5c.6 — whole-placer verify vs markv1
+## 5c.6 — whole-placer verify vs sw_only
 
 **Status:** run pending (below).
 
@@ -156,13 +156,13 @@ final positions finite/in-bounds -> PASS (loop closes correctly)
    takes the deliberately tiny seed step (α=0.01) so cells move ~fractions of a unit on an 800000-unit
    die. Meaningful movement only comes once BB α ramps up.
 2. **α saturates to the 4000 clamp at iter 2.** BB α = ‖Δv‖/‖Δg_total‖; after the tiny iter-1 step,
-   both Δv and Δg_total are ~0, so the ratio is unstable and clamps — exactly markv1's behavior
+   both Δv and Δg_total are ~0, so the ratio is unstable and clamps — exactly sw_only's behavior
    (its clamp is [1e-4, 4000]). The *first real* step happens with this large α at iter 2, producing
    v_3, which 2 iterations don't measure.
-3. **λ stays 2.898e-19.** `updateDensityWeight` fires only every 3rd iteration (markv1's cadence), so
+3. **λ stays 2.898e-19.** `updateDensityWeight` fires only every 3rd iteration (sw_only's cadence), so
    λ hasn't updated yet. The tiny magnitude is the ratio-based init absorbing the field-vs-HPWL scale
-   gap (markv1 does the same); with λ this small the early steps are effectively HPWL-gradient
-   descent, matching markv1's early behavior.
+   gap (sw_only does the same); with λ this small the early steps are effectively HPWL-gradient
+   descent, matching sw_only's early behavior.
 
 **⚑ 2 iterations is too few to show placement progress or to stress-test BB-without-backtracking**
 (v1 has no backtracking; a saturated α=4000 step could in principle overshoot, caught only by the die
@@ -198,7 +198,7 @@ final positions finite/in-bounds; overflow decreasing -> PASS
 **Conclusion (5c.6).** The full PL placement loop is functionally correct end-to-end in sw_emu:
 gradients → combine/precond/step → write-back → next-iteration gradients, with the host policy
 driving λ/α/γ/precond/momentum. HPWL and overflow both move the right way and the step is stable.
-Full convergence + final-quality comparison vs markv1 is the real-HW task (Stage 6, item 1).
+Full convergence + final-quality comparison vs sw_only is the real-HW task (Stage 6, item 1).
 
 ---
 
@@ -217,13 +217,13 @@ optimization**, roughly in priority order:
 
 1. **Real-hardware convergence (Geert's card).** The true completion of 5c.6: run the placement to
    full convergence (50–200 iters) on real HW — infeasible in sw_emu — and compare final HPWL /
-   overflow against markv1's DSE numbers. This is the one remaining *correctness* gate.
+   overflow against sw_only's DSE numbers. This is the one remaining *correctness* gate.
 2. **Re-tune the λ / γ schedule for the 1024² grid.** The field magnitudes at 1024² differ from
-   markv1's 64² by orders of magnitude (this run's λ_init ≈ 3e-19). The *ratio*-based init is
+   sw_only's 64² by orders of magnitude (this run's λ_init ≈ 3e-19). The *ratio*-based init is
    scale-robust, but the multiplicative λ growth cadence and the γ schedule constants were tuned at
    64² and should be re-checked at 1024² once real-HW iteration counts are available.
 3. **Re-enable fillers.** Excluded in v1 (standing pending item); materially affects density/quality.
-   Needed before a fair final-quality comparison vs markv1.
+   Needed before a fair final-quality comparison vs sw_only.
 4. **Fuse the density solve.** The 8-pass field solve currently round-trips each matrix through host
    memory per iteration (~16 host↔device copies/iter). Fusing the passes into on-chip dataflow (and
    widening the coord/matrix ports from 32-bit to 128-bit beats per DATAFLOW.md) is the biggest
@@ -233,6 +233,6 @@ optimization**, roughly in priority order:
 6. **BB α on the PL.** Currently a host reduction (v1); move the ‖Δv‖/‖Δg‖ reduction onto the PL.
 7. **Backtracking / stability.** v1 has no backtracking; the BB α can saturate to the 4000 clamp
    after a tiny step (seen at iter 2). The die clamp bounds it, but real-HW long runs should confirm
-   this doesn't cause overshoot — if it does, port markv1's Algorithm-2 backtracking.
+   this doesn't cause overshoot — if it does, port sw_only's Algorithm-2 backtracking.
 8. **Convergence + best-solution tracking** on the host (overflow-countdown + snapshot/restore),
    currently minimal in `runPlacement`.

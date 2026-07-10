@@ -3,7 +3,7 @@
 // Old-ABI TU (like DCT1DVerify): host-side references live here; the new-ABI XRT Driver is
 // reached only through the runXformTranspose/runSpectral/runField POD + const char* boundary.
 // References are naive double-precision transforms matching the Stage 0 model (which proved
-// makhoul == naive == markv1 compute_eField_DCT). Gate: rel_rms < 1e-3 (float32 1024-pt).
+// makhoul == naive == sw_only compute_eField_DCT). Gate: rel_rms < 1e-3 (float32 1024-pt).
 
 #include "FieldVerify.hpp"
 #include "Driver.hpp"

@@ -43,7 +43,7 @@ static void ref_fft(std::vector<cd>& a) {
     }
 }
 
-// markv1 golden DCT (DCT.cpp DCT_naive), unnormalized.
+// sw_only golden DCT (DCT.cpp DCT_naive), unnormalized.
 static std::vector<double> ref_dct(const float* x, int N) {
     std::vector<double> r(N);
     for (int k = 0; k < N; k++) {

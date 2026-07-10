@@ -2,7 +2,7 @@
 //
 // Proves, in pure host C++ (no HLS), that the STRIP-TILED two-pass binning the PL
 // kernel will use reproduces a naive full-grid scatter: same exact rect-intersection
-// as markv1 Grid::computeBinOverlaps (fast path for sub-bin cells, else exact rect
+// as sw_only Grid::computeBinOverlaps (fast path for sub-bin cells, else exact rect
 // area), same two-pass order (fixed -> clamp -> movable), fillers excluded. Each bin
 // is in exactly one strip and is accumulated from the same node set in the same order
 // in both versions, so the match should be BIT-EXACT; any off-by-one in the strip

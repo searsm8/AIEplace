@@ -2,7 +2,7 @@
 //
 // Old-ABI TU (like ForceVerify): the golden Nesterov step is computed here in double; the
 // new-ABI XRT Driver is reached only through runIterUpdate's POD + const char* boundary.
-// The golden replicates, in order, markv1's per-node update:
+// The golden replicates, in order, sw_only's per-node update:
 //   combineGradients : g_total = g_wl - lambda*g_density
 //   Node::step       : pg = g_total/precond; u = v_k - alpha*pg; v' = u + coeff*(u - u_k)
 //   enforceDieBounds : clamp u and v' independently into [0, die - size]
@@ -85,7 +85,7 @@ int runIterUpdateVerify(const char* xclbin_path) {
     }
     const double rr = std::sqrt(sse / (ref + 1e-30));
     const bool   ok = rr < 1e-5;
-    printf("[iter] Nesterov step vs markv1 golden: %d/%d clamped  max_abs=%.3e  rel_rms=%.3e  -> %s\n",
+    printf("[iter] Nesterov step vs sw_only golden: %d/%d clamped  max_abs=%.3e  rel_rms=%.3e  -> %s\n",
            clamped, M, max_abs, rr, ok ? "PASS" : "FAIL");
     return ok ? 0 : 1;
 }

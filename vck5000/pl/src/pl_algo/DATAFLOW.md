@@ -37,7 +37,7 @@ no change to the datapath.
 
 ## Device-resident iteration loop (target; supersedes the v1 host-owned control)
 The whole schedule + convergence now lives on the PL in `modules/param_scheduler.hpp` (verified
-bit-for-bit vs the markv1 golden), and the Barzilai-Borwein step norms reduce on-device in
+bit-for-bit vs the sw_only golden), and the Barzilai-Borwein step norms reduce on-device in
 `modules/bb_reduce.hpp`. So the loop can run **fully on the device**: host uploads the static design
 once, the kernel runs N iterations with **no per-iteration round-trip**, host downloads final coords
 once. This removes ~8 XRT kernel-launches/iter (~50-100us each) + the schedule sync per iteration --
@@ -71,6 +71,6 @@ iteration, then sw_emu-verify the trajectory vs the golden (needs the Vitis/AIE 
 
 ## Open format decisions (to finalize as modules are implemented)
 - AoS vs SoA and 1-vs-2 nodes per beat for the coord/gradient buffers.
-- Exact net packet grouping for the AIE HPWL graph (mirror markv1 `prepareNetGroup`).
+- Exact net packet grouping for the AIE HPWL graph (mirror sw_only `prepareNetGroup`).
 - Final AIE PLIO port names for the FFT pool and HPWL graph (with `aie/src/pl_algo`).
 - IDXST path (Ey) -- deferred; a tweak on the IDCT flow.

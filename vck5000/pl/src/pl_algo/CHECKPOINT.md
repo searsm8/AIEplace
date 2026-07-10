@@ -1,13 +1,13 @@
 # RESOLVED (2026-07-09) — preconditioner fixed; the coordinate-normalization hypothesis was WRONG
 
-**The preconditioner now converges (commit `2a8b482`).** The 2026-07-08 plan below assumed markv1
+**The preconditioner now converges (commit `2a8b482`).** The 2026-07-08 plan below assumed sw_only
 works in a different (raw-DBU) coordinate frame than XPlace and that a site-width normalization was
 needed. **That premise is empirically false** — I measured both:
 - **Frames already match.** XPlace adaptec1: `site_width=100, die_scale=100` ⇒ its working coords are
-  raw bookshelf DBU (die≈10.7k, mean node area≈175, `bin_area≈436`). markv1: die≈11.2k, avg area≈176.8,
+  raw bookshelf DBU (die≈10.7k, mean node area≈175, `bin_area≈436`). sw_only: die≈11.2k, avg area≈176.8,
   **identical total pins 9.2351e5**. Same frame. So a coordinate normalization would do nothing.
-- **The real gap was λ magnitude, not coordinates.** markv1 λ_init=1.68e-5 vs XPlace 3.4e-9 (~4900×
-  larger) because markv1's DCT field path (`dct_normalize=true`) applies 1/N on all four transforms
+- **The real gap was λ magnitude, not coordinates.** sw_only λ_init=1.68e-5 vs XPlace 3.4e-9 (~4900×
+  larger) because sw_only's DCT field path (`dct_normalize=true`) applies 1/N on all four transforms
   (~1/N⁴), making the density field ~4900× weaker; λ compensates (larger). This is absorbed by λ for
   the force balance (precond-OFF unaffected) and did **not** need fixing for the goal.
 - **Actual failure mode = the Barzilai-Borwein step-length upper clamp (4000).** `Node::step` moves by
@@ -16,7 +16,7 @@ needed. **That premise is empirically false** — I measured both:
   cap, the effective step `α/precond_weight` collapses → cells freeze → overflow stalls → λ runs away
   (verified via `step_len` pinned at 4000 while `density_weight` grew to 2e5 in the precond-ON run).
 
-**Fix (commit `2a8b482`, surgical, markv1 `AIEplace.cpp`/`AIEplace.h`):** scale the BB clamp upper bound
+**Fix (commit `2a8b482`, surgical, sw_only `AIEplace.cpp`/`AIEplace.h`):** scale the BB clamp upper bound
 by `precond_weight_mean` (mean diagonal precond weight over movable nodes+fillers). It is **exactly 1.0
 when preconditioning is off**, so the precond-OFF path is a bit-identical no-op (verified: adaptec1@512
 OFF 7.172e7@0.039 unchanged). Results (seed 42, stop 0.04, precond ON vs OFF):
@@ -30,7 +30,7 @@ No coordinate/field normalization was made — unnecessary and would have risked
 `preconditioner_bb_fix` (updated).
 
 **DCT inverse-normalization fix (commit `dbeb58e`, opt-in flag `dct_normalize_inverse`).** Investigated
-the λ-magnitude gap (markv1 λ_init 1.68e-5 vs XPlace 3.4e-9): markv1's field solve re-applied the
+the λ-magnitude gap (sw_only λ_init 1.68e-5 vs XPlace 3.4e-9): sw_only's field solve re-applied the
 forward DCT's 1/N on the INVERSE transforms too, so the field carried a spurious extra 1/N² vs the naive
 DREAMPlace Eq-3c/3d field (`compute_eField_naive`) — density force ~N² too weak, λ ~N² inflated.
 Confirmed against the references: XPlace (`dct2_fft2`) and DREAMPlace (`idct_2N` does `mul_(N)`) apply
@@ -62,19 +62,19 @@ and BB step_len peaks at only 1.2e4 vs 1.0e7, since λ no longer runs away.)
 ## Where things stand
 - **Golden schedule CHANGED:** performIteration now throttles γ AND λ together via one `skip_update`
   gate (commits b300e09, and 669d135 reconciled the PL `param_scheduler` to match — verified
-  bit-identical drop-in). markv1 built **-O2** now (makeflags). The **full-suite snapshot is STALE**
+  bit-identical drop-in). sw_only built **-O2** now (makeflags). The **full-suite snapshot is STALE**
   (was γ-every-iter) — re-run it AFTER the normalization work, not before.
 - **PL port: paused, in good shape.** `param_scheduler` (schedule+convergence) verified bit-exact +
   closed-loop bit-identical; `bb_reduce` (on-device BB norms) C-synth clean (Fmax 411MHz, II=1);
   resident-loop dataflow documented. Remaining = S6 steps 1-2 (sw_emu). Leave as-is per Mark.
 - **Preconditioner re-tested (2026-07-08) — see `preconditioner_bb_fix`.** ePlace-origin diagonal
-  Hessian `pins + λ·area`. markv1 precond ON still DIVERGES under the new golden (adaptec1 706/0.188/
+  Hessian `pins + λ·area`. sw_only precond ON still DIVERGES under the new golden (adaptec1 706/0.188/
   9.46e7; adaptec2 catastrophic 920/0.324/2.0e8). XPlace precond on/off = a WASH on adaptec1 (~0.1%),
   and XPlace's disable path was BROKEN (never run without it; patched locally in ~/phd/Xplace).
 
 ## THE TASK: match XPlace's site-width coordinate normalization (queued as an overnight task)
-**Goal:** normalize markv1's coordinates the way XPlace does so the preconditioner (and λ schedule)
-are well-scaled and precond stops diverging — the root cause per the 5c audit ("markv1 works in raw
+**Goal:** normalize sw_only's coordinates the way XPlace does so the preconditioner (and λ schedule)
+are well-scaled and precond stops diverging — the root cause per the 5c audit ("sw_only works in raw
 DBU; XPlace in site-width-normalized coords; `pins + λ·area` mixes a scale-free count with a
 scale-dependent area, so the balance is set by the arbitrary DBU scale").
 
@@ -85,11 +85,11 @@ scale-dependent area, so the balance is set by the arbitrary DBU scale").
 - `hpwl_scale = die_scale/site_width` (:602) un-normalizes HPWL back to raw DBU for reporting.
 - `unit_len` (bin size) and `node_area` (:604) live in the normalized frame; `bin_area=prod(unit_len)`.
 - **GOTCHA:** adaptec1 `.scl` says `Sitewidth=1`, but XPlace's log reports "Site Width = 100" — XPlace
-  applies an INTERNAL scale (investigate its `scale_factor`/`microns`/DEF units). markv1 tracks NO
+  applies an INTERNAL scale (investigate its `scale_factor`/`microns`/DEF units). sw_only tracks NO
   site width (grep: DataBase.cpp has none) — pure raw bookshelf DBU. So step 1 = reverse-engineer
   XPlace's effective coordinate scale (die_scale / hpwl_scale / unit_len) for adaptec1 and match it.
 
-**markv1 change points:** DataBase (scale all geometry at load; store the factor), Grid (die bounds,
+**sw_only change points:** DataBase (scale all geometry at load; store the factor), Grid (die bounds,
 bin sizes), base_gamma (a length — rescales), density solve (bin coords), HPWL output (un-scale via
 hpwl_scale), DEF writer + Visualizer (un-scale positions), filler sizes, pin offsets. Absolute
 schedule constants (init_step_length, etc.) may need retuning in the new frame. Then reflect into the
@@ -97,7 +97,7 @@ PL `param_scheduler`/`bb_reduce` if constants shift.
 
 **Verification:** precond ON in the normalized frame should CONVERGE on adaptec1/adaptec2 and land
 within ~1% of precond OFF (matching XPlace's wash), ideally helping on macro-heavy designs. Then
-re-run the full suite (new golden + normalization) and re-compare to XPlace. Method: markv1 A/B via
+re-run the full suite (new golden + normalization) and re-compare to XPlace. Method: sw_only A/B via
 `dse.py`/direct runs, seed 42, stop 0.04; XPlace A/B already wired (precond patches in ~/phd/Xplace).
 
 ---
@@ -107,7 +107,7 @@ re-run the full suite (new golden + normalization) and re-compare to XPlace. Met
 ## 2026-07-08 — full-suite snapshot + PL-port plan (task batch after the γ fix)
 - **Full 28-design suite snapshot DONE** (`tools/dse.py` `_full_suite()` → `tools/make_scorecard.py`;
   results at `results/DSE_20260707_185300/scorecard.md`, copied to `MARK_TO_REVIEW/`). Every design
-  at its XPlace grid, seed 42, stop 0.04. **markv1 GP ≈ XPlace across the board: mean ratio 1.014,
+  at its XPlace grid, seed 42, stop 0.04. **sw_only GP ≈ XPlace across the board: mean ratio 1.014,
   median 1.020, 22/27 within ±5%, 17/27 within ±2%**, range 0.93 (fft_b, a win) → 1.09 (bigblue4).
   Weakest = the **bigblue family** (bigblue2 1.07 / bigblue3 1.08 / bigblue4 1.09) — largest designs
   at the finest grids; bigblue3 didn't converge (floored ovfw 0.183) so its number is unmatched-spread.
@@ -117,14 +117,14 @@ re-run the full suite (new golden + normalization) and re-compare to XPlace. Met
 - **PL algorithm-port plan written** = `MARK_TO_REVIEW/PL_PORT_PLAN.md` (NEXT STEP #2 planning).
   Move the ePlace *control* onto PL: `iteration_update` (add BB reduction norms), `metrics` (finish
   overflow-ratio), NEW `param_scheduler` (γ/λ-trend/coeff/BB-α/convergence). **Key finding: the
-  current PL schedule `host/src/pl_algo/src/Placement.hpp` is a REDUCED STUB** missing markv1's tuned
+  current PL schedule `host/src/pl_algo/src/Placement.hpp` is a REDUCED STUB** missing sw_only's tuned
   λ-trend + plateau jolt + divergence guards; Stage 5c only ran ~6 iters, so the PL has never
   converged at golden quality — porting the tuned schedule faithfully IS the task. `density_force_
   fraction` has a closed form when precond OFF (always). Verify each stage vs a recorded golden trace.
   See auto-memory `pl_port_plan_and_suite_snapshot`.
 - **PL PORT STARTED — S3+S4 done & verified (commit 63ec945).** `param_scheduler.hpp` (γ/BB-α/
   Nesterov-coeff/λ-trend+plateau-jolt, scalar C++, builds under g++ & HLS) verified BIT-FOR-BIT vs
-  markv1: `dump_schedule_trace` hook (Output.cpp `dumpScheduleTrace` + BB norms from
+  sw_only: `dump_schedule_trace` hook (Output.cpp `dumpScheduleTrace` + BB norms from
   computeLipshitzEstimate) → `model/sched_verify.cpp` offline replay. adaptec1@512, 752 iters, all 4
   outputs EXACT. Confirmed the dff closed form; caught the plateau jolt firing ~iter114.
 - **S5 DONE (commit 1c24244): param_scheduler feature-complete.** Full checkConvergence (best
@@ -136,7 +136,7 @@ re-run the full suite (new golden + normalization) and re-compare to XPlace. Met
   device-resident loop design. `model/synth_check.{cpp,tcl}` C-synthesizes the control core
   (bb_reduce+param_scheduler, resident SchedState): **SYNCHK 0 err, Fmax 411 MHz, bb_loop II=1.** All
   resident-loop CONTROL modules synthesizable.
-- **S6 STEP 0 DONE (commit 1099134): closed-loop drop-in validated.** markv1 `use_pl_scheduler` flag
+- **S6 STEP 0 DONE (commit 1099134): closed-loop drop-in validated.** sw_only `use_pl_scheduler` flag
   sources its schedule from param_scheduler.hpp (scalar, golden `#include`s it directly). adaptec1
   (countdown stop) AND fft_b (divergence-guard stop) **BIT-IDENTICAL** to native — param_scheduler is
   a complete, correct drop-in with real gradients feeding back (not just trace replay). NEXT = S6
@@ -169,13 +169,13 @@ pl_algo PL modules; re-verify vs golden via sw_emu). Details in `gamma_bin_scale
 
 ---
 
-# (prior) Checkpoint — markv1 GP now ≈ XPlace across the suite (6/7 within ~2%); grid-tied γ was the lever (2026-07-07)
+# (prior) Checkpoint — sw_only GP now ≈ XPlace across the suite (6/7 within ~2%); grid-tied γ was the lever (2026-07-07)
 
 ## 2026-07-07 session — closed most of the HPWL gap
-Two wirelength fixes landed in the markv1 golden, both verified via `tools/dse.py` and committed on
+Two wirelength fixes landed in the sw_only golden, both verified via `tools/dse.py` and committed on
 `pl_algo`, taking adaptec1 from +5% to +1.6% vs local XPlace GP and the whole suite to near-parity:
 - **`6b5a924` grid-tied WA γ (the big lever).** XPlace sets `base_gamma = wa_coeff·(bin_w+bin_h)`;
-  markv1 used a bare `init_gamma=4` constant → WA ~42× too sharp (near winner-take-all) and mis-scaled
+  sw_only used a bare `init_gamma=4` constant → WA ~42× too sharp (near winner-take-all) and mis-scaled
   with grid. New `gamma_bin_scaled` flag (default true): `base_gamma = init_gamma·(bin_w+bin_h)`,
   finalized after the grid is built. adaptec1@512 7.322e7→**7.171e7 (−2.1%)**; adaptec2@1024 legacy
   γ *couldn't even spread* (stalled exact 0.25) while grid-tied converged (exact 0.089). See
@@ -202,7 +202,7 @@ suite re-sweep: fixes adaptec2@1024 (1.20→**1.05**) but REGRESSES @512 designs
 @1024): fix the γ SCALING, not the constant** — base_gamma ∝ 1/N (grid-tied) over-sharpens at high N;
 make it scale gentler (∝ die_span/REF_N or tie to site pitch, ~grid-independent) so one config is right
 at 512 AND 1024, then re-verify the suite. (XPlace uses ∝1/N yet runs adaptec2@1024 fine — likely its
-always-on preconditioner compensates; markv1 precond is OFF. Confirm before changing scaling.)
+always-on preconditioner compensates; sw_only precond is OFF. Confirm before changing scaling.)
 Details: `gamma_bin_scaled_milestone`.
 
 ## Preconditioner thread (investigated deeply, stays OFF) — see `preconditioner_bb_fix`
@@ -218,7 +218,7 @@ Chased whether a working preconditioner is how XPlace tolerates the sharp 1/N γ
 - **Raw-area alpha_2 fix TRIED → WORSE, REVERTED.** Set a2=λ·precond_coef·getArea() (raw, = XPlace
   site²-area since ISPD2005 site_width=1). Over-damped (precond ON floored 0.29-0.59) AND perturbed
   precond-OFF adaptec2 via the shared density_force_fraction. **Reverted; nothing left in tree.**
-- **CONCLUSION:** markv1 works in raw DBU; XPlace in site-width-normalized coords. `precond_weight =
+- **CONCLUSION:** sw_only works in raw DBU; XPlace in site-width-normalized coords. `precond_weight =
   num_pins + λ·area` adds a scale-invariant COUNT to a scale-dependent AREA, so their balance is set by
   the coordinate scale — plus non-covariant landmines (`max(1,·)` floor, absolute schedule constants).
   The preconditioner can't be fixed by the area term alone; it needs the FULL site-width coordinate
@@ -231,37 +231,37 @@ Chased whether a working preconditioner is how XPlace tolerates the sharp 1/N γ
    adaptec2@1024 1.20→1.05, @512 suite bit-identical. Verified across the suite via dse.py explicit_runs.
 2. **← YOU ARE HERE. PL port (the actual project).** Reflect the session's golden fixes — grid-tied γ, pin offsets, the
    verified schedule — into the `pl_algo` PL modules, then re-verify the PL against the golden via sw_emu,
-   then toward real HW. The golden (markv1) is now a trustworthy reference. See Stage 5c reference below
+   then toward real HW. The golden (sw_only) is now a trustworthy reference. See Stage 5c reference below
    for the PL module layout.
-3. **Find an open-source detailed placer (NEW idea).** markv1 does global placement only; the last ~1-2%
-   vs XPlace's *published* numbers is detailed placement / legalization, which markv1 lacks. Rather than
+3. **Find an open-source detailed placer (NEW idea).** sw_only does global placement only; the last ~1-2%
+   vs XPlace's *published* numbers is detailed placement / legalization, which sw_only lacks. Rather than
    build DP, adopt a literature-standard open-source detailed placer (candidates to evaluate:
    **ABCDPlace** / DREAMPlace's DP, **NTUplace3/4**, **FastDP**, or **OpenROAD's `detailed_placement`
-   (opendp)**). Feed markv1/PL GP output → legalize+DP → compare final legal HPWL to XPlace post-DP
+   (opendp)**). Feed sw_only/PL GP output → legalize+DP → compare final legal HPWL to XPlace post-DP
    (Output.cpp's `xplace_hpwl` map is post-DP). This makes the head-to-head fully apples-to-apples and
    gives a deployable legal placement.
 
-**Bottom line for the wirelength chase:** essentially DONE. Every quick GP lever is exhausted; markv1 GP
+**Bottom line for the wirelength chase:** essentially DONE. Every quick GP lever is exhausted; sw_only GP
 ≈ XPlace. Remaining substantive work = the γ-scaling fix (#1), then the PL port (#2), with the DP placer
 (#3) to close the final published-number gap and legalize.
 
 ---
 
-# (prior) Checkpoint — markv1 GP ≈ XPlace at matched conditions; only ~5% HPWL residual left (2026-07-06)
+# (prior) Checkpoint — sw_only GP ≈ XPlace at matched conditions; only ~5% HPWL residual left (2026-07-06)
 
-Branch `pl_algo`. The markv1 CPU golden now matches XPlace quality closely once compared fairly. This
+Branch `pl_algo`. The sw_only CPU golden now matches XPlace quality closely once compared fairly. This
 session: fixed the adaptec2 non-convergence, FFT-accelerated the DCT (1024 grid now practical), added
 density-map instrumentation, and — through a careful apples-to-apples comparison — showed the
-"markv1 is more clustered than XPlace" narrative was largely a **measurement artifact**. The one real
+"sw_only is more clustered than XPlace" narrative was largely a **measurement artifact**. The one real
 remaining gap is a modest ~5% wirelength (HPWL) difference.
 
 ## The bottom line (what to tell the next session)
-At **matched grid resolution + matched cell set + matched overflow**, markv1's global placement is
+At **matched grid resolution + matched cell set + matched overflow**, sw_only's global placement is
 essentially on par with XPlace on physical spread. The prior "2.9× hotspots vs 1.1×" gap was an
-artifact of (1) markv1 running at 64-bin while XPlace ran at 512, (2) the density dumps using different
+artifact of (1) sw_only running at 64-bin while XPlace ran at 512, (2) the density dumps using different
 cell sets (XPlace's excluded fixed macros), and (3) comparing at each placer's own stopping point.
 Fix all three and the density maps are nearly identical. **The genuine residual is ~5% HPWL** (adaptec1:
-markv1 7.42e7 vs XPlace 7.06e7 at matched spread) — a wirelength-efficiency gap, NOT a spreading or
+sw_only 7.42e7 vs XPlace 7.06e7 at matched spread) — a wirelength-efficiency gap, NOT a spreading or
 density-force defect. **Next: chase the ~5% HPWL** — candidates are the WA-γ (wirelength-smoothing)
 schedule, the WL-gradient formulation (`Partials.cpp`), or the optimizer settling at a WL-worse local
 optimum. Do NOT chase the electrostatic force (Tests A/B below cleared it).
@@ -285,25 +285,25 @@ optimum. Do NOT chase the electrostatic force (Tests A/B below cleared it).
   -1 = time-based) for controlled A/B.
 
 ## The apples-to-apples comparison (the honest result)
-Three corrections made the markv1-vs-XPlace density comparison fair:
+Three corrections made the sw_only-vs-XPlace density comparison fair:
 1. **Match XPlace's per-design grid.** XPlace hard-codes grid per design in `Xplace/utils/setup_dataset.py`
-   (adaptec1=512, adaptec2=1024, bigblue3/4=2048); its grid spans exactly the die bbox, no padding. markv1
+   (adaptec1=512, adaptec2=1024, bigblue3/4=2048); its grid spans exactly the die bbox, no padding. sw_only
    now runs each design at that resolution.
-2. **Match the cell set.** The mean-level confound was NOT grid extent — markv1's `computeOverflow`/
+2. **Match the cell set.** The mean-level confound was NOT grid extent — sw_only's `computeOverflow`/
    `dumpBinDensity` deposits a capped fixed-macro baseline + movable, while XPlace's dump was movable-only
    (adaptec1 is 43% fixed area). Added fixed macros to XPlace's dump (`init_density_map`.clamp(0,target) +
    movable; `~/phd/Xplace/src/run_placement_nesterov.py`, env-gated `XPLACE_DUMP_DENSITY=1`).
 3. **Match overflow (Test A).** Compare at the same spreading level, not each placer's stopping point.
 
-**adaptec1, both @512, both fixed+movable, matched overflow** (markv1 stop 0.07→0.04, masked ovfw 0.040
-≈ XPlace 0.042): max_util 2.68× vs 2.37×, overflow_mass 0.042 vs 0.050 (markv1 lower), over-cap 14% vs
+**adaptec1, both @512, both fixed+movable, matched overflow** (sw_only stop 0.07→0.04, masked ovfw 0.040
+≈ XPlace 0.042): max_util 2.68× vs 2.37×, overflow_mass 0.042 vs 0.050 (sw_only lower), over-cap 14% vs
 17%, std 0.41 vs 0.45, exact overflow 0.111 vs 0.115 — **spread matches**. HPWL 7.42e7 vs 7.06e7 (+5%).
 Heatmaps: `tools/adaptec1_512_matched.png` (at each's own stop) and `tools/adaptec1_512_matched_overflow.png`.
 
 ### Tests A & B (ruling out hypotheses for the peak/HPWL residual)
-- **Test A (stopping point) — CONFIRMED.** Lowering markv1's stop 0.07→0.04 so it spreads to XPlace's
+- **Test A (stopping point) — CONFIRMED.** Lowering sw_only's stop 0.07→0.04 so it spreads to XPlace's
   overflow dropped max_util 3.56×→2.68× and exact overflow 0.162→0.111 (≈ XPlace) for only +1.1% HPWL. So
-  the sharper-peaks residual was mostly markv1 stopping earlier, not a force defect.
+  the sharper-peaks residual was mostly sw_only stopping earlier, not a force defect.
 - **Test B (preconditioner) — RULED OUT (harmful).** `enable_preconditioning:true` @512 never converges
   (overflow floors ~0.51, HPWL 1.11e8): the large normalized-field λ makes `precond_weight=max(1,pins+λ·area)`
   crush the density force. Stays FALSE.
@@ -311,14 +311,14 @@ Heatmaps: `tools/adaptec1_512_matched.png` (at each's own stop) and `tools/adapt
   residual is the ~5% HPWL (wirelength efficiency).
 
 ## Open next step
-**Chase the ~5% HPWL gap** (markv1 vs XPlace at matched spread). Start by diffing markv1's wirelength
+**Chase the ~5% HPWL gap** (sw_only vs XPlace at matched spread). Start by diffing sw_only's wirelength
 path against XPlace: the WA (weighted-average) γ schedule (`updateGamma`), the WL-gradient
 (`Partials.cpp` `computeHpwlPartials_CPU`), and the Nesterov/BB step settings. A matched-overflow HPWL
 comparison across a few benchmarks (adaptec2 @1024, pci_bridge32_a) would confirm the gap is universal
 and its size, before deciding where to intervene.
 
 ## Tooling added this session
-- **markv1 density dump:** config `"dump_density": true` → `Placer::dumpBinDensity` (Density.cpp) writes
+- **sw_only density dump:** config `"dump_density": true` → `Placer::dumpBinDensity` (Density.cpp) writes
   `<results_dir>/<bench>/<ts>_cpu_cpu/<bench>_density_rho_{masked,exact}.csv` (ρ = area/bin_area, fixed
   baseline capped + movable, fillers excluded) at the restored best. Reuses `computeOverflow(clamp, out)`.
 - **XPlace density dump:** `XPLACE_DUMP_DENSITY=1` env → `~/aieplace_tmp/<bench>_density_exact.npy` + `_meta.json`.
@@ -337,12 +337,12 @@ and its size, before deciding where to intervene.
   acceleration; the PL/AIE still uses the AIE FFT for the transform.
 
 ## Build / run how-to
-- **markv1 CPU golden:** `make host HOST=markv1` (no XRT). Run under a pty (parser hangs on non-tty
-  stdout): `script -qec './build/hw/host/markv1/aieplace_markv1.exe <cfg>' <log>`. Temp configs in
-  `~/aieplace_tmp/` (WSL `/tmp` is wiped between calls). Template `host/src/markv1/run_config.json`.
+- **sw_only CPU golden:** `make host HOST=sw_only` (no XRT). Run under a pty (parser hangs on non-tty
+  stdout): `script -qec './build/hw/host/sw_only/aieplace_sw_only.exe <cfg>' <log>`. Temp configs in
+  `~/aieplace_tmp/` (WSL `/tmp` is wiped between calls). Template `host/src/sw_only/run_config.json`.
   Key knobs: `bins_per_row` (per-design, match XPlace), `dct_normalize` (true), `enable_density_clamp`
   (true), `enable_preconditioning` (false), `enable_filler` (true), `dump_density`, `random_seed`.
-  Details: memory `markv1_cpu_run_gotchas`. When launching watch-loops, `pgrep -x aieplace_markv1`.
+  Details: memory `markv1_cpu_run_gotchas`. When launching watch-loops, `pgrep -x aieplace_sw_only`.
 - **PL C-synth:** `source /tools/Xilinx/Vitis/2022.2/settings64.sh`;
   `export PLATFORM_REPO_PATHS=$HOME/xilinx_local/opt/xilinx/platforms`; `cd pl && make PL=pl_algo TARGET=hw`.
 - **XPlace reference:** memory `xplace_build_and_run` (system CUDA 12.3, conda base torch,
@@ -355,7 +355,7 @@ VCK5000 shell matching `xilinx_vck5000_gen4x8_qdma_2_202220_1`, matching XRT, co
 Risk: platform-shell > XRT version > libstdc++/glibc ABI; mitigate `-static-libstdc++ -static-libgcc`.
 
 ## Key references
-- **markv1 golden:** `host/src/markv1/src/{AIEplace,Density,Partials,Output,Grid,DCT}.cpp`,
+- **sw_only golden:** `host/src/sw_only/src/{AIEplace,Density,Partials,Output,Grid,DCT}.cpp`,
   `include/{Node,AIEplace,Grid,DCT}.h`.
 - **Source of truth:** XPlace `~/phd/Xplace/src/{param_scheduler,calculator,evaluator,database,nesterov_optimizer,initializer}.py`, grid sizes `utils/setup_dataset.py`.
 - **Auto-memory:** `dct_fft_acceleration`, `density_map_comparison`, `markv1_nonconvergence_vs_xplace`,

@@ -6,7 +6,7 @@
 //
 // Builds the exp LUT, picks gamma from the design's coordinate span, runs the PL
 // kernel (Driver::runHpwlGradCU), computes the exact-exp full-WA golden (the same
-// math as markv1 computeHpwlPartials_CPU), and compares per movable node with a
+// math as sw_only computeHpwlPartials_CPU), and compares per movable node with a
 // tolerance (the LUT is approximate). Operates on a PackedDesign -- parser-free.
 
 #include "PackedDesign.hpp"

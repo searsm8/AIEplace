@@ -19,23 +19,23 @@ rows.sort(key=lambda r: g(r, "run") or g(r, "Design"))
 ratios = [fnum(g(r, "Ratio")) for r in rows if fnum(g(r, "Ratio"))]
 
 lines = [
-    "# markv1 GP performance snapshot — full ISPD2005 + ISPD2015 suite",
+    "# sw_only GP performance snapshot — full ISPD2005 + ISPD2015 suite",
     "",
     f"Source: `{d}`  |  {len(rows)} designs completed  |  best defaults "
     "(grid-indep γ, dct_normalize, pin offsets; precond OFF), each at its XPlace grid, "
     "seed 42, stop smoothed-overflow 0.04.",
     "",
-    "Ratio = markv1 GP best HPWL / XPlace **published** reference (post-legalization+DP for "
-    "ISPD2005). markv1 is **global placement only** (no legalization, no detailed placement).",
+    "Ratio = sw_only GP best HPWL / XPlace **published** reference (post-legalization+DP for "
+    "ISPD2005). sw_only is **global placement only** (no legalization, no detailed placement).",
     "",
     "**Reading the ratio (corrected 2026-07-08).** The academic flow is GP -> legalization (LG) "
     "-> detailed placement (DP). LG *increases* HPWL (it removes overlaps and snaps cells to legal "
     "rows/sites, displacing them from the WL-optimal continuous GP solution); DP then *claws back* "
     "some of that (local swap/reorder refinement), but the net LG+DP result is typically still "
     "**above** the raw GP HPWL. So XPlace's published number carries a legalization penalty that "
-    "markv1's raw GP does not. A markv1 ratio of ~1.0 therefore means markv1's GP is at or *ahead "
-    "of* XPlace's own GP -- markv1 is being compared against XPlace's inflated legal number. "
-    "Corollary: adding LG+DP to markv1 would *raise* its HPWL (worsen these ratios); its value is "
+    "sw_only's raw GP does not. A sw_only ratio of ~1.0 therefore means sw_only's GP is at or *ahead "
+    "of* XPlace's own GP -- sw_only is being compared against XPlace's inflated legal number. "
+    "Corollary: adding LG+DP to sw_only would *raise* its HPWL (worsen these ratios); its value is "
     "**legality** (a usable, overlap-free placement) and an apples-to-apples legal-vs-legal "
     "comparison, NOT wirelength reduction. Refs: RePlAce (TCAD 2019), ABCDPlace (TCAD 2020).",
     "",

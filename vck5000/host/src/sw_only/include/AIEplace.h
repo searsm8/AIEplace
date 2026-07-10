@@ -96,7 +96,7 @@ public:
     bool compare_hpwl_methods = false;
     bool precond_raw_area = false; // preconditioner/dff area term: false = legacy area/avg_node_size,
                                    // true = raw node area (XPlace-faithful: alpha_2 = pcoef·λ·mov_node_area).
-                                   // The /avg_node_size normalization was a spurious deviation — markv1
+                                   // The /avg_node_size normalization was a spurious deviation — sw_only
                                    // runs in the SAME raw-DBU frame as XPlace, so raw area is coordinate-
                                    // scale-invariant like XPlace's weighted_weight (area·S² and λ·1/S² cancel).
     bool dff_force_ratio = false;  // density_force_fraction basis: false = legacy area-mass a2/(a1+a2),

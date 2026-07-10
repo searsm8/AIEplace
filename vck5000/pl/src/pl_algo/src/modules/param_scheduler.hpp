@@ -10,9 +10,9 @@
 // coeff=Nesterov momentum, lambda=density weight) and a STOP flag (convergence / divergence / max
 // iters). It is a pure scalar recurrence -- cheap; its value on the PL is loop RESIDENCY (keep the
 // whole iteration on-device, no host round-trip), not speed. So it is written plain/sequential and
-// verified BIT-FOR-BIT against the markv1 golden, not optimized.
+// verified BIT-FOR-BIT against the sw_only golden, not optimized.
 //
-// Every formula mirrors a markv1 function (host/src/markv1/src/AIEplace.cpp / Output.cpp):
+// Every formula mirrors a sw_only function (host/src/sw_only/src/AIEplace.cpp / Output.cpp):
 //   updateGamma (Partials.cpp:182) .............. inv_gamma
 //   computeLipshitzEstimate (:281) .............. alpha
 //   performNextStep momentum (:855) ............. coeff (+ nesterov_ak recurrence)
@@ -36,7 +36,7 @@ struct SchedState {
     // --- schedule ---
     float lambda;       // density weight in use (updated in place to the next iteration's value)
     float inv_gamma;    // held 1/gamma; recomputed only on non-skipped iterations (shared skip_update)
-    float nesterov_ak;  // Nesterov a_k accumulator (markv1 starts at 1.0)
+    float nesterov_ak;  // Nesterov a_k accumulator (sw_only starts at 1.0)
     float prev_hpwl;    // previous iteration's HPWL (trend sign for the lambda mu)
     int   iteration;    // 0 before the first call; the call for iteration k sets it to k
     int   last_jolt_iter;   // last overflow-plateau 2x jolt iteration
@@ -70,8 +70,8 @@ static const int SCHED_BEST_MIN_ITER = 50; // best-tracking skips iters < this (
 
 // density_force_fraction closed form (precond OFF): dff = c*lambda/(1 + c*lambda), c = dff_coef =
 // precond_coef*K/total_pins (host-precomputed; K = sum of movable+filler normalized areas). This
-// REPLACES markv1's per-node updatePrecondWeights reduction. It is the caller's job to compute dff
-// with this and pass it into param_scheduler -- mirroring markv1, where updateDensityWeight consumes
+// REPLACES sw_only's per-node updatePrecondWeights reduction. It is the caller's job to compute dff
+// with this and pass it into param_scheduler -- mirroring sw_only, where updateDensityWeight consumes
 // the density_force_fraction that updatePrecondWeights produced. Verified separately from the trend.
 static inline float sched_dff(float lambda, float dff_coef) {
     const float cl = dff_coef * lambda;
@@ -186,7 +186,7 @@ static void param_scheduler(
     if (k == 1) {
         st.lambda = (iter1_gwl_L1 / (iter1_gden_L1 + 1e-8f)) * p.init_multiplier;
     } else {
-        // dff is supplied by the caller (sched_dff on the current lambda), mirroring markv1 where
+        // dff is supplied by the caller (sched_dff on the current lambda), mirroring sw_only where
         // updateDensityWeight reads the density_force_fraction updatePrecondWeights already computed.
         // Same skip_update gate as gamma above -- the two are frozen together.
         if (!skip_update) {

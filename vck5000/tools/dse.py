@@ -18,10 +18,10 @@ from typing import Any, Union, List, Tuple
 # A good default 4 or 8 to speed up DSE on a typical multi-core machine without overwhelming it.
 MAX_PARALLEL = 8
 
-# Compiled placer binary (current markv1 build) and the base config it reads.
+# Compiled placer binary (current sw_only build) and the base config it reads.
 # Both paths are relative to vck5000/, which is where this script must be run from.
-EXE_PATH = "build/hw/host/markv1/aieplace_markv1.exe"
-CONFIG_PATH = "host/src/markv1/run_config.json"
+EXE_PATH = "build/hw/host/sw_only/aieplace_sw_only.exe"
+CONFIG_PATH = "host/src/sw_only/run_config.json"
 
 
 # =============================================================================

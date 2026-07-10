@@ -3,8 +3,8 @@
 
 // iteration_update -- Stage 5c: the ePlace position update for the movable nodes.
 //
-// One call = one Nesterov step. It mirrors, exactly, three markv1 functions run
-// back-to-back (host/src/markv1/src/AIEplace.cpp, include/Node.h):
+// One call = one Nesterov step. It mirrors, exactly, three sw_only functions run
+// back-to-back (host/src/sw_only/src/AIEplace.cpp, include/Node.h):
 //   combineGradients()   : g_total = g_wl - lambda * g_density          (in-place -=)
 //   Node::step()         : precondition, then u_{k+1} = v_k - alpha*P*g_total,
 //                          then v_{k+1} = u_{k+1} + coeff*(u_{k+1} - u_k)
@@ -13,7 +13,7 @@
 // pl_algo_5c_algo_audit) for why the sign is `-` (the eField sign convention bakes
 // Xplace's `+=` into the field) and why there is no per-bin local_density_weight.
 //
-// Position convention (matches markv1 State):
+// Position convention (matches sw_only State):
 //   u = committed "node" position; v = look-ahead "probe" position. The gradient
 //   pipeline (hpwl_CU, density solve) is evaluated at v, so v_k is the step anchor
 //   and node_box carries it (node_box[n].{x,y} == v_k, {w,h} == cell size). u_k is a
@@ -68,7 +68,7 @@ node_loop:
         const float vkx = node_box[n].x, vky = node_box[n].y;
         const float ux = vkx - alpha * pgx;
         const float uy = vky - alpha * pgy;
-        // Nesterov momentum uses the UNCLAMPED u_{k+1} (markv1 step order): v = u + coeff*(u - u_k)
+        // Nesterov momentum uses the UNCLAMPED u_{k+1} (sw_only step order): v = u + coeff*(u - u_k)
         const float ukx = u_in[n].x, uky = u_in[n].y;
         const float vx = ux + coeff * (ux - ukx);
         const float vy = uy + coeff * (uy - uky);

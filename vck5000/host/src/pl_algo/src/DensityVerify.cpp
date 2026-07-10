@@ -1,6 +1,6 @@
 // DensityVerify.cpp -- see DensityVerify.hpp.
 //
-// Old-ABI TU (like HpwlGradVerify): builds the golden with the markv1 parser /
+// Old-ABI TU (like HpwlGradVerify): builds the golden with the sw_only parser /
 // Grid, and crosses into the new-ABI XRT Driver only through runDensityBin's
 // POD + const char* boundary (PackedDesign is std::vector-only).
 
@@ -18,7 +18,7 @@
 
 namespace plalgo {
 
-// markv1 maximum_utilization default; only consistency between golden and PL matters.
+// sw_only maximum_utilization default; only consistency between golden and PL matters.
 static constexpr float TARGET_DENSITY = 0.9f;
 
 int runDensityVerify(AIEplace::DataBase& db, const PackedDesign& pk, const char* xclbin_path) {
@@ -27,7 +27,7 @@ int runDensityVerify(AIEplace::DataBase& db, const PackedDesign& pk, const char*
     const float bin_w = (float)die.getXsize() / G;
     const float bin_h = (float)die.getYsize() / G;
 
-    // ---- golden: markv1 Grid path. Sync probe = pos (computeBinOverlaps reads the
+    // ---- golden: sw_only Grid path. Sync probe = pos (computeBinOverlaps reads the
     // probe position), then two-pass fixed + clamp + movable, fillers EXCLUDED.
     AIEplace::Grid grid(die);   // 1024 x 1024
     for (const auto& kv : db.getComponents()) kv.second->initializeState(kv.second->getPos());

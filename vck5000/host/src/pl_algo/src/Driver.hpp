@@ -80,7 +80,7 @@ void runSpectral(const float* a_uv, int N,
 
 // Stage 4: full electrostatic field solve (rho -> Ex, Ey) in one device/graph session:
 // forward 2D DCT, spectral multiply, and the four inverse IDCT/IDXST passes. rho, Ex, Ey
-// caller-allocated (N*N floats). AIE-using. Mirrors markv1 compute_eField_DCT.
+// caller-allocated (N*N floats). AIE-using. Mirrors sw_only compute_eField_DCT.
 void runField(const float* rho, int N, float* Ex, float* Ey, const char* xclbin_path);
 
 // Stage 5: force gather -- per-movable-node density gradient = sum_bins overlap_area*eField.

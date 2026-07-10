@@ -89,7 +89,7 @@ void Placer::performIteration()
         // Xplace param_scheduler.step(): one shared skip_update flag throttles the density-weight,
         // gamma (wa_coeff), and precond-coef updates together — freezing all three on 2 of every 3
         // iterations during the early stage (iter<50) or while the wirelength/density forces are
-        // mid-balance (density_force_fraction ∈ (0.5,0.95)). markv1 previously scoped this gate to
+        // mid-balance (density_force_fraction ∈ (0.5,0.95)). sw_only previously scoped this gate to
         // density_weight only, letting gamma sharpen 3x too fast early and over-clumping the cells.
         bool skip_update = ((iteration < 50) ||
                             (density_force_fraction > 0.5f && density_force_fraction < 0.95f))
@@ -285,7 +285,7 @@ Placer::Placer(std::string config_filepath)
             // grid-INDEPENDENT: base_gamma = init_gamma*(die_w+die_h)/gamma_ref_grid. At the reference
             // grid this equals the bin-tied form exactly (bin_w+bin_h == die_span/gamma_ref_grid), so
             // the tuned @512 suite is unchanged; at other resolutions the absolute gamma is preserved.
-            // markv1's init_gamma plays XPlace's wa_coeff role. gamma_bin_scaled=false = legacy bare
+            // sw_only's init_gamma plays XPlace's wa_coeff role. gamma_bin_scaled=false = legacy bare
             // constant. gamma_schedule starts gamma at 10x base (overflow~1) and shrinks it as overflow
             // drops (updateGamma).
             if (gamma_bin_scaled)
@@ -535,7 +535,7 @@ void Placer::updatePrecondWeights()
 
     // Area term for a2 (precond_weight + area-mass dff). precond_raw_area=false: legacy area/avg_node_size
     // (keeps a2 O(1) per cell). true: RAW area, matching XPlace alpha_2 = pcoef·λ·mov_node_area — the
-    // coordinate-scale-invariant form (markv1 runs in the same raw-DBU frame as XPlace).
+    // coordinate-scale-invariant form (sw_only runs in the same raw-DBU frame as XPlace).
     for (auto item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         Node* node = item.second;

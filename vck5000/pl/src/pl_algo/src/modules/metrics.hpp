@@ -5,7 +5,7 @@
 //   HPWL          = sum over nets of (max_x - min_x) + (max_y - min_y) of the net's pins
 //   overflow_sum  = sum over bins of max(0, rho - target_density)
 // The host scales overflow_sum by bin_area / total_movable_area to form the ePlace
-// overflow ratio (markv1 Grid::computeTotalOverflow: rho*bin_area is the bin overlap,
+// overflow ratio (sw_only Grid::computeTotalOverflow: rho*bin_area is the bin overlap,
 // capacity is target*bin_area, so excess = bin_area*(rho-target); the bin_area and the
 // movable-area normalization stay on the host, matching "host owns the schedule").
 // HPWL mirrors DataBase::computeTotalWirelength("HPWL") and hpwl_CU's bbox pass exactly:

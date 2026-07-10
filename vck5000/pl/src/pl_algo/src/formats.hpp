@@ -67,7 +67,7 @@ constexpr int STATE_BEATS_PER_NODE = 1;
 // ---- HPWL packet (PL <-> AIE HPWL graph) -----------------------------------
 // The HPWL-gradient transfer contract (packet beat layout, sort rule, gradient
 // return) lives in host_interface.hpp, since it is shared by the host packer and
-// is POD/STL-free. v1 reuses markv1's SIMD-grouped layout verbatim: per degree D,
+// is POD/STL-free. v1 reuses sw_only's SIMD-grouped layout verbatim: per degree D,
 // a control beat then num_groups*D beats of NETS_PER_GROUP nets x {x,y} packed
 // across the 8 lanes (max-coord term first). The host owns grouping + the per-axis
 // max/min sort; PL movers are passthrough. See host_interface.hpp "HPWL GRADIENT

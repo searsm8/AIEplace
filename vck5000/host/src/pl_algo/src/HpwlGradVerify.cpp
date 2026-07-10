@@ -26,7 +26,7 @@ static std::vector<float> buildExpLut(int& lut_size) {
     return lut;
 }
 
-// Exact-exp full-WA gradient golden (mirrors markv1 computeHpwlPartials_CPU).
+// Exact-exp full-WA gradient golden (mirrors sw_only computeHpwlPartials_CPU).
 // Float math throughout to match the kernel, so the comparison isolates LUT-vs-exp.
 static std::vector<coord_t> gradientGolden(const PackedDesign& pk, float inv_gamma) {
     const int M = pk.header.num_movable;

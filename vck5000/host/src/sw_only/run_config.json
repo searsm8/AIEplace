@@ -51,7 +51,7 @@
                                        // suite re-verify. Kept as an opt-in for lambda interpretability / PL-port.
     "precond_raw_area": false,         // preconditioner/dff density-mass area term. false = legacy area/avg_node_size;
                                        // true = RAW node area (XPlace-faithful alpha_2 = pcoef*lambda*mov_node_area).
-                                       // The /avg_node_size was a spurious deviation (markv1 is in the same raw-DBU
+                                       // The /avg_node_size was a spurious deviation (sw_only is in the same raw-DBU
                                        // frame as XPlace); raw area is coordinate-scale-invariant like weighted_weight.
     "dff_force_ratio": false,          // density_force_fraction basis. false = legacy area-mass a2/(a1+a2);
                                        // true = force-magnitude ratio ||lambda*grad_den||1 / (||grad_wl||1 +

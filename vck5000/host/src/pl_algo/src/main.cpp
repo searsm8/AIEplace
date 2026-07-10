@@ -117,7 +117,7 @@ int main(int argc, char** argv) {
     }
 
     // Verify the PL bin-density module on a real benchmark: parse + pack, run
-    // density_bin on the device, compare rho vs the markv1 Grid golden.
+    // density_bin on the device, compare rho vs the sw_only Grid golden.
     if (argc >= 4 && std::strcmp(argv[1], "--density") == 0) {
         AIEplace::DataBase db(argv[2]);
         db.printInfo();

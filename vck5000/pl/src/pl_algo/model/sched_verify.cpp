@@ -1,6 +1,6 @@
-// sched_verify.cpp -- offline verification of the PL param_scheduler against the markv1 golden.
+// sched_verify.cpp -- offline verification of the PL param_scheduler against the sw_only golden.
 //
-// Replays a recorded schedule_trace.csv (markv1 with "dump_schedule_trace": true) through
+// Replays a recorded schedule_trace.csv (sw_only with "dump_schedule_trace": true) through
 // modules/param_scheduler.hpp and asserts the four produced scalars (inv_gamma, alpha, coeff,
 // lambda) match the golden row-for-row. Pure g++/offline -- no device, no XRT -- so the tuned
 // scalar schedule is nailed before any sw_emu integration (PL_PORT_PLAN.md stages S3-S4).
@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
     p.base_gamma = rows[0].base_gamma;
     p.min_step = 0.95f; p.max_step = 1.05f; p.init_multiplier = 8e-5f;
     p.dff_coef = (float)c_med; p.enable_momentum = 1; p.gamma_schedule = 1;
-    // convergence config: the trace was produced with stop 0.04; the rest are markv1 defaults.
+    // convergence config: the trace was produced with stop 0.04; the rest are sw_only defaults.
     p.overflow_threshold = 0.04f; p.min_iters = 50; p.max_iters = 1200;
     p.conv_iters = 30; p.max_life = 30;
 

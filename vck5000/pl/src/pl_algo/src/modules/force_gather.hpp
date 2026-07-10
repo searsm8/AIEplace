@@ -8,7 +8,7 @@
 // This is the ADJOINT of density_bin's area scatter (density_bin scatters overlap_area
 // INTO rho; this gathers overlap_area * eField OUT). The overlap area is required, not
 // optional -- confirmed vs DREAMPlace electric_force_cuda_kernel (area * field_map) and
-// Xplace density_map_cuda_backward (overlap_area * grad_mat); markv1's original
+// Xplace density_map_cuda_backward (overlap_area * grad_mat); sw_only's original
 // computeElectrostaticForce omitted it (fixed 2026-07-03).
 //
 // Overlaps are REGENERATED here (same rectangle-intersection geometry as

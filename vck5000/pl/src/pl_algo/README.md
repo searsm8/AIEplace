@@ -5,7 +5,8 @@ FFT (an 8-lane pool) and the HPWL gradient graph; everything else -- bin density
 DCT/IDCT/IDXST pre/post-processing, e-field gather, gradient combine, Barzilai-Borwein
 step, Nesterov update, and the metric reductions -- runs in the PL.
 
-markv1 remains the working/tuned software+partial-offload reference and is untouched.
+sw_only (`HOST=sw_only`, formerly `markv1`) remains the working/tuned software-only golden
+reference; the partial-offload hardware kernels remain under `AIE=markv1`/`PL=markv1`.
 
 #### Layout
 - `src/top.cpp` -- top-level kernel; owns the per-iteration FSM and wires the modules.

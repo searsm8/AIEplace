@@ -3,7 +3,7 @@
 GIF for each (Output.cpp calls tools/gif_builder.py on the dumped per-iteration PNGs).
 
 Runs sequentially — per-frame cairo rendering of a large design is heavy and there is no
-benefit to overlapping it. Reuses markv1's base config and the same seed/grid/threshold as
+benefit to overlapping it. Reuses sw_only's base config and the same seed/grid/threshold as
 the DSE full suite so the animated trajectory matches the swept result. Must be run from
 vck5000/ (paths are relative to it), same as dse.py.
 """

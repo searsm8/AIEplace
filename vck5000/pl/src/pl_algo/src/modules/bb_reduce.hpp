@@ -8,7 +8,7 @@
 //   grad_norm_sq = sum_n ||(g_total_n - g_total_prev_n)/precond_n||^2   (preconditioned grad delta)
 // It also MATERIALIZES this iteration's combined gradient g_total = g_hpwl - lambda*g_density into
 // g_total_out, which becomes g_total_prev for the next iteration's difference. This is the on-device
-// replacement for the host BB reduction (markv1 computeLipshitzEstimate, AIEplace.cpp:281) and for
+// replacement for the host BB reduction (sw_only computeLipshitzEstimate, AIEplace.cpp:281) and for
 // host Placement.hpp bbStepLength -- removing the last per-iteration host round-trip in the control
 // path, which is what makes the device-resident loop possible.
 //

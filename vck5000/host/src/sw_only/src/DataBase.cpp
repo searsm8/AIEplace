@@ -823,7 +823,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                     iopad_p->addNet(new_net);
                 } else if(mm_components.count(net_pin.node_name)){ // it's a component
                     Component* comp_p = mm_components[net_pin.node_name];
-                    // Bookshelf pin offsets are relative to the cell CENTER; markv1 node_pos is the
+                    // Bookshelf pin offsets are relative to the cell CENTER; sw_only node_pos is the
                     // lower-left corner, so shift by half-size to make the stored offset LL-relative
                     // (the NetPin.offset convention shared with the LEF/DEF path). Offsets and sizes
                     // are already in the same units here (no micron→dbu scaling for bookshelf).

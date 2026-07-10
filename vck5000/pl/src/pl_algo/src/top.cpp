@@ -3,8 +3,8 @@
 // One kernel, modules selected by `mode` (host_interface.hpp top_mode). Bring-up
 // scaffold: each module is verified independently through one kernel while we
 // build toward the unified per-iteration datapath (Stage 5).
-//   MODE_HPWL_GRAD   -> hpwl_CU    : HPWL gradient (vs markv1 computeHpwlPartials_CPU).
-//   MODE_DENSITY_BIN -> density_bin : bin density rho (vs markv1 computeOverlaps).
+//   MODE_HPWL_GRAD   -> hpwl_CU    : HPWL gradient (vs sw_only computeHpwlPartials_CPU).
+//   MODE_DENSITY_BIN -> density_bin : bin density rho (vs sw_only computeOverlaps).
 //   MODE_DCT_1D      -> dct_1d     : 1D DCT via the AIE FFT (PL shuffle/twiddle, AIE
 //                                    does only the forward FFT). First AIE-using mode.
 // The inactive modules' buffers are still kernel args (the host binds 1-element

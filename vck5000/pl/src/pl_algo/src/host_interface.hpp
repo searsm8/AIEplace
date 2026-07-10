@@ -96,7 +96,7 @@ struct NetSums { float Bpx, Bmx, Cpx, Cmx, Bpy, Bmy, Cpy, Cmy; }; // WA B/C sums
 // ===========================================================================
 // The AIE HPWL-gradient graph computes, per pin, the weighted-average (WA)
 // wirelength partials dW/dx, dW/dy and the host accumulates them per node.
-// Reference math: markv1 computeHpwlPartials_CPU() (Partials.cpp). The on-chip
+// Reference math: sw_only computeHpwlPartials_CPU() (Partials.cpp). The on-chip
 // kernel is a SIMD port of that, with two fixed properties we must match when
 // verifying:
 //   * gamma is a COMPILE-TIME constant on the AIE (no runtime params on the
@@ -106,7 +106,7 @@ struct NetSums { float Bpx, Bmx, Cpx, Cmx, Bpy, Bmy, Cpy, Cmy; }; // WA B/C sums
 //     (RMS / R^2 / outlier %), never bit-exact.
 
 // ---- AIE packet geometry (PL <-> AIE HPWL graph) ---------------------------
-// Ported verbatim from markv1 (Common.h). The AIE processes nets in SIMD
+// Ported verbatim from sw_only (Common.h). The AIE processes nets in SIMD
 // "groups": NETS_PER_GROUP nets of the SAME degree share one 8-lane vector,
 // with x and y interleaved, so one kernel pass yields both x and y partials for
 // 4 nets at once (4 nets * {x,y} = 8 lanes = AIE_VEC).
@@ -116,7 +116,7 @@ constexpr int   AIE_VEC        = 8;     // floats per AIE vector beat (VEC_SIZE)
 constexpr int   NETS_PER_GROUP = 4;     // nets packed across the 8 lanes (x,y interleaved)
 constexpr int   AIE_NET_MIN    = 2;     // smallest net degree handled on the AIE
 constexpr int   AIE_NET_MAX    = 8;     // largest net degree handled on the AIE
-constexpr float AIE_INV_GAMMA  = 0.25f; // 1/gamma baked into the AIE kernel (== markv1)
+constexpr float AIE_INV_GAMMA  = 0.25f; // 1/gamma baked into the AIE kernel (== sw_only)
 
 // ---- AIE input packet  (host -> PL mover -> AIE)  flat float buffer ---------
 // One packet per net degree D. Layout (all beats are AIE_VEC floats):
@@ -150,7 +150,7 @@ constexpr float AIE_INV_GAMMA  = 0.25f; // 1/gamma baked into the AIE kernel (==
 // The density_manager scatters node areas into the GRID x GRID bin-density grid
 // rho (the ePlace charge density), as step 1 of the electrostatic-field solve.
 // Stage 1 implements only the binning + readback; the DCT/FFT field solve follows
-// in later stages. Reference: markv1 Grid::computeBinOverlaps + clampFixedDensity
+// in later stages. Reference: sw_only Grid::computeBinOverlaps + clampFixedDensity
 // + getBinDensities (Density.cpp::computeOverlaps). Fillers are EXCLUDED in v1
 // (TODO: add fillers once the field pipeline is in place).
 
@@ -226,10 +226,10 @@ struct NodeBox { float x; float y; float w; float h; };
 // ---- Bin density rho  (PL -> host for Stage 1; DDR scratch later) -----------
 //   float bin_density[GRID*GRID], row-major FIRST-INDEX(x)-major:
 //     bin_density[x*GRID + y]   x horizontal in [0,GRID), y vertical in [0,GRID)
-//   to match markv1 density[x][y] and make a fixed-x "row" contiguous (the DCT's
+//   to match sw_only density[x][y] and make a fixed-x "row" contiguous (the DCT's
 //   row direction). Natural float (128-bit beat packing deferred, like hpwl_CU).
 //   bin_w = die_xsize/GRID, bin_h = die_ysize/GRID; bin indexing assumes die
-//   origin (0,0) (markv1 convention). rho = clamped_overlap / (bin_w*bin_h);
+//   origin (0,0) (sw_only convention). rho = clamped_overlap / (bin_w*bin_h);
 //   fixed overlap is clamped to target_density*bin_area before movable is added.
 
 } // namespace plalgo

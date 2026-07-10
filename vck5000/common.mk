@@ -40,7 +40,7 @@ endif
 
 AIE ?= markv1
 PL ?= markv1
-HOST ?= markv1
+HOST ?= sw_only
 
 AIE_PARTIALS_INSTANCES ?= 1
 AIE_DENSITY_INSTANCES ?= 1

@@ -4,7 +4,7 @@
 // HPWL compute unit (PL).
 //
 // Computes the weighted-average HPWL gradient (dW/dx, dW/dy) for every movable
-// node, entirely on the PL -- no AIE. Math mirrors markv1 computeHpwlPartials_CPU,
+// node, entirely on the PL -- no AIE. Math mirrors sw_only computeHpwlPartials_CPU,
 // with exp() replaced by a host-supplied LUT (exp(-d/gamma), linear-interpolated).
 //
 // THREE SEGMENTED REDUCTIONS, FULLY ARBITRARY-SIZE. Every phase streams a flat pin

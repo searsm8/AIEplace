@@ -1,12 +1,12 @@
 # pl_algo host: lean IO/policy driver around the PL.
-# Reuses the markv1 parser (DataBase + Limbo) and data model; the CPU solver and
+# Reuses the sw_only parser (DataBase + Limbo) and data model; the CPU solver and
 # visualizer are intentionally absent (the algorithm runs on the PL).
 
 THIRD_PARTY = $(PROJECT_ROOT)/../third_party
-MARKV1_DIR  = $(PROJECT_ROOT)/host/src/markv1
+SW_ONLY_DIR = $(PROJECT_ROOT)/host/src/sw_only
 
 HOST_MAIN = main.cpp
-# Frozen parser subset (copied from markv1) + the new packer.
+# Frozen parser subset (copied from sw_only) + the new packer.
 HOST_SRCS = DataBase.cpp Net.cpp Common.cpp Logger.cpp Grid.cpp \
 	    Packer.cpp
 
@@ -21,8 +21,8 @@ CXXFLAGS += -std=c++2a -g -O0
 
 LDLIBS += -lpthread -lrt -lstdc++ -lstdc++fs
 
-# Parsers (Limbo) -- reuse markv1's prebuilt static libs.
-LDFLAGS += -L$(MARKV1_DIR)/lib
+# Parsers (Limbo) -- reuse sw_only's prebuilt static libs.
+LDFLAGS += -L$(SW_ONLY_DIR)/lib
 LDLIBS  += -llefparseradapt -ldefparseradapt -lbookshelfparser -lgzstream -lz
 CPPFLAGS += -I${THIRD_PARTY}/Limbo   # boost is found via the system include path
 CPPFLAGS += -D_GLIBCXX_USE_CXX11_ABI=0

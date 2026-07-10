@@ -3,7 +3,7 @@
 
 // node_footprint -- shared density footprint geometry for the density solve.
 //
-// Mirrors markv1 Grid::computeBinOverlaps (the software golden). When clamping, each cell
+// Mirrors sw_only Grid::computeBinOverlaps (the software golden). When clamping, each cell
 // is inflated to at least sqrt(2) bins per dimension and its deposited density is scaled by
 // weight = real_area / clamped_area, so total area is conserved but a sub-bin cell is smeared
 // across the grid resolution instead of spiking a single bin. The footprint is centered on the
