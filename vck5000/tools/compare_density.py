@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare markv1 vs XPlace bin-density maps (physical / exact real-cell density).
 
-markv1 dump  (Placer::dumpBinDensity): <bench>_density_rho_exact.csv / _rho_masked.csv
+markv1 dump  (Placer::dumpBinDensity): <bench>_density_rho_exact.csv / _rho_smoothed.csv
     plain CSV, one line per grid row y (0 = bottom), comma-separated over columns x.
     Values are rho = deposited_area / bin_area (fillers excluded).
 XPlace dump  (run_placement_nesterov.py, XPLACE_DUMP_DENSITY=1):

@@ -406,8 +406,9 @@ void Placer::computeOverlaps()
 }
 
 /*
- * @brief Overflow metric with fillers excluded. clamp=true gives XPlace's *masked* overflow
- * (the global-placement convergence signal); clamp=false gives the *exact* physical overflow.
+ * @brief Overflow metric with fillers excluded. clamp=true gives the *smoothed* overflow
+ * (the global-placement convergence signal; equivalent to XPlace's expand_ratio-inflated
+ * density field); clamp=false gives the *exact* physical overflow.
  *
  * Same formula as Grid::computeTotalOverflow (sum of per-bin excess over target*bin_area,
  * normalized by movable area), evaluated on an independently-built density map so the two
@@ -417,7 +418,7 @@ void Placer::computeOverlaps()
  * so sub-bin cells are smeared to grid resolution rather than spiking a single bin. Fixed
  * macros form a per-bin-capped baseline (mirrors clampFixedDensity); fillers are excluded.
  *
- * Why masked matters: it is the smoothed density the electrostatic optimizer actually
+ * Why smoothed matters: it is the smoothed density the electrostatic optimizer actually
  * minimizes, so it descends cleanly to the stop threshold. The exact overflow re-measures
  * with sharp footprints, whose sub-bin quantization spikes leave it floored above threshold
  * even for a well-spread placement (the markv1 "can't reach 0.07" effect).
@@ -485,7 +486,7 @@ float Placer::computeOverflow(bool clamp, std::vector<float>* out_density)
 /**
  * @brief Dump the real-cell bin-density map ρ for offline comparison with XPlace.
  *
- * Writes two CSVs — masked (clamped footprints, the smoothed field the optimizer
+ * Writes two CSVs — smoothed (clamped footprints, the smoothed field the optimizer
  * minimizes) and exact (sharp footprints, the physical density) — at the current
  * (restored best) placement, using the same deposit as computeOverflow (fillers
  * excluded, fixed baseline capped). ρ = deposited_area / bin_area, so ρ = 1 means a
@@ -502,14 +503,14 @@ void Placer::dumpBinDensity(const std::string& path_prefix)
         std::vector<float> density;
         computeOverflow(clamp, &density); // fills density[col*ny + row] (area per bin)
 
-        std::string fname = path_prefix + (clamp ? "_rho_masked.csv" : "_rho_exact.csv");
+        std::string fname = path_prefix + (clamp ? "_rho_smoothed.csv" : "_rho_exact.csv");
         std::ofstream out(fname);
         for (int r = 0; r < ny; r++) {
             for (int c = 0; c < nx; c++)
                 out << (c ? "," : "") << (density[c * ny + r] / bin_area);
             out << "\n";
         }
-        Logger::log_info("Dumped " + std::string(clamp ? "masked" : "exact") +
+        Logger::log_info("Dumped " + std::string(clamp ? "smoothed" : "exact") +
                          " bin-density map (" + std::to_string(nx) + "x" +
                          std::to_string(ny) + ") -> " + fname);
     }

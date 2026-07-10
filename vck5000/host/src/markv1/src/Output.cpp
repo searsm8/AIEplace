@@ -398,11 +398,11 @@ void Placer::printFinalResults()
     algo_time = Logger::getFunctionTime("run")/ 1e6; // Convert microseconds to seconds
     float final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
     // Exact (physical) overflow — sharp footprints, the real spreading quality. Reported
-    // alongside the masked overflow that drove convergence (see computeOverflow).
+    // alongside the smoothed overflow that drove convergence (see computeOverflow).
     float final_overflow = computeOverflow(false);
-    float final_masked_overflow = computeOverflow(true);
+    float final_smoothed_overflow = computeOverflow(true);
 
-    // Optional: dump the restored-best bin-density map (masked + exact) for offline
+    // Optional: dump the restored-best bin-density map (smoothed + exact) for offline
     // comparison against XPlace. Gated by config so normal runs are unaffected.
     if (cfg["params"].contains("dump_density") && cfg["params"]["dump_density"]) {
         dumpBinDensity((output_dir / (db.getBenchmarkName() + "_density")).string());
@@ -435,7 +435,7 @@ void Placer::printFinalResults()
         results.add_row(RowStream{} << "Initial HPWL" << std::scientific << std::setprecision(3) << m_initial_hpwl);
         results.add_row(RowStream{} << "HPWL improvement (%)" << std::fixed << std::setprecision(2) << hpwl_improvement);
     }
-    results.add_row(RowStream{} << "Final Overflow (masked)" << std::scientific << std::setprecision(3) << final_masked_overflow);
+    results.add_row(RowStream{} << "Final Overflow (smoothed)" << std::scientific << std::setprecision(3) << final_smoothed_overflow);
     results.add_row(RowStream{} << "Final Overflow (exact)" << std::scientific << std::setprecision(3) << final_overflow);
     if (chosen.valid) {
         std::string type = (&chosen == &best_primary) ? "primary" : "fallback";
@@ -678,10 +678,11 @@ void Placer::initializeFocus()
 void Placer::recordIterationResults()
 {
     float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
-    // Drive convergence off XPlace's masked overflow (clamped footprints, fillers excluded):
-    // the smoothed density the optimizer minimizes, which descends cleanly to the stop
-    // threshold. The exact overflow is reported separately as the physical result.
-    float overflow = computeOverflow(true);   // masked (clamped) — the convergence signal
+    // Drive convergence off the smoothed overflow (clamped footprints, fillers excluded;
+    // equivalent to XPlace's expand_ratio-inflated field): the smoothed density the optimizer
+    // minimizes, which descends cleanly to the stop threshold. The exact overflow is reported
+    // separately as the physical result.
+    float overflow = computeOverflow(true);   // smoothed (clamped) — the convergence signal
 
     hpwl_history.push_back(hpwl);
     step_length_history.push_back(step_length);

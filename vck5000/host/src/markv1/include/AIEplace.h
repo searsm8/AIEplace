@@ -227,10 +227,11 @@ public:
 
     void computeOverlaps();
     float computeOverflow(bool clamp, std::vector<float>* out_density = nullptr);
-                                        // overflow metric, fillers excluded; clamp=true = XPlace
-                                        // masked (GP convergence), clamp=false = exact (physical).
+                                        // overflow metric, fillers excluded; clamp=true = smoothed
+                                        // (GP convergence, XPlace expand_ratio field), clamp=false =
+                                        // exact (physical).
                                         // out_density (optional): area deposited per bin (col*ny+row).
-    void dumpBinDensity(const std::string& path_prefix); // ρ maps (masked+exact) for XPlace compare
+    void dumpBinDensity(const std::string& path_prefix); // ρ maps (smoothed+exact) for XPlace compare
 
 
     // Comparison functions for verification

@@ -109,7 +109,7 @@ dse_sweep = OrderedDict([
 #   ]
 def _full_suite():
     """Full 28-benchmark snapshot: every design with a known XPlace reference, each at
-    its XPlace grid (setup_dataset.py). seed 42, stop masked-overflow 0.04. Ordered
+    its XPlace grid (setup_dataset.py). seed 42, stop smoothed-overflow 0.04. Ordered
     largest-first (by node count) so the long jobs start first (LPT makespan)."""
     grid = {  # design -> (benchmark path, XPlace num_bin)
         "bigblue4":        ("ispd2005/bigblue4",           2048),

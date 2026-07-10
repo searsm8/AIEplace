@@ -23,7 +23,7 @@ lines = [
     "",
     f"Source: `{d}`  |  {len(rows)} designs completed  |  best defaults "
     "(grid-indep γ, dct_normalize, pin offsets; precond OFF), each at its XPlace grid, "
-    "seed 42, stop masked-overflow 0.04.",
+    "seed 42, stop smoothed-overflow 0.04.",
     "",
     "Ratio = markv1 GP best HPWL / XPlace **published** reference (post-legalization+DP for "
     "ISPD2005). markv1 is **global placement only** (no legalization, no detailed placement).",

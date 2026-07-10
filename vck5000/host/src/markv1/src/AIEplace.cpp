@@ -806,7 +806,7 @@ bool Placer::checkConvergence()
         }
         convergence_iterations_remaining--;
 
-        // Run the full countdown after masked overflow first crosses the threshold, rather
+        // Run the full countdown after smoothed overflow first crosses the threshold, rather
         // than stopping on the first crossing. HPWL is already plateaued by this point, so a
         // HPWL-plateau early-out would stop immediately and leave overflow (and thus the
         // physical spread) worse than it needs to be; the countdown lets overflow keep

@@ -53,7 +53,7 @@ void Grid::computeBinOverlaps(Node* node_p)
     // Clamping smooths sub-bin cells to the grid resolution, so the density field — and hence
     // the electrostatic force/gradient the optimizer follows — has no sub-bin spikes. Macros
     // already exceed the clamp, so they are unaffected (weight stays 1). Must stay in sync with
-    // Placer::computeOverflow, which applies the same clamp to the masked overflow metric.
+    // Placer::computeOverflow, which applies the same clamp to the smoothed overflow metric.
     float cw = w, ch = h, weight = 1.0f;
     if (m_clamp_density) {
         const float SQRT2 = 1.41421356f;
