@@ -147,7 +147,55 @@ def _full_suite():
         for name, (path, n) in grid.items()
     ]
 
-explicit_runs = _full_suite()
+def _precond_ab():
+    """A/B: enable_preconditioning OFF vs ON, each design at its XPlace grid.
+    Verifies the BB-clamp removal: ON must converge (was stalling), OFF must
+    match its pre-change baseline."""
+    grid = {
+        "adaptec1": ("ispd2005/adaptec1",  512),
+        "adaptec2": ("ispd2005/adaptec2", 1024),
+        "bigblue1": ("ispd2005/bigblue1",  512),
+    }
+    runs = []
+    for name, (path, n) in grid.items():
+        for precond in (False, True):
+            runs.append({
+                "label": f"{name}@{n}_{'ON' if precond else 'OFF'}",
+                "benchmark": path,
+                "bins_per_row": n,
+                "enable_preconditioning": precond,
+                "convergence_overflow_threshold": 0.04,
+                "random_seed": 42,
+            })
+    return runs
+
+def _precond_on_subset():
+    """Preconditioning ON across a representative size-spanning subset, each design at
+    its XPlace grid. Pairs against the full-suite OFF baseline (same seed/grid/threshold)
+    for a direct A/B. Includes the three adaptec/bigblue designs from _precond_ab plus a
+    large superblue and a standard-cell des_perf for coverage."""
+    grid = {
+        "adaptec1":        ("ispd2005/adaptec1",         512),
+        "adaptec2":        ("ispd2005/adaptec2",        1024),
+        "bigblue1":        ("ispd2005/bigblue1",         512),
+        "mgc_superblue19": ("ispd2015/mgc_superblue19",  512),
+        "mgc_des_perf_1":  ("ispd2015/mgc_des_perf_1",   512),
+    }
+    return [
+        {"label": f"{name}@{n}_precondON", "benchmark": path, "bins_per_row": n,
+         "enable_preconditioning": True,
+         "convergence_overflow_threshold": 0.04, "random_seed": 42}
+        for name, (path, n) in grid.items()
+    ]
+
+# Run-set selected by the DSE_RUN_SET env var so a follow-up sweep can be queued without
+# editing this file between runs. Defaults to the full 28-design suite.
+_RUN_SETS = {
+    "full_suite": _full_suite,
+    "precond_ab": _precond_ab,
+    "precond_on": _precond_on_subset,
+}
+explicit_runs = _RUN_SETS[os.environ.get("DSE_RUN_SET", "full_suite")]()
 
 
 # =============================================================================
