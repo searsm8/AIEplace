@@ -18,5 +18,13 @@ build/
 *core.*
 results/
 temp/
+*.vcd
+*.aiecompile_summary
+
+.AIE_SIM_CMD_LINE_OPTIONS
+pl_sample_counts
+ISS_RPC_SERVER_PORT
+vck5000/aie/scripts/
+!vck5000/aie/scripts/gen_fft_data.py
 
 vck5000/output/

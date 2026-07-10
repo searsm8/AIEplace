@@ -7,7 +7,7 @@ AIEplaceGraph aieplace;
 
 #if defined(__AIESIM__) || defined(__X86SIM__) || defined(__ADF_FRONTEND__)
 
-#define ITERATIONS 1
+#define ITERATIONS 4
 
 int main(void) {
   aieplace.init();

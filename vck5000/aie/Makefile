@@ -12,7 +12,7 @@ AIE_SRCS_MAIN := $(AIE_DIR)/src/$(TOPGRAPH).cpp
 AIE_SRCS_OTHER := $(filter-out $(AIE_SRCS_MAIN), $(wildcard $(AIE_DIR)/src/*))
 
 AIE_FLAGS := --include "$(AIE_DIR)/src"
-AIE_FLAGS += --Xpreproc="-DPARTIALS_INSTANCES=$(AIE_PARTIALS_INSTANCES) -DDENSITY_INSTANCES=$(AIE_DENSITY_INSTANCES)"
+AIE_FLAGS += --Xpreproc="-DPARTIALS_INSTANCES=$(AIE_PARTIALS_INSTANCES) -DDENSITY_CHANNELS=$(AIE_DENSITY_INSTANCES)"
 AIE_FLAGS += --stacksize=2048
 
 # Add subcomponent variables
@@ -42,7 +42,7 @@ $(AIE_LIBADF): $(AIE_SRCS_MAIN) $(AIE_SRCS_OTHER)
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 .PHONY: aiesim x86sim
 # Simulate AIE code
-aiesim:  $(BUILD_DIR)/hw/aie/libadf_$(AIE).a
+aiesim:  $(BUILD_DIR)/hw/aie/$(AIE)/libadf_$(AIE)_$(INSTANCES_CONFIG).a
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	@echo "INFO: Running aiesimulator..."
 	aiesimulator --pkg-dir=$(AIE_WORKDIR) --profile --dump-vcd=AIEplace --hang-detect-time=10000 --output-dir=$(BUILD_DIR)/x86simulator_output
