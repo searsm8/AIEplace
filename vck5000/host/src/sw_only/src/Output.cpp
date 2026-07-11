@@ -396,7 +396,7 @@ void Placer::printFinalResults()
 
     // Calculate final metrics
     algo_time = Logger::getFunctionTime("run")/ 1e6; // Convert microseconds to seconds
-    float final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
+    float final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"], cfg["params"].value("ignore_net_degree", 100));
     // Exact (physical) overflow — sharp footprints, the real spreading quality. Reported
     // alongside the smoothed overflow that drove convergence (see computeOverflow).
     float final_overflow = computeOverflow(false);
@@ -577,7 +577,7 @@ float Placer::getMemoryUsageMB()
 // Additional function to track initial HPWL (call this at the start of placement)
 void Placer::recordInitialHPWL()
 {
-    m_initial_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
+    m_initial_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"], cfg["params"].value("ignore_net_degree", 100));
     Logger::log_info("Initial HPWL recorded: " + std::to_string(m_initial_hpwl));
 }
 
@@ -677,7 +677,7 @@ void Placer::initializeFocus()
 
 void Placer::recordIterationResults()
 {
-    float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"]);
+    float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"], cfg["params"].value("ignore_net_degree", 100));
     // Drive convergence off the smoothed overflow (clamped footprints, fillers excluded;
     // equivalent to XPlace's expand_ratio-inflated field): the smoothed density the optimizer
     // minimizes, which descends cleanly to the stop threshold. The exact overflow is reported

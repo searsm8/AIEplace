@@ -149,7 +149,7 @@ public:
     const vector<Net *> &getFocusNets() { return mv_focus_nets; }
     const vector<Node *> &getFocusNodes() { return mv_focus_nodes; }
 
-    float computeTotalWirelength(string);
+    float computeTotalWirelength(string, int max_net_degree = INT_MAX);
     float computeTotalComponentArea();
     float getTotalFixedArea() { return m_total_fixed_area; }
     float getTotalMovableArea() { return m_total_movable_area; }

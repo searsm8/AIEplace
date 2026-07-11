@@ -352,11 +352,15 @@ void DataBase::sortPositionsMaxMinY()
         item.second->sortPositionsMaxMinY();
 }
 
-float DataBase::computeTotalWirelength(string method)
+float DataBase::computeTotalWirelength(string method, int max_net_degree)
 {
+    // max_net_degree matches XPlace's ignore_net_degree (net_mask): nets with more pins are
+    // excluded from the HPWL metric so the reported number, the density-weight schedule's
+    // delta_hpwl, and convergence all measure the SAME masked wirelength XPlace does.
     float total = 0;
     for (auto item : mm_nets)
-        total += item.second->computeWirelength(method);
+        if (item.second->getDegree() <= max_net_degree)
+            total += item.second->computeWirelength(method);
     return total;
 }
 

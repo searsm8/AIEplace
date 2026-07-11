@@ -209,10 +209,11 @@ void Placer::computeHpwlPartials_simple()
 
     const float range = hpwl_lut_range;
 
+    int ignore_net_degree = cfg["params"].value("ignore_net_degree", 100); // XPlace net_mask
     for (Net* net_p : db.getNetsVector()) {
         const std::vector<NetPin>& pins = net_p->getPins();
         int net_size = net_p->getDegree();
-        if (net_size <= 1) continue;
+        if (net_size <= 1 || net_size > ignore_net_degree) continue;
 
         // Find bounding box using pin positions (node + offset)
         float min_x = __FLT_MAX__, min_y = __FLT_MAX__;
@@ -255,11 +256,16 @@ void Placer::computeHpwlPartials_simple()
 void Placer::computeHpwlPartials_CPU()
 {
     TIME_FUNCTION();
+    // Match XPlace net_mask (database.py:613, ignore_net_degree=100): high-degree nets
+    // (clock/reset/scan spanning the die) are excluded from the wirelength gradient. Their
+    // WA gradient pulls hundreds of unrelated cells and is noise for placement; XPlace drops
+    // them from both the gradient and the HPWL metric (see computeTotalWirelength).
+    int ignore_net_degree = cfg["params"].value("ignore_net_degree", 100);
     for (Net* net_p : db.getNetsVector()) {
         const std::vector<NetPin>& pins = net_p->getPins();
         int net_size = net_p->getDegree();
 
-        if (net_size <= 1) continue;
+        if (net_size <= 1 || net_size > ignore_net_degree) continue;
 
         // find max and min x and y pin positions (node + offset)
         float min_x = __FLT_MAX__, min_y = __FLT_MAX__, max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
