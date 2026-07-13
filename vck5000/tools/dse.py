@@ -188,12 +188,36 @@ def _precond_on_subset():
         for name, (path, n) in grid.items()
     ]
 
+def _gamma_ab():
+    """gamma_ref_grid A/B on the 1024-grid designs: 512 (current, grid-independent) vs 1024
+    (= num_bins, matching XPlace's bin-tied base_gamma = 4*(bin_w+bin_h)). Isolates the one
+    remaining gamma mismatch vs XPlace. @512 designs are unaffected (512==num_bins) so they
+    are not included. Compare Best HPWL against the measured XPlace GP numbers, not the
+    legalized reference in Output.cpp."""
+    grid = {  # all 1024-grid designs we have (or are getting) XPlace GP numbers for
+        "adaptec2": ("ispd2005/adaptec2", 1024),
+        "bigblue2": ("ispd2005/bigblue2", 1024),
+        "adaptec3": ("ispd2005/adaptec3", 1024),
+        "adaptec4": ("ispd2005/adaptec4", 1024),
+    }
+    runs = []
+    for name, (path, n) in grid.items():
+        for ref in (512, 1024):
+            runs.append({
+                "label": f"{name}@{n}_gref{ref}",
+                "benchmark": path, "bins_per_row": n,
+                "gamma_ref_grid": ref,
+                "convergence_overflow_threshold": 0.04, "random_seed": 42,
+            })
+    return runs
+
 # Run-set selected by the DSE_RUN_SET env var so a follow-up sweep can be queued without
 # editing this file between runs. Defaults to the full 28-design suite.
 _RUN_SETS = {
     "full_suite": _full_suite,
     "precond_ab": _precond_ab,
     "precond_on": _precond_on_subset,
+    "gamma_ab": _gamma_ab,
 }
 explicit_runs = _RUN_SETS[os.environ.get("DSE_RUN_SET", "full_suite")]()
 
