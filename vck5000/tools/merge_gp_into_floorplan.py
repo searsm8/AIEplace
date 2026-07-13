@@ -41,8 +41,10 @@ def load_gp_coords(path):
             if m:
                 cur = m.group(1)
             # coords may be on the "- ..." line or the following "+ PLACED ( x y ) O ;" line.
-            # sw_only's writeDEF emits FRACTIONAL DBU coords; DEF requires integers, so round.
-            pm = re.search(r"(PLACED|FIXED)\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)\s*(\w+)", line)
+            # sw_only's writeDEF emits FRACTIONAL DBU coords, and large values in scientific
+            # notation ("1.46115e+06"); DEF requires integers, so accept both forms and round.
+            num = r"-?[\d.]+(?:[eE][+-]?\d+)?"
+            pm = re.search(rf"(PLACED|FIXED)\s*\(\s*({num})\s+({num})\s*\)\s*(\w+)", line)
             if pm and cur:
                 x = str(round(float(pm.group(2))))
                 y = str(round(float(pm.group(3))))
