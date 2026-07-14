@@ -237,6 +237,16 @@ def _nonconverge_ab():
                          "convergence_overflow_threshold": 0.04, "random_seed": 42, **over})
     return runs
 
+def _full_suite_autogrid():
+    """Same 28 designs as full_suite but WITHOUT bins_per_row -> the exe auto-sizes the grid via the
+    ePlace formula (AIEplace.cpp). Re-baseline for the grid-sizing change; compare per-design against
+    the fixed-XPlace-grid baseline DSE_20260713_105516 (same seed 42, stop 0.04)."""
+    runs = _full_suite()
+    for r in runs:
+        r.pop("bins_per_row", None)
+        r["label"] = r["label"].split("@")[0] + "@auto"
+    return runs
+
 def _grid_ab():
     """Bucket-2 (mild) stall test: are the low-row std-cell designs stalling because 512x512 is
     FINER than the row structure? XPlace caps num_bin to <= num_rows (pci_bridge32_b: 400 rows ->
@@ -256,6 +266,7 @@ def _grid_ab():
 # editing this file between runs. Defaults to the full 28-design suite.
 _RUN_SETS = {
     "full_suite": _full_suite,
+    "full_suite_autogrid": _full_suite_autogrid,
     "precond_ab": _precond_ab,
     "precond_on": _precond_on_subset,
     "gamma_ab": _gamma_ab,
