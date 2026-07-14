@@ -9,7 +9,7 @@ import csv, sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from xplace_gp_ref import gp_ref
 
-XPLACE_GP = gp_ref(refresh=True)  # design -> XPlace GP (pre-LG) masked_hpwl
+XPLACE_GP = gp_ref()  # ISPD2005 curated (raw-DBU frame); ISPD2015 is site-width-normalized, excluded
 
 csv_path = sys.argv[1] if len(sys.argv) > 1 else "results.csv"
 with open(csv_path) as f:

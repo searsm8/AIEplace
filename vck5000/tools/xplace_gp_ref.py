@@ -52,9 +52,12 @@ def scan_xplace_results(result_dir=XPLACE_RESULT_DIR):
     return found
 
 
-def gp_ref(refresh=True):
-    """GP reference dict. When refresh, overlay a live scan of the result dirs on top
-    of the cached snapshot (live numbers win)."""
+def gp_ref(refresh=False):
+    """GP reference dict (XPlace GP masked_hpwl, raw-DBU frame). Defaults to the curated
+    ISPD2005 snapshot only: those share sw_only's raw-DBU HPWL frame, so the ratio is direct.
+    ISPD2015 (mgc_*) XPlace HPWL is site-width-normalized (~/200), a different frame -> a naive
+    ratio is off by site_width and must NOT be mixed in. `refresh` re-scans the result dirs but
+    is opt-in for that reason (only safe for raw-DBU designs)."""
     ref = dict(XPLACE_GP_HPWL)
     if refresh:
         try:
