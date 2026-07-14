@@ -437,17 +437,19 @@ void Placer::updateDensityWeight()
     // still improving; damp toward ~1.0 once wirelength worsens, so density does not
     // overshoot and blow HPWL up (the late-run divergence observed before this change).
     //
-    // Worsening branch: match XPlace step_density_weight (param_scheduler.py:280) exactly —
-    // exponent = -delta_hpwl / worsening_hpwl_norm (a FIXED constant, 350000). XPlace's
-    // recorder.hpwl is round(hpwl·die_scale/site_width), the SAME ~1e7-1e8 magnitude frame as
-    // sw_only's raw-DBU HPWL, so 350000 ports directly. The earlier relative form
-    // (-delta/prev_hpwl·100) had an effective constant of prev_hpwl/100 (~8.5e5 on adaptec2),
-    // damping ~2.4× weaker than XPlace and — because it is relative, not fixed — failing to
-    // damp progressively harder as HPWL grows. That let λ ramp too fast on the 1024-grid designs
-    // (over-spread, inflated HPWL). Fixed K restores XPlace's grid-size-aware damping. Config
-    // `density_weight_worsening_hpwl_norm` (default 350000) exposes K; set <=0 for the legacy
-    // relative form.
-    float worsening_hpwl_norm = cfg["params"].value("density_weight_worsening_hpwl_norm", 350000.0f);
+    // Worsening branch damping — must be SCALE-INVARIANT. Default = relative form
+    // (mu ~ 1.05^(-(delta_hpwl/prev_hpwl)*100)): delta_hpwl/prev_hpwl is dimensionless, so the
+    // damping behaves the same regardless of a design's absolute HPWL magnitude.
+    //
+    // History: a fixed constant K=350000 was tried to match XPlace step_density_weight
+    // (param_scheduler.py:280) exactly, assuming sw_only's raw-DBU HPWL is XPlace's
+    // round(hpwl*die_scale/site_width) frame (~1e7-1e8). That assumption is FALSE for standard-cell
+    // designs (raw HPWL 5e8-1e9): delta_hpwl/350000 becomes O(1), mu pins to the 0.95 floor, and
+    // lambda can never ramp -> the placement collapses and never spreads (des_perf/edit_dist/
+    // superblue stalls at overflow ~0.8). So the fixed-K default is reverted. Config
+    // `density_weight_worsening_hpwl_norm` still exposes K: set it >0 to use the fixed-K form (only
+    // correct if delta_hpwl is first site-width-normalized into XPlace's frame).
+    float worsening_hpwl_norm = cfg["params"].value("density_weight_worsening_hpwl_norm", -1.0f);
     float mu;
     if (delta_hpwl < 0.0f) {
         mu = dw_max_step * std::max(std::pow(0.9999f, (float)iteration), 0.98f);
