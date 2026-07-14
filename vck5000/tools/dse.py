@@ -141,9 +141,9 @@ def _full_suite():
         "mgc_pci_bridge32_a":("ispd2015/mgc_pci_bridge32_a",512),
         "mgc_pci_bridge32_b":("ispd2015/mgc_pci_bridge32_b",512),
     }
+    # No convergence_overflow_threshold override -> uses run_config.json's 0.07 (XPlace-matched).
     return [
-        {"label": f"{name}@{n}", "benchmark": path, "bins_per_row": n,
-         "convergence_overflow_threshold": 0.04, "random_seed": 42}
+        {"label": f"{name}@{n}", "benchmark": path, "bins_per_row": n, "random_seed": 42}
         for name, (path, n) in grid.items()
     ]
 
