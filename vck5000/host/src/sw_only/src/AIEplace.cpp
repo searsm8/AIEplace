@@ -190,11 +190,17 @@ Placer::Placer(std::string config_filepath)
             input_dir = fs::path(cfg["input"]["benchmark"]);
             results_dir = fs::path(cfg["output"]["results_dir"].get<std::string>());
 
-            // Grid resolution (default to compile-time BINS_PER_ROW if not specified)
+            // Grid resolution. An explicit config `bins_per_row` is an ad-hoc override (kept for
+            // per-benchmark tuning / A/B); otherwise the grid is auto-sized by the ePlace formula
+            // once the die/cell areas are known (see below, after the DB is read). The AIE datapath
+            // is a fixed-size pipeline, so it always uses the compile-time BINS_PER_ROW grid.
+            bool bins_auto = false;
             if (cfg["params"].contains("bins_per_row")) {
                 bins_per_row = cfg["params"]["bins_per_row"];
-            } else {
+            } else if (density_method == "aie") {
                 bins_per_row = BINS_PER_ROW;
+            } else {
+                bins_auto = true;
             }
             if (density_method == "aie" && bins_per_row != BINS_PER_ROW) {
                 Logger::log_error("bins_per_row=" + std::to_string(bins_per_row)
@@ -202,7 +208,8 @@ Placer::Placer(std::string config_filepath)
                     + " (hardware constraint)");
                 exit(1);
             }
-            Logger::log_info("Grid resolution: " + std::to_string(bins_per_row) + " x " + std::to_string(bins_per_row));
+            if (!bins_auto)
+                Logger::log_info("Grid resolution: " + std::to_string(bins_per_row) + " x " + std::to_string(bins_per_row));
 
 // AI Summary:
 // The following section initializes the Xilinx Runtime (XRT) and AI Engine (AIE) drivers if hardware acceleration
@@ -263,9 +270,34 @@ Placer::Placer(std::string config_filepath)
             // Preconditioner normalization: use movable area and count only
             {
                 int movable_count = 0;
+                float movable_height_sum = 0.0f, fixed_area = 0.0f;
                 for (auto& item : db.getComponents())
-                    if (item.second->getStatus() != FIXED) movable_count++;
+                    if (item.second->getStatus() != FIXED) {
+                        movable_count++;
+                        movable_height_sum += item.second->getYsize();
+                    } else {
+                        fixed_area += item.second->getXsize() * item.second->getYsize();
+                    }
                 avg_node_size = db.getTotalMovableArea() / std::max(1, movable_count);
+
+                // ePlace grid sizing (paper: |B| = V_R * target_density / (k * avg_cell_area), k=1 =>
+                // ~one movable cell per bin). V_R is the placement region = die minus fixed blocks;
+                // with target_density = util = movable_area/V_R this gives |B| ~ N_movable. Round to a
+                // power of 2 (FFT needs it), then cap so a bin is never shorter than a standard-cell row
+                // (bin_height >= row_height), mirroring XPlace's num_bin <= num_rows guard. Only runs
+                // when the grid was not pinned by config or by the fixed AIE datapath.
+                if (bins_auto) {
+                    float placeable_area = std::max(1.0f, db.getDieArea().getArea() - fixed_area);
+                    float total_bins = placeable_area * target_density / std::max(1.0f, avg_node_size);
+                    int   bins       = 1 << std::clamp((int)std::lround(std::log2(std::sqrt(total_bins))), 3, 12);
+                    float row_height = movable_height_sum / std::max(1, movable_count);
+                    int   num_rows   = (int)(db.getDieArea().getYsize() / std::max(1.0f, row_height));
+                    int   row_cap    = 1 << std::clamp((int)std::floor(std::log2((float)std::max(1, num_rows))), 3, 12);
+                    bins_per_row = std::min(bins, row_cap);
+                    Logger::log_info("Grid resolution (ePlace auto): " + std::to_string(bins_per_row)
+                        + " x " + std::to_string(bins_per_row) + "  [sqrt|B|=" + std::to_string(bins)
+                        + ", num_rows=" + std::to_string(num_rows) + ", row_cap=" + std::to_string(row_cap) + "]");
+                }
             }
 
             db_IO_time = getInterval(pgrm_start_time, getTime());
