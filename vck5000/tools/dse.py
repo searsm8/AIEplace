@@ -211,6 +211,32 @@ def _gamma_ab():
             })
     return runs
 
+def _nonconverge_ab():
+    """Why do the mgc standard-cell designs stall at high overflow (ovfw ~0.8, 1200-iter cap)?
+    Diagnosis: init density-weight lambda starts ~1e-15 (vs ~1e-9 on converging adaptec1) and the
+    multiplicative ramp can't recover in 1200 iters. Suspects: (1) the XPlace-faithful field frame
+    (dct_normalize_inverse=false etc.) inflates the density gradient on tiny std cells, crushing
+    init lambda = |wl_grad|/|den_grad| * mult; (2) the 8e-5 init multiplier. 2x2 on two stalled
+    std-cell designs. 'default' = current committed defaults (the stalled baseline)."""
+    designs = {"mgc_des_perf_1": "ispd2015/mgc_des_perf_1",
+               "mgc_pci_bridge32_b": "ispd2015/mgc_pci_bridge32_b"}
+    # Round 1 (field frame, init lambda) refuted -- all four stayed at ~0.82/0.32. Round 2 tests
+    # the fixed-K lambda worsening-branch schedule (98772d9) and net-mask (8025644). Hypothesis:
+    # the fixed K=350000 is mis-scaled for these std-cell HPWL magnitudes, crushing the lambda ramp.
+    variants = {
+        "default":          {},                                    # current defaults (stalled)
+        "relsched":         {"density_weight_worsening_hpwl_norm": -1.0},   # legacy relative form
+        "nomask":           {"ignore_net_degree": 1000000000},             # disable net masking
+        "relsched_nomask":  {"density_weight_worsening_hpwl_norm": -1.0,
+                             "ignore_net_degree": 1000000000},
+    }
+    runs = []
+    for dname, path in designs.items():
+        for vname, over in variants.items():
+            runs.append({"label": f"{dname}_{vname}", "benchmark": path, "bins_per_row": 512,
+                         "convergence_overflow_threshold": 0.04, "random_seed": 42, **over})
+    return runs
+
 # Run-set selected by the DSE_RUN_SET env var so a follow-up sweep can be queued without
 # editing this file between runs. Defaults to the full 28-design suite.
 _RUN_SETS = {
@@ -218,6 +244,7 @@ _RUN_SETS = {
     "precond_ab": _precond_ab,
     "precond_on": _precond_on_subset,
     "gamma_ab": _gamma_ab,
+    "nonconverge_ab": _nonconverge_ab,
 }
 explicit_runs = _RUN_SETS[os.environ.get("DSE_RUN_SET", "full_suite")]()
 
