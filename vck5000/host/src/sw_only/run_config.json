@@ -28,7 +28,8 @@
     // Computation method selection
     "partials_compute_method": "cpu", // choose: aie, cpu, simple, hybrid, threaded
     "density_compute_method": "cpu",  // choose: aie, cpu
-    "bins_per_row": 64,               // grid resolution
+    // bins_per_row intentionally OMITTED -> grid auto-sized by the ePlace formula (AIEplace.cpp).
+    // Set it here (or per-run) only to force a fixed grid (ad-hoc override / AIE datapath).
     "wirelength_method": "HPWL",      // choose: HPWL
     "ignore_net_degree": 100,          // XPlace net_mask: nets with more pins than this are excluded
                                        // from BOTH the WA wirelength gradient and the HPWL metric
