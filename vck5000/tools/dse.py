@@ -237,6 +237,21 @@ def _nonconverge_ab():
                          "convergence_overflow_threshold": 0.04, "random_seed": 42, **over})
     return runs
 
+def _grid_ab():
+    """Bucket-2 (mild) stall test: are the low-row std-cell designs stalling because 512x512 is
+    FINER than the row structure? XPlace caps num_bin to <= num_rows (pci_bridge32_b: 400 rows ->
+    XPlace uses 256, converges @725; our suite forced 512 -> stalls 0.32, lambda runs away to 3e11
+    with no spreading). Sweep bins_per_row on three low-row bucket-2 designs."""
+    designs = {"mgc_pci_bridge32_b": "ispd2015/mgc_pci_bridge32_b",
+               "mgc_fft_2":          "ispd2015/mgc_fft_2",
+               "mgc_matrix_mult_1":  "ispd2015/mgc_matrix_mult_1"}
+    runs = []
+    for dname, path in designs.items():
+        for grid in (512, 256, 128):
+            runs.append({"label": f"{dname}_grid{grid}", "benchmark": path, "bins_per_row": grid,
+                         "convergence_overflow_threshold": 0.04, "random_seed": 42})
+    return runs
+
 # Run-set selected by the DSE_RUN_SET env var so a follow-up sweep can be queued without
 # editing this file between runs. Defaults to the full 28-design suite.
 _RUN_SETS = {
@@ -245,6 +260,7 @@ _RUN_SETS = {
     "precond_on": _precond_on_subset,
     "gamma_ab": _gamma_ab,
     "nonconverge_ab": _nonconverge_ab,
+    "grid_ab": _grid_ab,
 }
 explicit_runs = _RUN_SETS[os.environ.get("DSE_RUN_SET", "full_suite")]()
 
