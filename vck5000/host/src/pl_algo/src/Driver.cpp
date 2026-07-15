@@ -834,16 +834,17 @@ int runPlacement(const PlacementConfig& cfg,
     std::vector<NodeBox> node_box(node_box_init, node_box_init + N);   // [N]; {x,y}=v, {w,h}=size
     std::vector<coord_t> u(M), v(M), v_prev(M), u_out(M), v_out(M);
     std::vector<coord_t> g_hpwl(M), g_density(M), gtot(M), gtot_prev(M);
-    std::vector<float>   precond(M), rho((size_t)NBINS);
+    std::vector<float>   precond(M, 1.0f), rho((size_t)NBINS);  // precond OFF (sw_only default) -> weight 1
     std::vector<float>   t1((size_t)NBINS), a_uv((size_t)NBINS), Exh((size_t)NBINS), Eyh((size_t)NBINS);
     std::vector<float>   tE((size_t)NBINS), tY((size_t)NBINS), Ex((size_t)NBINS), Ey((size_t)NBINS);
     for (int n = 0; n < M; n++) { u[n] = node_pos_init[n]; v[n] = node_pos_init[n]; }
 
-    float gamma        = cfg.gamma_schedule ? 10.0f * cfg.base_gamma : cfg.base_gamma;
-    float lambda       = 1.0f;
-    float nesterov_ak  = 1.0f;
-    float precond_coef = 1.0f;
-    bool  have_prev    = false;
+    float gamma          = cfg.gamma_schedule ? 10.0f * cfg.base_gamma : cfg.base_gamma;
+    float lambda         = 1.0f;
+    float nesterov_ak    = 1.0f;
+    bool  have_prev      = false;
+    float prev_hpwl      = 0.0f;   // for the density-weight trend
+    int   conv_remaining = -1;     // overflow-below-stop countdown (-1 until first crossing)
 
     // One fused transform/spectral pass: src -> dst (scratch crosses via host, like runField).
     auto field_pass = [&](const float* src, float* dst, int mode, int sub) {
@@ -933,7 +934,8 @@ int runPlacement(const PlacementConfig& cfg,
         float alpha = have_prev
             ? bbStepLength(v.data(), v_prev.data(), gtot.data(), gtot_prev.data(), M)
             : cfg.init_step_length;
-        updatePrecondWeights(precond.data(), degree, area, M, avg_area, precond_coef, lambda);
+        // preconditioner OFF (sw_only default): precond weight stays 1 (filled at init). With
+        // dff_force_ratio the schedule's dff comes from the gradient L1 norms, not precond mass.
         const float coeff = momentumCoeff(nesterov_ak, cfg.enable_momentum);
 
         printf("[place] iter %d: HPWL=%.6g overflow=%.4f lambda=%.4g alpha=%.4g coeff=%.4f gamma=%.4g\n",
@@ -962,10 +964,30 @@ int runPlacement(const PlacementConfig& cfg,
         v_prev = v; gtot_prev = gtot; have_prev = true;
         u = u_out; v = v_out;
 
-        // ---- policy updates for next iteration ----
-        if (cfg.gamma_schedule) gamma = updateGammaValue((float)overflow, cfg.base_gamma);
-        if (overflow < 0.3 && precond_coef < 1024.0f && (iter % 20) == 0) precond_coef *= 2.0f;
+        // ---- schedule updates for the NEXT iteration (sw_only performIteration) ----
+        // λ and γ share one skip_update gate (freeze both on 2 of 3 early / mid-balance iters).
+        // dff = density-force fraction from this iteration's gradients (dff_force_ratio form).
+        const float dff  = densityForceFraction(g_hpwl.data(), g_density.data(), M, lambda);
+        const bool  skip = scheduleSkipUpdate(iter, dff);
+        if (!skip) {
+            lambda = updateDensityWeight(lambda, (float)hpwl, prev_hpwl, iter,
+                                         cfg.density_weight_min_step, cfg.density_weight_max_step);
+            if (cfg.gamma_schedule) gamma = updateGammaValue((float)overflow, cfg.base_gamma);
+        }
+        prev_hpwl = (float)hpwl;   // trend reference for the next iteration (updated every iter)
         iters_run = iter;
+
+        // ---- convergence: stop once overflow holds below the stop threshold for conv_iters ----
+        // (sw_only checkConvergence overflow countdown; full divergence/best guards TODO on device).
+        if (iter >= cfg.min_iters) {
+            if (overflow < cfg.overflow_threshold) {
+                if (conv_remaining < 0) conv_remaining = cfg.conv_iters;
+                if (--conv_remaining <= 0) { printf("[place] converged at iter %d (overflow %.4f)\n",
+                                                    iter, overflow); break; }
+            } else if (conv_remaining >= 0) {
+                conv_remaining = -1;   // rose back above the threshold; reset the countdown
+            }
+        }
     }
 
     for (int n = 0; n < M; n++) out_final_pos[n] = u[n];

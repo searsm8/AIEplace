@@ -34,6 +34,12 @@ struct PlacementConfig {
     float init_step_length;      // first-iteration BB step seed
     float density_weight_init_multiplier;
     int   enable_momentum;       // 0/1
+    // --- density-weight schedule + convergence (ported from sw_only) ---
+    float density_weight_min_step;   // mu lower clamp (0.95)
+    float density_weight_max_step;   // mu growth base (1.05)
+    float overflow_threshold;        // stop overflow (0.07, = XPlace --stop_overflow)
+    int   min_iters;                 // convergence_min_iterations (50)
+    int   conv_iters;                // extra iters after overflow first drops below stop (30)
 };
 
 // ---- sw_only initializeDensityWeight: λ = (Σ|g_wl| / Σ|g_density|) * init_multiplier ----
@@ -66,6 +72,47 @@ static inline float bbStepLength(const coord_t* v, const coord_t* v_prev,
 // ---- sw_only updateGamma: γ = 10^((overflow-0.1)*20/9 - 1) * base_gamma ----
 static inline float updateGammaValue(float overflow, float base_gamma) {
     return std::pow(10.0f, (overflow - 0.1f) * (20.0f / 9.0f) - 1.0f) * base_gamma;
+}
+
+// ---- sw_only density_force_fraction (dff_force_ratio=true, the default) ----
+// dff = ||λ·g_density||_1 / (||g_wl||_1 + ||λ·g_density||_1) in [0,1]: how balanced the
+// wirelength and density forces are. Field-norm/scale invariant. Gates the shared skip_update.
+static inline float densityForceFraction(const coord_t* g_wl, const coord_t* g_density,
+                                         int M, float lambda) {
+    double wl = 0.0, den = 0.0;
+    for (int n = 0; n < M; n++) {
+        wl  += std::fabs(g_wl[n].x)      + std::fabs(g_wl[n].y);
+        den += std::fabs(g_density[n].x) + std::fabs(g_density[n].y);
+    }
+    den *= lambda;
+    return (float)(den / (wl + den + 1e-8));
+}
+
+// ---- sw_only updateDensityWeight: scale-invariant multiplicative λ trend ----
+// mu grows λ near max_step while HPWL improves; while it worsens, damp with the RELATIVE form
+// (dHPWL/prev_hpwl, dimensionless). sw_only reverted the fixed-K form (ad6d52a) as mis-scaled for
+// std-cell HPWL. The caller applies the shared skip_update gate (freeze λ and γ together).
+static inline float updateDensityWeight(float lambda, float hpwl, float prev_hpwl, int iteration,
+                                        float min_step, float max_step) {
+    const float dHPWL = hpwl - prev_hpwl;
+    float mu;
+    if (dHPWL < 0.0f) {
+        const float decay = std::pow(0.9999f, (float)iteration);
+        mu = max_step * (decay > 0.98f ? decay : 0.98f);
+    } else {
+        const float rel = dHPWL / (prev_hpwl + 1e-8f);
+        float g = std::pow(max_step, -rel * 100.0f);
+        if (g < min_step) g = min_step;
+        if (g > max_step) g = max_step;
+        mu = max_step * g;
+    }
+    return lambda * mu;
+}
+
+// ---- shared skip_update gate (sw_only performIteration / XPlace step()): on 2 of every 3 iters,
+// while early (k<50) or the WL/density forces are mid-balance (dff in (0.5,0.95)), FREEZE λ+γ. ----
+static inline bool scheduleSkipUpdate(int iteration, float dff) {
+    return ((iteration < 50) || (dff > 0.5f && dff < 0.95f)) && (iteration % 3 != 0);
 }
 
 // ---- sw_only performNextStep momentum: a_{k+1}=(1+sqrt(4a^2+1))/2; coeff=(a_k-1)/a_{k+1} ----

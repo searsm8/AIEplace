@@ -154,11 +154,11 @@ int main(int argc, char** argv) {
         const int   num_nets = pk.header.num_nets;
         const int   num_pins = (int)pk.pins.size(), num_npins = (int)pk.npins.size();
 
-        // gamma from the initial coordinate span (matches HpwlGradVerify: 1% of the larger extent).
-        float maxx=-1e30f, minx=1e30f, maxy=-1e30f, miny=1e30f;
-        for (const auto& c : pk.node_pos) { maxx=std::max(maxx,c.x); minx=std::min(minx,c.x);
-                                            maxy=std::max(maxy,c.y); miny=std::min(miny,c.y); }
-        const float base_gamma = 0.01f * std::max(maxx-minx, maxy-miny);
+        // sw_only base_gamma: gamma_bin_scaled referenced to a FIXED grid (grid-independent):
+        //   base_gamma = init_gamma * (die_w + die_h) / gamma_ref_grid  (init_gamma=4, ref=512).
+        // init_gamma plays XPlace's wa_coeff role; the fixed reference keeps absolute gamma the same
+        // regardless of the actual grid (avoids over-sharpening at fine grids).
+        const float base_gamma = 4.0f * (die_x + die_y) / 512.0f;
 
         // Normalized exp LUT (gamma-independent; only inv_lut_step depends on gamma).
         const int GAMMA_MULT = 12;
@@ -174,12 +174,21 @@ int main(int argc, char** argv) {
         for (int n = 0; n < M; n++) { area[n] = pk.node_box[n].w * pk.node_box[n].h; total_mov += area[n]; }
         const float avg_area = total_mov / std::max(1, M);
 
+        // target_density from the benchmark's placement.constraints (maximum_utilization); ISPD2005
+        // has no constraints file -> default 1.0 (matches sw_only and XPlace ispd2005).
+        const float target_density = db.getMaximumUtilization() > 0.0f
+                                   ? db.getMaximumUtilization() : 1.0f;
         plalgo::PlacementConfig cfg{};
         cfg.max_iters = max_iters; cfg.die_x = die_x; cfg.die_y = die_y;
-        cfg.bin_w = die_x / G; cfg.bin_h = die_y / G; cfg.target_density = 0.9f;
-        cfg.base_gamma = base_gamma; cfg.gamma_schedule = 0;
-        cfg.init_step_length = 0.01f; cfg.density_weight_init_multiplier = 0.01f;
+        cfg.bin_w = die_x / G; cfg.bin_h = die_y / G; cfg.target_density = target_density;
+        cfg.base_gamma = base_gamma; cfg.gamma_schedule = 1;   // sw_only enables the overflow-driven gamma schedule
+        cfg.init_step_length = 0.01f; cfg.density_weight_init_multiplier = 8e-5f;
         cfg.enable_momentum = 1;
+        cfg.density_weight_min_step = 0.95f; cfg.density_weight_max_step = 1.05f;
+        cfg.overflow_threshold = 0.07f; cfg.min_iters = 50; cfg.conv_iters = 30;
+        // NB: the PL density datapath is a FIXED GRID (DENSITY_GRID=1024). sw_only's ePlace auto
+        // grid sizing is a host decision; on the PL the grid is pinned by the hardware, so the grid
+        // formula does not apply here (documented in report_pl_port.md).
 
         printf("[place] bench M=%d N=%d nets=%d die=%.1fx%.1f bin=%.4gx%.4g gamma=%.4g max_iters=%d\n",
                M, N, num_nets, die_x, die_y, cfg.bin_w, cfg.bin_h, base_gamma, max_iters);
