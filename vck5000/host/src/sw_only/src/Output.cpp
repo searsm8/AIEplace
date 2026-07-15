@@ -222,37 +222,20 @@ void Placer::writeResultsCSV(float final_hpwl, float final_hpwl_exact, float fin
     out_file.open(csv_path, std::ios_base::app);
     out_file.imbue(std::locale::classic());  // Prevent comma thousands separators
 
-    // XPlace reference HPWL values (×10^6, from Table II/III of Liu et al. TCAD 2023)
-    // Non-deterministic Xplace column; HPWL after global placement + legalization
+    // XPlace GP-ONLY reference HPWL (masked_hpwl at "GP Stop", NOT legalized), so the Ratio is an
+    // honest GP-vs-GP comparison instead of our-GP vs XPlace-GP+legalization. Values from local
+    // XPlace runs: ~/phd/Xplace/result/<ts>_<design>/log/test.log line "GP Stop! ... masked_hpwl: X".
+    // Only ISPD2005 is populated: XPlace's ispd2005 HPWL shares sw_only's raw-DBU frame. ISPD2015
+    // (mgc_*) XPlace HPWL is site-width-normalized (~ /site_width, e.g. /200) -- a DIFFERENT frame --
+    // so it must NOT be mixed in here; populate mgc as masked_hpwl*site_width once measured. bigblue3/
+    // bigblue4 need a local XPlace GP run. Designs absent here -> XPlace GP HPWL + Ratio print N/A.
     static const std::map<std::string, float> xplace_hpwl = {
-        {"adaptec1",            7.309e+07f},
-        {"adaptec2",            8.130e+07f},
-        {"adaptec3",            1.9362e+08f},
-        {"adaptec4",            1.7336e+08f},
-        {"bigblue1",            8.908e+07f},
-        {"bigblue2",            1.3691e+08f},
-        {"bigblue3",            3.0308e+08f},
-        {"bigblue4",            7.4219e+08f},
-        {"mgc_des_perf_1",      1.1065e+09f},
-        {"mgc_des_perf_a",      1.9988e+09f},
-        {"mgc_des_perf_b",      1.6118e+09f},
-        {"mgc_edit_dist_a",     4.1983e+09f},
-        {"mgc_fft_1",           4.115e+08f},
-        {"mgc_fft_2",           3.741e+08f},
-        {"mgc_fft_a",           6.258e+08f},
-        {"mgc_fft_b",           8.456e+08f},
-        {"mgc_matrix_mult_1",   2.1163e+09f},
-        {"mgc_matrix_mult_2",   2.1527e+09f},
-        {"mgc_matrix_mult_a",   3.0326e+09f},
-        {"mgc_matrix_mult_b",   2.7626e+09f},
-        {"mgc_matrix_mult_c",   2.6746e+09f},
-        {"mgc_pci_bridge32_a",  3.609e+08f},
-        {"mgc_pci_bridge32_b",  7.140e+08f},
-        {"mgc_superblue11_a",   3.35213e+10f},
-        {"mgc_superblue12",     2.57845e+10f},
-        {"mgc_superblue14",     2.27767e+10f},
-        {"mgc_superblue16_a",   2.54910e+10f},
-        {"mgc_superblue19",     1.55424e+10f},
+        {"adaptec1",  7.060218e+07f},
+        {"adaptec2",  7.893496e+07f},
+        {"adaptec3",  1.858436e+08f},
+        {"adaptec4",  1.675808e+08f},
+        {"bigblue1",  8.721903e+07f},
+        {"bigblue2",  1.298895e+08f},
     };
 
     // Lookup XPlace reference for this benchmark
@@ -283,8 +266,8 @@ void Placer::writeResultsCSV(float final_hpwl, float final_hpwl_exact, float fin
         out_file << "Iters,";
         out_file << "Best Iter,";
         out_file << "Best OVFW,";
-        out_file << "Best HPWL,";
-        out_file << "XPlace HPWL,";
+        out_file << "Best GP HPWL,";
+        out_file << "XPlace GP HPWL,";
         out_file << "Ratio,";
         // DSE sweep parameter columns (one per swept parameter)
         for (const auto& [key, val] : dse_params)
