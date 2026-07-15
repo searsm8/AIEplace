@@ -1,6 +1,6 @@
 // Packer.cpp -- DataBase -> v0 host->PL buffers. See Packer.hpp / host_interface.hpp.
 
-#include "Packer.hpp"
+#include "Packer.hpp"      // -> host_interface.hpp: plalgo::IGNORE_NET_DEGREE (XPlace net_mask)
 #include <unordered_map>
 #include <algorithm>
 #include <cstdio>
@@ -51,8 +51,11 @@ PackedDesign packDesign(AIEplace::DataBase& db) {
             if (it == idx.end()) { ++unresolved; continue; } // not in v0 index space
             pk.pins.push_back(NodePin{ it->second, pin.offset.x, pin.offset.y, net_id });
         }
-        // Tag pins of no-gradient nets (resolved degree <= 1) so the PL skips them.
-        if ((int32_t)pk.pins.size() - beg <= 1)
+        // Tag pins of masked nets (net=-1) so the PL gradient/metrics skip them: degree <= 1
+        // (no gradient) OR degree > IGNORE_NET_DEGREE (XPlace net_mask, high-degree clock/reset
+        // nets excluded from both the WA gradient and reported HPWL). Mirrors sw_only.
+        const int32_t deg = (int32_t)pk.pins.size() - beg;
+        if (deg <= 1 || deg > plalgo::IGNORE_NET_DEGREE)
             for (int32_t p = beg; p < (int32_t)pk.pins.size(); ++p) pk.pins[p].net = -1;
         pk.net_ptr.push_back((int32_t)pk.pins.size());
         ++net_id;
@@ -80,6 +83,7 @@ double hpwlFromPacked(const PackedDesign& pk) {
         const int beg = pk.net_ptr[n], end = pk.net_ptr[n + 1];
         if (beg == end) continue;
         const NodePin& f = pk.pins[beg];
+        if (f.net < 0) continue;   // masked net (degree<=1 or >IGNORE_NET_DEGREE); skip like the PL kernels
         float min_x = pk.node_pos[f.node_idx].x + f.off_x, max_x = min_x;
         float min_y = pk.node_pos[f.node_idx].y + f.off_y, max_y = min_y;
         for (int p = beg + 1; p < end; ++p) {

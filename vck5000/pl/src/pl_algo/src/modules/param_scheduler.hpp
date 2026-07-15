@@ -59,7 +59,7 @@ struct SchedParams {
     int   enable_momentum;   // 0/1
     int   gamma_schedule;    // 0/1; if 1 initial gamma = 10*base_gamma (else base_gamma)
     // convergence
-    float overflow_threshold; // masked-overflow stop (0.04)
+    float overflow_threshold; // smoothed-overflow stop (0.07, = XPlace --stop_overflow)
     int   min_iters;          // convergence_min_iterations (50)
     int   max_iters;          // convergence_max_iterations (1200)
     int   conv_iters;         // convergence_iterations countdown (30)
@@ -171,11 +171,9 @@ static void param_scheduler(
     }
     inv_gamma_out = st.inv_gamma;
 
-    // (b) alpha: clamp(sqrt(||dv||^2)/sqrt(||dg||^2 + 1e-8), 1e-4, 4000)
-    float alpha = std::sqrt(pos_norm_sq) / std::sqrt(grad_norm_sq + 1e-8f);
-    if (alpha < 1e-4f)  alpha = 1e-4f;
-    if (alpha > 4000.f) alpha = 4000.f;
-    alpha_out = alpha;
+    // (b) alpha: sqrt(||dv||^2)/sqrt(||dg||^2 + 1e-8). No magnitude clamp -- sw_only removed the
+    // fixed [1e-4, 4000] clamp (commit ba9cf41) to mirror XPlace (backtracking bounds the step).
+    alpha_out = std::sqrt(pos_norm_sq) / std::sqrt(grad_norm_sq + 1e-8f);
 
     // (c) coeff: Nesterov momentum recurrence on nesterov_ak
     const float a_next = (1.0f + std::sqrt(4.0f * st.nesterov_ak * st.nesterov_ak + 1.0f)) / 2.0f;

@@ -112,6 +112,9 @@ struct NetSums { float Bpx, Bmx, Cpx, Cmx, Bpy, Bmy, Cpy, Cmy; }; // WA B/C sums
 // 4 nets at once (4 nets * {x,y} = 8 lanes = AIE_VEC).
 //   AIE handles net degrees [AIE_NET_MIN, AIE_NET_MAX]; degree-1 nets have no
 //   gradient and degree>AIE_NET_MAX nets stay on the host/CPU.
+constexpr int   IGNORE_NET_DEGREE = 100; // XPlace net_mask / ignore_net_degree: nets with more
+                                         // pins are excluded from the WA gradient AND reported HPWL
+                                         // (clock/reset/scan). == sw_only cfg ignore_net_degree.
 constexpr int   AIE_VEC        = 8;     // floats per AIE vector beat (VEC_SIZE)
 constexpr int   NETS_PER_GROUP = 4;     // nets packed across the 8 lanes (x,y interleaved)
 constexpr int   AIE_NET_MIN    = 2;     // smallest net degree handled on the AIE

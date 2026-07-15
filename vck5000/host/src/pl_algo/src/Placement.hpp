@@ -47,7 +47,11 @@ static inline float initDensityWeight(const coord_t* g_wl, const coord_t* g_dens
     return (float)(wl_L1 / (den_L1 + 1e-8)) * init_multiplier;
 }
 
-// ---- sw_only computeLipshitzEstimate: α = ||Δv|| / ||Δg_total||, clamped [1e-4, 4000] ----
+// ---- sw_only computeLipshitzEstimate: α = ||Δv|| / ||Δg_total|| ----
+// No magnitude clamp -- mirrors XPlace (nesterov_optimizer.py), which bounds the step with its
+// backtracking line search alone. The old fixed [1e-4, 4000] clamp was removed in sw_only
+// (commit ba9cf41); the estimate self-scales with preconditioning, so a clamp only starves the
+// step when precond is on. Ported to match the golden exactly.
 static inline float bbStepLength(const coord_t* v, const coord_t* v_prev,
                                  const coord_t* g, const coord_t* g_prev, int M) {
     double pos2 = 0.0, grad2 = 0.0;
@@ -56,9 +60,7 @@ static inline float bbStepLength(const coord_t* v, const coord_t* v_prev,
         const double gx = (double)g[n].x - g_prev[n].x, gy = (double)g[n].y - g_prev[n].y;
         pos2 += dx*dx + dy*dy; grad2 += gx*gx + gy*gy;
     }
-    double a = std::sqrt(pos2) / std::sqrt(grad2 + 1e-8);
-    if (a < 1e-4f) a = 1e-4f; if (a > 4000.0f) a = 4000.0f;
-    return (float)a;
+    return (float)(std::sqrt(pos2) / std::sqrt(grad2 + 1e-8));
 }
 
 // ---- sw_only updateGamma: γ = 10^((overflow-0.1)*20/9 - 1) * base_gamma ----
@@ -85,13 +87,17 @@ static inline void updatePrecondWeights(float* precond, const int32_t* degree, c
     }
 }
 
-// ---- host HPWL (mirrors metrics.hpp / DataBase HPWL): sum_nets bbox half-perimeter ----
+// IGNORE_NET_DEGREE (XPlace net_mask) lives in host_interface.hpp (shared host<->PL contract).
+
+// ---- host HPWL (mirrors metrics.hpp / DataBase::computeTotalWirelength): sum_nets bbox
+// half-perimeter, over nets with 2 <= degree <= IGNORE_NET_DEGREE ----
 static inline double hostHPWL(const coord_t* node_pos, const int32_t* net_ptr,
                               const NodePin* pins, int num_nets) {
     double total = 0.0;
     for (int net = 0; net < num_nets; net++) {
         const int beg = net_ptr[net], end = net_ptr[net + 1];
-        if (end - beg <= 1) continue;
+        const int deg = end - beg;
+        if (deg <= 1 || deg > IGNORE_NET_DEGREE) continue;   // XPlace net_mask
         float maxx = -1e30f, minx = 1e30f, maxy = -1e30f, miny = 1e30f;
         for (int p = beg; p < end; p++) {
             const NodePin& r = pins[p];

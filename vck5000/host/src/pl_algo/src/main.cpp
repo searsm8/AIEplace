@@ -227,8 +227,11 @@ int main(int argc, char** argv) {
     // a float accumulator is order-dependent to ~0.3%, so it cannot serve as a
     // reference (and the PL kernel accumulates in double for the same reason).
     double golden = 0.0;
-    for (AIEplace::Net* net : db.getNetsVector())
+    for (AIEplace::Net* net : db.getNetsVector()) {
+        const int deg = net->getDegree();               // XPlace net_mask: 2 <= deg <= IGNORE_NET_DEGREE
+        if (deg <= 1 || deg > plalgo::IGNORE_NET_DEGREE) continue;
         golden += (double)net->computeWirelength_HPWL();
+    }
     const double packed  = plalgo::hpwlFromPacked(pk);
     const double rel_err = std::fabs(packed - golden) / std::fabs(golden);
     printf("[hpwl] golden=%.10g  packed=%.10g  rel_err=%.3e  -> %s\n",
