@@ -208,7 +208,7 @@ void Placer::createRunOutputStructure()
     Logger::log_info("Created output directory: " + output_dir.string());
 }
 
-void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
+void Placer::writeResultsCSV(float final_hpwl, float final_hpwl_exact, float final_overflow,
                               float total_runtime, float iteration_avg,
                               float hpwl_improvement, const std::string& run_id)
 {
@@ -292,6 +292,7 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
         out_file << "Gamma,";
         out_file << "Net Count,";
         out_file << "Node Count,";
+        out_file << "Final HPWL Exact,";   // final HPWL over ALL nets (no net-degree mask)
         out_file << "Total Runtime (sec),";
         out_file << "DB IO Time (sec),";
         out_file << "Algorithm Time (sec),";
@@ -353,6 +354,7 @@ void Placer::writeResultsCSV(float final_hpwl, float final_overflow,
     out_file << PREC(gamma) << ",";
     out_file << db.getNetsVector().size() << ",";
     out_file << db.getComponents().size() << ",";
+    out_file << std::scientific << SCI(final_hpwl_exact) << ",";   // Final HPWL Exact (all nets)
     out_file << std::fixed << std::setprecision(3);
     out_file << total_runtime << ",";
     out_file << db_IO_time << ",";
@@ -397,6 +399,12 @@ void Placer::printFinalResults()
     // Calculate final metrics
     algo_time = Logger::getFunctionTime("run")/ 1e6; // Convert microseconds to seconds
     float final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"], cfg["params"].value("ignore_net_degree", 100));
+    // Exact HPWL over ALL nets (no net-degree mask). The masked final_hpwl above drops nets with
+    // > ignore_net_degree pins (matching XPlace's GP metric); this includes them, matching XPlace's
+    // post-GP "exact HPWL" / published-number convention (get_obj_hpwl is unmasked). Report both:
+    // masked for the schedule + GP-vs-GP, exact for the apples-to-apples vs XPlace's headline HPWL.
+    // A huge cap (not -1, which would exclude every net) includes every degree.
+    float final_hpwl_exact = db.computeTotalWirelength(cfg["params"]["wirelength_method"], 1000000000);
     // Exact (physical) overflow — sharp footprints, the real spreading quality. Reported
     // alongside the smoothed overflow that drove convergence (see computeOverflow).
     float final_overflow = computeOverflow(false);
@@ -431,6 +439,7 @@ void Placer::printFinalResults()
     results.add_row(RowStream{} << "Algorithm time (s)" << std::fixed << std::setprecision(3) << algo_time);
     results.add_row(RowStream{} << "Avg iteration time (s)" << std::fixed << std::setprecision(3) << iteration_avg);
     results.add_row(RowStream{} << "Final HPWL" << std::scientific << std::setprecision(3) << final_hpwl);
+    results.add_row(RowStream{} << "Final HPWL (exact, all nets)" << std::scientific << std::setprecision(3) << final_hpwl_exact);
     if (has_improvement) {
         results.add_row(RowStream{} << "Initial HPWL" << std::scientific << std::setprecision(3) << m_initial_hpwl);
         results.add_row(RowStream{} << "HPWL improvement (%)" << std::fixed << std::setprecision(2) << hpwl_improvement);
@@ -472,7 +481,7 @@ void Placer::printFinalResults()
     Logger::export_markdown(function_stats, run_output_dir, "function_statistics");
 
     // Write run record to global results CSV
-    writeResultsCSV(final_hpwl, final_overflow, total_runtime,
+    writeResultsCSV(final_hpwl, final_hpwl_exact, final_overflow, total_runtime,
                     iteration_avg, hpwl_improvement, run_id);
 
     // Generate visualization in run-specific directory

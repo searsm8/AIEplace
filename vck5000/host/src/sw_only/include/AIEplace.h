@@ -37,7 +37,7 @@ private:
     
     // Helper functions for DSE integration and output organization
     void createRunOutputStructure();
-    void writeResultsCSV(float final_hpwl, float final_overflow,
+    void writeResultsCSV(float final_hpwl, float final_hpwl_exact, float final_overflow,
                          float total_runtime, float iteration_avg,
                          float hpwl_improvement, const std::string& run_id);
     
