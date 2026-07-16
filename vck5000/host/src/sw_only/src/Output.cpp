@@ -393,6 +393,19 @@ void Placer::printFinalResults()
     float final_overflow = computeOverflow(false);
     float final_smoothed_overflow = computeOverflow(true);
 
+    // DIAGNOSTIC: overflow the four ways {clamp,sharp}×{no-filler,+filler} on the restored-best
+    // placement, to reconcile our convergence metric with XPlace. XPlace's GP STOP signal is
+    // clamp+filler (overflow_fn on mov+filler density); our convergence signal is clamp,no-filler
+    // (= XPlace's exact eval). Measures whether including fillers reproduces XPlace's lower stop
+    // overflow. Temporary — remove once the convergence metric is reconciled.
+    float ovf_clamp_filler = computeOverflow(true,  nullptr, true);
+    float ovf_sharp_filler = computeOverflow(false, nullptr, true);
+    Logger::log_info("[OVFW-DIAG] clamp/no-filler=" + PREC(final_smoothed_overflow)
+        + "  sharp/no-filler=" + PREC(final_overflow)
+        + "  clamp/+filler=" + PREC(ovf_clamp_filler)
+        + "  sharp/+filler=" + PREC(ovf_sharp_filler)
+        + "  (XPlace GP stop = clamp/+filler)");
+
     // Optional: dump the restored-best bin-density map (smoothed + exact) for offline
     // comparison against XPlace. Gated by config so normal runs are unaffected.
     if (cfg["params"].contains("dump_density") && cfg["params"]["dump_density"]) {
@@ -670,11 +683,13 @@ void Placer::initializeFocus()
 void Placer::recordIterationResults()
 {
     float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"], cfg["params"].value("ignore_net_degree", 100));
-    // Drive convergence off the smoothed overflow (clamped footprints, fillers excluded;
-    // equivalent to XPlace's expand_ratio-inflated field): the smoothed density the optimizer
-    // minimizes, which descends cleanly to the stop threshold. The exact overflow is reported
-    // separately as the physical result.
-    float overflow = computeOverflow(true);   // smoothed (clamped) — the convergence signal
+    // Drive convergence off the smoothed overflow (clamped footprints; equivalent to XPlace's
+    // expand_ratio-inflated field): the smoothed density the optimizer minimizes, which descends
+    // toward the stop threshold. The exact overflow is reported separately as the physical result.
+    // convergence_include_fillers=true mirrors XPlace's GP-stop metric (overflow_fn), which counts
+    // filler density too; default false keeps the filler-excluded (XPlace-exact) signal.
+    bool conv_incl_fillers = cfg["params"].value("convergence_include_fillers", false);
+    float overflow = computeOverflow(true, nullptr, conv_incl_fillers);   // convergence signal
 
     hpwl_history.push_back(hpwl);
     step_length_history.push_back(step_length);

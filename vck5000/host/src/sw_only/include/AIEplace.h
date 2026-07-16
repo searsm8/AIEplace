@@ -226,10 +226,12 @@ public:
     void compute_eField_DCT();
 
     void computeOverlaps();
-    float computeOverflow(bool clamp, std::vector<float>* out_density = nullptr);
-                                        // overflow metric, fillers excluded; clamp=true = smoothed
-                                        // (GP convergence, XPlace expand_ratio field), clamp=false =
-                                        // exact (physical).
+    float computeOverflow(bool clamp, std::vector<float>* out_density = nullptr,
+                          bool include_fillers = false);
+                                        // overflow metric; clamp=true = smoothed (GP convergence,
+                                        // XPlace expand_ratio field), clamp=false = exact (physical).
+                                        // include_fillers=true mirrors XPlace's filler-inclusive GP
+                                        // stop signal (diagnostic only; default excludes fillers).
                                         // out_density (optional): area deposited per bin (col*ny+row).
     void dumpBinDensity(const std::string& path_prefix); // ρ maps (smoothed+exact) for XPlace compare
 

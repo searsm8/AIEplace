@@ -423,7 +423,7 @@ void Placer::computeOverlaps()
  * with sharp footprints, whose sub-bin quantization spikes leave it floored above threshold
  * even for a well-spread placement (the sw_only "can't reach 0.07" effect).
  */
-float Placer::computeOverflow(bool clamp, std::vector<float>* out_density)
+float Placer::computeOverflow(bool clamp, std::vector<float>* out_density, bool include_fillers)
 {
     const int nx = grid.getBinsPerRow();
     const int ny = grid.getBinsPerCol();
@@ -446,10 +446,15 @@ float Placer::computeOverflow(bool clamp, std::vector<float>* out_density)
         float weight = (cw > 0.0f && ch > 0.0f) ? (w * h) / (cw * ch) : 0.0f; // conserve total area
         float xl = node->getProbeX() + 0.5f * w - 0.5f * cw;
         float yl = node->getProbeY() + 0.5f * h - 0.5f * ch;
-        if (xl + cw > grid_w) xl = grid_w - cw;
-        if (yl + ch > grid_h) yl = grid_h - ch;
-        if (xl < 0.0f) xl = 0.0f;
-        if (yl < 0.0f) yl = 0.0f;
+        // Movable/filler: shift to stay in-die (area-conserving edge deposit). FIXED terminals are
+        // geometrically clipped instead — IO pads outside the core-row die must not be piled onto
+        // the edge bins (false density moat). Kept in sync with Grid::computeBinOverlaps.
+        if (node->getStatus() != FIXED) {
+            if (xl + cw > grid_w) xl = grid_w - cw;
+            if (yl + ch > grid_h) yl = grid_h - ch;
+            if (xl < 0.0f) xl = 0.0f;
+            if (yl < 0.0f) yl = 0.0f;
+        }
         float xh = xl + cw, yh = yl + ch;
         int col_lo = std::max(0, (int)(xl / bin_w));
         int col_hi = std::min(nx - 1, (int)(xh / bin_w));
@@ -471,9 +476,12 @@ float Placer::computeOverflow(bool clamp, std::vector<float>* out_density)
         if (item.second->getStatus() == FIXED) deposit(item.second, false);
     for (float& d : density) d = std::min(d, cap);
 
-    // Movable real cells (clamped when requested). Fillers intentionally excluded.
+    // Movable real cells (clamped when requested). Fillers included only for the diagnostic
+    // that mirrors XPlace's filler-inclusive GP stop signal (default: excluded).
     for (auto item : db.getComponents())
         if (item.second->getStatus() != FIXED) deposit(item.second, clamp);
+    if (include_fillers)
+        for (auto filler : db.getFillers()) deposit(filler, clamp);
 
     float overflow_area = 0.0f;
     for (float d : density) overflow_area += std::max(0.0f, d - cap);

@@ -62,16 +62,22 @@ void Grid::computeBinOverlaps(Node* node_p)
         weight = (cw > 0.0f && ch > 0.0f) ? (w * h) / (cw * ch) : 0.0f;
     }
 
-    // Footprint centered on the cell, shifted to stay inside the die so edge cells still
-    // deposit their full area-conserving mass (matches XPlace pre_normalize clamping).
+    // Footprint centered on the cell. Movable cells are shifted to stay inside the die so edge
+    // cells still deposit their full area-conserving mass (matches XPlace pre_normalize clamping).
+    // FIXED terminals are NOT shifted: IO pads/blockages sit in the margin outside the core-row
+    // die, and shifting would pile their full area onto the edge bins (a false density moat that
+    // repels cells/fillers). Instead they are geometrically clipped to the die below (XPlace drops
+    // out-of-die fixed density from init_density_map).
     float grid_w = m_bins_per_row * m_bin_width;
     float grid_h = m_bins_per_col * m_bin_height;
     float node_xl = node_p->getProbeX() + 0.5f * w - 0.5f * cw;
     float node_yl = node_p->getProbeY() + 0.5f * h - 0.5f * ch;
-    if (node_xl + cw > grid_w) node_xl = grid_w - cw;
-    if (node_yl + ch > grid_h) node_yl = grid_h - ch;
-    if (node_xl < 0.0f) node_xl = 0.0f;
-    if (node_yl < 0.0f) node_yl = 0.0f;
+    if (node_p->getStatus() != FIXED) {
+        if (node_xl + cw > grid_w) node_xl = grid_w - cw;
+        if (node_yl + ch > grid_h) node_yl = grid_h - ch;
+        if (node_xl < 0.0f) node_xl = 0.0f;
+        if (node_yl < 0.0f) node_yl = 0.0f;
+    }
     float node_xh = node_xl + cw;
     float node_yh = node_yl + ch;
 

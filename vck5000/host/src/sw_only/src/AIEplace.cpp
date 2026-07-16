@@ -469,7 +469,9 @@ void Placer::updateDensityWeight()
     int plateau_window = cfg["params"]["adaptation_window"];
     float plateau_threshold = cfg["params"]["slow_improvement_threshold"];
     float high_ovfw = cfg["params"]["high_overflow_threshold"];
-    int min_jolt_interval = 1000; // Xplace uses 1000 (effectively once per run)
+    // Xplace uses 1000 (effectively once per run). Lower it to let the jolt re-fire and
+    // repeatedly double lambda through a stall (a deliberate deviation from Xplace).
+    int min_jolt_interval = cfg["params"].value("density_jolt_interval", 1000);
 
     if (iteration > plateau_window &&
         iteration - last_density_jolt_iter >= min_jolt_interval &&

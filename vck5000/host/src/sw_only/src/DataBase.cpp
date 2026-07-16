@@ -64,21 +64,30 @@ DataBase::DataBase(fs::path input_dir, bool enable_pin_offsets)
         m_total_net_degree += net->getDegree();
     }
 
-    // Cache area breakdown (constant for the lifetime of the design)
-    double area_sum = 0;
+    // Cache area breakdown (constant for the lifetime of the design). FIXED components are
+    // clipped to the die — XPlace counts only the fixed area that lands inside the die
+    // (fixed_node_area = init_density_map inside the core), so terminals overhanging the die
+    // don't inflate the placeable-area denominator that sets the filler count. Movable area
+    // is the raw sum (movable cells sit inside the die).
+    float die_xl = m_die_area.getPosBottomLeft().x, die_yl = m_die_area.getPosBottomLeft().y;
+    float die_xu = m_die_area.getPosTopRight().x,   die_yu = m_die_area.getPosTopRight().y;
+    double movable_sum = 0;
     double fixed_sum = 0;
     int fixed_count = 0;
     for (auto item : mm_components) {
-        float area = item.second->getArea();
-        area_sum += area;
-        if (item.second->getStatus() == FIXED) {
-            fixed_sum += area;
+        Component* comp = item.second;
+        if (comp->getStatus() == FIXED) {
+            float ox = std::max(0.0f, std::min(comp->getX() + comp->getXsize(), die_xu) - std::max(comp->getX(), die_xl));
+            float oy = std::max(0.0f, std::min(comp->getY() + comp->getYsize(), die_yu) - std::max(comp->getY(), die_yl));
+            fixed_sum += (double)ox * oy;
             fixed_count++;
+        } else {
+            movable_sum += comp->getArea();
         }
     }
-    m_total_component_area = (float)area_sum;
     m_total_fixed_area = (float)fixed_sum;
-    m_total_movable_area = m_total_component_area - m_total_fixed_area;
+    m_total_movable_area = (float)movable_sum;
+    m_total_component_area = m_total_fixed_area + m_total_movable_area;
 
     Logger::log_info("Fixed components: " + std::to_string(fixed_count)
         + " (area: " + std::to_string((long long)m_total_fixed_area)
@@ -867,8 +876,26 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
 
          }
 
-        /// @brief add row 
-        void DataBase::add_bookshelf_row(BookshelfParser::Row const&) {  }
+        /// @brief add row — accumulate the .scl core-row bounding box (the die comes from
+        /// the rows, not the terminal coordinates). A row spans [SubrowOrigin, +NumSites*
+        /// SiteSpacing] in x and [Coordinate, +Height] in y.
+        void DataBase::add_bookshelf_row(BookshelfParser::Row const& row) {
+            long spacing = row.site_spacing > 0 ? row.site_spacing : row.site_width;
+            long x0 = row.origin[0];
+            long x1 = x0 + (long)row.site_num * spacing;
+            long y0 = row.origin[1];
+            long y1 = y0 + row.height;
+            if (m_row_count == 0) {
+                m_row_xmin = x0; m_row_xmax = x1;
+                m_row_ymin = y0; m_row_ymax = y1;
+            } else {
+                m_row_xmin = std::min(m_row_xmin, x0);
+                m_row_xmax = std::max(m_row_xmax, x1);
+                m_row_ymin = std::min(m_row_ymin, y0);
+                m_row_ymax = std::max(m_row_ymax, y1);
+            }
+            m_row_count++;
+        }
         /// @brief set node position — all bookshelf nodes (terminals + cells) are now Components
         void DataBase::set_bookshelf_node_position(string const& name, double x, double y, string const& orientation, string const& placement_status, bool notsurewhatfor) {
             Component* comp = mm_components[name];
@@ -901,9 +928,22 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         }
 
         /// @brief a callback when a bookshelf file reaches to the end 
-        void DataBase::bookshelf_end() { 
-            m_die_area = Box(Position(0, 0),
-                             Position((float)m_max_x, (float)m_max_y));
+        void DataBase::bookshelf_end() {
+            if (m_row_count > 0) {
+                // Die = core-row bounding box (matches XPlace). Shift all node coords so the
+                // die lower-left becomes the origin — the grid/solver assume die LL = (0,0),
+                // and XPlace applies the identical die_shift. Added back on DEF output.
+                m_die_shift = Position((float)m_row_xmin, (float)m_row_ymin);
+                for (auto& item : mm_components)
+                    item.second->translate(-m_die_shift.x, -m_die_shift.y);
+                m_die_area = Box(Position(0, 0),
+                                 Position((float)(m_row_xmax - m_row_xmin),
+                                          (float)(m_row_ymax - m_row_ymin)));
+            } else {
+                // No core rows parsed (defensive): fall back to terminal-inferred extent.
+                m_die_area = Box(Position(0, 0),
+                                 Position((float)m_max_x, (float)m_max_y));
+            }
             Logger::log_info("End of Bookshelf design reading.");
         }
         
@@ -1052,9 +1092,12 @@ void DataBase::writeHeader(std::ofstream& out) const {
 }
 
 void DataBase::writeDieArea(std::ofstream& out) const {
+    // Un-shift back to the original benchmark frame (see bookshelf_end die_shift).
     out << "DIEAREA ( "
-        << m_die_area.getPosBottomLeft().x << " " << m_die_area.getPosBottomLeft().y << " ) ( "
-        << m_die_area.getPosTopRight().x << " " << m_die_area.getPosTopRight().y << " ) ;\n\n";
+        << m_die_area.getPosBottomLeft().x + m_die_shift.x << " "
+        << m_die_area.getPosBottomLeft().y + m_die_shift.y << " ) ( "
+        << m_die_area.getPosTopRight().x + m_die_shift.x << " "
+        << m_die_area.getPosTopRight().y + m_die_shift.y << " ) ;\n\n";
 }
 
 void DataBase::writeComponents(std::ofstream& out) const {
@@ -1062,7 +1105,8 @@ void DataBase::writeComponents(std::ofstream& out) const {
     for (const auto& item : mm_components) {
         auto comp = item.second;
         out << "    - " << comp->getName() << " " << comp->getMacro()->getName() << "\n"
-            << "      + " << "PLACED"/*comp->getStatus()*/ << " ( " << comp->getX() << " " << comp->getY() << " ) "
+            << "      + " << "PLACED"/*comp->getStatus()*/ << " ( "
+            << comp->getX() + m_die_shift.x << " " << comp->getY() + m_die_shift.y << " ) "
             << comp->getOrientation() << " ;\n";
     }
     out << "END COMPONENTS\n\n";

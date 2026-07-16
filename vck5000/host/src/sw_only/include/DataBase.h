@@ -90,6 +90,12 @@ private:
 
     Box m_die_area;
     int m_max_x, m_max_y; // used when reading Bookshelf format to find die_area
+    // Bookshelf die is derived from the .scl core-row bounding box (matches XPlace),
+    // not from terminal coordinates. Node coords are then shifted so the die LL is the
+    // origin (XPlace die_shift); m_die_shift is added back on DEF output.
+    long m_row_xmin = 0, m_row_ymin = 0, m_row_xmax = 0, m_row_ymax = 0;
+    int  m_row_count = 0;
+    Position m_die_shift; // (0,0) unless a bookshelf die_shift was applied
     string m_design_name;
     int m_units_per_micron;
     int m_packet_count;
