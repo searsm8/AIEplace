@@ -636,6 +636,8 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         void DataBase::lef_macro_cbk(LefParser::lefiMacro const& m) {
             // Finalize macro size (pins have already been added by lef_pin_cbk)
             m_current_lef_macro->setSize(m.sizeX(), m.sizeY());
+            // Record LEF CLASS so add_def_component can apply XPlace's PLACED->fixed rule.
+            if (m.hasClass()) m_current_lef_macro->setClass(m.macroClass());
 
             m_current_lef_macro = nullptr;
         }
@@ -688,8 +690,17 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         // Create a new component (Node) and add it to the database
         {
             Component* new_comp = new Component(c.comp_name);
-            new_comp->setMacroClass(mm_macros[c.macro_name]);
-            new_comp->setPlacementStatus(c.status);
+            MacroClass* macro = mm_macros[c.macro_name];
+            new_comp->setMacroClass(macro);
+            // XPlace-faithful status (file_lefdef_db.cpp:1565-1595): a PLACED cell is movable only if
+            // its LEF CLASS is CORE or BLOCK; PLACED non-CORE/BLOCK cells (VIA/feedthrough/fill) are
+            // pre-placed and treated as FIXED. UNPLACED/FIXED pass through unchanged.
+            string status = c.status;
+            if (status == "PLACED" && macro) {
+                const string& cls = macro->getClass();
+                if (cls != "CORE" && cls != "BLOCK") status = "FIXED";
+            }
+            new_comp->setPlacementStatus(status);
             new_comp->setNodePos(Position((float)c.origin[0], (float)c.origin[1]));
             // TODO: assert component is created correctly
             mm_components.emplace(std::make_pair(new_comp->getName(), new_comp));

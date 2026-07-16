@@ -10,6 +10,7 @@ class MacroClass
 {
 private:
     string m_name;
+    string m_class;   // LEF CLASS (CORE/BLOCK/PAD/...), for the XPlace PLACED->fixed rule
     float m_Xsize;
     float m_Ysize;
     float m_area;
@@ -27,12 +28,14 @@ public:
 
     // Getters
     string getName() { return m_name; }
+    const string& getClass() const { return m_class; }
     float getXsize() { return m_Xsize; }
     float getYsize() { return m_Ysize; }
     float getArea()  { return m_area; }
 
     // Setters
     void setSize(float Xsize, float Ysize) { m_Xsize = Xsize; m_Ysize = Ysize; m_area = Xsize * Ysize; }
+    void setClass(const string& cls) { m_class = cls; }
 
     // Pin offset accessors
     void addPinOffset(const string& pin_name, Position offset) { m_pin_offsets[pin_name] = offset; }
