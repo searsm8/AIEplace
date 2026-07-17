@@ -143,7 +143,8 @@ void Placer::dumpScheduleTrace() {
     f.open(path.append("schedule_trace.csv"), std::ios_base::app);
     if (iteration == 1)
         f << "iter,hpwl,overflow,pos_norm_sq,grad_norm_sq,density_force_fraction,"
-             "base_gamma,gamma,inv_gamma,step_length,nesterov_ak,momentum_coeff,density_weight\n";
+             "base_gamma,gamma,inv_gamma,step_length,nesterov_ak,momentum_coeff,density_weight,"
+             "precond_coef,precond_a1_norm,precond_a2_norm\n";
     f << std::scientific << std::setprecision(9)
       << iteration << ','
       << hpwl_history.back()    << ',' << ovfw_history.back()   << ','
@@ -151,7 +152,9 @@ void Placer::dumpScheduleTrace() {
       << density_force_fraction << ',' << base_gamma            << ','
       << gamma                  << ',' << inv_gamma             << ','
       << step_length            << ',' << nesterov_ak           << ','
-      << momentum_coeff         << ',' << density_weight        << '\n';
+      << momentum_coeff         << ',' << density_weight        << ','
+      << precond_coef           << ',' << precond_a1_norm       << ','
+      << precond_a2_norm        << '\n';
     f.close();
 }
 

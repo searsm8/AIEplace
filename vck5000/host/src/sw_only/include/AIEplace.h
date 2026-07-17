@@ -109,6 +109,9 @@ public:
     float avg_node_size = 1.0f; // average cell area; normalizes preconditioner area term
     float density_force_fraction = 0.0f; // density's share of total preconditioner force-mass, in [0,1]
                                           // (0 = all wirelength, 1 = all density); XPlace calls this "weighted_weight"
+    float precond_density_scale = 1.0f; // EXPERIMENT: multiplies alpha_2 (precond density-mass) only, to match XPlace's a1/a2 basis
+    float precond_a1_norm = 0.0f; // ||alpha_1||_1 = sum of movable num_pins (preconditioner pin-mass; diag) [instrumentation]
+    float precond_a2_norm = 0.0f; // ||alpha_2||_1 = sum of precond_coef*lambda*area (preconditioner density-mass) [instrumentation]
     // BB-step raw sums from the last computeLipshitzEstimate (before the sqrt/clamp), exposed so the
     // schedule-trace dump can hand the PL param_scheduler port the exact inputs it must reproduce.
     float last_pos_norm_sq = 0.0f;  // ||v_{k+1} - v_k||^2 (preconditioned-consistent)

@@ -179,6 +179,13 @@ Placer::Placer(std::string config_filepath)
             dct_normalize_inverse = cfg["params"].value("dct_normalize_inverse", false);
             precond_raw_area = cfg["params"].value("precond_raw_area", true);
             dff_force_ratio  = cfg["params"].value("dff_force_ratio", true);
+            // EXPERIMENT: scale the preconditioner density-mass term (alpha_2 = pcoef*lambda*area) only,
+            // WITHOUT touching the main force (which is lambda*E, already XPlace-matched). sw_only's field
+            // E is ~50x larger than DREAMPlace's => lambda ~50x smaller => alpha_2 ~50x under-weighted vs
+            // num_pins, so the preconditioner never enters XPlace's area-dominated regime. Set this to the
+            // measured field-norm ratio (~50 on adaptec1) to match XPlace's a1/a2 basis and test whether a
+            // basis-matched preconditioner actually helps. Default 1.0 = unchanged.
+            precond_density_scale = cfg["params"].value("precond_density_scale", 1.0f);
             convergence_window = cfg["params"]["convergence_window"];
             convergence_iterations = cfg["params"].value("convergence_iterations", 30);
             max_backtracking_attempts = cfg["params"]["backtrack_max_tries"];
@@ -576,7 +583,7 @@ bool Placer::checkDivergence(int window, float threshold)
  */
 void Placer::updatePrecondWeights()
 {
-    float lambda_area_coef = precond_coef * density_weight;
+    float lambda_area_coef = precond_coef * density_weight * precond_density_scale;
 
     // Accumulate the two force-mass components for density_force_fraction:
     //   a1 = wirelength mass (pin count per node), a2 = density mass (λ · normalized area).
@@ -616,6 +623,9 @@ void Placer::updatePrecondWeights()
         density_force_fraction = last_gden_L1 / (last_gwl_L1 + last_gden_L1 + 1e-8f);
     else
         density_force_fraction = a2_norm / (a1_norm + a2_norm + 1e-8f);
+
+    precond_a1_norm = a1_norm; // instrumentation: expose the two preconditioner addend norms for the trace
+    precond_a2_norm = a2_norm;
 }
 
 

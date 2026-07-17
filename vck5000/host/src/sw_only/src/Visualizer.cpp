@@ -183,12 +183,29 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     cairo_set_line_width (cr, 0.001);
     cairo_stroke(cr);
 
-    // Draw Movable Components (blue)
+    // Movable cells split by size: std cells blue, large movable macros red.
+    // Macro = movable component whose area exceeds a small fraction of the die (die-relative so it
+    // generalizes across benchmarks; ~0.02% of die area cleanly separates ISPD2005/MMS macros from std cells).
+    double macro_area_thresh = 0.0002 * (double) m_die_width * (double) m_die_height;
+
+    // Draw Movable Standard Cells (blue)
     for (auto item : db.getComponents()) {
-       if (item.second->getStatus() != FIXED)
-           drawComponent(item.second);
+       Component* c = item.second;
+       if (c->getStatus() == FIXED) continue;
+       if ((double) c->getXsize() * c->getYsize() > macro_area_thresh) continue; // macros drawn red below
+       drawComponent(c);
     }
     cairo_set_source_rgb (cr, 0.0, 0.0, 1.0); // blue
+    cairo_fill(cr);
+
+    // Draw Movable Macros (red)
+    for (auto item : db.getComponents()) {
+       Component* c = item.second;
+       if (c->getStatus() == FIXED) continue;
+       if ((double) c->getXsize() * c->getYsize() <= macro_area_thresh) continue;
+       drawComponent(c);
+    }
+    cairo_set_source_rgb (cr, 1.0, 0.0, 0.0); // red for movable macros
     cairo_fill(cr);
 
     // Draw IO Pads

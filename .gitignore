@@ -33,3 +33,4 @@ __pycache__/
 # local scratch / review staging (not for the repo)
 /OVERNIGHT_WORK/
 /MARK_TO_REVIEW/
+vck5000/host/benchmarks/mms/
