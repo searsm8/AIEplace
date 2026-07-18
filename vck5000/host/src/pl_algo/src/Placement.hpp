@@ -40,6 +40,9 @@ struct PlacementConfig {
     float overflow_threshold;        // stop overflow (0.07, = XPlace --stop_overflow)
     int   min_iters;                 // convergence_min_iterations (50)
     int   conv_iters;                // extra iters after overflow first drops below stop (30)
+    // Preconditioner (sw_only updatePrecondWeights). Tri-state: -1 = auto (ON iff the design has
+    // movable macros, matching sw_only's smart default), 0 = force OFF, 1 = force ON.
+    int   enable_preconditioning = -1;
 };
 
 // ---- sw_only initializeDensityWeight: λ = (Σ|g_wl| / Σ|g_density|) * init_multiplier ----

@@ -846,6 +846,20 @@ int runPlacement(const PlacementConfig& cfg,
     float prev_hpwl      = 0.0f;   // for the density-weight trend
     int   conv_remaining = -1;     // overflow-below-stop countdown (-1 until first crossing)
 
+    // Preconditioner (sw_only updatePrecondWeights + auto-enable, faithful port). Auto-ON iff the
+    // design has movable macros (die-relative 0.02% area threshold, matching sw_only #5); an explicit
+    // cfg.enable_preconditioning (0/1) overrides. precond_coef starts at 1 and doubles every 20 iters
+    // once overflow<0.3 (sw_only escalation). Weights use RAW area (avg_area=1 => precond_raw_area=true),
+    // matching sw_only's MMS default. When OFF, precond stays 1 (no-op divide in iteration_update).
+    const float macro_area_thresh = 0.0002f * cfg.die_x * cfg.die_y;
+    int num_mov_macros = 0;
+    for (int n = 0; n < M; n++) if (area[n] > macro_area_thresh) num_mov_macros++;
+    const bool precond_on = (cfg.enable_preconditioning >= 0)
+        ? (cfg.enable_preconditioning != 0) : (num_mov_macros > 0);
+    float precond_coef = 1.0f;
+    printf("[place] preconditioner %s (%d movable macros detected)\n",
+           precond_on ? "ON" : "OFF", num_mov_macros);
+
     // One fused transform/spectral pass: src -> dst (scratch crosses via host, like runField).
     auto field_pass = [&](const float* src, float* dst, int mode, int sub) {
         std::memcpy(b_din.map<void*>(), src, matB);
@@ -934,8 +948,12 @@ int runPlacement(const PlacementConfig& cfg,
         float alpha = have_prev
             ? bbStepLength(v.data(), v_prev.data(), gtot.data(), gtot_prev.data(), M)
             : cfg.init_step_length;
-        // preconditioner OFF (sw_only default): precond weight stays 1 (filled at init). With
-        // dff_force_ratio the schedule's dff comes from the gradient L1 norms, not precond mass.
+        // Preconditioner weights for this iteration: w = max(1, degree + precond_coef*lambda*area)
+        // (raw area => avg_area=1). iteration_update divides the combined gradient by w. Essential for
+        // movable-macro (MMS) convergence; with dff_force_ratio the schedule's dff still comes from the
+        // gradient L1 norms, not precond mass, so leaving precond=1 when OFF is a clean no-op.
+        if (precond_on)
+            updatePrecondWeights(precond.data(), degree, area, M, /*avg_area=*/1.0f, precond_coef, lambda);
         const float coeff = momentumCoeff(nesterov_ak, cfg.enable_momentum);
 
         printf("[place] iter %d: HPWL=%.6g overflow=%.4f lambda=%.4g alpha=%.4g coeff=%.4f gamma=%.4g\n",
@@ -973,6 +991,10 @@ int runPlacement(const PlacementConfig& cfg,
             lambda = updateDensityWeight(lambda, (float)hpwl, prev_hpwl, iter,
                                          cfg.density_weight_min_step, cfg.density_weight_max_step);
             if (cfg.gamma_schedule) gamma = updateGammaValue((float)overflow, cfg.base_gamma);
+            // sw_only precond escalation: double precond_coef every 20 iters once overflow < 0.3
+            // (progressively tightens macro damping in late placement; cap 1024).
+            if (precond_on && overflow < 0.3f && precond_coef < 1024.0f && iter % 20 == 0)
+                precond_coef *= 2.0f;
         }
         prev_hpwl = (float)hpwl;   // trend reference for the next iteration (updated every iter)
         iters_run = iter;
