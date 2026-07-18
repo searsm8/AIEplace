@@ -278,16 +278,21 @@ Placer::Placer(std::string config_filepath)
             // (XPlace achieves this by normalizing all coordinates by site_width)
             // Preconditioner normalization: use movable area and count only
             {
-                int movable_count = 0;
-                float movable_height_sum = 0.0f, fixed_area = 0.0f;
+                int movable_count = 0, movable_stdcell_count = 0;
+                float movable_height_sum = 0.0f, fixed_area = 0.0f, movable_stdcell_area = 0.0f;
                 // die-relative macro threshold, same 0.02% rule the Visualizer uses to color macros red
                 double macro_area_thresh = 0.0002 * db.getDieArea().getArea();
                 for (auto& item : db.getComponents())
                     if (item.second->getStatus() != FIXED) {
                         movable_count++;
                         movable_height_sum += item.second->getYsize();
-                        if ((double)item.second->getXsize() * item.second->getYsize() > macro_area_thresh)
+                        float node_area = (float)item.second->getXsize() * item.second->getYsize();
+                        if ((double)node_area > macro_area_thresh) {
                             num_movable_macros++;
+                        } else {
+                            movable_stdcell_count++;
+                            movable_stdcell_area += node_area;
+                        }
                     } else {
                         fixed_area += item.second->getXsize() * item.second->getYsize();
                     }
@@ -301,7 +306,15 @@ Placer::Placer(std::string config_filepath)
                 // when the grid was not pinned by config or by the fixed AIE datapath.
                 if (bins_auto) {
                     float placeable_area = std::max(1.0f, db.getDieArea().getArea() - fixed_area);
-                    float total_bins = placeable_area * target_density / std::max(1.0f, avg_node_size);
+                    // Grid divisor uses the average STD-CELL area, not the all-movable average: big
+                    // movable macros inflate the mean and coarsen the grid, which under-reads density on
+                    // macro-heavy designs (adaptec2: 127 macros -> 512 grid stopped early at true-ovfw
+                    // 0.087; excluding macros -> 1024 grid, ovfw 0.057, legalizes -0.3% vs XPlace instead
+                    // of a +17% blowup). Bit-identical to the old formula when there are no movable macros.
+                    float avg_grid_cell = (num_movable_macros > 0)
+                        ? movable_stdcell_area / std::max(1, movable_stdcell_count)
+                        : avg_node_size; // no macros -> exactly the old divisor (bit-identical)
+                    float total_bins = placeable_area * target_density / std::max(1.0f, avg_grid_cell);
                     int   bins       = 1 << std::clamp((int)std::lround(std::log2(std::sqrt(total_bins))), 3, 12);
                     float row_height = movable_height_sum / std::max(1, movable_count);
                     int   num_rows   = (int)(db.getDieArea().getYsize() / std::max(1.0f, row_height));
