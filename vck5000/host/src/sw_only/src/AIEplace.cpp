@@ -170,7 +170,9 @@ Placer::Placer(std::string config_filepath)
             target_density = cfg["params"].value("maximum_utilization", 0.9f);
             enable_backtracking = cfg["params"]["enable_backtracking"];
             enable_momentum = cfg["params"]["enable_momentum"];
-            enable_preconditioning = cfg["params"].value("enable_preconditioning", true);
+            precond_explicitly_set = cfg["params"].contains("enable_preconditioning");
+            enable_preconditioning = cfg["params"].value("enable_preconditioning", false);
+            auto_enable_preconditioning = cfg["params"].value("auto_enable_preconditioning", true);
             precond_coef_escalation = cfg["params"].value("precond_coef_escalation", true);
             enable_density_clamp = cfg["params"].value("enable_density_clamp", true);
             dct_normalize = cfg["params"].value("dct_normalize", true);
@@ -278,10 +280,14 @@ Placer::Placer(std::string config_filepath)
             {
                 int movable_count = 0;
                 float movable_height_sum = 0.0f, fixed_area = 0.0f;
+                // die-relative macro threshold, same 0.02% rule the Visualizer uses to color macros red
+                double macro_area_thresh = 0.0002 * db.getDieArea().getArea();
                 for (auto& item : db.getComponents())
                     if (item.second->getStatus() != FIXED) {
                         movable_count++;
                         movable_height_sum += item.second->getYsize();
+                        if ((double)item.second->getXsize() * item.second->getYsize() > macro_area_thresh)
+                            num_movable_macros++;
                     } else {
                         fixed_area += item.second->getXsize() * item.second->getYsize();
                     }
@@ -305,6 +311,18 @@ Placer::Placer(std::string config_filepath)
                         + " x " + std::to_string(bins_per_row) + "  [sqrt|B|=" + std::to_string(bins)
                         + ", num_rows=" + std::to_string(num_rows) + ", row_cap=" + std::to_string(row_cap) + "]");
                 }
+            }
+
+            // Smart default: the preconditioner is essential for movable-macro (MMS) convergence but a
+            // wash on fixed-macro designs. When the config did not name enable_preconditioning, turn it
+            // ON iff this design has movable macros. An explicit config value always wins.
+            if (auto_enable_preconditioning && !precond_explicitly_set) {
+                enable_preconditioning = (num_movable_macros > 0);
+                Logger::log_info("Preconditioner auto-" + std::string(enable_preconditioning ? "ON" : "OFF")
+                    + " (" + std::to_string(num_movable_macros) + " movable macros detected)");
+            } else {
+                Logger::log_info("Movable macros detected: " + std::to_string(num_movable_macros)
+                    + " (preconditioner " + std::string(enable_preconditioning ? "ON" : "OFF") + ", explicit)");
             }
 
             db_IO_time = getInterval(pgrm_start_time, getTime());
