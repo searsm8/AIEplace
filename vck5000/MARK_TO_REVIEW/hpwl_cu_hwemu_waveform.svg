@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="460" viewBox="0 0 1180 460" font-family="monospace">
+<rect width="1180" height="460" fill="#0d1117"/>
+<text x="260" y="34" fill="#c9d1d9" font-size="17" font-weight="bold">hpwl_CU (HPWL gradient compute unit) — hw_emu RTL waveform, MODE_HPWL_GRAD</text>
+<text x="260" y="54" fill="#8b949e" font-size="12">synthetic 6-node/3-net/9-pin case · PASS vs CPU golden (rel_rms 1.4e-7) · window 139746.0–143920.0 ns</text>
+<line x1="260.0" y1="62" x2="260.0" y2="420" stroke="#30363d" stroke-width="0.5"/>
+<text x="260.0" y="436" fill="#8b949e" font-size="10" text-anchor="middle">139746ns</text>
+<line x1="348.0" y1="62" x2="348.0" y2="420" stroke="#30363d" stroke-width="0.5"/>
+<text x="348.0" y="436" fill="#8b949e" font-size="10" text-anchor="middle">140163ns</text>
+<line x1="436.0" y1="62" x2="436.0" y2="420" stroke="#30363d" stroke-width="0.5"/>
+<text x="436.0" y="436" fill="#8b949e" font-size="10" text-anchor="middle">140581ns</text>
+<line x1="524.0" y1="62" x2="524.0" y2="420" stroke="#30363d" stroke-width="0.5"/>
+<text x="524.0" y="436" fill="#8b949e" font-size="10" text-anchor="middle">140998ns</text>
+<line x1="612.0" y1="62" x2="612.0" y2="420" stroke="#30363d" stroke-width="0.5"/>
+<text x="612.0" y="436" fill="#8b949e" font-size="10" text-anchor="middle">141416ns</text>
+<line x1="700.0" y1="62" x2="700.0" y2="420" stroke="#30363d" stroke-width="0.5"/>
+<text x="700.0" y="436" fill="#8b949e" font-size="10" text-anchor="middle">141833ns</text>
+<line x1="788.0" y1="62" x2="788.0" y2="420" stroke="#30363d" stroke-width="0.5"/>
+<text x="788.0" y="436" fill="#8b949e" font-size="10" text-anchor="middle">142250ns</text>
+<line x1="876.0" y1="62" x2="876.0" y2="420" stroke="#30363d" stroke-width="0.5"/>
+<text x="876.0" y="436" fill="#8b949e" font-size="10" text-anchor="middle">142668ns</text>
+<line x1="964.0" y1="62" x2="964.0" y2="420" stroke="#30363d" stroke-width="0.5"/>
+<text x="964.0" y="436" fill="#8b949e" font-size="10" text-anchor="middle">143085ns</text>
+<line x1="1052.0" y1="62" x2="1052.0" y2="420" stroke="#30363d" stroke-width="0.5"/>
+<text x="1052.0" y="436" fill="#8b949e" font-size="10" text-anchor="middle">143503ns</text>
+<line x1="1140.0" y1="62" x2="1140.0" y2="420" stroke="#30363d" stroke-width="0.5"/>
+<text x="1140.0" y="436" fill="#8b949e" font-size="10" text-anchor="middle">143920ns</text>
+<text x="248" y="94" fill="#c9d1d9" font-size="11" text-anchor="end">ap_clk</text>
+<line x1="260" y1="94" x2="1140" y2="94" stroke="#30363d" stroke-width="0.5"/>
+<rect x="260" y="76" width="880" height="18" fill="#58a6ff" opacity="0.10"/>
+<text x="266" y="91" fill="#58a6ff" font-size="10">≈300 MHz (2505 edges in window)</text>
+<text x="248" y="128" fill="#c9d1d9" font-size="11" text-anchor="end">ap_start</text>
+<line x1="260" y1="128" x2="1140" y2="128" stroke="#30363d" stroke-width="0.5"/>
+<path d="M260.0,128.0 L307.2,128.0 L307.2,110.0 L1093.5,110.0 L1093.5,128.0 L1140.0,128.0" fill="none" stroke="#3fb950" stroke-width="1.8"/>
+<text x="248" y="162" fill="#c9d1d9" font-size="11" text-anchor="end">ap_idle</text>
+<line x1="260" y1="162" x2="1140" y2="162" stroke="#30363d" stroke-width="0.5"/>
+<path d="M260.0,144.0 L307.2,144.0 L307.2,162.0 L1093.5,162.0 L1093.5,144.0 L1140.0,144.0" fill="none" stroke="#3fb950" stroke-width="1.8"/>
+<text x="248" y="196" fill="#c9d1d9" font-size="11" text-anchor="end">ap_done</text>
+<line x1="260" y1="196" x2="1140" y2="196" stroke="#30363d" stroke-width="0.5"/>
+<path d="M260.0,196.0 L1092.8,196.0 L1092.8,178.0 L1140.0,178.0" fill="none" stroke="#3fb950" stroke-width="1.8"/>
+<text x="248" y="230" fill="#c9d1d9" font-size="11" text-anchor="end">gmem0 ARVALID (node_pos rd addr)</text>
+<line x1="260" y1="230" x2="1140" y2="230" stroke="#30363d" stroke-width="0.5"/>
+<path d="M260.0,230.0 L416.8,230.0 L416.8,212.0 L417.5,212.0 L417.5,230.0 L418.2,230.0 L418.2,212.0 L418.9,212.0 L418.9,230.0 L419.6,230.0 L419.6,212.0 L420.3,212.0 L420.3,230.0 L421.0,230.0 L421.0,212.0 L421.7,212.0 L421.7,230.0 L422.4,230.0 L422.4,212.0 L423.1,212.0 L423.1,230.0 L423.8,230.0 L423.8,212.0 L424.5,212.0 L424.5,230.0 L425.2,230.0 L425.2,212.0 L425.9,212.0 L425.9,230.0 L426.6,230.0 L426.6,212.0 L427.3,212.0 L427.3,230.0 L428.0,230.0 L428.0,212.0 L428.7,212.0 L428.7,230.0 L687.4,230.0 L687.4,212.0 L688.1,212.0 L688.1,230.0 L689.5,230.0 L689.5,212.0 L690.2,212.0 L690.2,230.0 L691.6,230.0 L691.6,212.0 L692.3,212.0 L692.3,230.0 L693.7,230.0 L693.7,212.0 L694.4,212.0 L694.4,230.0 L695.8,230.0 L695.8,212.0 L696.5,212.0 L696.5,230.0 L697.9,230.0 L697.9,212.0 L698.6,212.0 L698.6,230.0 L700.0,230.0 L700.0,212.0 L700.7,212.0 L700.7,230.0 L702.1,230.0 L702.1,212.0 L702.8,212.0 L702.8,230.0 L704.2,230.0 L704.2,212.0 L704.9,212.0 L704.9,230.0 L924.2,230.0 L924.2,212.0 L929.1,212.0 L929.1,230.0 L1140.0,230.0" fill="none" stroke="#d29922" stroke-width="1.8"/>
+<text x="248" y="264" fill="#c9d1d9" font-size="11" text-anchor="end">gmem0 RVALID (node_pos rd data)</text>
+<line x1="260" y1="264" x2="1140" y2="264" stroke="#30363d" stroke-width="0.5"/>
+<path d="M260.0,264.0 L491.3,264.0 L491.3,246.0 L492.7,246.0 L492.7,264.0 L493.4,264.0 L493.4,246.0 L494.8,246.0 L494.8,264.0 L495.5,264.0 L495.5,246.0 L496.9,246.0 L496.9,264.0 L497.6,264.0 L497.6,246.0 L499.0,246.0 L499.0,264.0 L499.7,264.0 L499.7,246.0 L500.4,246.0 L500.4,264.0 L712.6,264.0 L712.6,246.0 L713.4,246.0 L713.4,264.0 L714.8,264.0 L714.8,246.0 L715.5,246.0 L715.5,264.0 L716.9,264.0 L716.9,246.0 L717.6,246.0 L717.6,264.0 L719.0,264.0 L719.0,246.0 L719.7,246.0 L719.7,264.0 L721.1,264.0 L721.1,246.0 L721.8,246.0 L721.8,264.0 L723.2,264.0 L723.2,246.0 L723.9,246.0 L723.9,264.0 L725.3,264.0 L725.3,246.0 L726.0,246.0 L726.0,264.0 L727.4,264.0 L727.4,246.0 L728.1,246.0 L728.1,264.0 L729.5,264.0 L729.5,246.0 L730.2,246.0 L730.2,264.0 L950.2,264.0 L950.2,246.0 L950.9,246.0 L950.9,264.0 L952.3,264.0 L952.3,246.0 L953.0,246.0 L953.0,264.0 L953.7,264.0 L953.7,246.0 L955.1,246.0 L955.1,264.0 L955.8,264.0 L955.8,246.0 L957.2,246.0 L957.2,264.0 L957.9,264.0 L957.9,246.0 L958.6,246.0 L958.6,264.0 L1140.0,264.0" fill="none" stroke="#d29922" stroke-width="1.8"/>
+<text x="248" y="298" fill="#c9d1d9" font-size="11" text-anchor="end">gmem2 ARVALID (pins rd addr)</text>
+<line x1="260" y1="298" x2="1140" y2="298" stroke="#30363d" stroke-width="0.5"/>
+<path d="M260.0,298.0 L364.8,298.0 L364.8,280.0 L365.5,280.0 L365.5,298.0 L635.3,298.0 L635.3,280.0 L636.0,280.0 L636.0,298.0 L1140.0,298.0" fill="none" stroke="#d29922" stroke-width="1.8"/>
+<text x="248" y="332" fill="#c9d1d9" font-size="11" text-anchor="end">gmem7 AWVALID (node_grad wr)</text>
+<line x1="260" y1="332" x2="1140" y2="332" stroke="#30363d" stroke-width="0.5"/>
+<path d="M260.0,332.0 L873.6,332.0 L873.6,314.0 L874.3,314.0 L874.3,332.0 L998.0,332.0 L998.0,314.0 L998.7,314.0 L998.7,332.0 L999.4,332.0 L999.4,314.0 L1000.1,314.0 L1000.1,332.0 L1000.8,332.0 L1000.8,314.0 L1001.5,314.0 L1001.5,332.0 L1051.4,332.0 L1051.4,314.0 L1052.1,314.0 L1052.1,332.0 L1140.0,332.0" fill="none" stroke="#d29922" stroke-width="1.8"/>
+<text x="248" y="366" fill="#c9d1d9" font-size="11" text-anchor="end">hpwl_sweep ap_start</text>
+<line x1="260" y1="366" x2="1140" y2="366" stroke="#30363d" stroke-width="0.5"/>
+<path d="M260.0,366.0 L1140.0,366.0" fill="none" stroke="#3fb950" stroke-width="1.8"/>
+<text x="248" y="400" fill="#c9d1d9" font-size="11" text-anchor="end">hpwl_sweep ap_done</text>
+<line x1="260" y1="400" x2="1140" y2="400" stroke="#30363d" stroke-width="0.5"/>
+<path d="M260.0,400.0 L1140.0,400.0" fill="none" stroke="#3fb950" stroke-width="1.8"/>
+</svg>
