@@ -17,6 +17,29 @@
 
 #ifdef USE_XILINX_XRT
 #include "Placement.hpp"
+#include "PackedDesign.hpp"
+
+// Tiny synthetic design for a FAST hw_emu RTL-sim waveform of the HPWL gradient CU.
+// A real benchmark has 10^5-10^6 pins => RTL sim would run for hours; this 6-node /
+// 3-net / 9-pin case exercises all three segmented-reduction phases (A1 bbox, A2 B/C
+// sums, B node gradient) in a handful of simulated cycles. Selected by passing the
+// benchmark path "synthetic" to --hpwl-grad.
+static plalgo::PackedDesign makeSyntheticDesign() {
+    using namespace plalgo;
+    PackedDesign pk;
+    pk.header.num_movable = 4;   // nodes 0-3 movable
+    pk.header.num_nodes   = 6;   // nodes 4-5 fixed (still carry HPWL of nets they touch)
+    pk.header.num_nets    = 3;
+    pk.header.num_pins    = 9;
+    pk.node_pos = { {10,10}, {30,20}, {20,40}, {50,30}, {5,5}, {60,60} };
+    pk.node_box = { {10,10,2,2}, {30,20,2,2}, {20,40,2,2}, {50,30,2,2}, {5,5,4,4}, {60,60,4,4} };
+    pk.net_ptr  = { 0, 3, 6, 9 };                  // net0={0,1,2} net1={1,3,4} net2={2,3,5}
+    auto P = [](int n, int net){ NodePin p; p.node_idx=n; p.off_x=0; p.off_y=0; p.net=net; return p; };
+    pk.pins  = { P(0,0),P(1,0),P(2,0),  P(1,1),P(3,1),P(4,1),  P(2,2),P(3,2),P(5,2) };
+    // NODE-major, movable pins only, sorted ascending by node_idx (pass B input)
+    pk.npins = { P(0,0), P(1,0),P(1,1), P(2,0),P(2,2), P(3,1),P(3,2) };
+    return pk;
+}
 #endif
 
 #ifdef USE_XILINX_XRT
@@ -107,9 +130,15 @@ int main(int argc, char** argv) {
     // Verify the PL HPWL gradient compute unit on a real benchmark: parse + pack,
     // run hpwl_CU on the device, compare per-node gradient vs the CPU golden.
     if (argc >= 4 && std::strcmp(argv[1], "--hpwl-grad") == 0) {
-        AIEplace::DataBase db(argv[2]);
-        db.printInfo();
-        plalgo::PackedDesign pk = plalgo::packDesign(db);
+        plalgo::PackedDesign pk;
+        if (std::strcmp(argv[2], "synthetic") == 0) {
+            pk = makeSyntheticDesign();   // tiny case for a fast hw_emu waveform
+            printf("[synthetic] tiny design for hw_emu waveform\n");
+        } else {
+            AIEplace::DataBase db(argv[2]);
+            db.printInfo();
+            pk = plalgo::packDesign(db);
+        }
         printf("[pack] M=%d  N=%d  nets=%d  pins=%d\n",
                pk.header.num_movable, pk.header.num_nodes,
                pk.header.num_nets, pk.header.num_pins);

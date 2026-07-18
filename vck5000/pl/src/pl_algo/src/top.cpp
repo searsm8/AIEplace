@@ -79,10 +79,15 @@ void top(
     int            dct_stage,
     int            num_frames,
     // ---- mode selector ----
-    int            mode,
+    int            mode
+#ifndef PL_ONLY
+    ,
     // ---- AIE FFT pool streams: 8 lanes as SEPARATE named ports (HW-wired via link.cfg,
     // not host args). HLS does not support an array of hls::stream at the AXIS interface,
-    // so the lanes are individual scalar streams fft_to_aie_<i> / fft_from_aie_<i>. ----
+    // so the lanes are individual scalar streams fft_to_aie_<i> / fft_from_aie_<i>.
+    // PL_ONLY (AIE=none) builds omit these ports entirely -- an RTL/hw_emu link cannot leave
+    // AXIS ports dangling and a self-loop stream_connect is rejected, so a PL-only design must
+    // not declare them. The AIE DCT modes are compiled out to match (see below). ----
     hls::stream<axis_t>& fft_to_aie_0, hls::stream<axis_t>& fft_to_aie_1,
     hls::stream<axis_t>& fft_to_aie_2, hls::stream<axis_t>& fft_to_aie_3,
     hls::stream<axis_t>& fft_to_aie_4, hls::stream<axis_t>& fft_to_aie_5,
@@ -90,7 +95,9 @@ void top(
     hls::stream<axis_t>& fft_from_aie_0, hls::stream<axis_t>& fft_from_aie_1,
     hls::stream<axis_t>& fft_from_aie_2, hls::stream<axis_t>& fft_from_aie_3,
     hls::stream<axis_t>& fft_from_aie_4, hls::stream<axis_t>& fft_from_aie_5,
-    hls::stream<axis_t>& fft_from_aie_6, hls::stream<axis_t>& fft_from_aie_7)
+    hls::stream<axis_t>& fft_from_aie_6, hls::stream<axis_t>& fft_from_aie_7
+#endif
+    )
 {
  
 /* 
@@ -145,6 +152,7 @@ void top(
 /*
  * AXIS interfaces PL to AIE (for the 8-lane AIE FFT pool)
  */
+#ifndef PL_ONLY
 #pragma HLS INTERFACE axis port=fft_to_aie_0
 #pragma HLS INTERFACE axis port=fft_to_aie_1
 #pragma HLS INTERFACE axis port=fft_to_aie_2
@@ -161,12 +169,15 @@ void top(
 #pragma HLS INTERFACE axis port=fft_from_aie_5
 #pragma HLS INTERFACE axis port=fft_from_aie_6
 #pragma HLS INTERFACE axis port=fft_from_aie_7
+#endif // !PL_ONLY
 #pragma HLS INTERFACE s_axilite port=return         bundle=control
 
     if (mode == MODE_DENSITY_BIN) {
         density_bin(node_box, bin_density, num_movable, num_nodes,
                     bin_w, bin_h, target_density);
-    } else if (mode == MODE_DCT_1D) {
+    }
+#ifndef PL_ONLY
+    else if (mode == MODE_DCT_1D) {
         // single lane: use lane 0 of the pool (Stage 2 bring-up).
         dct_1d(dct_in, dct_out, num_frames, dct_stage, fft_to_aie_0, fft_from_aie_0);
     } else if (mode == MODE_DCT_ROWPASS) {
@@ -176,12 +187,16 @@ void top(
                      fft_to_aie_4, fft_to_aie_5, fft_to_aie_6, fft_to_aie_7,
                      fft_from_aie_0, fft_from_aie_1, fft_from_aie_2, fft_from_aie_3,
                      fft_from_aie_4, fft_from_aie_5, fft_from_aie_6, fft_from_aie_7);
-    } else if (mode == MODE_TRANSPOSE) {
+    }
+#endif // !PL_ONLY
+    else if (mode == MODE_TRANSPOSE) {
         // GRID x GRID transpose (pure PL); dct_stage selects variant. Dimension is the
         // compile-time GRID (required for the DDR burst -- see transpose.hpp).
         if (dct_stage == 0) transpose_naive(dct_in, dct_out);
         else                transpose_band(dct_in, dct_out);
-    } else if (mode == MODE_DCT_TRANSPOSE) {
+    }
+#ifndef PL_ONLY
+    else if (mode == MODE_DCT_TRANSPOSE) {
         // Stage 3c/4: fused transform row-pass + transpose. Transform all GRID rows via the
         // 8-lane pool, written transposed. dct_stage = transform_mode (TF_DCT/IDCT/IDXST);
         // dct_in -> dct_out (transposed). num_frames unused (N=GRID).
@@ -190,7 +205,9 @@ void top(
                            fft_to_aie_4, fft_to_aie_5, fft_to_aie_6, fft_to_aie_7,
                            fft_from_aie_0, fft_from_aie_1, fft_from_aie_2, fft_from_aie_3,
                            fft_from_aie_4, fft_from_aie_5, fft_from_aie_6, fft_from_aie_7);
-    } else if (mode == MODE_SPECTRAL) {
+    }
+#endif // !PL_ONLY
+    else if (mode == MODE_SPECTRAL) {
         // Stage 4: spectral multiply a_uv -> one field. dct_stage = axis (0=Ex/w_u, 1=Ey/w_v).
         spectral_multiply(dct_in, dct_out, dct_stage);
     } else if (mode == MODE_FORCE_GATHER) {

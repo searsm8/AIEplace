@@ -91,7 +91,13 @@ VPP_PACKAGE_DEBUG_FLAGS = --debug $(AIE_LIBADF)
 # variant's headers (host_interface.hpp / formats.hpp / modules/).
 VPP_KERNEL_INCLUDE = -I$(PL_DIR)/src
 
-XO_COMPILE_OPTS = $(VPP_HLS_FLAGS) $(VPP_KERNEL_INCLUDE) $(VPP_EXTRA_DESIGN_OPTS) $(VPP_INTERMEDIATE_FILE_DIRS)
+# AIE=none is a PL-only build: compile out top's AIE FFT AXIS ports (they can't be left
+# dangling for an RTL/hw_emu link, and a self-loop stream_connect is rejected). Gated by
+# -DPL_ONLY so the HPWL/density/iteration modes still build+emulate without any AIE.
+ifeq ($(AIE),none)
+VPP_PL_ONLY_DEFINE = -DPL_ONLY
+endif
+XO_COMPILE_OPTS = $(VPP_HLS_FLAGS) $(VPP_KERNEL_INCLUDE) $(VPP_EXTRA_DESIGN_OPTS) $(VPP_INTERMEDIATE_FILE_DIRS) $(VPP_PL_ONLY_DEFINE)
 XSA_LINK_OPTS = -g $(VPP_KERNEL_INCLUDE) $(VPP_LINK_CLOCK_FLAGS) $(VPP_PROFILE_FLAGS) $(VPP_VIVADO_FLAGS) $(VPP_CONNECTION_FLAGS) $(VPP_INTERMEDIATE_FILE_DIRS)
 XCLBIN_PACKAGE_OPTS = $(VPP_PACKAGE_FLAGS) $(VPP_INTERMEDIATE_FILE_DIRS)
 

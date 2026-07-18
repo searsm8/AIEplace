@@ -24,6 +24,11 @@ def generate_link_cfg(file_path, aie, density_instances):
                 f.write("stream_connect=top_1.fft_to_aie_%d:ai_engine_0.fft_in_%d\n" % (i, i))
                 f.write("stream_connect=ai_engine_0.fft_out_%d:top_1.fft_from_aie_%d\n" % (i, i))
             f.write("\n")
+        else:
+            # AIE=none (PL-only): top.cpp is compiled with -DPL_ONLY (common.mk), which omits
+            # the 8 fft_to_aie_/fft_from_aie_ AXIS ports entirely, so there is nothing to
+            # stream_connect -- an RTL/hw_emu link then succeeds with no AIE at all.
+            f.write("### AIE=none: PL-only build (-DPL_ONLY), no AIE AXIS ports to connect ###\n\n")
 
         f.write("[vivado]\n")
         f.write("# improve hw_emu speed (platform-dependent)\n")
