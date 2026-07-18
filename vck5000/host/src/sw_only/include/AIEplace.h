@@ -85,6 +85,7 @@ public:
                                              // convergence; a wash on fixed-macro designs). See #5 handoff.
     bool precond_explicitly_set = false;     // config named enable_preconditioning => honor it, skip auto
     int  num_movable_macros = 0;             // movable components with area > macro_area_frac * die area
+    int  formula_bins_per_row = 0;           // grid the ePlace auto-formula picks (recorded even when overridden)
     bool precond_coef_escalation = true; // double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef)
     bool enable_density_clamp;   // clamp sub-bin cells in the density solve (XPlace expand_ratio)
     bool dct_normalize = true;   // apply 1/N per forward DCT (bounds a_uv intermediates; global scale absorbed by lambda)

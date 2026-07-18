@@ -304,7 +304,9 @@ Placer::Placer(std::string config_filepath)
                 // power of 2 (FFT needs it), then cap so a bin is never shorter than a standard-cell row
                 // (bin_height >= row_height), mirroring XPlace's num_bin <= num_rows guard. Only runs
                 // when the grid was not pinned by config or by the fixed AIE datapath.
-                if (bins_auto) {
+                // Compute the ePlace formula grid ALWAYS (recorded in run_summary even when an explicit
+                // bins_per_row overrides it, so the grid-sizing sweep can compare formula vs best grid).
+                {
                     float placeable_area = std::max(1.0f, db.getDieArea().getArea() - fixed_area);
                     // Grid divisor uses the average STD-CELL area, not the all-movable average: big
                     // movable macros inflate the mean and coarsen the grid, which under-reads density on
@@ -319,10 +321,12 @@ Placer::Placer(std::string config_filepath)
                     float row_height = movable_height_sum / std::max(1, movable_count);
                     int   num_rows   = (int)(db.getDieArea().getYsize() / std::max(1.0f, row_height));
                     int   row_cap    = 1 << std::clamp((int)std::floor(std::log2((float)std::max(1, num_rows))), 3, 12);
-                    bins_per_row = std::min(bins, row_cap);
-                    Logger::log_info("Grid resolution (ePlace auto): " + std::to_string(bins_per_row)
-                        + " x " + std::to_string(bins_per_row) + "  [sqrt|B|=" + std::to_string(bins)
-                        + ", num_rows=" + std::to_string(num_rows) + ", row_cap=" + std::to_string(row_cap) + "]");
+                    formula_bins_per_row = std::min(bins, row_cap);
+                    if (bins_auto) bins_per_row = formula_bins_per_row;
+                    Logger::log_info("Grid (ePlace formula): " + std::to_string(formula_bins_per_row)
+                        + "  [sqrt|B|=" + std::to_string(bins) + ", num_rows=" + std::to_string(num_rows)
+                        + ", row_cap=" + std::to_string(row_cap) + "]  effective bins_per_row="
+                        + std::to_string(bins_per_row));
                 }
             }
 

@@ -460,6 +460,9 @@ void Placer::printFinalResults()
     hyperparams.add_row({"Hyperparameter", "Final Value"});
     hyperparams.add_row(RowStream{} << "gamma" << gamma);
     hyperparams.add_row(RowStream{} << "step_length" << step_length);
+    hyperparams.add_row(RowStream{} << "bins_per_row" << bins_per_row);
+    hyperparams.add_row(RowStream{} << "formula_grid" << formula_bins_per_row);
+    hyperparams.add_row(RowStream{} << "num_movable_macros" << num_movable_macros);
     hyperparams.add_row(RowStream{} << "partials method" << cfg["params"]["partials_compute_method"]);
     hyperparams.add_row(RowStream{} << "density method" << cfg["params"]["density_compute_method"]);
     hyperparams.add_row(RowStream{} << "wirelength method" << cfg["params"]["wirelength_method"]);
