@@ -131,11 +131,16 @@ the entire PL-only field solve as a kernel. Built a 64×64 PL-only hw_emu xclbin
 whole density solve (4 FFT passes on-chip) and dumps a 90MB VCD. Waveform:
 `MARK_TO_REVIEW/field_solve_hwemu_waveform.svg`. This is the piece that makes the design **PL-only**.
 
+**FULL PL-ONLY ITERATION hw_emu (DONE):** `--one-iter` runs density_bin → field_solve_pl (fft_pl) →
+force_gather → iteration_update as a 4-call kernel sequence against the small-grid xclbin (host-only,
+no kernel rebuild), g_hpwl=0. In hw_emu the whole iteration executes: density gradient non-zero, the 6
+clustered nodes spread outward under the density force (mean move 40.6 on the 64-grid). Waveform:
+`MARK_TO_REVIEW/full_iteration_hwemu_waveform.svg` — the **entire algorithm iteration on the PL alone**.
+Four hw_emu waveforms delivered: hpwl_CU, iteration_update, field_solve, full-iteration.
+
 ## Open items / next steps
-1. **Full-iteration hw_emu waveform** — chain density_bin → field_solve_pl → force_gather → hpwl_CU →
-   iteration_update into one small-grid kernel. ALL pieces are now individually verified (HPWL CU +
-   iteration_update in hw_emu; field solve in hw_emu; density_bin/force_gather in prior C goldens); the
-   remaining work is the combined kernel + one build.
+1. **Add the HPWL gradient into `--one-iter`** (currently g_hpwl=0, density-driven only) for a
+   wirelength+density iteration; then loop it to convergence on the PL.
 2. **sw_emu `--place` MMS verification** of the new PL preconditioner (Part 4).
 3. Broader grid-sizing fix (row-cap) for the 2048-tier / adaptec5 coarseness; the newblue overflow-metric
    mismatch.
