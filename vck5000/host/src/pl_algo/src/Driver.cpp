@@ -585,6 +585,37 @@ void runForceGather(const NodeBox* node_box, int num_nodes, int num_movable,
     std::memcpy(node_grad, bo_grad.map<void*>(), grad_bytes);
 }
 
+// PL-only field solve: rho -> Ex, Ey via fft_pl (no AIE). rho = dct_in (gmem10);
+// Ex = dct_out (gmem11); Ey = bin_density (gmem9). NxN grids, N = DENSITY_GRID (small-grid build).
+void runFieldSolvePl(const float* rho, float* Ex, float* Ey, const char* xclbin_path) {
+    const size_t mat_bytes = (size_t)DENSITY_NBINS * sizeof(float);
+    xrt::device device(0);
+    xrt::uuid   uuid = device.load_xclbin(xclbin_path);
+    xrt::kernel top(device, uuid, "top");
+    xrt::bo d0 = xrt::bo(device, sizeof(coord_t), top.group_id(0));
+    xrt::bo d1 = xrt::bo(device, sizeof(int32_t), top.group_id(1));
+    xrt::bo d2 = xrt::bo(device, sizeof(NodePin), top.group_id(2));
+    xrt::bo d3 = xrt::bo(device, sizeof(NodePin), top.group_id(3));
+    xrt::bo d4 = xrt::bo(device, sizeof(float),   top.group_id(4));
+    xrt::bo d5 = xrt::bo(device, sizeof(NetBBox), top.group_id(5));
+    xrt::bo d6 = xrt::bo(device, sizeof(NetSums), top.group_id(6));
+    xrt::bo d7 = xrt::bo(device, sizeof(coord_t), top.group_id(7));
+    xrt::bo d8 = xrt::bo(device, sizeof(NodeBox), top.group_id(8));
+    xrt::bo bo_ey  = xrt::bo(device, mat_bytes, top.group_id(9));   // Ey  out
+    xrt::bo bo_rho = xrt::bo(device, mat_bytes, top.group_id(10));  // rho in
+    xrt::bo bo_ex  = xrt::bo(device, mat_bytes, top.group_id(11));  // Ex  out
+    std::memcpy(bo_rho.map<void*>(), rho, mat_bytes);
+    bo_rho.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    xrt::run run = top(d0, d1, d2, d3, d4, d5, d6, d7, d8, bo_ey, bo_rho, bo_ex,
+                       0.0f, 0.0f, 0, 0, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0, 0,
+                       (int)MODE_FIELD_SOLVE_PL);
+    run.wait();
+    bo_ex.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    bo_ey.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::memcpy(Ex, bo_ex.map<void*>(), mat_bytes);
+    std::memcpy(Ey, bo_ey.map<void*>(), mat_bytes);
+}
+
 // Stage 5b: the full density gradient in ONE device/graph session -- node geometry ->
 // density_bin (rho) -> forward 2D DCT (a_uv) -> spectral (Ex_hat,Ey_hat) -> inverse
 // (Ex,Ey) -> force_gather -> per-movable-node density gradient. Intermediate matrices

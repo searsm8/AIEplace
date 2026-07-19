@@ -6,6 +6,9 @@ include $(HOST_DIR)/makeflags.mk
 
 CXX = g++
 CXXFLAGS += -MMD -MP
+# Extra preprocessor defines for special builds (e.g. small-grid PL-only field solve:
+# EXTRA_DEFS="-DPL_GRID=64 -DPL_FIELD_SOLVE"). Empty by default.
+CXXFLAGS += $(EXTRA_DEFS)
 
 ifndef BUILD_XRT
 $(info MAKE INFO: Building without XRT - CPU only mode)

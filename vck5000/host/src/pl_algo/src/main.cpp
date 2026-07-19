@@ -18,6 +18,10 @@
 #ifdef USE_XILINX_XRT
 #include "Placement.hpp"
 #include "PackedDesign.hpp"
+#include <random>
+#ifdef PL_FIELD_SOLVE
+#include "modules/field_solve_pl.hpp"   // C golden for the --field-solve RTL-vs-Csim check
+#endif
 
 // Tiny synthetic design for a FAST hw_emu RTL-sim waveform of the HPWL gradient CU.
 // A real benchmark has 10^5-10^6 pins => RTL sim would run for hours; this 6-node /
@@ -124,6 +128,28 @@ int main(int argc, char** argv) {
     // Stage 5c.1/5c.2: verify one Nesterov step on synthetic data (no benchmark needed).
     if (argc >= 3 && std::strcmp(argv[1], "--iter-update") == 0)
         return plalgo::runIterUpdateVerify(argv[2]);
+#ifdef PL_FIELD_SOLVE
+    // PL-only field solve (fft_pl) in hw_emu: random rho -> Ex, Ey on device; compare to the
+    // C field_solve_pl (RTL-vs-Csim). Small-grid build (-DPL_GRID=<N> -DPL_FIELD_SOLVE).
+    if (argc >= 3 && std::strcmp(argv[1], "--field-solve") == 0) {
+        const int N = plalgo::DENSITY_GRID, NB = N * N;
+        std::vector<float> rho(NB), Ex(NB), Ey(NB), ExG(NB), EyG(NB), tA(NB), tB(NB);
+        std::mt19937 rng(2024); std::uniform_real_distribution<float> uni(0.f, 1.f);
+        for (int i = 0; i < NB; i++) rho[i] = uni(rng);
+        plalgo::field_solve_pl(rho.data(), ExG.data(), EyG.data(), tA.data(), tB.data()); // C golden
+        plalgo::runFieldSolvePl(rho.data(), Ex.data(), Ey.data(), argv[2]);                // device
+        double ee = 0, en = 0, ye = 0, yn = 0;
+        for (int i = 0; i < NB; i++) {
+            double dx = Ex[i] - ExG[i], dy = Ey[i] - EyG[i];
+            ee += dx * dx; en += (double)ExG[i] * ExG[i]; ye += dy * dy; yn += (double)EyG[i] * EyG[i];
+        }
+        double rex = std::sqrt(ee / (en + 1e-30)), rey = std::sqrt(ye / (yn + 1e-30));
+        bool ok = rex < 1e-4 && rey < 1e-4;
+        printf("[field-solve] N=%d  Ex rel_rms=%.3e  Ey rel_rms=%.3e  -> %s\n",
+               N, rex, rey, ok ? "PASS" : "FAIL");
+        return ok ? 0 : 1;
+    }
+#endif
 #endif
 
 #ifdef USE_XILINX_XRT

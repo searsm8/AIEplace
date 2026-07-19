@@ -159,7 +159,11 @@ constexpr float AIE_INV_GAMMA  = 0.25f; // 1/gamma baked into the AIE kernel (==
 
 // Bin grid dimension, host-visible. Must equal formats.hpp GRID (the PL transport
 // header pulls HLS types, so host TUs can't include it -- this is the host copy).
-constexpr int DENSITY_GRID  = 1024;
+// Overridable via -DPL_GRID (default 1024) for a small-grid PL-only build; see formats.hpp.
+#ifndef PL_GRID
+#define PL_GRID 1024
+#endif
+constexpr int DENSITY_GRID  = PL_GRID;
 constexpr int DENSITY_NBINS = DENSITY_GRID * DENSITY_GRID;   // 1,048,576 (4 MB float)
 constexpr int DENSITY_LANES = 8;   // AIE FFT pool width; must equal formats.hpp FFT_LANES
                                    // (and AIE_DENSITY_INSTANCES at build time)
@@ -200,11 +204,16 @@ enum top_mode { MODE_HPWL_GRAD = 0, MODE_DENSITY_BIN = 1, MODE_DCT_1D = 2,
                                          // scalars: lambda=inv_gamma, alpha=inv_lut_step,
                                          // coeff=bin_w, die_xmax=bin_h, die_ymax=target_density,
                                          // num_movable.
-                MODE_METRICS = 9 };      // Stage 5c: reduce {HPWL, overflow_sum} for the host
+                MODE_METRICS = 9,        // Stage 5c: reduce {HPWL, overflow_sum} for the host
                                          // policy. HPWL from node_pos (gmem0) + net_ptr (gmem1)
                                          // + pins (gmem2); overflow_sum from bin_density (gmem9).
                                          // OUT: dct_out[0]=HPWL, dct_out[1]=overflow_sum (gmem11).
                                          // scalars: num_nets, target_density.
+                MODE_FIELD_SOLVE_PL = 10 }; // PL-only field solve: forward 2D DCT -> spectral ->
+                                         // inverse (IDCT/IDXST), the whole density solve on the PL
+                                         // via fft_pl (NO AIE). rho = dct_in (gmem10) -> Ex =
+                                         // dct_out (gmem11), Ey = bin_density (gmem9). On-chip
+                                         // scratch. Small-grid (PL_GRID) build only (fits on-chip).
 
 // ---- 1D DCT via the AIE FFT  (Stage 2 -- first AIE bring-up) ----------------
 // MODE_DCT_1D streams num_frames real rows of FFT_PTS points each through:

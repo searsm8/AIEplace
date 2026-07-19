@@ -27,6 +27,9 @@
 #include "modules/iteration_update.hpp"
 #include "modules/memory_writer.hpp"
 #include "modules/metrics.hpp"
+#ifdef PL_FIELD_SOLVE
+#include "modules/field_solve_pl.hpp"   // PL-only field solve (small-grid build only)
+#endif
 
 using namespace plalgo;
 
@@ -227,7 +230,26 @@ void top(
         // Stage 5c: reduce {HPWL, overflow_sum}. HPWL from node_pos(0)/net_ptr(1)/pins(2);
         // overflow_sum from bin_density(9). Out: dct_out[0]=HPWL, dct_out[1]=overflow_sum.
         metrics(node_pos, net_ptr, pins, bin_density, num_nets, target_density, dct_out);
-    } else { // MODE_HPWL_GRAD
+    }
+#ifdef PL_FIELD_SOLVE
+    else if (mode == MODE_FIELD_SOLVE_PL) {
+        // PL-only density solve: rho (dct_in, gmem10) -> Ex (dct_out, gmem11), Ey (bin_density,
+        // gmem9), the whole forward-DCT / spectral / inverse pipeline via fft_pl (no AIE). On-chip
+        // scratch; only valid in the small-grid build (GRID*GRID must fit on-chip).
+        static float rho_[GRID * GRID], Ex_[GRID * GRID], Ey_[GRID * GRID];
+        static float tA_[GRID * GRID], tB_[GRID * GRID];
+        for (int i = 0; i < GRID * GRID; i++) {
+#pragma HLS PIPELINE II=1
+            rho_[i] = dct_in[i];
+        }
+        field_solve_pl(rho_, Ex_, Ey_, tA_, tB_);
+        for (int i = 0; i < GRID * GRID; i++) {
+#pragma HLS PIPELINE II=1
+            dct_out[i] = Ex_[i]; bin_density[i] = Ey_[i];
+        }
+    }
+#endif
+    else { // MODE_HPWL_GRAD
         hpwl_CU(node_pos, net_ptr, pins, npins, exp_lut, bb, sums, node_grad,
                 inv_gamma, inv_lut_step, lut_size, num_nets, num_movable, num_npins);
     }

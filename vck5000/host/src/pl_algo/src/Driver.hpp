@@ -91,6 +91,10 @@ void runForceGather(const NodeBox* node_box, int num_nodes, int num_movable,
                     float bin_w, float bin_h,
                     coord_t* node_grad, const char* xclbin_path);
 
+// PL-only field solve (fft_pl, no AIE): rho -> Ex, Ey. NxN grids (N = DENSITY_GRID),
+// caller-allocated. Small-grid build only. See top.cpp MODE_FIELD_SOLVE_PL.
+void runFieldSolvePl(const float* rho, float* Ex, float* Ey, const char* xclbin_path);
+
 // Stage 5b: the full density gradient in one device/graph session -- node geometry ->
 // density_bin -> forward 2D DCT -> spectral -> inverse -> force_gather -> per-node density
 // gradient (node_grad[num_movable], caller-allocated). AIE-using.

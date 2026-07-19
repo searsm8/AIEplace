@@ -16,6 +16,7 @@
 #include <vector>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <random>
 
 namespace plalgo {
@@ -25,7 +26,8 @@ static inline double clampd(double v, double lo, double hi) {
 }
 
 int runIterUpdateVerify(const char* xclbin_path) {
-    const int   M        = 4000;
+    // Node count is env-overridable (ITER_M) so a small case gives a fast, crisp hw_emu waveform.
+    const int   M        = std::getenv("ITER_M") ? std::atoi(std::getenv("ITER_M")) : 4000;
     const float die_x    = 1024.0f, die_y = 1024.0f;
     const float lambda   = 0.3f;    // density weight
     const float alpha    = 0.7f;    // BB step

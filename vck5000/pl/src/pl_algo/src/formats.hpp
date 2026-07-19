@@ -23,8 +23,14 @@ namespace plalgo {
 // One real matrix  = 1024*1024*4B = 4 MB.
 // One cfloat matrix = 1024*1024*8B = 8 MB.
 // => bin density, Ex, Ey, and FFT scratch are all DDR-resident, streamed in row tiles.
-constexpr int GRID        = 1024;            // bins per row and per column
-constexpr int N_BINS      = GRID * GRID;     // 1,048,576 bins total
+// GRID is overridable via -DPL_GRID (default 1024) so a small-grid PL-only build fits the
+// whole density solve on-chip for a tractable hw_emu RTL sim (e.g. PL_GRID=64 = sw_only
+// BINS_PER_ROW). Default 1024 is bit-identical to before. Must match fft_pl.hpp's PL_GRID.
+#ifndef PL_GRID
+#define PL_GRID 1024
+#endif
+constexpr int GRID        = PL_GRID;         // bins per row and per column
+constexpr int N_BINS      = GRID * GRID;     // 1,048,576 bins total (at PL_GRID=1024)
 
 // AIE FFT pool: number of rows transformed in parallel (the "8 parallel FFT rows").
 constexpr int FFT_LANES   = 8;
