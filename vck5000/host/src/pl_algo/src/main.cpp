@@ -149,6 +149,31 @@ int main(int argc, char** argv) {
                N, rex, rey, ok ? "PASS" : "FAIL");
         return ok ? 0 : 1;
     }
+    // ONE full density-driven iteration on the PL (density_bin -> field_solve_pl -> force_gather ->
+    // iteration_update), for a full-iteration hw_emu waveform. Small synthetic design on the grid.
+    if (argc >= 3 && std::strcmp(argv[1], "--one-iter") == 0) {
+        const int G = plalgo::DENSITY_GRID;      // grid = die (bin_w=bin_h=1)
+        const int M = 6;                          // movable nodes
+        const float die = (float)G;
+        std::vector<plalgo::NodeBox> box(M);
+        std::vector<plalgo::coord_t> u_k(M), u_out(M), v_out(M), gden(M);
+        std::vector<float> prec(M, 1.0f);
+        std::mt19937 rng(7); std::uniform_real_distribution<float> pos(4.f, die - 8.f), sz(2.f, 5.f);
+        for (int n = 0; n < M; n++) {             // clustered near center -> density force spreads them
+            box[n].x = die * 0.5f + (float)(n - 3) * 1.5f; box[n].y = die * 0.5f + (float)(n % 2) * 1.5f;
+            box[n].w = sz(rng); box[n].h = sz(rng);
+            u_k[n].x = box[n].x; u_k[n].y = box[n].y;
+        }
+        printf("[one-iter] M=%d grid=%d  running density_bin -> field_solve_pl -> force_gather -> iteration_update\n", M, G);
+        plalgo::runOneIterationPl(box.data(), u_k.data(), prec.data(), M, M, 1.0f, 1.0f, 1.0f,
+                                  /*lambda*/0.5f, /*alpha*/0.3f, /*coeff*/0.0f, die, die,
+                                  u_out.data(), v_out.data(), gden.data(), argv[2]);
+        double moved = 0; for (int n = 0; n < M; n++) { double dx = v_out[n].x - u_k[n].x, dy = v_out[n].y - u_k[n].y; moved += std::sqrt(dx*dx+dy*dy); }
+        printf("[one-iter] done. mean |g_density|=%.3e  mean node move=%.3f  (node0 v: %.2f,%.2f -> %.2f,%.2f)\n",
+               [&]{ double s=0; for(int n=0;n<M;n++) s+=std::sqrt((double)gden[n].x*gden[n].x+(double)gden[n].y*gden[n].y); return s/M; }(),
+               moved / M, u_k[0].x, u_k[0].y, v_out[0].x, v_out[0].y);
+        return 0;
+    }
 #endif
 #endif
 

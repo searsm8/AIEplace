@@ -95,6 +95,16 @@ void runForceGather(const NodeBox* node_box, int num_nodes, int num_movable,
 // caller-allocated. Small-grid build only. See top.cpp MODE_FIELD_SOLVE_PL.
 void runFieldSolvePl(const float* rho, float* Ex, float* Ey, const char* xclbin_path);
 
+// ONE full density-driven iteration (no AIE): density_bin -> field_solve_pl -> force_gather ->
+// iteration_update, as a kernel-call sequence against the small-grid xclbin (g_hpwl=0). Outputs
+// new u/v and the density gradient (caller-allocated [num_movable]). Small-grid build only.
+void runOneIterationPl(const NodeBox* node_box, const coord_t* u_k, const float* precond,
+                       int num_nodes, int num_movable, float bin_w, float bin_h,
+                       float target_density, float lambda, float alpha, float coeff,
+                       float die_x, float die_y,
+                       coord_t* u_out, coord_t* v_out, coord_t* g_density_out,
+                       const char* xclbin_path);
+
 // Stage 5b: the full density gradient in one device/graph session -- node geometry ->
 // density_bin -> forward 2D DCT -> spectral -> inverse -> force_gather -> per-node density
 // gradient (node_grad[num_movable], caller-allocated). AIE-using.

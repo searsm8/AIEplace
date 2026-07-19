@@ -707,6 +707,86 @@ void runDensityGradient(const NodeBox* node_box, int num_nodes, int num_movable,
     std::memcpy(node_grad, bo_grad.map<void*>(), grad_bytes);
 }
 
+#ifdef PL_FIELD_SOLVE
+// ONE full PL-only, AIE-free density-driven iteration, as a sequence of kernel calls against the
+// small-grid xclbin: density_bin -> field_solve_pl (fft_pl) -> force_gather -> iteration_update.
+// g_hpwl is taken as 0 here (the wirelength CU is verified separately); this exercises the whole
+// density path + the Nesterov/precond update in one hw_emu run for a full-iteration waveform.
+// v_k is node_box.{x,y}; u_k is node_pos; outputs new u/v in u_out/v_out[num_movable].
+void runOneIterationPl(const NodeBox* node_box, const coord_t* u_k, const float* precond,
+                       int num_nodes, int num_movable, float bin_w, float bin_h,
+                       float target_density, float lambda, float alpha, float coeff,
+                       float die_x, float die_y,
+                       coord_t* u_out, coord_t* v_out, coord_t* g_density_out,
+                       const char* xclbin_path) {
+    const int    N     = DENSITY_GRID;
+    const size_t boxB  = (size_t)num_nodes    * sizeof(NodeBox);
+    const size_t matB  = (size_t)N * N        * sizeof(float);
+    const size_t gradB = (size_t)num_movable  * sizeof(coord_t);
+    const size_t prcB  = (size_t)num_movable  * sizeof(float);
+
+    xrt::device device(0);
+    xrt::uuid   uuid = device.load_xclbin(xclbin_path);
+    xrt::kernel top(device, uuid, "top");                 // no graph (AIE=none)
+
+    xrt::bo b_np  = xrt::bo(device, gradB, top.group_id(0));   // node_pos / u_k
+    xrt::bo b1    = xrt::bo(device, sizeof(int32_t), top.group_id(1));
+    xrt::bo b2    = xrt::bo(device, sizeof(NodePin), top.group_id(2));
+    xrt::bo b3    = xrt::bo(device, sizeof(NodePin), top.group_id(3));
+    xrt::bo b_lut = xrt::bo(device, prcB,  top.group_id(4));   // precond
+    xrt::bo b5    = xrt::bo(device, sizeof(NetBBox), top.group_id(5));
+    xrt::bo b6    = xrt::bo(device, sizeof(NetSums), top.group_id(6));
+    xrt::bo b_gr  = xrt::bo(device, gradB, top.group_id(7));   // node_grad
+    xrt::bo b_box = xrt::bo(device, boxB,  top.group_id(8));   // node_box (v_k + size)
+    xrt::bo b_bd  = xrt::bo(device, matB,  top.group_id(9));   // rho / Ey / Ex / v_out
+    xrt::bo b_din = xrt::bo(device, matB,  top.group_id(10));  // rho in / Ey / g_density
+    xrt::bo b_do  = xrt::bo(device, matB,  top.group_id(11));  // Ex / u_out
+
+    std::memcpy(b_box.map<void*>(), node_box, boxB);
+    b_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    auto run_mode = [&](int mode, float s_ig, float s_ils, int s_lut, int s_nn, int s_nm, int s_np,
+                        int s_nnodes, float s_bw, float s_bh, float s_td, int s_stage, int s_nf) {
+        xrt::run r = top(b_np, b1, b2, b3, b_lut, b5, b6, b_gr, b_box, b_bd, b_din, b_do,
+                         s_ig, s_ils, s_lut, s_nn, s_nm, s_np, s_nnodes, s_bw, s_bh, s_td,
+                         s_stage, s_nf, mode);
+        r.wait();
+    };
+
+    // 1) density_bin: node_box(8) -> rho in bin_density(9)
+    run_mode((int)MODE_DENSITY_BIN, 0, 0, 0, 0, num_movable, 0, num_nodes, bin_w, bin_h, target_density, 0, 0);
+    b_bd.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::vector<float> rho(N * N); std::memcpy(rho.data(), b_bd.map<void*>(), matB);
+
+    // 2) field_solve_pl: rho = dct_in(10) -> Ex = dct_out(11), Ey = bin_density(9)
+    std::memcpy(b_din.map<void*>(), rho.data(), matB); b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    run_mode((int)MODE_FIELD_SOLVE_PL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    b_do.sync(XCL_BO_SYNC_BO_FROM_DEVICE); b_bd.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::vector<float> Ex(N * N), Ey(N * N);
+    std::memcpy(Ex.data(), b_do.map<void*>(), matB);
+    std::memcpy(Ey.data(), b_bd.map<void*>(), matB);
+
+    // 3) force_gather: eField_x = bin_density(9), eField_y = dct_in(10) -> node_grad(7) = g_density
+    std::memcpy(b_bd.map<void*>(),  Ex.data(), matB); b_bd.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    std::memcpy(b_din.map<void*>(), Ey.data(), matB); b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    run_mode((int)MODE_FORCE_GATHER, 0, 0, 0, 0, num_movable, 0, num_nodes, bin_w, bin_h, 0, 0, 0);
+    b_gr.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::vector<coord_t> gden(num_movable); std::memcpy(gden.data(), b_gr.map<void*>(), gradB);
+    if (g_density_out) std::memcpy(g_density_out, gden.data(), gradB);
+
+    // 4) iteration_update: u_k=node_pos(0), precond=exp_lut(4), g_hpwl=node_grad(7) [=0],
+    //    g_density=dct_in(10) -> u_out=dct_out(11), v_out=bin_density(9).
+    std::memcpy(b_np.map<void*>(),  u_k,     gradB); b_np.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    std::memcpy(b_lut.map<void*>(), precond, prcB);  b_lut.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    std::vector<coord_t> zero(num_movable, coord_t{0.0f, 0.0f});
+    std::memcpy(b_gr.map<void*>(),  zero.data(), gradB); b_gr.sync(XCL_BO_SYNC_BO_TO_DEVICE); // g_hpwl = 0
+    std::memcpy(b_din.map<void*>(), gden.data(), gradB); b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE); // g_density
+    run_mode((int)MODE_ITERATION_UPDATE, lambda, alpha, 0, 0, num_movable, 0, 0, coeff, die_x, die_y, 0, 0);
+    b_do.sync(XCL_BO_SYNC_BO_FROM_DEVICE); b_bd.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::memcpy(u_out, b_do.map<void*>(), gradB);
+    std::memcpy(v_out, b_bd.map<void*>(), gradB);
+}
+#endif
+
 // Stage 5c: one Nesterov step. Port aliasing (host_interface.hpp MODE_ITERATION_UPDATE):
 // u_k=node_pos(0), precond=exp_lut(4), g_hpwl=node_grad(7), node_box(8), v_out=bin_density(9),
 // g_density=dct_in(10), u_out=dct_out(11). Pure PL (no AIE graph).
