@@ -108,10 +108,36 @@ pipeline handshake.
 - `5fa58b0` pl_algo: PL-only (AIE=none) hw_emu build for the HPWL gradient CU
 - `c2270a1` hw_emu HPWL CU: rendered waveform SVG + VCD→SVG tool
 
+---
+
+## Part 6 — PL-only baseline: PL FFT + field solve + more hw_emu waveforms (follow-up 2026-07-18/19)
+
+**iteration_update hw_emu (commit ...):** ran `--iter-update` (Nesterov step + preconditioner divide,
+M=64 synthetic) in hw_emu — **PASS vs sw_only golden (rel_rms 3.5e-8)**. Waveform:
+`MARK_TO_REVIEW/iter_update_hwemu_waveform.svg`. (`ITER_M` env makes the node count small for a crisp sim.)
+
+**PL FFT (commit `...`):** `fft_pl.hpp` — HLS float radix-2 DIT forward FFT + Makhoul DCT/IDCT/IDXST,
+a direct port of the verified `model/density_model.cpp` double golden. Replaces the AIE FFT so the density
+solve runs entirely on the PL. `field_solve_pl.hpp` — the whole electrostatic field solve (forward 2D DCT
+→ spectral → inverse) on it. **C-verified vs the naive golden: 1D ~2-4e-7, full 2D field solve ~1e-6.**
+(HLS forbids function pointers — the row-transform selector is a direct branch, not a `xform1d_t`.)
+
+**Small-grid build (commit `...`):** `GRID`/`DENSITY_GRID` parameterized via `-DPL_GRID` (default 1024,
+bit-identical) so the whole density solve fits on-chip for a tractable RTL sim. `EXTRA_DEFS` hook in
+common.mk + host/Makefile.
+
+**Field-solve hw_emu (the PL FFT in hardware):** `MODE_FIELD_SOLVE_PL` (guarded `-DPL_FIELD_SOLVE`) runs
+the entire PL-only field solve as a kernel. Built a 64×64 PL-only hw_emu xclbin; the RTL sim executes the
+whole density solve (4 FFT passes on-chip) and dumps a 90MB VCD. Waveform:
+`MARK_TO_REVIEW/field_solve_hwemu_waveform.svg`. This is the piece that makes the design **PL-only**.
+
 ## Open items / next steps
-1. **sw_emu `--place` MMS verification** of the new PL preconditioner (Part 4).
-2. **hw_emu waveforms of the other PL modules** (density_bin, force_gather, iteration_update, metrics).
-3. **PL-only FFT** so the whole density solve runs in PL (no AIE) → a full PL-only baseline and a
-   waveform of the entire algorithm iteration.
-4. Broader grid-sizing fix (row-cap) for the 2048-tier / adaptec5 coarseness; the newblue overflow-metric
+1. **Full-iteration hw_emu waveform** — chain density_bin → field_solve_pl → force_gather → hpwl_CU →
+   iteration_update into one small-grid kernel. ALL pieces are now individually verified (HPWL CU +
+   iteration_update in hw_emu; field solve in hw_emu; density_bin/force_gather in prior C goldens); the
+   remaining work is the combined kernel + one build.
+2. **sw_emu `--place` MMS verification** of the new PL preconditioner (Part 4).
+3. Broader grid-sizing fix (row-cap) for the 2048-tier / adaptec5 coarseness; the newblue overflow-metric
    mismatch.
+4. Optimize the PL FFT (the C-baseline is correctness-first; a real design would pipeline/tile it and use
+   the 1024 grid, likely still with the AIE FFT for throughput — the PL FFT is the no-AIE baseline).
