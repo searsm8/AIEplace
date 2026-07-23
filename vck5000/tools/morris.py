@@ -26,6 +26,7 @@ import os
 import numpy as np
 from SALib.sample import morris as morris_sample
 
+import benchmarks
 from morris_factors import FACTORS, FIXED_OVERRIDES, salib_problem, map_sample_row
 
 
@@ -40,6 +41,9 @@ def main():
     ap.add_argument("--seed", type=int, default=1234, help="SALib sampling RNG seed (sampler, not placer)")
     ap.add_argument("--out", default=None, help="output dir (default results/morris_<ts>)")
     args = ap.parse_args()
+
+    # Reject out-of-scope / mistyped designs at launch (master manifest).
+    args.benchmark = benchmarks.resolve(args.benchmark)
 
     problem = salib_problem()
     k = problem["num_vars"]

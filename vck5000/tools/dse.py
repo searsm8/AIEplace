@@ -13,6 +13,8 @@ import time
 from collections import OrderedDict
 from typing import Any, Union, List, Tuple
 
+import benchmarks  # master benchmark manifest (rejects out-of-scope designs at launch)
+
 # Maximum number of parallel AIEplace processes.
 # Set to 1 for sequential execution (original behavior).
 # A good default 4 or 8 to speed up DSE on a typical multi-core machine without overwhelming it.
@@ -569,6 +571,13 @@ def dse():
     if total_runs == 0:
         print("DSE: nothing to run (dse_sweep and explicit_runs are both empty).")
         return
+
+    # Reject out-of-scope / mistyped designs at launch. Any run that overrides
+    # "benchmark" must name a design in the master manifest (tools/benchmarks.py);
+    # normalize bare names to their canonical "suite/design" form.
+    for overrides, _label in runs:
+        if "benchmark" in overrides:
+            overrides["benchmark"] = benchmarks.resolve(overrides["benchmark"])
 
     # Shared column set so the appended results.csv stays aligned: sweep params first
     # (order preserved), then any explicit-only params (first-seen). "run" label column
