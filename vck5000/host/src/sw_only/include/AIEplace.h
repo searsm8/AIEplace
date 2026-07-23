@@ -171,6 +171,9 @@ public:
     // Execution tracking
     int iteration = 0;
     bool quiet; // if true, suppress all console output except errors (for DSE runs)
+    bool m_diverged = false; // set when a NaN appears in the HPWL partials (hard divergence);
+                             // run() breaks the loop so printFinalResults() still emits a
+                             // best-so-far results row instead of the process aborting.
 
     // Two-tier best solution tracking (XPlace-inspired):
     //   Primary: lowest HPWL among solutions with overflow < convergence threshold

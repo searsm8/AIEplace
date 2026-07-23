@@ -348,7 +348,11 @@ void Placer::computeHpwlPartials_CPU()
                 Logger::log_error("A: " + A[i].to_string());
                 Logger::log_error("B: " + B.to_string());
                 Logger::log_error("C: " + C.to_string());
-                exit(1);
+                // Hard divergence: flag it and stop computing partials rather than exit(1).
+                // run() breaks on m_diverged so finalization restores the best-so-far placement
+                // and still writes a results row (a DSE sweep no longer loses the run).
+                m_diverged = true;
+                return;
             }
 
             pins[i].node->next.probe_grad += partial;

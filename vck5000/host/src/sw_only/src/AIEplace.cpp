@@ -32,6 +32,13 @@ void Placer::run()
     while( !converged )
     {
         performIteration();
+        // Hard divergence (NaN in the HPWL partials): stop now and fall through to
+        // finalization, which restores the best-so-far placement and writes the results row.
+        if (m_diverged) {
+            Logger::log_error("Stopping: NaN in HPWL partials at iteration " +
+                              std::to_string(iteration) + " (hard divergence)");
+            break;
+        }
         // Convergence from the PL param_scheduler stop flag (set in performIteration) when the
         // drop-in is active; else the native checkConvergence. (S6 step 0 closed-loop check.)
         converged = use_pl_scheduler ? (pl_stop != 0) : checkConvergence();
