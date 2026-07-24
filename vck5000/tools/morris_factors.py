@@ -36,14 +36,9 @@ FACTORS = [
     # --- continuous tuning hyperparameters -------------------------------
     dict(name="init_gamma",                     section="params", kind="float", bounds=(1.0, 16.0),   default=4),
     dict(name="density_weight_init_multiplier", section="params", kind="log",   bounds=(8e-6, 8e-4),  default=8e-5),
-    dict(name="density_weight_min_step",        section="params", kind="float", bounds=(0.90, 0.99),  default=0.95),
     dict(name="density_weight_max_step",        section="params", kind="float", bounds=(1.02, 1.10),  default=1.05),
     dict(name="init_step_length",               section="params", kind="log",   bounds=(1e-3, 1.0),   default=0.1),
     dict(name="backtrack_epsilon",              section="params", kind="float", bounds=(1.01, 1.20),  default=1.05),
-    dict(name="backtrack_max_tries",            section="params", kind="int",   bounds=(5, 20),       default=10),
-    dict(name="adaptation_window",              section="params", kind="int",   bounds=(10, 50),      default=25),
-    dict(name="slow_improvement_threshold",     section="params", kind="log",   bounds=(1e-4, 1e-2),  default=1e-3),
-    dict(name="high_overflow_threshold",        section="params", kind="float", bounds=(0.50, 0.90),  default=0.7),
     dict(name="gamma_ref_grid",                 section="params", kind="int",   bounds=(256, 1024),   default=512),
 
     # --- soft algorithm on/off toggles (2-level) -------------------------
@@ -61,6 +56,17 @@ FIXED_OVERRIDES = dict(
     init_method="random_center",
     enable_backtracking=True,
     random_seed=42,
+    # Screened OUT after the r=9 fft_a pass (2026-07-22): bottom-6 on ALL four objectives
+    # (HPWL/overflow/iters/runtime), never ranked better than 11th of 16. Pinned at defaults.
+    # NOTE: adaptation_window / slow_improvement_threshold / high_overflow_threshold are the
+    # emergency-jolt plateau-detection trio — inert here only because fft_a converges cleanly and
+    # never triggers the jolt. RE-ADD them (move back into FACTORS) when screening a STALLING
+    # design (e.g. mgc_des_perf_1), where the jolt mechanism actually fires. See [[nonconverge_root_cause]].
+    density_weight_min_step=0.95,
+    backtrack_max_tries=10,
+    adaptation_window=25,
+    slow_improvement_threshold=1e-3,
+    high_overflow_threshold=0.7,
 )
 
 
