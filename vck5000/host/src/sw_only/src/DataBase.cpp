@@ -2,6 +2,8 @@
 #include "DataBase.h"
 #include "Logger.h"
 #include <algorithm>
+#include <cstdio>
+#include <unistd.h>
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -164,11 +166,17 @@ bool DataBase::readLEF()
     bool success = true;
     for(fs::path file : lef_files)
     {
-        //disable LEF parser output by redirecting C stream stdout
-        FILE* oldStdout = freopen("/dev/null", "w", stdout); // "/dev/null" discards all data written to it
+        // Silence the LEF parser's stdout noise, then restore the ORIGINAL stdout.
+        // (The old code restored to a hardcoded "/dev/tty", which blocks under a headless
+        //  launch — e.g. dse.py sweeps — when the controlling terminal buffer fills.)
+        fflush(stdout);
+        int saved_stdout = dup(STDOUT_FILENO);
+        freopen("/dev/null", "w", stdout);
         success = LefParser::read(*this, file.string());
-        // restore stdout
-        freopen("/dev/tty", "w", stdout); // "/dev/tty" is the terminal
+        fflush(stdout);
+        dup2(saved_stdout, STDOUT_FILENO);
+        close(saved_stdout);
+        clearerr(stdout);
 
         if (success) {
             Logger::log_info(".lef file parsing successful: " + file.string());
@@ -206,11 +214,17 @@ bool DataBase::readDEF()
 
 
     Logger::log_info("Begin parsing .DEF design...");
-    //disable DEF parser output by redirecting C stream stdout
-    FILE* oldStdout = freopen("/dev/null", "w", stdout); // "/dev/null" discards all data written to it
+    // Silence the DEF parser's stdout noise, then restore the ORIGINAL stdout.
+    // (The old code restored to a hardcoded "/dev/tty", which blocks under a headless
+    //  launch — e.g. dse.py sweeps — when the controlling terminal buffer fills.)
+    fflush(stdout);
+    int saved_stdout = dup(STDOUT_FILENO);
+    freopen("/dev/null", "w", stdout);
     bool success = DefParser::read(*this, def_file);
-    // restore stdout
-    freopen("/dev/tty", "w", stdout); // "/dev/tty" is the terminal
+    fflush(stdout);
+    dup2(saved_stdout, STDOUT_FILENO);
+    close(saved_stdout);
+    clearerr(stdout);
 
     if (success) {
         Logger::log_info(".def file parsing successful: " + def_file.string());
@@ -237,11 +251,17 @@ bool DataBase::readBookshelf()
     }
 
     Logger::log_info("Begin parsing bookshelf design...");
-    //disable parser output by redirecting C stream stdout
-    //FILE* oldStdout = freopen("/dev/null", "w", stdout); // "/dev/null" discards all data written to it
+    // Silence the (noisy) bookshelf parser's stdout, then restore the ORIGINAL stdout.
+    // (Was disabled because the old /dev/tty restore hung; the dup/dup2 save-restore is
+    //  headless-safe, so we can suppress the spew again without the hang.)
+    fflush(stdout);
+    int saved_stdout = dup(STDOUT_FILENO);
+    freopen("/dev/null", "w", stdout);
     bool success = BookshelfParser::read(*this, aux_files[0]);
-    // restore stdout
-    //freopen("/dev/tty", "w", stdout); // "/dev/tty" is the terminal
+    fflush(stdout);
+    dup2(saved_stdout, STDOUT_FILENO);
+    close(saved_stdout);
+    clearerr(stdout);
 
     if (success) {
         Logger::log_info("Bookshelf parsing successful!");
