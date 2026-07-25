@@ -90,7 +90,10 @@
                                   // random_center to stay as close to XPlace's setup as possible
                                   // while chasing its results — later tuning may depend on it.
     "init_spread": 0.25, // fraction of die width for initial node spread (uniform_box only)
-    "init_step_length": 0.1, // small first step for calibration
+    "init_step_seed": 0.01, // SEED for the iteration-1 Barzilai-Borwein step estimate (XPlace args.lr),
+                            // not the literal first step: estimateInitialStep() takes one trial step of
+                            // this size, then sets α = ||Δpos|| / ||Δgrad||. A robust internal default;
+                            // rarely needs tuning now that the first step self-calibrates per design.
     "density_weight_init_multiplier": 8e-5, // multiplier used to set density penalty
                                             // 0.01 means that density will contribute about 1% as much
                                             // as wirelength to the cost function at the start of placement

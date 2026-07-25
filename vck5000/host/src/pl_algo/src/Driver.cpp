@@ -985,15 +985,16 @@ int runPlacement(const PlacementConfig& cfg,
         std::memcpy(dst, b_dout.map<void*>(), matB);
     };
 
-    int iters_run = 0;
-    for (int iter = 1; iter <= cfg.max_iters; iter++) {
-        const float inv_gamma    = 1.0f / gamma;
-        const float inv_lut_step = 1.0f / (PLACE_STEP_NORM * gamma);
-
-        // ---- push v into the movable prefix of node_pos and node_box ----
+    // Evaluate the HPWL + density gradients at the given probe positions -> g_hpwl, g_density (and
+    // rho, for overflow). One full gradient pipeline pass: HPWL_GRAD, then DENSITY_BIN -> field solve
+    // -> FORCE_GATHER. Mirrors sw_only computeHpwlPartials + computeElectricFields + electro force.
+    // Factored out of the loop so the iteration-1 initial-step estimate can reuse the identical
+    // passes at a trial probe (one extra evaluation, once). node_pos/node_box are left holding probe.
+    auto eval_gradients = [&](const std::vector<coord_t>& probe, float inv_gamma, float inv_lut_step) {
+        // ---- push probe into the movable prefix of node_pos and node_box ----
         for (int n = 0; n < M; n++) {
-            node_pos[n] = v[n];
-            node_box[n].x = v[n].x; node_box[n].y = v[n].y;
+            node_pos[n] = probe[n];
+            node_box[n].x = probe[n].x; node_box[n].y = probe[n].y;
         }
         std::memcpy(b_np.map<void*>(),  node_pos.data(), coordN);
         std::memcpy(b_box.map<void*>(), node_box.data(), (size_t)N*sizeof(NodeBox));
@@ -1002,7 +1003,7 @@ int runPlacement(const PlacementConfig& cfg,
         b_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
         b_lut.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
-        // ---- HPWL gradient at v -> b_grad, read to host ----
+        // ---- HPWL gradient at probe -> b_grad, read to host ----
         { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
                            b_box, b_bd, b_din, b_dout,
                            inv_gamma, inv_lut_step, lut_size, num_nets, M, num_npins,
@@ -1011,14 +1012,14 @@ int runPlacement(const PlacementConfig& cfg,
         b_grad.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
         std::memcpy(g_hpwl.data(), b_grad.map<void*>(), coordM);
 
-        // ---- density gradient at v: density_bin -> rho, field solve, force_gather -> g_density ----
+        // ---- density gradient at probe: density_bin -> rho, field solve, force_gather -> g_density ----
         { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
                            b_box, b_bd, b_din, b_dout,
                            0.0f, 0.0f, 0, 0, M, 0, N, cfg.bin_w, cfg.bin_h, cfg.target_density,
                            0, 0, (int)MODE_DENSITY_BIN);
           r.wait(); }
         b_bd.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-        std::memcpy(rho.data(), b_bd.map<void*>(), matB);            // rho at v (for overflow)
+        std::memcpy(rho.data(), b_bd.map<void*>(), matB);            // rho at probe (for overflow)
 
         field_pass(rho.data(), t1.data(),  (int)MODE_DCT_TRANSPOSE, (int)TFH_DCT);
         field_pass(t1.data(),  a_uv.data(),(int)MODE_DCT_TRANSPOSE, (int)TFH_DCT);
@@ -1040,6 +1041,60 @@ int runPlacement(const PlacementConfig& cfg,
           r.wait(); }
         b_grad.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
         std::memcpy(g_density.data(), b_grad.map<void*>(), coordM);
+    };
+
+    // XPlace-style iteration-1 initial learning-rate estimate (mirrors sw_only estimateInitialStep,
+    // Xplace estimate_initial_learning_rate). From v (=x0) with total gradient g0 (=gtot), take ONE
+    // trial step v' = x0 - seed·P·g0 via iteration_update (alpha=seed, coeff=0), recompute the total
+    // gradient g' at v', and return  alpha = ||v' - x0||₂ / ||g' - g0||₂  (Barzilai-Borwein). g_hpwl,
+    // g_density and node_box are restored to their x0 values so the real first step is unaffected
+    // apart from the calibrated alpha. Preconditions: lambda, precond, gtot are set for iteration 1.
+    auto estimate_initial_step = [&](float inv_gamma, float inv_lut_step) -> float {
+        std::vector<coord_t> g_hpwl0 = g_hpwl, g_density0 = g_density;  // gradients at x0
+        // Trial step: iteration_update with alpha=seed, coeff=0 -> v' = x0 - seed·P·gtot (b_bd = v').
+        // node_box already holds x0 (=v) from the eval_gradients(v) call above; stage the rest.
+        std::memcpy(b_np.map<void*>(),   u.data(),         coordM);
+        std::memcpy(b_lut.map<void*>(),  precond.data(),   (size_t)M*sizeof(float));
+        std::memcpy(b_grad.map<void*>(), g_hpwl0.data(),   coordM);
+        std::memcpy(b_din.map<void*>(),  g_density0.data(),coordM);
+        b_np.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        b_lut.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        b_grad.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
+                           b_box, b_bd, b_din, b_dout,
+                           lambda, cfg.init_step_seed, 0, 0, M, 0, 0, /*coeff=*/0.0f,
+                           cfg.die_x, cfg.die_y, 0, 0, (int)MODE_ITERATION_UPDATE);
+          r.wait(); }
+        b_bd.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        std::vector<coord_t> v_trial(M);
+        std::memcpy(v_trial.data(), b_bd.map<void*>(), coordM);
+
+        // g' = total gradient at the trial point v'.
+        eval_gradients(v_trial, inv_gamma, inv_lut_step);
+        std::vector<coord_t> gtot_trial(M);
+        for (int n = 0; n < M; n++) {
+            gtot_trial[n].x = g_hpwl[n].x - lambda * g_density[n].x;
+            gtot_trial[n].y = g_hpwl[n].y - lambda * g_density[n].y;
+        }
+        const float alpha0 = bbStepLength(v_trial.data(), v.data(), gtot_trial.data(), gtot.data(), M);
+
+        // Restore x0 gradients + re-stage node_box=x0 so the real iteration_update anchors at v.
+        g_hpwl = g_hpwl0; g_density = g_density0;
+        for (int n = 0; n < M; n++) { node_box[n].x = v[n].x; node_box[n].y = v[n].y; }
+        std::memcpy(b_box.map<void*>(), node_box.data(), (size_t)N*sizeof(NodeBox));
+        b_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        printf("[place] estimated initial alpha (BB): %.6g (seed %.4g)\n", alpha0, cfg.init_step_seed);
+        return alpha0;
+    };
+
+    int iters_run = 0;
+    for (int iter = 1; iter <= cfg.max_iters; iter++) {
+        const float inv_gamma    = 1.0f / gamma;
+        const float inv_lut_step = 1.0f / (PLACE_STEP_NORM * gamma);
+
+        // ---- gradients at v (HPWL + density) ----
+        eval_gradients(v, inv_gamma, inv_lut_step);
 
         // ---- host metrics (verified PL metrics module replicated on host to save a pass) ----
         const double hpwl = hostHPWL(node_pos.data(), net_ptr, pins, num_nets);
@@ -1056,15 +1111,18 @@ int runPlacement(const PlacementConfig& cfg,
             gtot[n].x = g_hpwl[n].x - lambda * g_density[n].x;
             gtot[n].y = g_hpwl[n].y - lambda * g_density[n].y;
         }
-        float alpha = have_prev
-            ? bbStepLength(v.data(), v_prev.data(), gtot.data(), gtot_prev.data(), M)
-            : cfg.init_step_length;
         // Preconditioner weights for this iteration: w = max(1, degree + precond_coef*lambda*area)
         // (raw area => avg_area=1). iteration_update divides the combined gradient by w. Essential for
         // movable-macro (MMS) convergence; with dff_force_ratio the schedule's dff still comes from the
         // gradient L1 norms, not precond mass, so leaving precond=1 when OFF is a clean no-op.
+        // Set before the step-length estimate: the iteration-1 trial step is preconditioned too.
         if (precond_on)
             updatePrecondWeights(precond.data(), degree, area, M, /*avg_area=*/1.0f, precond_coef, lambda);
+        // Step length: BB from the previous probe/gradient pair once we have one; on iteration 1
+        // calibrate it with the XPlace-style initial estimate (one extra trial gradient evaluation).
+        float alpha = have_prev
+            ? bbStepLength(v.data(), v_prev.data(), gtot.data(), gtot_prev.data(), M)
+            : estimate_initial_step(inv_gamma, inv_lut_step);
         const float coeff = momentumCoeff(nesterov_ak, cfg.enable_momentum);
 
         printf("[place] iter %d: HPWL=%.6g overflow=%.4f lambda=%.4g alpha=%.4g coeff=%.4f gamma=%.4g\n",

@@ -92,7 +92,7 @@ scale-dependent area, so the balance is set by the arbitrary DBU scale").
 **sw_only change points:** DataBase (scale all geometry at load; store the factor), Grid (die bounds,
 bin sizes), base_gamma (a length — rescales), density solve (bin coords), HPWL output (un-scale via
 hpwl_scale), DEF writer + Visualizer (un-scale positions), filler sizes, pin offsets. Absolute
-schedule constants (init_step_length, etc.) may need retuning in the new frame. Then reflect into the
+schedule constants (init_step_seed, etc.) may need retuning in the new frame. Then reflect into the
 PL `param_scheduler`/`bb_reduce` if constants shift.
 
 **Verification:** precond ON in the normalized frame should CONVERGE on adaptec1/adaptec2 and land

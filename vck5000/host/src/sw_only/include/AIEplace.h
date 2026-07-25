@@ -65,6 +65,7 @@ public:
 
     // Hyperparameters
     float step_length; // α (alpha) in eplace
+    float init_step_seed; // BB trial-step seed for estimateInitialStep (XPlace args.lr)
     float density_weight; // λ (lambda) in eplace
     float nesterov_ak = 1.0f; // a_k in Algorithm 1; controls momentum coefficient
     float momentum_coeff; // (a_k - 1) / a_{k+1} in Algorithm 1; computed each iteration if momentum enabled
@@ -259,6 +260,7 @@ public:
     // Main algorithm iteration functions
     void combineGradients();            // subtract electro from probe_grad in-place
     float computeLipshitzEstimate();    // BB step estimate: ||Δv|| / ||Δ∇f||
+    void estimateInitialStep();         // XPlace-style iteration-1 BB learning-rate estimate
     void performNextStep(bool backtracking_enabled = true); // Algorithm 2: BkTrk
     void advanceIterationState();       // promote next → current for all nodes
     void stepAllNodes();                // Algorithm 1, lines 2–4

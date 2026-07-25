@@ -68,6 +68,12 @@ void Placer::performIteration()
     // Update per-node preconditioner weights (fixed for this iteration, unaffected by backtracking)
     updatePrecondWeights();
 
+    // Iteration 1: calibrate the first step_length with XPlace's Barzilai-Borwein estimate.
+    // Runs after updatePrecondWeights so the trial step and BB ratio use the preconditioned
+    // gradient (matching XPlace, whose calc_obj_and_grad applies the preconditioner).
+    if (iteration == 1)
+        estimateInitialStep();
+
     // Algorithm 1 + Algorithm 2: step with backtracking line search.
     // On exit: positions at u_{k+1}, v_{k+1}; gradients at v_{k+1} already computed;
     // nesterov_ak advanced.
@@ -160,7 +166,15 @@ Placer::Placer(std::string config_filepath)
             gamma_schedule = cfg["params"].value("gamma_schedule", false);
             gamma_bin_scaled = cfg["params"].value("gamma_bin_scaled", true);
             gamma_ref_grid   = cfg["params"].value("gamma_ref_grid", 512.0f);
-            step_length = cfg["params"]["init_step_length"];
+            // init_step_seed: BB trial-step SEED for estimateInitialStep() (XPlace args.lr, default
+            // 0.01) — not the literal first step. The real iteration-1 α is calibrated by the
+            // Barzilai-Borwein estimate. Back-compat: accept the old init_step_length key if present.
+            init_step_seed = cfg["params"].contains("init_step_seed")
+                           ? cfg["params"]["init_step_seed"].get<float>()
+                           : cfg["params"].value("init_step_length", 0.01f);
+            if (!cfg["params"].contains("init_step_seed") && cfg["params"].contains("init_step_length"))
+                Logger::log_info("Config uses deprecated 'init_step_length'; treat as 'init_step_seed'.");
+            step_length = init_step_seed; // placeholder; estimateInitialStep() overwrites on iteration 1
             density_weight = 1.0f; // will be updated on iteration 1 after computing gradients
 
             // Read compute methods
@@ -1023,6 +1037,57 @@ void Placer::stepAllNodes()
         enforceDieBoundaries(filler);
     }
 }
+
+/**
+ * @brief XPlace-style initial learning-rate (step-length) estimate, run once at iteration 1.
+ *
+ * Mirrors Xplace estimate_initial_learning_rate (initializer.py:171): from the current movable
+ * positions x0 with total gradient g0, take ONE trial step x' = x0 − seed·P·g0
+ * (seed = init_step_seed, XPlace args.lr), recompute the total gradient g' there, and set
+ *     step_length = ‖x' − x0‖₂ / ‖P·(g' − g0)‖₂        (Barzilai-Borwein inverse-Lipschitz)
+ * which is exactly the ratio computeLipshitzEstimate() forms. The step (Node::step) and the
+ * estimate both divide by precond_weight, so the whole ratio is in the preconditioned gradient
+ * — matching XPlace, whose calc_obj_and_grad returns the preconditioned gradient.
+ *
+ * Positions are restored to x0 afterwards and next.probe_grad left = g0 (the total gradient), so
+ * the real first step in performNextStep starts from x0 exactly as every later iteration does —
+ * the only lasting effect is the calibrated step_length. Costs one extra gradient evaluation, once.
+ *
+ * Preconditions: density_weight (initializeDensityWeight) and precond_weight (updatePrecondWeights)
+ * are set; next holds x0 with the HPWL-only gradient in probe_grad.
+ */
+void Placer::estimateInitialStep()
+{
+    // g0 = total gradient at x0 (subtract λ·density force from the HPWL-only next.probe_grad).
+    combineGradients();
+
+    // Snapshot the anchor (x0, g0) into current so computeLipshitzEstimate can diff against it.
+    advanceIterationState();
+
+    // One trial step x' = x0 − seed·P·g0, momentum off (matches XPlace's x_k − lr·g_k).
+    step_length    = init_step_seed;
+    momentum_coeff = 0.0f;
+    stepAllNodes();
+
+    // g' = total gradient at the trial point x'.
+    iterationReset();
+    computeHpwlPartials();
+    computeElectricFields();
+    combineGradients();
+
+    // Barzilai-Borwein estimate α = ‖Δv‖₂ / ‖P·Δg‖₂ (no magnitude clamp — as in XPlace).
+    step_length = computeLipshitzEstimate();
+    Logger::log_info("Estimated initial step_length (BB): " + PREC_P(step_length, 6) +
+                     "  (seed " + PREC_P(init_step_seed, 4) + ")");
+
+    // Undo the probe step: restore x0 / g0 into next so the real first step starts from x0.
+    for (auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
+        item.second->restoreState();
+    }
+    for (auto filler : db.getFillers()) filler->restoreState();
+}
+
 
 /**
  * @brief Algorithm 2 (BkTrk): Backtracking line search for step length.

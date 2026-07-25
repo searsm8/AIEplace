@@ -262,7 +262,7 @@ int main(int argc, char** argv) {
         cfg.max_iters = max_iters; cfg.die_x = die_x; cfg.die_y = die_y;
         cfg.bin_w = die_x / G; cfg.bin_h = die_y / G; cfg.target_density = target_density;
         cfg.base_gamma = base_gamma; cfg.gamma_schedule = 1;   // sw_only enables the overflow-driven gamma schedule
-        cfg.init_step_length = 0.01f; cfg.density_weight_init_multiplier = 8e-5f;
+        cfg.init_step_seed = 0.01f; cfg.density_weight_init_multiplier = 8e-5f;
         cfg.enable_momentum = 1;
         cfg.density_weight_min_step = 0.95f; cfg.density_weight_max_step = 1.05f;
         cfg.overflow_threshold = 0.07f; cfg.min_iters = 50; cfg.conv_iters = 30;

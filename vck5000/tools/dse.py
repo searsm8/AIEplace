@@ -84,7 +84,7 @@ dse_sweep = OrderedDict([
     #("init_method",        (["params"], ["uniform_box", "random_center"])),
 
     #("init_method",             (["params"], ["uniform_box", "random_center"])),
-    #("init_step_length",        (["params"], [0.001, 0.01, 0.1, 1.0])),
+    #("init_step_seed",          (["params"], [0.001, 0.01, 0.1, 1.0])),
     #("init_spread",              (["params"], [0.5, 0.4, 0.3, 0.25])),
     #("convergence_min_iterations", (["params"], [50, 100, 200])),
     #("density_weight_max_step", (["params"], [1.02, 1.05, 1.1])),

@@ -92,6 +92,9 @@ public:
     // Promote next → current for the new iteration
     void cacheState() { current = next; }
 
+    // Roll next back to the cached anchor (inverse of cacheState); used to undo a probe step
+    void restoreState() { next = current; }
+
     // Perform Nesterov gradient step (Algorithm 1, Lines 2 & 4)
     // Reads from current (must call cacheState() first), writes to next
     // Gradient is preconditioned (divided by precond_weight) before stepping

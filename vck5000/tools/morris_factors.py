@@ -37,7 +37,7 @@ FACTORS = [
     dict(name="init_gamma",                     section="params", kind="float", bounds=(1.0, 16.0),   default=4),
     dict(name="density_weight_init_multiplier", section="params", kind="log",   bounds=(8e-6, 8e-4),  default=8e-5),
     dict(name="density_weight_max_step",        section="params", kind="float", bounds=(1.02, 1.10),  default=1.05),
-    dict(name="init_step_length",               section="params", kind="log",   bounds=(1e-3, 1.0),   default=0.1),
+    dict(name="init_step_seed",                 section="params", kind="log",   bounds=(1e-3, 1.0),   default=0.01),
     dict(name="backtrack_epsilon",              section="params", kind="float", bounds=(1.01, 1.20),  default=1.05),
     dict(name="gamma_ref_grid",                 section="params", kind="int",   bounds=(256, 1024),   default=512),
 
