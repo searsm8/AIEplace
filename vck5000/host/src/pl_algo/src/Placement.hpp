@@ -77,7 +77,7 @@ static inline float updateGammaValue(float overflow, float base_gamma) {
     return std::pow(10.0f, (overflow - 0.1f) * (20.0f / 9.0f) - 1.0f) * base_gamma;
 }
 
-// ---- sw_only density_force_fraction (dff_force_ratio=true, the default) ----
+// ---- sw_only density_force_fraction (force-magnitude ratio) ----
 // dff = ||λ·g_density||_1 / (||g_wl||_1 + ||λ·g_density||_1) in [0,1]: how balanced the
 // wirelength and density forces are. Field-norm/scale invariant. Gates the shared skip_update.
 static inline float densityForceFraction(const coord_t* g_wl, const coord_t* g_density,

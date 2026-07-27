@@ -960,8 +960,8 @@ int runPlacement(const PlacementConfig& cfg,
     // Preconditioner (sw_only updatePrecondWeights + auto-enable, faithful port). Auto-ON iff the
     // design has movable macros (die-relative 0.02% area threshold, matching sw_only #5); an explicit
     // cfg.enable_preconditioning (0/1) overrides. precond_coef starts at 1 and doubles every 20 iters
-    // once overflow<0.3 (sw_only escalation). Weights use RAW area (avg_area=1 => precond_raw_area=true),
-    // matching sw_only's MMS default. When OFF, precond stays 1 (no-op divide in iteration_update).
+    // once overflow<0.3 (sw_only escalation). Weights use RAW node area (avg_area=1), matching sw_only.
+    // When OFF, precond stays 1 (no-op divide in iteration_update).
     const float macro_area_thresh = 0.0002f * cfg.die_x * cfg.die_y;
     int num_mov_macros = 0;
     for (int n = 0; n < M; n++) if (area[n] > macro_area_thresh) num_mov_macros++;
@@ -1113,8 +1113,8 @@ int runPlacement(const PlacementConfig& cfg,
         }
         // Preconditioner weights for this iteration: w = max(1, degree + precond_coef*lambda*area)
         // (raw area => avg_area=1). iteration_update divides the combined gradient by w. Essential for
-        // movable-macro (MMS) convergence; with dff_force_ratio the schedule's dff still comes from the
-        // gradient L1 norms, not precond mass, so leaving precond=1 when OFF is a clean no-op.
+        // movable-macro (MMS) convergence; the schedule's dff comes from the gradient L1 norms, not
+        // precond mass, so leaving precond=1 when OFF is a clean no-op.
         // Set before the step-length estimate: the iteration-1 trial step is preconditioned too.
         if (precond_on)
             updatePrecondWeights(precond.data(), degree, area, M, /*avg_area=*/1.0f, precond_coef, lambda);
@@ -1153,7 +1153,7 @@ int runPlacement(const PlacementConfig& cfg,
 
         // ---- schedule updates for the NEXT iteration (sw_only performIteration) ----
         // λ and γ share one skip_update gate (freeze both on 2 of 3 early / mid-balance iters).
-        // dff = density-force fraction from this iteration's gradients (dff_force_ratio form).
+        // dff = density-force fraction from this iteration's gradient L1 norms (field-norm invariant).
         const float dff  = densityForceFraction(g_hpwl.data(), g_density.data(), M, lambda);
         const bool  skip = scheduleSkipUpdate(iter, dff);
         if (!skip) {
