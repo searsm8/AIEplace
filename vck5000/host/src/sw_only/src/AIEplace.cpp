@@ -155,17 +155,19 @@ Placer::Placer(std::string config_filepath)
             cfg = json::parse(json_content);
 
             // Setup logging (quiet mode suppresses all output except errors)
-            quiet = cfg["output"].value("quiet", false);
+            quiet = cfg["output"].value("quiet", quiet);
             Logger::setup_logging(quiet);
             printWelcomeBanner();
             Logger::log_info("Reading runtime configuration from: " + config_filepath);
 
             // Read hyperparameters. gamma/base_gamma are finalized after the grid is built
             // (gamma_bin_scaled ties base_gamma to the bin geometry — see after grid creation).
+            // The .value() fallbacks below reference the member itself, so each configurable
+            // default is defined ONCE — at the member's header initializer (single source of truth).
             base_gamma    = cfg["params"]["init_gamma"];
-            gamma_schedule = cfg["params"].value("gamma_schedule", false);
-            gamma_bin_scaled = cfg["params"].value("gamma_bin_scaled", true);
-            gamma_ref_grid   = cfg["params"].value("gamma_ref_grid", 512.0f);
+            gamma_schedule = cfg["params"].value("gamma_schedule", gamma_schedule);
+            gamma_bin_scaled = cfg["params"].value("gamma_bin_scaled", gamma_bin_scaled);
+            gamma_ref_grid   = cfg["params"].value("gamma_ref_grid", gamma_ref_grid);
             // init_step_seed: BB trial-step SEED for estimateInitialStep() (XPlace args.lr, default
             // 0.01) — not the literal first step. The real iteration-1 α is calibrated by the
             // Barzilai-Borwein estimate. Back-compat: accept the old init_step_length key if present.
@@ -188,34 +190,34 @@ Placer::Placer(std::string config_filepath)
             min_iterations = cfg["params"]["convergence_min_iterations"];
             hpwl_improvement_threshold = cfg["params"]["convergence_hpwl_improvement_threshold"];
             overflow_threshold = cfg["params"]["convergence_overflow_threshold"];
-            target_density = cfg["params"].value("maximum_utilization", 0.9f);
+            target_density = cfg["params"].value("maximum_utilization", target_density);
             enable_backtracking = cfg["params"]["enable_backtracking"];
             enable_momentum = cfg["params"]["enable_momentum"];
             precond_explicitly_set = cfg["params"].contains("enable_preconditioning");
-            enable_preconditioning = cfg["params"].value("enable_preconditioning", false);
-            auto_enable_preconditioning = cfg["params"].value("auto_enable_preconditioning", true);
-            precond_coef_escalation = cfg["params"].value("precond_coef_escalation", true);
-            enable_density_clamp = cfg["params"].value("enable_density_clamp", true);
-            dct_normalize = cfg["params"].value("dct_normalize", true);
+            enable_preconditioning = cfg["params"].value("enable_preconditioning", enable_preconditioning);
+            auto_enable_preconditioning = cfg["params"].value("auto_enable_preconditioning", auto_enable_preconditioning);
+            precond_coef_escalation = cfg["params"].value("precond_coef_escalation", precond_coef_escalation);
+            enable_density_clamp = cfg["params"].value("enable_density_clamp", enable_density_clamp);
+            dct_normalize = cfg["params"].value("dct_normalize", dct_normalize);
             // XPlace/DREAMPlace-faithful field frame (2026-07-12 A/B: -1.0% adaptec1@512,
             // -3.0% adaptec2@1024). dff_force_ratio=true is REQUIRED with the faithful inverse.
-            dct_normalize_inverse = cfg["params"].value("dct_normalize_inverse", false);
-            precond_raw_area = cfg["params"].value("precond_raw_area", true);
-            dff_force_ratio  = cfg["params"].value("dff_force_ratio", true);
+            dct_normalize_inverse = cfg["params"].value("dct_normalize_inverse", dct_normalize_inverse);
+            precond_raw_area = cfg["params"].value("precond_raw_area", precond_raw_area);
+            dff_force_ratio  = cfg["params"].value("dff_force_ratio", dff_force_ratio);
             // EXPERIMENT: scale the preconditioner density-mass term (alpha_2 = pcoef*lambda*area) only,
             // WITHOUT touching the main force (which is lambda*E, already XPlace-matched). sw_only's field
             // E is ~50x larger than DREAMPlace's => lambda ~50x smaller => alpha_2 ~50x under-weighted vs
             // num_pins, so the preconditioner never enters XPlace's area-dominated regime. Set this to the
             // measured field-norm ratio (~50 on adaptec1) to match XPlace's a1/a2 basis and test whether a
             // basis-matched preconditioner actually helps. Default 1.0 = unchanged.
-            precond_density_scale = cfg["params"].value("precond_density_scale", 1.0f);
+            precond_density_scale = cfg["params"].value("precond_density_scale", precond_density_scale);
             convergence_window = cfg["params"]["convergence_window"];
-            convergence_iterations = cfg["params"].value("convergence_iterations", 30);
+            convergence_iterations = cfg["params"].value("convergence_iterations", convergence_iterations);
             max_backtracking_attempts = cfg["params"]["backtrack_max_tries"];
             backtrack_epsilon = cfg["params"]["backtrack_epsilon"];
 
             // Read other stuff
-            compare_hpwl_methods = cfg["output"].value("compare_hpwl_methods", false);
+            compare_hpwl_methods = cfg["output"].value("compare_hpwl_methods", compare_hpwl_methods);
             MAX_THREADS = cfg["params"]["max_threads"];
             input_dir = fs::path(cfg["input"]["benchmark"]);
             results_dir = fs::path(cfg["output"]["results_dir"].get<std::string>());
@@ -400,7 +402,7 @@ Placer::Placer(std::string config_filepath)
             // PL param_scheduler drop-in (S6 step 0): seed the module's config + state from the same
             // knobs the native schedule uses, now that base_gamma is finalized. dff is passed in each
             // call (from density_force_fraction), so dff_coef is unused here.
-            use_pl_scheduler = cfg["params"].value("use_pl_scheduler", false);
+            use_pl_scheduler = cfg["params"].value("use_pl_scheduler", use_pl_scheduler);
             pl_sched_params.base_gamma       = base_gamma;
             pl_sched_params.min_step         = cfg["params"]["density_weight_min_step"];
             pl_sched_params.max_step         = cfg["params"]["density_weight_max_step"];

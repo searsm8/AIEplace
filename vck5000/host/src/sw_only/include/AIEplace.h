@@ -71,16 +71,16 @@ public:
     float momentum_coeff; // (a_k - 1) / a_{k+1} in Algorithm 1; computed each iteration if momentum enabled
     float gamma, inv_gamma; // smoothness factor for WA gradient; updated each iteration if gamma_schedule enabled
     float base_gamma;       // reference gamma from config; schedule varies around this
-    bool gamma_schedule;    // if true, gamma follows overflow-driven schedule (XPlace-style)
-    bool gamma_bin_scaled;  // if true, base_gamma tied to bin geometry referenced to gamma_ref_grid (grid-independent); else bare init_gamma
-    float gamma_ref_grid;   // reference grid for gamma_bin_scaled: base_gamma = init_gamma*die_span/gamma_ref_grid (grid-independent absolute gamma)
+    bool gamma_schedule = false;    // if true, gamma follows overflow-driven schedule (XPlace-style)
+    bool gamma_bin_scaled = true;   // if true, base_gamma tied to bin geometry referenced to gamma_ref_grid (grid-independent); else bare init_gamma
+    float gamma_ref_grid = 512.0f;  // reference grid for gamma_bin_scaled: base_gamma = init_gamma*die_span/gamma_ref_grid (grid-independent absolute gamma)
 
     int backtrack_steps = 0;
     int max_backtracking_attempts;
     float backtrack_epsilon;
     bool enable_backtracking;
     bool enable_momentum;
-    bool enable_preconditioning;
+    bool enable_preconditioning = false;
     bool auto_enable_preconditioning = true; // if enable_preconditioning is not set explicitly, turn it
                                              // ON iff the design has movable macros (essential for MMS
                                              // convergence; a wash on fixed-macro designs). See #5 handoff.
@@ -88,9 +88,9 @@ public:
     int  num_movable_macros = 0;             // movable components with area > macro_area_frac * die area
     int  formula_bins_per_row = 0;           // grid the ePlace auto-formula picks (recorded even when overridden)
     bool precond_coef_escalation = true; // double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef)
-    bool enable_density_clamp;   // clamp sub-bin cells in the density solve (XPlace expand_ratio)
+    bool enable_density_clamp = true;   // clamp sub-bin cells in the density solve (XPlace expand_ratio)
     bool dct_normalize = true;   // apply 1/N per forward DCT (bounds a_uv intermediates; global scale absorbed by lambda)
-    bool dct_normalize_inverse = true; // apply 1/N per INVERSE transform (IDCT/IDXST) in the field solve.
+    bool dct_normalize_inverse = false; // apply 1/N per INVERSE transform (IDCT/IDXST) in the field solve.
                                        // true = legacy: the inverse re-applies the forward's 1/N, so the
                                        // field carries an extra 1/N^2 vs the naive DREAMPlace Eq-3c/3d field
                                        // (compute_eField_naive) → density force ~N^2 too weak → lambda ~N^2
@@ -98,15 +98,15 @@ public:
                                        // scale is absorbed by lambda so GP is unaffected, but it mis-scales
                                        // the preconditioner's lambda*area term. false = the field-faithful
                                        // inverse (matches compute_eField_naive / DREAMPlace): lambda lands
-                                       // within ~50x of XPlace instead of ~5000x. Quality-neutral (lambda-
-                                       // absorbed); verify a precond-off A/B before flipping the default.
+                                       // within ~50x of XPlace instead of ~5000x. false is the validated
+                                       // default (MMS A/B 2026-07-26: faithful beats legacy 16/16, mean -9.6% HPWL).
     bool compare_hpwl_methods = false;
-    bool precond_raw_area = false; // preconditioner/dff area term: false = legacy area/avg_node_size,
+    bool precond_raw_area = true;  // preconditioner/dff area term: false = legacy area/avg_node_size,
                                    // true = raw node area (XPlace-faithful: alpha_2 = pcoef·λ·mov_node_area).
                                    // The /avg_node_size normalization was a spurious deviation — sw_only
                                    // runs in the SAME raw-DBU frame as XPlace, so raw area is coordinate-
                                    // scale-invariant like XPlace's weighted_weight (area·S² and λ·1/S² cancel).
-    bool dff_force_ratio = false;  // density_force_fraction basis: false = legacy area-mass a2/(a1+a2),
+    bool dff_force_ratio = true;   // density_force_fraction basis: false = legacy area-mass a2/(a1+a2),
                                    // true = force-magnitude ‖λ·∇den‖₁ / (‖∇wl‖₁ + ‖λ·∇den‖₁). The force
                                    // ratio is INVARIANT to the field-normalization constant (field→C·field
                                    // ⇒ λ→λ/C, so λ·∇den is unchanged), making the skip_update schedule
@@ -159,9 +159,9 @@ public:
     float hpwl_improvement_threshold;
     float overflow_threshold;
     int convergence_window;
-    int convergence_iterations;             // iterations to continue after overflow < threshold
+    int convergence_iterations = 30;        // iterations to continue after overflow < threshold
     int convergence_iterations_remaining = -1; // countdown; -1 = not yet triggered
-    float target_density;
+    float target_density = 0.9f;
 
     // Divergence guard (XPlace need_to_early_stop / life): once the run starts climbing
     // away from its best solution, each detection burns "life"; at zero we stop and
@@ -171,7 +171,7 @@ public:
 
     // Execution tracking
     int iteration = 0;
-    bool quiet; // if true, suppress all console output except errors (for DSE runs)
+    bool quiet = false; // if true, suppress all console output except errors (for DSE runs)
     bool m_diverged = false; // set when a NaN appears in the HPWL partials (hard divergence);
                              // run() breaks the loop so printFinalResults() still emits a
                              // best-so-far results row instead of the process aborting.
