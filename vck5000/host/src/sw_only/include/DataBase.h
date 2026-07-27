@@ -102,7 +102,6 @@ private:
     int m_total_net_degree;
     float m_maximum_utilization = 0.0f; // 0 = not specified by benchmark
     MacroClass* m_current_lef_macro = nullptr; // tracks current macro during LEF parsing for pin callbacks
-    bool m_enable_pin_offsets = true; // if false, all pins collapse to node origin (legacy behavior)
     float m_total_component_area = 0.0f; // all components (movable + fixed), cached after construction
     float m_total_fixed_area = 0.0f;     // fixed components only
     float m_total_movable_area = 0.0f;   // movable components only (= total - fixed)
@@ -114,7 +113,7 @@ public:
 
     /// Default Constructor
     DataBase() {}
-    DataBase(fs::path input_dir, bool enable_pin_offsets = true);
+    DataBase(fs::path input_dir);
 
     /// Destructor
     virtual ~DataBase() {}

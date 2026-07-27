@@ -351,13 +351,14 @@ void Placer::compute_eField_DCT()
         }
     }
 
-    // Inverse transforms use dct_normalize_inverse (NOT dct_normalize). The forward a_uv already
-    // carries the 1/N^2; re-applying 1/N here (legacy dct_normalize_inverse=true) adds a spurious
-    // 1/N^2 vs the naive DREAMPlace field, inflating lambda by ~N^2. false = field-faithful inverse.
+    // Inverse transforms are left UNNORMALIZED (default). The forward a_uv already carries the 1/N^2;
+    // re-applying 1/N on the inverse would double-normalize — a spurious extra 1/N^2 vs the naive
+    // DREAMPlace field that inflates lambda ~N^2 and corrupts the preconditioner (the distortion grows
+    // with grid). Unnormalized = field-faithful: verified == compute_eField_naive and matches XPlace.
     // compute IDCT on all rows of Ex, and IDXST on all rows of Ey (FFT; verified == naive)
     for (int row_index = 0; row_index < num_rows; row_index++) {
-        Ex[row_index] = IDCT_fft (Ex[row_index], dct_normalize_inverse);
-        Ey[row_index] = IDXST_fft(Ey[row_index], dct_normalize_inverse);
+        Ex[row_index] = IDCT_fft (Ex[row_index]);
+        Ey[row_index] = IDXST_fft(Ey[row_index]);
     }
 
     Ex = transpose(Ex);
@@ -365,8 +366,8 @@ void Placer::compute_eField_DCT()
 
     // compute IDCT on all rows of Ey, and IDXST on all rows of Ex
     for (int row_index = 0; row_index < num_rows; row_index++) {
-        Ex[row_index] = IDXST_fft (Ex[row_index], dct_normalize_inverse);
-        Ey[row_index] = IDCT_fft(Ey[row_index], dct_normalize_inverse);
+        Ex[row_index] = IDXST_fft (Ex[row_index]);
+        Ey[row_index] = IDCT_fft(Ey[row_index]);
     }
 
     Ex = transpose(Ex);

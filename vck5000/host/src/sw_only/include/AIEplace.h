@@ -90,33 +90,11 @@ public:
     bool precond_coef_escalation = true; // double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef)
     bool enable_density_clamp = true;   // clamp sub-bin cells in the density solve (XPlace expand_ratio)
     bool dct_normalize = true;   // apply 1/N per forward DCT (bounds a_uv intermediates; global scale absorbed by lambda)
-    bool dct_normalize_inverse = false; // apply 1/N per INVERSE transform (IDCT/IDXST) in the field solve.
-                                       // true = legacy: the inverse re-applies the forward's 1/N, so the
-                                       // field carries an extra 1/N^2 vs the naive DREAMPlace Eq-3c/3d field
-                                       // (compute_eField_naive) → density force ~N^2 too weak → lambda ~N^2
-                                       // inflated (adaptec1@512 lambda_init 1.68e-5 vs XPlace 3.4e-9). The
-                                       // scale is absorbed by lambda so GP is unaffected, but it mis-scales
-                                       // the preconditioner's lambda*area term. false = the field-faithful
-                                       // inverse (matches compute_eField_naive / DREAMPlace): lambda lands
-                                       // within ~50x of XPlace instead of ~5000x. false is the validated
-                                       // default (MMS A/B 2026-07-26: faithful beats legacy 16/16, mean -9.6% HPWL).
     bool compare_hpwl_methods = false;
-    bool precond_raw_area = true;  // preconditioner/dff area term: false = legacy area/avg_node_size,
-                                   // true = raw node area (XPlace-faithful: alpha_2 = pcoef·λ·mov_node_area).
-                                   // The /avg_node_size normalization was a spurious deviation — sw_only
-                                   // runs in the SAME raw-DBU frame as XPlace, so raw area is coordinate-
-                                   // scale-invariant like XPlace's weighted_weight (area·S² and λ·1/S² cancel).
-    bool dff_force_ratio = true;   // density_force_fraction basis: false = legacy area-mass a2/(a1+a2),
-                                   // true = force-magnitude ‖λ·∇den‖₁ / (‖∇wl‖₁ + ‖λ·∇den‖₁). The force
-                                   // ratio is INVARIANT to the field-normalization constant (field→C·field
-                                   // ⇒ λ→λ/C, so λ·∇den is unchanged), making the skip_update schedule
-                                   // independent of dct_normalize_inverse. Uses the previous iteration's
-                                   // committed gradients (updatePrecondWeights runs before combineGradients).
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
-    float avg_node_size = 1.0f; // average cell area; normalizes preconditioner area term
+    float avg_node_size = 1.0f; // average movable cell area; grid-sizing divisor for the no-macros case
     float density_force_fraction = 0.0f; // density's share of total preconditioner force-mass, in [0,1]
                                           // (0 = all wirelength, 1 = all density); XPlace calls this "weighted_weight"
-    float precond_density_scale = 1.0f; // EXPERIMENT: multiplies alpha_2 (precond density-mass) only, to match XPlace's a1/a2 basis
     float precond_a1_norm = 0.0f; // ||alpha_1||_1 = sum of movable num_pins (preconditioner pin-mass; diag) [instrumentation]
     float precond_a2_norm = 0.0f; // ||alpha_2||_1 = sum of precond_coef*lambda*area (preconditioner density-mass) [instrumentation]
     // BB-step raw sums from the last computeLipshitzEstimate (before the sqrt/clamp), exposed so the

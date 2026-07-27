@@ -199,18 +199,6 @@ Placer::Placer(std::string config_filepath)
             precond_coef_escalation = cfg["params"].value("precond_coef_escalation", precond_coef_escalation);
             enable_density_clamp = cfg["params"].value("enable_density_clamp", enable_density_clamp);
             dct_normalize = cfg["params"].value("dct_normalize", dct_normalize);
-            // XPlace/DREAMPlace-faithful field frame (2026-07-12 A/B: -1.0% adaptec1@512,
-            // -3.0% adaptec2@1024). dff_force_ratio=true is REQUIRED with the faithful inverse.
-            dct_normalize_inverse = cfg["params"].value("dct_normalize_inverse", dct_normalize_inverse);
-            precond_raw_area = cfg["params"].value("precond_raw_area", precond_raw_area);
-            dff_force_ratio  = cfg["params"].value("dff_force_ratio", dff_force_ratio);
-            // EXPERIMENT: scale the preconditioner density-mass term (alpha_2 = pcoef*lambda*area) only,
-            // WITHOUT touching the main force (which is lambda*E, already XPlace-matched). sw_only's field
-            // E is ~50x larger than DREAMPlace's => lambda ~50x smaller => alpha_2 ~50x under-weighted vs
-            // num_pins, so the preconditioner never enters XPlace's area-dominated regime. Set this to the
-            // measured field-norm ratio (~50 on adaptec1) to match XPlace's a1/a2 basis and test whether a
-            // basis-matched preconditioner actually helps. Default 1.0 = unchanged.
-            precond_density_scale = cfg["params"].value("precond_density_scale", precond_density_scale);
             convergence_window = cfg["params"]["convergence_window"];
             convergence_iterations = cfg["params"].value("convergence_iterations", convergence_iterations);
             max_backtracking_attempts = cfg["params"]["backtrack_max_tries"];
@@ -283,9 +271,7 @@ Placer::Placer(std::string config_filepath)
 #endif
 
             // Initialize database by reading LEF and DEF design files
-            bool enable_pin_offsets = cfg["params"].value("enable_pin_offsets", true);
-            Logger::log_info(std::string("Pin offsets: ") + (enable_pin_offsets ? "enabled" : "disabled"));
-            db = DataBase(input_dir, enable_pin_offsets); // TODO: Database initialization should be multithreaded?
+            db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
 
             // Benchmark-specified maximum_utilization overrides config default
             if (db.getMaximumUtilization() > 0.0f) {
@@ -641,7 +627,7 @@ bool Placer::checkDivergence(int window, float threshold)
  */
 void Placer::updatePrecondWeights()
 {
-    float lambda_area_coef = precond_coef * density_weight * precond_density_scale;
+    float lambda_area_coef = precond_coef * density_weight;
 
     // Accumulate the two force-mass components for density_force_fraction:
     //   a1 = wirelength mass (pin count per node), a2 = density mass (λ · normalized area).
@@ -651,14 +637,13 @@ void Placer::updatePrecondWeights()
     // Computed even when preconditioning is disabled, since the schedule still consumes it.
     float a1_norm = 0.0f, a2_norm = 0.0f;
 
-    // Area term for a2 (precond_weight + area-mass dff). precond_raw_area=false: legacy area/avg_node_size
-    // (keeps a2 O(1) per cell). true: RAW area, matching XPlace alpha_2 = pcoef·λ·mov_node_area — the
+    // Area term for a2: RAW node area, matching XPlace alpha_2 = pcoef·λ·mov_node_area — the
     // coordinate-scale-invariant form (sw_only runs in the same raw-DBU frame as XPlace).
     for (auto item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         Node* node = item.second;
         float num_pins = (float)node->getNets().size();
-        float area = precond_raw_area ? node->getArea() : node->getArea() / avg_node_size;
+        float area = node->getArea();
         float a2 = lambda_area_coef * area;
         a1_norm += num_pins;
         a2_norm += a2;
@@ -666,21 +651,18 @@ void Placer::updatePrecondWeights()
             node->precond_weight = std::max(1.0f, num_pins + a2);
     }
     for (auto filler : db.getFillers()) {
-        float area = precond_raw_area ? filler->getArea() : filler->getArea() / avg_node_size;
+        float area = filler->getArea();
         float a2 = lambda_area_coef * area;
         a2_norm += a2;  // fillers carry no pins, so they add no wirelength mass
         if (enable_preconditioning)
             filler->precond_weight = std::max(1.0f, a2);
     }
 
-    // density_force_fraction: force-magnitude ratio (dff_force_ratio, field-norm invariant) or the
-    // legacy area-mass ratio. The force ratio uses the PREVIOUS iteration's committed gradient L1 norms
-    // (last_g*_L1, refreshed each combineGradients / seeded by initializeDensityWeight on iteration 1),
-    // since updatePrecondWeights runs before this iteration's performNextStep→combineGradients.
-    if (dff_force_ratio)
-        density_force_fraction = last_gden_L1 / (last_gwl_L1 + last_gden_L1 + 1e-8f);
-    else
-        density_force_fraction = a2_norm / (a1_norm + a2_norm + 1e-8f);
+    // density_force_fraction: force-magnitude ratio ‖λ·∇den‖₁ / (‖∇wl‖₁ + ‖λ·∇den‖₁), invariant to the
+    // field-normalization constant. Uses the PREVIOUS iteration's committed gradient L1 norms (last_g*_L1,
+    // refreshed each combineGradients / seeded by initializeDensityWeight on iteration 1), since
+    // updatePrecondWeights runs before this iteration's performNextStep→combineGradients.
+    density_force_fraction = last_gden_L1 / (last_gwl_L1 + last_gden_L1 + 1e-8f);
 
     precond_a1_norm = a1_norm; // instrumentation: expose the two preconditioner addend norms for the trace
     precond_a2_norm = a2_norm;

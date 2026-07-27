@@ -7,8 +7,8 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-DataBase::DataBase(fs::path input_dir, bool enable_pin_offsets)
-    : m_input_dir(input_dir), m_enable_pin_offsets(enable_pin_offsets) {
+DataBase::DataBase(fs::path input_dir)
+    : m_input_dir(input_dir) {
     TIME_BLOCK("DataBase read input");
     Logger::log_info("Reading design from directory: " + m_input_dir.string());
     m_max_x = 0;
@@ -770,7 +770,7 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                     // Look up pin offset from the component's macro (LEF microns → DEF dbu)
                     Position pin_offset(0, 0);
                     MacroClass* macro = comp_p->getMacro();
-                    if (m_enable_pin_offsets && macro && macro->hasPinOffset(net_pin.second)) {
+                    if (macro && macro->hasPinOffset(net_pin.second)) {
                         pin_offset = macro->getPinOffset(net_pin.second);
                         float scale = (float)m_units_per_micron;
                         pin_offset.x *= scale;
@@ -872,10 +872,8 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                     // (the NetPin.offset convention shared with the LEF/DEF path). Offsets and sizes
                     // are already in the same units here (no micron→dbu scaling for bookshelf).
                     Position pin_offset(0, 0);
-                    if (m_enable_pin_offsets) {
-                        pin_offset.x = comp_p->getXsize() / 2.0f + (float)net_pin.offset[0];
-                        pin_offset.y = comp_p->getYsize() / 2.0f + (float)net_pin.offset[1];
-                    }
+                    pin_offset.x = comp_p->getXsize() / 2.0f + (float)net_pin.offset[0];
+                    pin_offset.y = comp_p->getYsize() / 2.0f + (float)net_pin.offset[1];
                     new_net->addNode(comp_p, pin_offset, net_pin.pin_name);
                     comp_p->addNet(new_net);
                 } else {

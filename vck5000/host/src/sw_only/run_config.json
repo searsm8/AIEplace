@@ -46,33 +46,10 @@
     "auto_enable_preconditioning": true,
     "precond_coef_escalation": true,   // double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef); false = diagnostic (fixed precond_coef)
     "enable_density_clamp": true,      // clamp sub-bin cells to ~bin size in the density solve (XPlace expand_ratio); smooths the force
-    "enable_pin_offsets": true,        // use per-pin offsets (bookshelf: center-relative; LEF/DEF: macro RECT) in HPWL + WL gradient; false = all pins at node origin (legacy)
-    "dct_normalize": true,             // 1/N per FORWARD DCT (bounds a_uv; global scale absorbed by lambda)
-    "dct_normalize_inverse": false,    // 1/N per INVERSE transform in the field solve. NEW DEFAULT = false
-                                       // (XPlace/DREAMPlace-faithful). true = legacy: the inverse re-applies the
-                                       // forward 1/N, so the field carries a spurious extra 1/N^2 vs the naive
-                                       // DREAMPlace Eq-3c/3d field -> density force ~N^2 too weak -> lambda ~N^2
-                                       // inflated (adaptec1@512 lambda_init 1.68e-5 vs XPlace 3.4e-9), and the
-                                       // distortion GROWS with grid resolution. false = field-faithful inverse:
-                                       // matches compute_eField_naive/DREAMPlace, lands lambda within ~50x of XPlace
-                                       // (6e-11..3.4 vs 3.4e-9..82). Requires dff_force_ratio=true (below) to keep the
-                                       // skip_update schedule invariant to the lambda-scale shift. A/B (2026-07-12,
-                                       // with dff_force_ratio+precond_raw_area on): adaptec1@512 7.203e7->7.132e7
-                                       // (-1.0%), adaptec2@1024 8.499e7->8.244e7 (-3.0%) -- bigger win at higher grid,
-                                       // closing the grid-dependent gap vs XPlace GP (+2.0%->+1.0%, +7.5%->+4.3%).
-                                       // Set true for the legacy frame. NEEDS a full-suite re-baseline of
-                                       // results.csv/scorecard before the new ratios are treated as final.
-    "precond_raw_area": true,          // preconditioner/dff density-mass area term. NEW DEFAULT = true (XPlace-faithful
-                                       // alpha_2 = pcoef*lambda*mov_node_area). false = legacy area/avg_node_size (a
-                                       // spurious deviation; sw_only is in the same raw-DBU frame as XPlace). Raw area
-                                       // is coordinate-scale-invariant like weighted_weight. Part of the faithful-field
-                                       // set with dct_normalize_inverse=false + dff_force_ratio=true.
-    "dff_force_ratio": true,           // density_force_fraction basis. NEW DEFAULT = true (force-magnitude ratio
-                                       // ||lambda*grad_den||1 / (||grad_wl||1 + ||lambda*grad_den||1), from the committed
-                                       // gradients each iteration). false = legacy area-mass a2/(a1+a2). The force ratio
-                                       // is INVARIANT to the field-normalization constant, so it decouples the
-                                       // skip_update schedule from dct_normalize_inverse -- REQUIRED for the faithful
-                                       // inverse (false here reintroduces the ~3.5% adaptec2@1024 regression).
+    "dct_normalize": true,             // 1/N per FORWARD DCT (bounds a_uv; global scale absorbed by lambda). The
+                                       // inverse transform is deliberately NOT normalized (field-faithful: the forward
+                                       // already carries 1/N^2; normalizing the inverse too would double-normalize and
+                                       // inflate lambda ~N^2 -- verified == compute_eField_naive and matches XPlace).
 
     // Hyperparameters
     "init_gamma": 4, // plays XPlace's wa_coeff role; with gamma_bin_scaled, base_gamma = init_gamma*(bin_w+bin_h)
