@@ -30,7 +30,8 @@ __pycache__/
 /vck5000/aie/x86simulator_output/
 /vck5000/aie/golden_data/
 
-# local scratch / review staging (not for the repo)
-/OVERNIGHT_WORK/
-/MARK_TO_REVIEW/
+# Numbered workflow dirs (N_CAPSNAME: 0_TODO, 0_OVERNIGHT_WORK, 1_MARK_TO_REVIEW, 2_ARTIFACTS, ...):
+# local async handoff / scratch between Mark & Claude, NOT part of the tracked repo. The digit prefix
+# pins them to the top of the listing; this one pattern ignores them all at any depth.
+[0-9]_*/
 vck5000/host/benchmarks/mms/
