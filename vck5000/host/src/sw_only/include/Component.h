@@ -1,6 +1,8 @@
-// TODO: add header
-#ifndef AIEPLACE_COMPONENT_H
-#define AIEPLACE_COMPONENT_H
+/**
+ * @file Component.h
+ * @brief A placed instance of a macro — a Node subclass that gets its size from its MacroClass.
+ */
+#pragma once
 
 #include "Common.h"
 #include "Node.h"
@@ -36,4 +38,3 @@ public:
 
 AIEPLACE_NAMESPACE_END
 
-#endif

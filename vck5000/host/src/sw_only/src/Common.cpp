@@ -1,5 +1,7 @@
-// Common.cpp
-// Contains functions defined in Common.h
+/**
+ * @file Common.cpp
+ * @brief Implementations of the free helper functions declared in Common.h (timing, thread ids).
+ */
 #include "Common.h"
 
 AIEPLACE_NAMESPACE_BEGIN

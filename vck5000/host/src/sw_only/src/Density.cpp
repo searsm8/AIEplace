@@ -15,212 +15,18 @@ void Placer::computeElectricFields()
     TIME_FUNCTION();
     computeOverlaps();          // update the density ρ at probe positions
 
-    if(density_method == "aie") {
-        #ifdef USE_XILINX_XRT
-            computeElectricFields_AIE(); // Accelerated compute on AIEs
-        #else
-            Logger::log_error("density_method 'aie' requires XRT. Recompile with BUILD_XRT=1 or use 'cpu'");
-            exit(1);
-        #endif
-    } else if(density_method == "cpu") {
+    if(density_method == "cpu") {
         computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
-        //computeElectricFields_CPU(); // Compute E-fields using naive algorithm 
-    } else { 
-        Logger::log_error("Invalid density_compute_method specified in config file"); 
+        //computeElectricFields_CPU(); // Compute E-fields using naive algorithm
+    } else {
+        Logger::log_error("Invalid density_compute_method specified in config file "
+                          "(sw_only supports 'cpu' only; AIE acceleration lives in pl_algo)");
         exit(1);
     }
 }
 
 /***************
- * XRT/AIE ACCELERATION FUNCTIONS - VCK5000 only
- ****************/
-
-#ifdef USE_XILINX_XRT
-
-/*
- * @brief On AIEs, compute Electric fields using 2D-DCT method
- *
-**/
-void Placer::computeElectricFields_AIE()
-{
-    Logger::log_trace("Begin computeElectricFields_AIE()");
-
-    // Call AIE graph_driver to accelerate computation
-    std::vector< std::vector<float> > density = grid.getBinDensities(); // rho
-    std::vector< std::vector<float> > temp;
-
-    //DEBUGGING: print out the density (rho) matrix
-    //for( int x_index = 0; x_index < BINS_PER_ROW; x_index++)
-    //{
-    //    for( int y_index = 0; y_index < BINS_PER_ROW; y_index++)
-    //    {
-    //        cout << density[x_index][y_index] << " ";
-    //    }
-    //    cout << endl;
-    //}
-    //cout << endl;
-
-    float * input_data  = new float[2*BINS_PER_ROW];
-    float * output_data = new float[2*BINS_PER_ROW];
-
-    // Send the density (rho) matrix into the AIE, one row at a time, for 1D-DCTs
-
-    for(int row = 0; row < BINS_PER_ROW; row++) {
-        for(int col = 0; col < BINS_PER_ROW; col++) {
-        input_data[2*col] = density[row][col]; // real part
-        input_data[2*col+1] = 0; // imaginary part
-        }
-
-    density_driver[0].send_packet(input_data);
-    density_driver[0].receive_packet(output_data);
-
-    std::vector<float> res;
-    for(int col = 0; col < BINS_PER_ROW; col++)
-        res.push_back(output_data[2*col]);
-    temp.push_back(res);
-
-    //std::vector<float> test_output = DCT_naive(test_data);
-    //for(int i = 0; i < BINS_PER_ROW; i++) {
-    //    cout << test_output[i] << " ";
-    //} cout << endl;
-
-    }
-
-    // Send the density (rho) matrix into the AIE, one column at a time, to complete 2D-DCT
-    //cout << "Input" << std::setprecision(2) << endl;
-    for(int col = 0; col < BINS_PER_ROW; col++) {
-        for(int row = 0; row < BINS_PER_ROW; row++) { // looping order performs DCT on columns
-        input_data[2*row] = temp[row][col];
-        input_data[2*row+1] = 0;
-        }
-
-        // Send data to DCT graph
-        density_driver[0].send_packet(input_data);
-        density_driver[0].receive_packet(output_data);
-
-        //cout << endl << "AIE DCT output:" << endl << std::setprecision(2);
-        // Store the result a_uv transposed (for comparison)
-        for(int row = 0; row < BINS_PER_ROW; row++) {
-            grid.getBin(row, col).a_uv = output_data[2*row];
-            //cout << output_data[2*row] << " ";
-        }
-        //cout << endl;
-
-    }
-
-    // Compute Ex
-    temp.clear();
-    // Setup input for IDCT
-    double w_u, w_v, denom_inv;
-    for(int row = 0; row < BINS_PER_ROW; row++) { //looping params implement transpose!
-        //cout << endl << "IDCT input to AIE:" << endl << std::setprecision(2);
-        for(int col = 0; col < BINS_PER_ROW; col++) {
-            if(row == 0 && col == 0)
-                { w_u = 0; w_v = 0; denom_inv = 0;} // for 0, 0 we avoid division by 0
-            else {
-                w_u = 2*M_PI*row / BINS_PER_ROW;
-                w_v = 2*M_PI*col / BINS_PER_ROW;
-                denom_inv = 1 / (w_u*w_u + w_v*w_v);
-            }
-            input_data[2*col] = grid.getBin(row, col).a_uv * w_u * denom_inv;
-            input_data[2*col+1] = 0; // imaginary part is expected for FFT input
-            //cout << input_data[2*col] << " ";
-        }
-        //cout << endl;
-
-
-        // Send data to IDCT graph
-        density_driver[1].send_packet(input_data);
-        density_driver[1].receive_packet(output_data);
-
-        //cout << endl << "IDCT output from AIE:" << endl << std::setprecision(2);
-        std::vector<float> res;
-        for(int col = 0; col < BINS_PER_ROW; col++) {
-            res.push_back(output_data[2*col]);
-            //cout << output_data[2*col] << " ";
-        }
-        //cout << endl;
-        temp.push_back(res);
-    }
-
-    for(int col = 0; col < BINS_PER_ROW; col++) {
-        for(int row = 0; row < BINS_PER_ROW; row++) { // looping order performs IDXST on columns
-            input_data[2*row] = temp[row][col];
-            input_data[2*row+1] = 0;
-        }
-
-        // Send data to IDXST graph
-        density_driver[2].send_packet(input_data);
-        density_driver[2].receive_packet(output_data);
-
-        //cout << endl << "IDXST output:" << endl << std::setprecision(2);
-        // Store the result Ex transposed (for comparison)
-        for(int row = 0; row < BINS_PER_ROW; row++) {
-            grid.getBin(row, col).eField.x = output_data[2*row];
-            //cout << output_data[2*row] << " ";
-        }
-        //cout << endl;
-    }
-
-    // Compute Ey
-    temp.clear();
-    // Setup input for IDXST
-    for(int row = 0; row < BINS_PER_ROW; row++) { //looping params implement transpose!
-        //cout << endl << "IDXST input to AIE:" << endl << std::setprecision(2);
-        for(int col = 0; col < BINS_PER_ROW; col++) {
-            if(row == 0 && col == 0)
-                { w_u = 0; w_v = 0; denom_inv = 0;} // for a(0, 0) we avoid division by 0 (remove dc component)
-            else {
-                w_u = 2*M_PI*row / BINS_PER_ROW;
-                w_v = 2*M_PI*col / BINS_PER_ROW;
-                denom_inv = 1 / (w_u*w_u + w_v*w_v);
-            }
-            input_data[2*col] = grid.getBin(row, col).a_uv * w_v * denom_inv;
-            input_data[2*col+1] = 0;
-            //cout << input_data[2*col] << " ";
-        }
-        //cout << endl;
-
-
-        // Send data to IDXST graph
-        density_driver[2].send_packet(input_data);
-        density_driver[2].receive_packet(output_data);
-
-        //cout << endl << "IDXST output from AIE:" << endl << std::setprecision(2);
-        std::vector<float> res;
-        for(int col = 0; col < BINS_PER_ROW; col++) {
-            res.push_back(output_data[2*col]);
-            //cout << output_data[2*col] << " ";
-        }
-        //cout << endl;
-        temp.push_back(res);
-    }
-
-    for(int col = 0; col < BINS_PER_ROW; col++) {
-        for(int row = 0; row < BINS_PER_ROW; row++) { // looping order performs IDCT on columns
-            input_data[2*row] = temp[row][col];
-            input_data[2*row+1] = 0;
-        }
-
-        // Send data to IDCT graph
-        density_driver[1].send_packet(input_data);
-        density_driver[1].receive_packet(output_data);
-
-        //cout << endl << "IDCT output:" << endl << std::setprecision(2);
-        // Store the result Ex transposed (for comparison)
-        for(int row = 0; row < BINS_PER_ROW; row++) {
-            grid.getBin(row, col).eField.y = output_data[2*row];
-            //cout << output_data[2*row] << " ";
-        }
-        //cout << endl;
-    }
-}
-
-#endif // USE_XILINX_XRT
-
-
-/***************
- * CPU FUNCTIONS - Always available
+ * CPU FUNCTIONS
  ****************/
 
 /*
@@ -234,10 +40,7 @@ void Placer::computeElectricFields_CPU()
     compute_eField_naive();
 }
 
-/*
- * @brief On CPU, compute Electric fields using 2D-DCT method
- *
-**/
+/// @brief Compute the per-bin electric field on the CPU via the 2D-DCT method (a_uv then E).
 void Placer::computeElectricFields_DCT()
 {
     TIME_FUNCTION();
@@ -302,7 +105,7 @@ void Placer::compute_eField_naive()
     }
 }
 
-/* @brief: Compute the intermediate term a_uv using DCTs*/
+/** @brief: Compute the intermediate term a_uv using DCTs*/
 void Placer::compute_a_uv_DCT()
 {
     std::vector< std::vector<float> > density = grid.getBinDensities(); // rho
@@ -327,7 +130,7 @@ void Placer::compute_a_uv_DCT()
         }
 }
 
-/* @brief: Compute the eField values using DCTs*/
+/** @brief: Compute the eField values using DCTs*/
 void Placer::compute_eField_DCT()
 {
     int num_rows = grid.getBinsPerCol();
@@ -383,6 +186,11 @@ void Placer::compute_eField_DCT()
 }
 
 
+/**
+ * @brief Deposit every component's area into the bin grid to build the density map ρ.
+ *        Two passes: fixed components first (clamped to a per-bin capacity baseline), then
+ *        movable components and fillers, so only density stacked above fixed macros overflows.
+ */
 void Placer::computeOverlaps()
 {
     TIME_FUNCTION();
@@ -402,11 +210,11 @@ void Placer::computeOverlaps()
         if (item.second->getStatus() != FIXED)
             grid.computeBinOverlaps(item.second);
 
-    for (auto filler : db.getFillers())
-        grid.computeBinOverlaps(filler);
+    for (auto filler_p : db.getFillers())
+        grid.computeBinOverlaps(filler_p);
 }
 
-/*
+/**
  * @brief Overflow metric with fillers excluded. clamp=true gives the *smoothed* overflow
  * (the global-placement convergence signal; equivalent to XPlace's expand_ratio-inflated
  * density field); clamp=false gives the *exact* physical overflow.
@@ -440,17 +248,17 @@ float Placer::computeOverflow(bool clamp, std::vector<float>* out_density, bool 
 
     // Deposit a node's area over its (optionally clamped) footprint, centered on the cell and
     // shifted to stay in-die (kept in sync with Grid::computeBinOverlaps).
-    auto deposit = [&](Node* node, bool clamp_node) {
-        float w = node->getXsize(), h = node->getYsize();
+    auto deposit = [&](Node* node_p, bool clamp_node) {
+        float w = node_p->getXsize(), h = node_p->getYsize();
         float cw = clamp_node ? std::max(w, min_w) : w;
         float ch = clamp_node ? std::max(h, min_h) : h;
         float weight = (cw > 0.0f && ch > 0.0f) ? (w * h) / (cw * ch) : 0.0f; // conserve total area
-        float xl = node->getProbeX() + 0.5f * w - 0.5f * cw;
-        float yl = node->getProbeY() + 0.5f * h - 0.5f * ch;
+        float xl = node_p->getProbeX() + 0.5f * w - 0.5f * cw;
+        float yl = node_p->getProbeY() + 0.5f * h - 0.5f * ch;
         // Movable/filler: shift to stay in-die (area-conserving edge deposit). FIXED terminals are
         // geometrically clipped instead — IO pads outside the core-row die must not be piled onto
         // the edge bins (false density moat). Kept in sync with Grid::computeBinOverlaps.
-        if (node->getStatus() != FIXED) {
+        if (node_p->getStatus() != FIXED) {
             if (xl + cw > grid_w) xl = grid_w - cw;
             if (yl + ch > grid_h) yl = grid_h - ch;
             if (xl < 0.0f) xl = 0.0f;
@@ -482,7 +290,7 @@ float Placer::computeOverflow(bool clamp, std::vector<float>* out_density, bool 
     for (auto item : db.getComponents())
         if (item.second->getStatus() != FIXED) deposit(item.second, clamp);
     if (include_fillers)
-        for (auto filler : db.getFillers()) deposit(filler, clamp);
+        for (auto filler_p : db.getFillers()) deposit(filler_p, clamp);
 
     float overflow_area = 0.0f;
     for (float d : density) overflow_area += std::max(0.0f, d - cap);
@@ -535,8 +343,8 @@ Gradient Placer::computeElectrostaticForce(Node* node_p)
     // sum_bins overlap_area * eField -- confirmed vs DREAMPlace electric_force_cuda_kernel
     // (area * field_map) and Xplace density_map_cuda_backward (overlap_area * grad_mat).
     for (BinOverlap bo : node_p->getBinOverlaps()) {
-        float coeff = density_weight * bo.bin->local_density_weight * bo.overlap;
-        electro_force += coeff * bo.bin->eField;
+        float coeff = density_weight * bo.bin_p->local_density_weight * bo.overlap;
+        electro_force += coeff * bo.bin_p->eField;
     }
 
     return electro_force;

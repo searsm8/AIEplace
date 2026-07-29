@@ -1,7 +1,9 @@
-// Logger.h
-// Simple logger for debugging and managing info and data tables.
-#ifndef LOGGER_H
-#define LOGGER_H
+/**
+ * @file Logger.h
+ * @brief Singleton logger with severity keys, scientific-notation helpers, and tabulate-based
+ *        table/report formatting.
+ */
+#pragma once
 
 #include "Common.h"
 #include "Grid.h"
@@ -14,7 +16,8 @@
 #include <sstream>
 #include <iomanip>
 
-using namespace tabulate;
+// tabulate types are referenced as tabulate:: in this header; .cpp files that build tables
+// declare a file-local `using namespace tabulate;` (no namespace leak through the header).
 using std::string;
 
 // Macros for convenient logging in scientific notation
@@ -53,11 +56,10 @@ private:
     static std::mutex iMutex;
 
     // Define type to match tabulate's expected types:
-    using MsgType = std::variant<std::string, const char*, std::string_view, Table>;
-    //using MsgType = std::variant<string, Table>;
+    using MsgType = std::variant<std::string, const char*, std::string_view, tabulate::Table>;
 
     static std::unordered_set<string> keys;
-    static std::map<string, Color> string_colors;
+    static std::map<string, tabulate::Color> string_colors;
 
 
     struct FunctionStatBlock {
@@ -94,7 +96,7 @@ public:
     // Primary logging fucntions
     static bool log(string key, MsgType msg);
 
-    static Color getColor(string key);
+    static tabulate::Color getColor(string key);
 
     // inline functions for convenience
     static inline void log_trace(const MsgType& msg)    { iLogger->log("TRACE", msg); }
@@ -107,10 +109,10 @@ public:
     static inline void log_critical(const MsgType& msg) { iLogger->log("CRITICAL", msg); }
 
     // Report generation functions
-    static void export_markdown(Table t, fs::path dir, string filename = "statistics");
+    static void export_markdown(tabulate::Table t, fs::path dir, string filename = "statistics");
     static void export_eField(AIEplace::Grid& grid, fs::path dir, int iter);
     static void updateFunctionStats(string func_name, long long func_time);
-    static Table printFunctionStats();
+    static tabulate::Table printFunctionStats();
     static double getFunctionTime(const std::string& func_name);
 
 }; // end class Logger
@@ -163,4 +165,3 @@ public:
 #define TIME_BLOCK(name) ScopeTimer scopeTimer(name)
 
 
-#endif

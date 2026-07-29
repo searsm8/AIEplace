@@ -1,6 +1,9 @@
-// TODO: add header
-#ifndef AIEPLACE_NET_H
-#define AIEPLACE_NET_H
+/**
+ * @file Net.h
+ * @brief A net (hyperedge) and its pins. Owns the node list the wirelength gradient
+ *        and HPWL are computed over.
+ */
+#pragma once
 
 #include "Common.h"
 #include "Logger.h"
@@ -9,18 +12,21 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-// A pin connection on a net: the parent node, pin offset from node origin, and pin name.
-// Absolute pin position = node->getProbePos() + offset (for gradient evaluation)
-//                       = node->getPos()      + offset (for committed position)
+/**
+ * @brief A pin connection on a net: the parent node, the pin offset from the node origin,
+ *        and the pin name. Absolute pin position is node position + offset —
+ *        getProbePos() for gradient evaluation, getPos() for the committed position.
+ */
 struct NetPin {
-    Node* node;
+    Node* node_p;
     Position offset;   // from MacroClass pin geometry; (0,0) if unknown
     string pin_name;   // DEF pin name (e.g. "A", "Y"); empty for IOPads/bookshelf
 
-    Position getPos() const { return node->getPos() + offset; }
-    Position getProbePos() const { return node->getProbePos() + offset; }
+    Position getPos() const { return node_p->getPos() + offset; }
+    Position getProbePos() const { return node_p->getProbePos() + offset; }
 };
 
+/// @brief A hyperedge over nodes, with parallel node and pin lists.
 class Net
 {
 public:
@@ -31,7 +37,7 @@ public:
     std::vector<Node*> mv_nodes; // List of all nodes on this net
     std::vector<NetPin> mv_pins; // Parallel to mv_nodes: each node + pin offset + pin name
 
-    int tally = 0; // debugging counter used to track how many times this net has been processed
+    int tally = 0; // TODO: unused debugging counter — remove once confirmed dead
 
     // Constructors
     Net() : m_degree(0) {}
@@ -52,8 +58,6 @@ public:
     // Sorting
     void sortPositionsByX();
     void sortPositionsByY();
-    void sortPositionsMaxMinX();
-    void sortPositionsMaxMinY();
 
     // Metrics
     position_type computeWirelength(string method); // method must be "HPWL" or "RSMT"
@@ -72,4 +76,3 @@ public:
 
 AIEPLACE_NAMESPACE_END
 
-#endif

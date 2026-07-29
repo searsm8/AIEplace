@@ -1,8 +1,9 @@
-// IOPad.h — Top-level design IO pads (primary inputs/outputs).
-// These are the "Pins" in the DEF PINS section — fixed ports on the chip boundary.
-// Not to be confused with NetPin (a connection point on a component within a net).
-#ifndef AIEPLACE_IOPAD_H
-#define AIEPLACE_IOPAD_H
+/**
+ * @file IOPad.h
+ * @brief Top-level design IO pads (primary inputs/outputs) — the DEF PINS-section fixed ports
+ *        on the chip boundary. Not to be confused with NetPin (a pin within a net).
+ */
+#pragma once
 
 #include "Common.h"
 #include "Node.h"
@@ -38,4 +39,3 @@ public:
 
 AIEPLACE_NAMESPACE_END
 
-#endif

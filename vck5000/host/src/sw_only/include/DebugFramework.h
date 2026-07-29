@@ -1,5 +1,4 @@
-#ifndef DEBUG_FRAMEWORK_H
-#define DEBUG_FRAMEWORK_H
+#pragma once
 
 #include <chrono>
 #include <string>
@@ -212,4 +211,3 @@ public:
 #define TIME_BLOCK(name) ScopeTimer scopeTimer(name)
 #define TRACK_MEMORY(bytes) MemoryTracker memTracker(__func__, bytes)
 
-#endif // DEBUG_FRAMEWORK_H

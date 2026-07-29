@@ -1,6 +1,8 @@
-// Partials.cpp
-// HPWL partial derivative computation functions
-// Separated from AIEplace.cpp for better organization
+/**
+ * @file Partials.cpp
+ * @brief Weighted-average HPWL gradient (the wirelength partials dW/dx, dW/dy per node).
+ *        Split out of AIEplace.cpp; provides the cpu / simple backends.
+ */
 
 #include "AIEplace.h"
 #include <cmath>
@@ -10,6 +12,8 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
+/// @brief Clear per-node wirelength gradients, then dispatch to the configured backend
+///        (cpu / simple) to accumulate the WA-HPWL partials for this iteration.
 void Placer::computeHpwlPartials()
 {
     TIME_FUNCTION();
@@ -19,150 +23,35 @@ void Placer::computeHpwlPartials()
         if (item.second->getStatus() == FIXED) continue;
         item.second->next.probe_grad.clear();
     }
-    for (auto filler : db.getFillers()) {
-        filler->next.probe_grad.clear();
+    for (auto filler_p : db.getFillers()) {
+        filler_p->next.probe_grad.clear();
     }
     for (auto item : db.getIOPads()) {
         item.second->next.probe_grad.clear();
     }
 
-    if(partials_method == "aie") {
-        #ifdef USE_XILINX_XRT
-            computeAllPartials_AIE();
-        #else
-            Logger::log_error("partials_method 'aie' requires XRT. Recompile with BUILD_XRT=1 or use 'cpu'/'simple'");
-            exit(1);
-        #endif
-    }
-    else if(partials_method == "cpu") {
+    if(partials_method == "cpu") {
         computeHpwlPartials_CPU();
     }
     else if(partials_method == "simple") {
         computeHpwlPartials_simple();
     }
     else {
-        Logger::log_error("Invalid partials_compute_method specified in config file"); 
+        Logger::log_error("Invalid partials_compute_method specified in config file "
+                          "(sw_only supports 'cpu'/'simple' only; AIE acceleration lives in pl_algo)");
         exit(1);
     }
 }
 
 /***************
- * XRT/AIE ACCELERATION FUNCTIONS - VCK5000 only
- *
- * These functions are only compiled when USE_XILINX_XRT is defined.
- * They provide hardware-accelerated computation on Versal AI Engines via XRT.
+ * CPU FUNCTIONS
  ****************/
 
-#ifdef USE_XILINX_XRT
-
-#define GROUP_SIZE 1 // Size of the group of nets sent before waiting to receive results
-
-void Placer::computeHpwlPartials_AIE()
-{
-    TIME_FUNCTION();
-    Logger::log_trace("BEGIN computeAllPartials_AIE()");
-
-    // for each packet specified in DataBase
-    for(int packet_index {0}; packet_index < db.getPacketCount(); packet_index++) {
-        TIME_BLOCK("packet block");
-        int graphs_active {0};
-        // send a packet to each AIE graph
-        long start_prep {getTime()};
-
-        std::vector<std::thread> partials_threads;
-        for(int graph_index = 0; graph_index < PARTIALS_GRAPH_COUNT; graph_index++) {
-            if(packet_index < db.mv_packet[graph_index].size()) {
-                partials_threads.emplace_back(&AIEplace::Placer::computePartials, this, db.mv_packet[graph_index][packet_index]);
-                graphs_active++;
-            }
-        }
-
-        // Join threads
-        for(auto& thread : partials_threads) {
-            thread.join();
-        }
-
-        // receive output from each AIE graph
-        Timer t_receive{};
-        for(int graph_index = 0; graph_index < graphs_active; graph_index++) {
-            if(packet_index < db.mv_packet[graph_index].size()) {
-                receivePartials(db.mv_packet[graph_index][packet_index]);
-            }
-        }
-        Logger::updateFunctionStats("receiving_packets", t_receive.stop());
-    }
-
-    Logger::log_trace("END computeAllPartials_AIE()");
-}
-
-// Send a packet of coordinate data to the AIE partials computation graph
-void Placer::computePartials(Packet* p)
-{
-    TIME_FUNCTION();
-    Logger::log_trace("BEGIN computePartials(Packet* p)");
-    float * input_packet = new float[INPUT_PACKET_SIZE]; // extra size for ctrl data
-
-    // set ctrl data for the packet
-    int index = 0;
-    for(PacketIndex pind : p->contents) {
-        input_packet[index++] = pind.net_size;
-        input_packet[index++] = pind.group_count;
-    }
-    while(index < 8)
-        input_packet[index++] = 0;
-
-
-    long start = getTime();
-    for(PacketIndex pind : p->contents) {
-        // fetch the current packet's postion data into a float* array (with ctrl data)
-        for(int group_index = pind.group_start; group_index < pind.group_start + pind.group_count; ++group_index) {
-            db.prepareNetGroup(input_packet, pind.net_size, group_index*NETS_PER_GROUP );
-        }
-    }
-
-    // send the data packet to PL (maybe as a thread?)
-    partials_drivers[p->graph_index].send_packet(input_packet);
-
-    Logger::log_trace("END computePartials(Packet* p)");
-}
-
-// Receive the result and place it into the database appropriately
-void Placer::receivePartials(Packet* p)
-{
-    TIME_FUNCTION();
-    Logger::log_trace("BEGIN receivePartials(Packet* p)");
-
-    // receive the result data packet from PL
-    float * output_packet = new float[OUTPUT_PACKET_SIZE];
-    partials_drivers[p->graph_index].receive_packet(output_packet);
-
-    // store it into database, updating node partials
-    for(PacketIndex pind : p->contents) {
-        for(int group_index = pind.group_start; group_index < pind.group_start + pind.group_count; ++group_index) {
-            int nan_count  = db.storeNetGroup(output_packet, pind.net_size, group_index*NETS_PER_GROUP);
-            if(nan_count > 0) {
-                Logger::log_critical("NaN result detected...exiting");
-                exit(1);
-            }
-
-        }
-    }
-    Logger::log_trace("END receivePartials(Packet* p)");
-}
-
-#endif // USE_XILINX_XRT
-
-
-/***************
- * CPU FUNCTIONS - Always available
- *
- * These functions run on the host CPU and don't require XRT or VCK5000 hardware.
- ****************/
-
-// Build normalized exp(-x) lookup table for the simple HPWL gradient method.
-// Stores exp(-i * LUT_STEP_NORM) for i = 0..size-1 (normalized distances x = d/gamma).
-// Table is built once; only inv_lut_step and hpwl_lut_range depend on gamma and are
-// refreshed by updateGamma() each iteration when gamma_schedule is enabled.
+/**
+ * @brief Build the normalized exp(-x) lookup table for the 'simple' HPWL gradient.
+ *        Stores exp(-i * LUT_STEP_NORM) for x = d/gamma. Built once; only inv_lut_step and
+ *        hpwl_lut_range depend on gamma and are refreshed by updateGamma() per iteration.
+ */
 void Placer::initHpwlLut()
 {
     hpwl_lut_size = int(LUT_GAMMA_MULTIPLIER / LUT_STEP_NORM) + 2; // fixed: 52
@@ -176,11 +65,14 @@ void Placer::initHpwlLut()
         + " entries (normalized), init_gamma=" + std::to_string(gamma));
 }
 
-// Update gamma according to XPlace overflow-driven schedule and refresh LUT scalars.
-// Formula: gamma = 10^((overflow - 0.1) * 20/9 - 1) * base_gamma
-// At overflow=1.0 → ~10x base; overflow=0.55 → 1x base; overflow=0.07 → ~0.09x base.
+/**
+ * @brief Update the WA smoothing length gamma on the XPlace overflow-driven schedule and
+ *        refresh the LUT scalars. gamma = 10^((overflow - 0.1) * 20/9 - 1) * base_gamma
+ *        (overflow 1.0 -> ~10x base; 0.55 -> 1x; 0.07 -> ~0.09x).
+ */
 void Placer::updateGamma(float overflow)
 {
+    if (!gamma_schedule) return;
     float coef = std::pow(10.0f, (overflow - 0.1f) * (20.0f / 9.0f) - 1.0f);
     gamma     = coef * base_gamma;
     inv_gamma = 1.0f / gamma;
@@ -188,7 +80,7 @@ void Placer::updateGamma(float overflow)
     inv_lut_step   = 1.0f / (LUT_STEP_NORM * gamma);
 }
 
-// Linearly interpolate into the precomputed exp(-d/gamma) LUT.
+/// @brief Linearly interpolate into the precomputed exp(-d/gamma) LUT.
 inline float Placer::lutLookup(float d) const
 {
     float idx_f = d * inv_lut_step;
@@ -197,12 +89,12 @@ inline float Placer::lutLookup(float d) const
     return hpwl_lut[idx] * (1.0f - frac) + hpwl_lut[idx + 1] * frac;
 }
 
-// LUT-based WA-HPWL gradient approximation.
-// Uses the 2-node softmax approximation: for a node at distance d_max from the
-// net's max edge and d_min from the min edge, the gradient is approximately:
-//   grad = [exp(-d_max/γ) - exp(-d_min/γ)] / [1 + exp(-span/γ)]
-// The exp values come from the precomputed LUT. Nodes far from both edges
-// (distance > 5γ) get gradient ≈ 0 and are skipped entirely.
+/**
+ * @brief Fast LUT-based WA-HPWL gradient approximation (2-node softmax): for a node at
+ *        distance d_max from the net's max edge and d_min from the min edge,
+ *        grad ≈ [exp(-d_max/γ) - exp(-d_min/γ)] / [1 + exp(-span/γ)], exp() from the LUT.
+ *        Nodes farther than 5γ from both edges contribute ≈0 and are skipped.
+ */
 void Placer::computeHpwlPartials_simple()
 {
     TIME_FUNCTION();
@@ -247,12 +139,17 @@ void Placer::computeHpwlPartials_simple()
             float minus_y = (d_min_y < range) ? lutLookup(d_min_y) * norm_y : 0.0f;
 
             // Gradient accumulates onto the parent node
-            pin.node->next.probe_grad.x += plus_x - minus_x;
-            pin.node->next.probe_grad.y += plus_y - minus_y;
+            pin.node_p->next.probe_grad.x += plus_x - minus_x;
+            pin.node_p->next.probe_grad.y += plus_y - minus_y;
         }
     }
 }
 
+/**
+ * @brief Exact weighted-average HPWL gradient on the CPU — the golden reference the AIE
+ *        and 'simple' backends are checked against. High-degree nets are masked out to
+ *        match XPlace (see the net_mask note below).
+ */
 void Placer::computeHpwlPartials_CPU()
 {
     TIME_FUNCTION();
@@ -311,12 +208,12 @@ void Placer::computeHpwlPartials_CPU()
             Logger::log_error("B: " + B.to_string());
             Logger::log_error(net_p->to_string());
             for (size_t i = 0; i < net_size; i++)
-                Logger::log_error("A[" + std::to_string(i) + "]: " + A[i].to_string() + " node: " + pins[i].node->getName());
+                Logger::log_error("A[" + std::to_string(i) + "]: " + A[i].to_string() + " node: " + pins[i].node_p->getName());
             Logger::log_error("max_x: " + std::to_string(max_x) + " min_x: " + std::to_string(min_x) + " max_y: " + std::to_string(max_y) + " min_y: " + std::to_string(min_y));
             Logger::log_error("Pin positions:");
             for (size_t i = 0; i < net_size; i++) {
                 Position p = pins[i].getProbePos();
-                Logger::log_error("Node " + pins[i].node->getName() + " pin_x: " + std::to_string(p.x) + " pin_y: " + std::to_string(p.y));
+                Logger::log_error("Node " + pins[i].node_p->getName() + " pin_x: " + std::to_string(p.x) + " pin_y: " + std::to_string(p.y));
             }
         }
         assert(B.plus.x  != 0 && "B.plus.x is zero, cannot compute partials");
@@ -341,7 +238,7 @@ void Placer::computeHpwlPartials_CPU()
 
             //check for NaNs
             if(partial.x != partial.x || partial.y != partial.y) {
-                Logger::log_error("NaN detected in partials for node " + pins[i].node->getName() + " in net " + net_p->getName());
+                Logger::log_error("NaN detected in partials for node " + pins[i].node_p->getName() + " in net " + net_p->getName());
                 Logger::log_error("partial x: " + std::to_string(partial.x) + " y: " + std::to_string(partial.y));
                 Logger::log_error("net size: " + std::to_string(net_size));
                 Logger::log_error(net_p->to_string());
@@ -355,7 +252,7 @@ void Placer::computeHpwlPartials_CPU()
                 return;
             }
 
-            pins[i].node->next.probe_grad += partial;
+            pins[i].node_p->next.probe_grad += partial;
         }
     }
 }
@@ -371,8 +268,8 @@ void Placer::compareHpwlPartials()
         if (item.second->getStatus() == FIXED) continue;
         movable_nodes.push_back(item.second);
     }
-    for (auto filler : db.getFillers())
-        movable_nodes.push_back(filler);
+    for (auto filler_p : db.getFillers())
+        movable_nodes.push_back(filler_p);
 
     // --- Run CPU method ---
     for (Node* n : movable_nodes) n->next.probe_grad.clear();

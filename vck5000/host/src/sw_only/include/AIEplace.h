@@ -1,5 +1,4 @@
-#ifndef AIEPLACE_H
-#define AIEPLACE_H
+#pragma once
 
 #include "Common.h"
 #include "DataBase.h"
@@ -8,18 +7,10 @@
 #include "json.h"
 using json = nlohmann::json;
 
-#ifdef USE_XILINX_XRT
-#include "GraphDriver.h"
-#endif
-
 #include <chrono>
 #include <iomanip>
 #include <fstream>
 #include <sstream>
-
-// PL port param_scheduler (scalar, cmath-only). Included by the golden so the schedule can be
-// sourced from the PL module behind use_pl_scheduler -- the closed-loop drop-in check (S6 step 0).
-#include "modules/param_scheduler.hpp"
 
 #define DEVICE_ID 0 // Device ID to find VCK5000
 
@@ -34,7 +25,18 @@ class Placer
 private:
     float m_initial_hpwl = 0.0f;
     std::string m_config_filepath;
-    
+
+    // Constructor phases (see Placer::Placer)
+    void setupDesign();                    // timed: config parse + grid decision + DB read + fillers + area analysis
+    void loadConfiguration();              // parse the config file into cfg and read all hyperparameters
+    bool resolveGridResolution();          // explicit bins_per_row override, or defer to the ePlace formula
+    void loadDesignDatabase();             // read LEF/DEF, apply benchmark max_util, add fillers
+    void analyzeDesignArea(bool bins_auto); // movable/fixed area stats, macro count, ePlace-formula grid size
+    void configurePreconditioner();        // auto-enable decision from num_movable_macros
+    void setupGrid();                      // build the Grid from bins_per_row, clamp density, set die_size
+    void configureGammaSchedule();         // grid-independent base_gamma, gamma/inv_gamma, LUT init
+    void initializeVisualization();        // no-op when CREATE_VISUALIZATION isn't defined
+
     // Helper functions for DSE integration and output organization
     void createRunOutputStructure();
     void writeResultsCSV(float final_hpwl, float final_hpwl_exact, float final_overflow,
@@ -45,17 +47,16 @@ private:
     std::string escapeJsonString(const std::string& input);
     std::string generateRunId();
     bool checkConvergence();
+    bool reachedMaxIterations();       // safety fallback: iteration >= max_iterations
+    bool hasNaNMetrics();              // NaN in overflow or HPWL — hard stop
+    bool hasCoarseDivergence();        // HPWL blown past 2x the best known solution
+    bool checkFineDivergenceGuard();   // near-converged-band divergence guard (burns life)
+    bool checkOverflowCountdown();     // XPlace-style post-threshold countdown to stop
     float getMemoryUsageMB();
-    float getAIEUtilizationPercent();
 
 public:
     DataBase db;
     Grid grid;
-
-#ifdef USE_XILINX_XRT
-    PartialsGraphDriver partials_drivers[PARTIALS_GRAPH_COUNT];
-    DensityGraphDriver density_driver[3];
-#endif
 
     // Configuration object
     json cfg;
@@ -97,20 +98,9 @@ public:
                                           // (0 = all wirelength, 1 = all density); XPlace calls this "weighted_weight"
     float precond_a1_norm = 0.0f; // ||alpha_1||_1 = sum of movable num_pins (preconditioner pin-mass; diag) [instrumentation]
     float precond_a2_norm = 0.0f; // ||alpha_2||_1 = sum of precond_coef*lambda*area (preconditioner density-mass) [instrumentation]
-    // BB-step raw sums from the last computeLipshitzEstimate (before the sqrt/clamp), exposed so the
-    // schedule-trace dump can hand the PL param_scheduler port the exact inputs it must reproduce.
-    float last_pos_norm_sq = 0.0f;  // ||v_{k+1} - v_k||^2 (preconditioned-consistent)
-    float last_grad_norm_sq = 0.0f; // ||g(v_{k+1}) - g(v_k)||^2 (preconditioned)
 
-    // PL param_scheduler drop-in (S6 step 0). When use_pl_scheduler, the metric-driven schedule
-    // (gamma, lambda, BB alpha, convergence stop) is sourced from the PL module instead of the
-    // native updateGamma/updateDensityWeight/computeLipshitzEstimate/checkConvergence, closing the
-    // loop with real (CPU) gradients. momentum stays native (pure a_k recurrence). A correct drop-in
-    // reproduces the native run bit-for-bit. last_g*_L1 feed the module's iteration-1 lambda init.
-    bool  use_pl_scheduler = false;
-    plalgo::SchedState  pl_sched_state;
-    plalgo::SchedParams pl_sched_params;
-    int   pl_stop = 0;
+    // Committed wirelength/density gradient L1 norms from the previous iteration, refreshed each
+    // combineGradients (seeded by initializeDensityWeight on iteration 1). Drive density_force_fraction.
     float last_gwl_L1 = 0.0f, last_gden_L1 = 0.0f;
 
     int die_size; // minimum of width and height of the die area
@@ -165,13 +155,13 @@ public:
     };
     BestSolution best_primary;   // HPWL-driven, only when overflow < threshold
     BestSolution best_fallback;  // Pareto-improving, always available
+    const BestSolution& bestReference() const; // converged best if valid, else lowest-overflow fallback
     static constexpr int BEST_SOL_MIN_ITER = 50; // don't save before this
     int last_density_jolt_iter = -1000; // tracks last emergency 2x jolt for cooldown
     
 
     // Legacy timing variables
     long double pgrm_start_time;
-    long double db_IO_time;
     double algo_time = 0.0;
     
     // Histories for diagnostics and visualization
@@ -188,17 +178,10 @@ public:
     void printWelcomeBanner(bool show_info = true);
 
     // Pre-run preparation
-    void initializePlacement(Position target_pos, int min_dist, int max_dist);
+    void initializePlacement();
     void recordInitialHPWL();
     void iterationReset();
     void initializeDensityWeight();
-
-    // Functions to be accelerated on AIEs
-    void prepareInputDataPacket(float * input_data, int net_size);
-    void computeAllPartials_AIE();
-    void computePartials(Packet* p); 
-    void receivePartials(Packet* p);
-    void computeElectricFields_AIE();
 
     // Functions implemented on CPU
     void computeHpwlPartials();
@@ -236,13 +219,15 @@ public:
     void performIteration();
 
     // Main algorithm iteration functions
+    void initializeFirstIteration();    // iteration-1 only: bootstrap gradients + solver state
     void combineGradients();            // subtract electro from probe_grad in-place
-    float computeLipshitzEstimate();    // BB step estimate: ||Δv|| / ||Δ∇f||
+    float computeLipschitzEstimate();    // BB step estimate: ||Δv|| / ||Δ∇f||
     void estimateInitialStep();         // XPlace-style iteration-1 BB learning-rate estimate
     void performNextStep(bool backtracking_enabled = true); // Algorithm 2: BkTrk
     void advanceIterationState();       // promote next → current for all nodes
     void stepAllNodes();                // Algorithm 1, lines 2–4
     void enforceDieBoundaries(Node* node_p);           // clamp next.node_pos to die area
+    void updateSchedule();              // throttled γ/λ update (skip_update gate)
     void updateDensityWeight();
     void updateGamma(float overflow);
     void updatePrecondWeights();
@@ -251,7 +236,6 @@ public:
 
     // Diagnostics
     void logStepDiagnostics();
-    void dumpScheduleTrace(); // append this iteration's schedule I/O for the PL param_scheduler port verify
 
     // Bookkeeping and visualization
     void recordIterationResults();
@@ -270,4 +254,3 @@ public:
 
 AIEPLACE_NAMESPACE_END
 
-#endif

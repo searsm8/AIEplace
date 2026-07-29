@@ -37,45 +37,16 @@ struct Ylesser
 /**
  * Sorts mv_nodes in descending order by X positions for feeding to AIE kernels
  */
+/// @brief Sort mv_nodes in descending order by X position (for feeding to AIE kernels).
 void Net::sortPositionsByX()
 {
     std::sort(mv_nodes.begin(), mv_nodes.end(), Xgreater());
 }
 
-/**
- * Sorts mv_nodes in descending order by Y positions for feeding to AIE kernels
- */
+/// @brief Sort mv_nodes in descending order by Y position (for feeding to AIE kernels).
 void Net::sortPositionsByY()
 {
     std::sort(mv_nodes.begin(), mv_nodes.end(), Ygreater());
-}
-
-/**
- * Sort mv_nodes for AIE kernel execution
- * max_x, min_x, x, x, x...
- */
-void Net::sortPositionsMaxMinX()
-{
-    sortPositionsByX();
-    // Put the min value in 2nd position
-    std::swap(mv_nodes.at(1), mv_nodes.back());
-
-    // For AIE kernels, data format requires 1st element being max and 2nd element being min
-    // other coordinates for nodes on the net can be in any order
-}
-
-/**
- * Sort mv_nodes for AIE kernel execution
- * max_y, min_y, y, y, y...
- */
-void Net::sortPositionsMaxMinY()
-{
-    sortPositionsByY();
-    // Put the min value in 2nd position
-    std::swap(mv_nodes.at(1), mv_nodes.back());
-
-    // For AIE kernels, data format requires 1st element being max and 2nd element being min
-    // other coordinates for nodes on the net can be in any order
 }
 
 string Net::to_string()
@@ -83,23 +54,21 @@ string Net::to_string()
     string s = m_name + ":\n";
     for (const NetPin& pin : mv_pins)
     {
-        if(pin.node == nullptr)
+        if(pin.node_p == nullptr)
         {
             cout << "nullptr found!" << endl;
             exit(1);
         }
-        s += "\t" + pin.node->getName() + " (Pin " + pin.pin_name + ") : " + pin.node->next.probe_pos.to_string() + "\n";
+        s += "\t" + pin.node_p->getName() + " (Pin " + pin.pin_name + ") : " + pin.node_p->next.probe_pos.to_string() + "\n";
     }
 
     return s;
 }
 
 /**
- * Compute the wirelength of this net, using HPWL or RSMT method
- * 
- * @param method: name of the method to use. Either "HPWL" or "RSMT"
- * 
- * @return: The wirelength of the net.
+ * @brief Compute this net's wirelength by the named method.
+ * @param method "HPWL" or "RSMT"
+ * @return the net's wirelength
  */
 position_type Net::computeWirelength(string method)
 {
@@ -115,10 +84,9 @@ position_type Net::computeWirelength(string method)
     }
 }
 
-/** 
- * Simple Half-Perimeter Wirelength (HPWL)
- * 
- * @return: Estimate of the wirelength for the net, computed using HPWL.
+/**
+ * @brief Half-Perimeter Wirelength: width + height of the net's pin bounding box.
+ * @return the net's HPWL
  */
 position_type Net::computeWirelength_HPWL()
 {
@@ -133,10 +101,10 @@ position_type Net::computeWirelength_HPWL()
     return (max_x - min_x) + (max_y - min_y);
 }
 
-/** 
- * Rectilinear Steiner Minimum Spanning Tree (RSMT)
- * 
- * @return: The wirelength of the net, computed using RSMT.
+/**
+ * @brief Rectilinear Steiner Minimum Spanning Tree wirelength.
+ * @return the net's RSMT wirelength
+ * @note Not yet implemented — returns 0.
  */
 position_type Net::computeWirelength_RSMT()
 {
@@ -158,8 +126,8 @@ Box Net::getBoundingBox()
 
 bool Net::hasIOPad()
 {
-    for(Node* node : mv_nodes) {
-        if (IOPad* iopad_ptr = dynamic_cast<IOPad*>(node))
+    for(Node* node_p : mv_nodes) {
+        if (IOPad* iopad_p = dynamic_cast<IOPad*>(node_p))
             return true;
     }
     return false;
@@ -167,8 +135,8 @@ bool Net::hasIOPad()
 
 bool Net::hasFixedNode()
 {
-    for(Node* node : mv_nodes) {
-        if (node->getStatus() == FIXED)
+    for(Node* node_p : mv_nodes) {
+        if (node_p->getStatus() == FIXED)
             return true;
     }
     return false;

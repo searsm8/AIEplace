@@ -57,16 +57,6 @@
     "gamma_bin_scaled": true, // tie base_gamma to bin geometry referenced to gamma_ref_grid (grid-independent); false = legacy bare init_gamma constant
     "gamma_ref_grid": 512, // reference grid for gamma_bin_scaled: base_gamma = init_gamma*(die_w+die_h)/gamma_ref_grid; keeps absolute gamma grid-independent (512 matches the tuned suite)
     "max_threads": 1, // multithreading not yet implemented
-    "init_method": "random_center", // initial placement of movable cells:
-                                  //   "uniform_box"   — uniform offset in a box of half-width
-                                  //                     init_spread*min(W,H) around die center.
-                                  //   "random_center" — XPlace-style tight Gaussian cluster at
-                                  //                     center (sigma = 0.001*die span).
-                                  // A/B (adaptec1/bigblue1/fft_b/pci_bridge32_a, seed 42): quality
-                                  // near-identical (uniform edged 3/4 by <2%), but we default to
-                                  // random_center to stay as close to XPlace's setup as possible
-                                  // while chasing its results — later tuning may depend on it.
-    "init_spread": 0.25, // fraction of die width for initial node spread (uniform_box only)
     "init_step_seed": 0.01, // SEED for the iteration-1 Barzilai-Borwein step estimate (XPlace args.lr),
                             // not the literal first step: estimateInitialStep() takes one trial step of
                             // this size, then sets α = ||Δpos|| / ||Δgrad||. A robust internal default;

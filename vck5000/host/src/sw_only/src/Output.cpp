@@ -1,6 +1,8 @@
-// Output.cpp
-// Output, reporting, and results management functions
-// Separated from AIEplace.cpp for better organization
+/**
+ * @file Output.cpp
+ * @brief Output, reporting, and results management (DEF writeout, CSV/summary, visualization
+ *        export). Split out of AIEplace.cpp.
+ */
 
 #include "AIEplace.h"
 #include <chrono>
@@ -14,6 +16,8 @@
 #include <set>
 
 AIEPLACE_NAMESPACE_BEGIN
+
+using namespace tabulate; // table types, scoped to this .cpp (not leaked via Logger.h)
 
 void Placer::printWelcomeBanner(bool show_info)
 {
@@ -129,33 +133,6 @@ void Placer::printIterationResults()
               << SCI(density_weight) << ", "
               << backtrack_steps << endl;
     hpwl_file.close();
-}
-
-// Append one row of the schedule's per-iteration inputs and outputs to schedule_trace.csv.
-// This is the golden trace the PL param_scheduler port is verified against (offline, no device):
-// given the INPUTS a scheduler consumes at iteration k (hpwl, overflow, the two BB norms,
-// density_force_fraction) plus its persistent state, it must reproduce the OUTPUTS this row
-// records (gamma/inv_gamma, step_length=alpha, momentum_coeff, density_weight=lambda). Written
-// at the END of performIteration, so gamma/density_weight already hold the NEXT iteration's values.
-void Placer::dumpScheduleTrace() {
-    std::ofstream f;
-    fs::path path = output_dir;
-    f.open(path.append("schedule_trace.csv"), std::ios_base::app);
-    if (iteration == 1)
-        f << "iter,hpwl,overflow,pos_norm_sq,grad_norm_sq,density_force_fraction,"
-             "base_gamma,gamma,inv_gamma,step_length,nesterov_ak,momentum_coeff,density_weight,"
-             "precond_coef,precond_a1_norm,precond_a2_norm\n";
-    f << std::scientific << std::setprecision(9)
-      << iteration << ','
-      << hpwl_history.back()    << ',' << ovfw_history.back()   << ','
-      << last_pos_norm_sq       << ',' << last_grad_norm_sq     << ','
-      << density_force_fraction << ',' << base_gamma            << ','
-      << gamma                  << ',' << inv_gamma             << ','
-      << step_length            << ',' << nesterov_ak           << ','
-      << momentum_coeff         << ',' << density_weight        << ','
-      << precond_coef           << ',' << precond_a1_norm       << ','
-      << precond_a2_norm        << '\n';
-    f.close();
 }
 
 void Placer::plotHistories() {
@@ -283,7 +260,6 @@ void Placer::writeResultsCSV(float final_hpwl, float final_hpwl_exact, float fin
         out_file << "DB IO Time (sec),";
         out_file << "Algorithm Time (sec),";
         out_file << "Iteration Avg (sec),";
-        out_file << "Partials AIE Time (sec),";
         out_file << "Memory Usage (MB),";
         out_file << "Output Dir,";
         out_file << "Timestamp,";
@@ -343,10 +319,9 @@ void Placer::writeResultsCSV(float final_hpwl, float final_hpwl_exact, float fin
     out_file << std::scientific << SCI(final_hpwl_exact) << ",";   // Final HPWL Exact (all nets)
     out_file << std::fixed << std::setprecision(3);
     out_file << total_runtime << ",";
-    out_file << db_IO_time << ",";
+    out_file << Logger::getFunctionTime("setupDesign") / 1.0e6 << ",";
     out_file << algo_time << ",";
     out_file << iteration_avg << ",";
-    out_file << Logger::getFunctionTime("computeAllPartials_AIE") << ",";
     out_file << getMemoryUsageMB() << ",";
     out_file << "\"" << output_dir.string() << "\",";
     out_file << "\"" << timestamp.str() << "\",";
@@ -434,7 +409,7 @@ void Placer::printFinalResults()
     results.add_row({"Benchmark name", db.getBenchmarkName()});
     results.add_row(RowStream{} << "Iterations" << iteration);
     results.add_row(RowStream{} << "Total runtime (s)" << std::fixed << std::setprecision(3) << total_runtime);
-    results.add_row(RowStream{} << "Database I/O time (s)" << std::fixed << std::setprecision(3) << db_IO_time);
+    results.add_row(RowStream{} << "Database I/O time (s)" << std::fixed << std::setprecision(3) << Logger::getFunctionTime("setupDesign") / 1.0e6);
     results.add_row(RowStream{} << "Algorithm time (s)" << std::fixed << std::setprecision(3) << algo_time);
     results.add_row(RowStream{} << "Avg iteration time (s)" << std::fixed << std::setprecision(3) << iteration_avg);
     results.add_row(RowStream{} << "Final HPWL" << std::scientific << std::setprecision(3) << final_hpwl);
@@ -502,7 +477,8 @@ void Placer::printFinalResults()
             // use python script to create gif from generated pngs in run directory
             std::string quiet_flag = quiet ? " --quiet" : "";
             std::string gif_command = "python3 tools/gif_builder.py " + run_output_dir + "/placement" + " -d 100 -o " + run_output_dir + "/full_placement.gif" + quiet_flag;
-            system(gif_command.c_str());
+            if (system(gif_command.c_str()) != 0)
+                Logger::log_warning("gif_builder.py failed (non-fatal): " + gif_command);
         }
     #endif
 
@@ -617,8 +593,8 @@ void Placer::initializeFocus()
     if (num_focus_nets > 0) {
         std::vector<Net*> all_nets;
         all_nets.reserve(nets.size());
-        for (auto& [id, net] : nets)
-            all_nets.push_back(net);
+        for (auto& [id, net_p] : nets)
+            all_nets.push_back(net_p);
         std::shuffle(all_nets.begin(), all_nets.end(), rng);
         int count = std::min(num_focus_nets, (int)all_nets.size());
         for (int i = 0; i < count; i++) {
@@ -632,9 +608,9 @@ void Placer::initializeFocus()
     int num_focus_nodes = cfg["output"].value("rand_focus_nodes", 0);
     if (num_focus_nodes > 0) {
         std::vector<Node*> movable;
-        for (auto& [name, comp] : db.getComponents())
-            if (comp->getStatus() != FIXED)
-                movable.push_back(comp);
+        for (auto& [name, comp_p] : db.getComponents())
+            if (comp_p->getStatus() != FIXED)
+                movable.push_back(comp_p);
         std::shuffle(movable.begin(), movable.end(), rng);
         int count = std::min(num_focus_nodes, (int)movable.size());
         for (int i = 0; i < count; i++) {
@@ -649,10 +625,10 @@ void Placer::initializeFocus()
     int num_macro_nets = cfg["output"].value("rand_macro_nets", 0);
     if (num_macro_nets > 0) {
         std::vector<Net*> macro_nets;
-        for (auto& [id, net] : nets) {
-            for (Node* node : net->getNodes()) {
-                if (dynamic_cast<Component*>(node) && node->getStatus() == FIXED) {
-                    macro_nets.push_back(net);
+        for (auto& [id, net_p] : nets) {
+            for (Node* node_p : net_p->getNodes()) {
+                if (dynamic_cast<Component*>(node_p) && node_p->getStatus() == FIXED) {
+                    macro_nets.push_back(net_p);
                     break;
                 }
             }
@@ -672,9 +648,9 @@ void Placer::initializeFocus()
         std::vector<Node*> fixed_nodes;
         for (auto& [name, pad] : db.getIOPads())
             fixed_nodes.push_back(pad);
-        for (auto& [name, comp] : db.getComponents())
-            if (comp->getStatus() == FIXED)
-                fixed_nodes.push_back(comp);
+        for (auto& [name, comp_p] : db.getComponents())
+            if (comp_p->getStatus() == FIXED)
+                fixed_nodes.push_back(comp_p);
         std::shuffle(fixed_nodes.begin(), fixed_nodes.end(), rng);
         int count = std::min(num_focus_io, (int)fixed_nodes.size());
         for (int i = 0; i < count; i++) {
@@ -714,8 +690,10 @@ void Placer::recordIterationResults()
     }
 
     // Fallback: lowest overflow achieved. Tiebreak on HPWL when overflow is similar.
-    if (overflow < best_fallback.overflow - OVFW_EPSILON ||
-        (overflow < best_fallback.overflow + OVFW_EPSILON && hpwl < best_fallback.hpwl))
+    bool overflow_clearly_improved     = (overflow < best_fallback.overflow - OVFW_EPSILON);
+    bool overflow_tied_but_hpwl_better = (overflow < best_fallback.overflow + OVFW_EPSILON &&
+                                          hpwl < best_fallback.hpwl);
+    if (overflow_clearly_improved || overflow_tied_but_hpwl_better)
     {
         best_fallback = {hpwl, overflow, iteration, true};
         // Only snapshot if primary hasn't already saved this iteration

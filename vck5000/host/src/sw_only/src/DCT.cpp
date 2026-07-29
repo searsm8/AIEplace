@@ -5,6 +5,7 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
+/// @brief Return the transpose of a rectangular 2D matrix.
 std::vector< std::vector<float> > transpose   (std::vector< std::vector<float> > input)
 {
     int num_rows = input.size();
@@ -21,7 +22,7 @@ std::vector< std::vector<float> > transpose   (std::vector< std::vector<float> >
     return output;
 }
 
-/* @brief: perform Discrete Cosine transform naively using the definition
+/** @brief: perform Discrete Cosine transform naively using the definition
  * DCT(x_n)_k = SUM ( x_n * cos(PI/N * (n+.5) * k))
  */
 std::vector<float> DCT_naive   (std::vector<float> input)
@@ -40,7 +41,7 @@ std::vector<float> DCT_naive   (std::vector<float> input)
     return result;
 }
 
-/* @brief: perform Inverse Discrete Cosine transform naively using the definition
+/** @brief: perform Inverse Discrete Cosine transform naively using the definition
  * IDCT(x_n)_k = .5*x_0 + SUM ( x_n * cos(PI/N * (k+.5) * n))
  */
 std::vector<float> IDCT_naive  (std::vector<float> input)
@@ -59,7 +60,7 @@ std::vector<float> IDCT_naive  (std::vector<float> input)
     return result;
 }
 
-/* @brief: perform Inverse Discrete Cosine transform naively using the definition
+/** @brief: perform Inverse Discrete Cosine transform naively using the definition
  * IDXST(x_n)_k = (-1)^k * IDCT({x_(N-n)})_k
  */
 std::vector<float> IDXST_naive (std::vector<float> input)
@@ -78,7 +79,8 @@ std::vector<float> IDXST_naive (std::vector<float> input)
     return temp;
 }
 
-/* Iterative in-place radix-2 Cooley-Tukey FFT (N a power of 2). sign=-1 forward,
+/**
+ * @brief Iterative in-place radix-2 Cooley-Tukey FFT (N a power of 2). sign=-1 forward,
  * sign=+1 inverse; neither direction is normalized (callers scale as needed). */
 static void fft(std::vector<std::complex<double>>& a, int sign)
 {
@@ -105,7 +107,7 @@ static void fft(std::vector<std::complex<double>>& a, int sign)
     }
 }
 
-/* @brief DCT-II via a single length-N FFT (Makhoul). Equivalent to DCT_naive to
+/** @brief DCT-II via a single length-N FFT (Makhoul). Equivalent to DCT_naive to
  * float precision but O(N log N). normalize=true applies the 1/N scale factor that
  * keeps intermediate magnitudes bounded (a global constant, absorbed by lambda). */
 std::vector<float> DCT_fft   (std::vector<float> input, bool normalize)
@@ -126,7 +128,7 @@ std::vector<float> DCT_fft   (std::vector<float> input, bool normalize)
     return out;
 }
 
-/* @brief DCT-III (inverse) via a single length-N FFT (Makhoul), matching IDCT_naive. */
+/** @brief DCT-III (inverse) via a single length-N FFT (Makhoul), matching IDCT_naive. */
 std::vector<float> IDCT_fft  (std::vector<float> input, bool normalize)
 {
     int N = input.size();
@@ -146,7 +148,7 @@ std::vector<float> IDCT_fft  (std::vector<float> input, bool normalize)
     return x;
 }
 
-/* @brief IDXST via IDCT_fft with the same input reversal + odd-output sign flip as IDXST_naive. */
+/** @brief IDXST via IDCT_fft with the same input reversal + odd-output sign flip as IDXST_naive. */
 std::vector<float> IDXST_fft (std::vector<float> input, bool normalize)
 {
     int N = input.size();

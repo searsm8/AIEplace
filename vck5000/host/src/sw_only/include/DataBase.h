@@ -1,6 +1,10 @@
 
-#ifndef AIEPLACE_DATABASE_H
-#define AIEPLACE_DATABASE_H
+/**
+ * @file DataBase.h
+ * @brief Owns the parsed design — macros, components, IO pads, nets — read from LEF/DEF or
+ *        Bookshelf, plus filler generation.
+ */
+#pragma once
 #include "Common.h"
 #include "MacroClass.h"
 #include "Component.h"
@@ -19,56 +23,7 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-// On AIEs, we process only nets of size 2 thru 8. This covers the great majority of all nets
-// other nets above size 8 will be processed on the host.
-#define MIN_AIE_NET_SIZE 2 // should be 2 by default
-#define MAX_AIE_NET_SIZE 8 // should be 8 by default
-
-struct PacketIndex
-{
-    int net_size;
-    int group_start; // node index to begin this packet
-    int group_count; // how many nodes of this net_size are to be in this packet
-
-    PacketIndex(int size, int gs, int gc) { set(size, gs, gc); } // default constructor
-
-    void set(int size, int gs, int gc)
-    {
-        net_size = size;
-        group_start = gs;
-        group_count = gc;
-    }
-
-    string to_string() 
-    {
-        string str = "PacketIndex: ";
-        str += "\tnetsize = "       + stringify(net_size);
-        str += "\tgroup_start = "   + stringify(group_start);
-        str += "\tgroup_count = "   + stringify(group_count);
-        str += "\n";
-        return str;
-    }
-};
-
-struct Packet
-{
-    int graph_index;   // The AIE partials graph which this packet should be sent to.
-    int id;
-    
-    vector<PacketIndex> contents;
-
-    int ctrl_data[8]; //  first 8 floats of the packet are control data which dictate
-                     //   the netsize and quantity of coordinate data to expect.
-
-    // ALTERNATE APPROACH
-    float ** content = new float* [LCM_BUFFSIZE*VEC_SIZE]; // array of float pointers in the order expected by AIE kernels
-
-    // Default constructor
-    Packet() {}
-};
-
-
-class DataBase : 
+class DataBase :
     public DefParser::DefDataBase,
     public LefParser::LefDataBase,
     public BookshelfParser::BookshelfDataBase
@@ -98,7 +53,6 @@ private:
     Position m_die_shift; // (0,0) unless a bookshelf die_shift was applied
     string m_design_name;
     int m_units_per_micron;
-    int m_packet_count;
     int m_total_net_degree;
     float m_maximum_utilization = 0.0f; // 0 = not specified by benchmark
     MacroClass* m_current_lef_macro = nullptr; // tracks current macro during LEF parsing for pin callbacks
@@ -107,10 +61,6 @@ private:
     float m_total_movable_area = 0.0f;   // movable components only (= total - fixed)
 
 public:
-    // each compute graph has a vector of PacketIndex which records what data has been sent
-    vector<Packet*> mv_packet[PARTIALS_GRAPH_COUNT];
-
-
     /// Default Constructor
     DataBase() {}
     DataBase(fs::path input_dir);
@@ -146,11 +96,9 @@ public:
     void iterationReset();
     void sortPositionsByX();
     void sortPositionsByY();
-    void sortPositionsMaxMinX();
-    void sortPositionsMaxMinY();
 
-    void addFocusNet(Net* net) { mv_focus_nets.push_back(net); }
-    void addFocusNode(Node* node) { mv_focus_nodes.push_back(node); }
+    void addFocusNet(Net* net_p) { mv_focus_nets.push_back(net_p); }
+    void addFocusNode(Node* node_p) { mv_focus_nodes.push_back(node_p); }
     const vector<Net *> &getFocusNets() { return mv_focus_nets; }
     const vector<Node *> &getFocusNodes() { return mv_focus_nodes; }
 
@@ -159,12 +107,6 @@ public:
     float getTotalFixedArea() { return m_total_fixed_area; }
     float getTotalMovableArea() { return m_total_movable_area; }
     float getTotalOverflow();
-
-    // Packet loading/unloading
-    void initializePacketContents();
-    void prepareNetGroup(float * input_data, int net_size, int offset);
-    int storeNetGroup(float * output_data, int net_size, int offset);
-    int  getPacketCount() { return m_packet_count; }
 
 
     /// parser callback functions for reading input
@@ -276,4 +218,3 @@ public:
 
 AIEPLACE_NAMESPACE_END
 
-#endif

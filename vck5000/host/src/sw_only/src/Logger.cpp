@@ -2,6 +2,8 @@
 
 #include "Logger.h"
 
+using namespace tabulate; // table types, scoped to this .cpp (not leaked via Logger.h)
+
 // Initialize static members of Logger
 std::mutex Logger::iMutex;
 Logger* Logger::iLogger = nullptr;

@@ -3,6 +3,9 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
+using namespace tabulate; // table types, scoped to this .cpp (not leaked via Logger.h)
+
+/// @brief Build the bins_per_row x bins_per_col grid and seed each bin's local density weight.
 void Grid::init()
 {
     m_bin_width  = m_die_area.getXsize() / (float)m_bins_per_row;
@@ -21,8 +24,7 @@ void Grid::init()
     }
 }
 
-/* @brief: Reset all nodes and nets for the next iteration.
-*/
+/// @brief Clear every bin's per-iteration accumulators (overlap, a_uv, field) before the next solve.
 void Grid::iterationReset()
 {
     for( int x_index = 0; x_index < m_bins_per_row; x_index++)
@@ -104,9 +106,10 @@ void Grid::computeBinOverlaps(Node* node_p)
     }
 }
 
-// Clamp each bin's overlap to target_density * bin_area after fixed components
-// have been added. This prevents fixed macros from counting as overflow —
-// only movable cells placed on top of fixed regions will overflow.
+/**
+ * @brief Clamp each bin's overlap to target_density * bin_area after fixed components are added,
+ *        so fixed macros don't count as overflow — only movable cells stacked on top do.
+ */
 void Grid::clampFixedDensity(float target_density)
 {
     for (int col = 0; col < m_bins_per_row; col++)
@@ -148,6 +151,12 @@ std::vector< std::vector<float> > Grid::get_a_uv()
     return a_uv;
 }
 
+/**
+ * @brief ePlace overflow metric: total bin area above capacity, normalized by movable area.
+ * @param target_density   per-bin capacity fraction (bin_capacity = target_density * bin_area)
+ * @param total_movable_area normalizing denominator (movable cell area)
+ * @return overflow ratio in [0, ~1]; convergence target is ~0.07
+ */
 float Grid::computeTotalOverflow(float target_density, float total_movable_area)
 {
     float overflow_area = 0;

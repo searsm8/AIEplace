@@ -1,6 +1,8 @@
-// TODO: add header
-#ifndef AIEPLACE_MACROCLASS_H
-#define AIEPLACE_MACROCLASS_H
+/**
+ * @file MacroClass.h
+ * @brief A macro/cell type: name, LEF class, dimensions, and per-pin offsets shared by its instances.
+ */
+#pragma once
 
 #include "Common.h"
 
@@ -49,4 +51,3 @@ public:
 
 AIEPLACE_NAMESPACE_END
 
-#endif

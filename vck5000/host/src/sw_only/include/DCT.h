@@ -1,3 +1,9 @@
+/**
+ * @file DCT.h
+ * @brief 1D DCT/IDCT/IDXST transforms used by the electrostatic density solver — both a
+ *        naive O(N^2) reference and an O(N log N) FFT-based implementation (Makhoul).
+ */
+#pragma once
 #include "Common.h"
 
 AIEPLACE_NAMESPACE_BEGIN

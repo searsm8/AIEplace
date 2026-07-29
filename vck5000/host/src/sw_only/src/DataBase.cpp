@@ -7,6 +7,8 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
+using namespace tabulate; // table types, scoped to this .cpp (not leaked via Logger.h)
+
 DataBase::DataBase(fs::path input_dir)
     : m_input_dir(input_dir) {
     TIME_BLOCK("DataBase read input");
@@ -59,11 +61,9 @@ DataBase::DataBase(fs::path input_dir)
     //    }
     //}
 
-    initializePacketContents();
-
     m_total_net_degree = 0;
-    for (auto* net : mv_nets) {
-        m_total_net_degree += net->getDegree();
+    for (auto* net_p : mv_nets) {
+        m_total_net_degree += net_p->getDegree();
     }
 
     // Cache area breakdown (constant for the lifetime of the design). FIXED components are
@@ -77,14 +77,14 @@ DataBase::DataBase(fs::path input_dir)
     double fixed_sum = 0;
     int fixed_count = 0;
     for (auto item : mm_components) {
-        Component* comp = item.second;
-        if (comp->getStatus() == FIXED) {
-            float ox = std::max(0.0f, std::min(comp->getX() + comp->getXsize(), die_xu) - std::max(comp->getX(), die_xl));
-            float oy = std::max(0.0f, std::min(comp->getY() + comp->getYsize(), die_yu) - std::max(comp->getY(), die_yl));
+        Component* comp_p = item.second;
+        if (comp_p->getStatus() == FIXED) {
+            float ox = std::max(0.0f, std::min(comp_p->getX() + comp_p->getXsize(), die_xu) - std::max(comp_p->getX(), die_xl));
+            float oy = std::max(0.0f, std::min(comp_p->getY() + comp_p->getYsize(), die_yu) - std::max(comp_p->getY(), die_yl));
             fixed_sum += (double)ox * oy;
             fixed_count++;
         } else {
-            movable_sum += comp->getArea();
+            movable_sum += comp_p->getArea();
         }
     }
     m_total_fixed_area = (float)fixed_sum;
@@ -171,7 +171,7 @@ bool DataBase::readLEF()
         //  launch — e.g. dse.py sweeps — when the controlling terminal buffer fills.)
         fflush(stdout);
         int saved_stdout = dup(STDOUT_FILENO);
-        freopen("/dev/null", "w", stdout);
+        if (!freopen("/dev/null", "w", stdout)) { /* non-fatal: stdout stays as-is, parser noise is not */ }
         success = LefParser::read(*this, file.string());
         fflush(stdout);
         dup2(saved_stdout, STDOUT_FILENO);
@@ -219,7 +219,7 @@ bool DataBase::readDEF()
     //  launch — e.g. dse.py sweeps — when the controlling terminal buffer fills.)
     fflush(stdout);
     int saved_stdout = dup(STDOUT_FILENO);
-    freopen("/dev/null", "w", stdout);
+    if (!freopen("/dev/null", "w", stdout)) { /* non-fatal: stdout stays as-is, parser noise is not */ }
     bool success = DefParser::read(*this, def_file);
     fflush(stdout);
     dup2(saved_stdout, STDOUT_FILENO);
@@ -256,7 +256,7 @@ bool DataBase::readBookshelf()
     //  headless-safe, so we can suppress the spew again without the hang.)
     fflush(stdout);
     int saved_stdout = dup(STDOUT_FILENO);
-    freopen("/dev/null", "w", stdout);
+    if (!freopen("/dev/null", "w", stdout)) { /* non-fatal: stdout stays as-is, parser noise is not */ }
     bool success = BookshelfParser::read(*this, aux_files[0]);
     fflush(stdout);
     dup2(saved_stdout, STDOUT_FILENO);
@@ -273,7 +273,7 @@ bool DataBase::readBookshelf()
 }
 
 
-/* @brief: Add fillers to design 
+/** @brief: Add fillers to design 
 * Computes the total area of all components in the design and adds enough filler cells
 * to bring the filled area to target utilization.
 */
@@ -287,10 +287,10 @@ bool DataBase::addFillers(float target_utilization)
     // filler from the smallest *macro*, which yields ~0 fillers on standard-cell designs.)
     std::vector<float> widths, heights;
     for (auto item : mm_components) {
-        Component* comp = item.second;
-        if (comp->getStatus() == FIXED) continue;
-        widths.push_back(comp->getXsize());
-        heights.push_back(comp->getYsize());
+        Component* comp_p = item.second;
+        if (comp_p->getStatus() == FIXED) continue;
+        widths.push_back(comp_p->getXsize());
+        heights.push_back(comp_p->getYsize());
     }
     if (widths.empty()) {
         Logger::log_warning("No movable cells found — no fillers added.");
@@ -328,24 +328,24 @@ bool DataBase::addFillers(float target_utilization)
 
     for (int i = 0; i < fillers_needed; i++)
     {
-        Component* filler = new Component("filler_" + stringify(i));
-        filler->setMacroClass(filler_macro);
-        filler->setPlacementStatus(PlacementStatus::UNPLACED);
-        filler->setNodePos(Position(0.0f, 0.0f)); // position will be updated during placement
-        mv_fillers.push_back(filler);
+        Component* filler_p = new Component("filler_" + stringify(i));
+        filler_p->setMacroClass(filler_macro);
+        filler_p->setPlacementStatus(PlacementStatus::UNPLACED);
+        filler_p->setNodePos(Position(0.0f, 0.0f)); // position will be updated during placement
+        mv_fillers.push_back(filler_p);
     }
     Logger::log_info("Total fillers added: " + stringify(fillers_needed));
     return true;
 }
 
-/* @brief: Reset all nodes and nets in preparation for the next iteration.
+/** @brief: Reset all nodes and nets in preparation for the next iteration.
 */
 void DataBase::iterationReset()
 {
     for (auto item : mm_components)
         item.second->iterationReset();
-    for (auto filler : mv_fillers)
-        filler->iterationReset();
+    for (auto filler_p : mv_fillers)
+        filler_p->iterationReset();
     for (auto item : mm_iopads)
         item.second->iterationReset();
 }
@@ -365,22 +365,6 @@ void DataBase::sortPositionsByY()
         item.second->sortPositionsByY();
 }
 
-// Places Nodes in order for AIE kernel execution:
-// max_x, min_x, x, x, x...
-void DataBase::sortPositionsMaxMinX()
-{
-    for (auto item : mm_nets)
-        item.second->sortPositionsMaxMinX();
-}
-
-// Places Nodes in order for AIE kernel execution:
-// max_y, min_y, y, y, y...
-void DataBase::sortPositionsMaxMinY()
-{
-    for (auto item : mm_nets)
-        item.second->sortPositionsMaxMinY();
-}
-
 float DataBase::computeTotalWirelength(string method, int max_net_degree)
 {
     // max_net_degree matches XPlace's ignore_net_degree (net_mask): nets with more pins are
@@ -396,248 +380,6 @@ float DataBase::computeTotalWirelength(string method, int max_net_degree)
 float DataBase::computeTotalComponentArea()
 {
     return m_total_component_area;
-}
-
-/* @brief: Organize data into “groups” to create “packets”.
-Define a “group” as X and Y data of 4 nets of the same size, which gives 8 operands
-A packet is a set of groups. The number of groups_per_packet  =  840 / net_size 
-840 is LCM of sizes 2-8, which means all nets <= 8 will fit neatly into 840
-
-Loop over net_size 2 thru 8.
-Generate packets of current net_size until all nets of this size are assigned.
-
-*/
-void DataBase::initializePacketContents()
-{
-    Logger::log("packets", "BEGIN initializePacketContents()");
-    int graph_index = 0;
-    m_packet_count = 0;
-    for(int net_size = MIN_AIE_NET_SIZE; net_size <= MAX_AIE_NET_SIZE; net_size++) {
-    //for(int net_size = TEST_NET_SIZE; net_size <= TEST_NET_SIZE; net_size++) {
-        Logger::log("packets",  "net_size = " + stringify(net_size));
-        int groups_per_packet = LCM_BUFFSIZE/net_size; // for netsize 2 thru 8, this will be an exact integer
-        Logger::log("packets",  "groups_per_packet = " + stringify(groups_per_packet));
-        Logger::log("packets",  "nets_per_packet = " + stringify(groups_per_packet*NETS_PER_GROUP));
-        int num_nets = mmv_nets_by_degree[net_size].size();
-        Logger::log("packets",  "num_nets = " + stringify(num_nets));
-
-        int packet_start = 0;
-        //int nets_per_graph = num_nets / PARTIALS_GRAPH_COUNT;
-        //int net_groups_per_graph = nets_per_graph / NETS_PER_GROUP; // We send 4 nets of data in each net group 
-
-        // Fill packets with data ranges
-        // TODO: This is oversimplified and leads to a lot of zeroes being sent!
-        Table table;
-        table.add_row({ "graph_index", "net_size", "group_start", "group_count" });
-        while(packet_start*NETS_PER_GROUP < num_nets) {
-            Packet* p = new Packet();
-            p->graph_index = graph_index;
-            // For now only a single PacketIndex in each packet for simplicity
-            // This could lead to many zeroes (empty packets) being sent and could be improved.
-            p->contents.push_back(PacketIndex(net_size, packet_start, groups_per_packet));
-            mv_packet[graph_index].push_back(p);
-
-            PacketIndex &pir = p->contents[0];
-            //cout << "graph_index: " << graph_index  << "\t" << p->contents[0].to_string();
-            table.add_row({ stringify(graph_index), stringify(pir.net_size), 
-                            stringify(pir.group_start), stringify(pir.group_count) });
-
-            //move start/stop for next packet
-            packet_start += groups_per_packet;
-
-            if(graph_index == 0) m_packet_count++;
-            graph_index = (graph_index+1) % PARTIALS_GRAPH_COUNT;
-        }
-        table.format().font_align(FontAlign::center);
-        Logger::log("packets", table);
-    }
-    Logger::log("packets", "END initializePacketContents()");
-}
-
-/*
- * @brief: Prepare data in correct format to be sent to PL and then AIE input streams
- * A net group is four (NETS_PER_GROUP) of size (net_size).
- * Group will have a size of (2 x NETS_PER_GROUP x net_size)
- * The 2x is because X and Y coord are grouped together
-**/
-void DataBase::prepareNetGroup(float * input_data, int net_size, int offset)
-{
-    TIME_FUNCTION();
-    // Base address starts at VEC_SIZE to leave room for control data
-    int base_addr = VEC_SIZE + (2*offset*net_size)%(LCM_BUFFSIZE*VEC_SIZE); // TODO: This needs an explanation
-    bool nan = false;
-
-    for(int net_idx = 0; net_idx < NETS_PER_GROUP; net_idx++) { // prepare XY data for 4 nets at a time
-        // check if we have reached the end of nets with this degree
-        if(net_idx + offset >= mmv_nets_by_degree[net_size].size()) {
-            // prep data with trailing zeroes
-            //cout << "Zeroes at index: " << net_idx + offset << endl; 
-            for(int j = 0; j < net_size; j++) {
-                input_data[base_addr + 2*net_idx + j*8] = 0;
-                input_data[base_addr + 2*net_idx + j*8 + 1] = 0;
-            }
-            continue;
-        }
-
-        // otherwise, prep X coordinate data
-        auto net = mmv_nets_by_degree[net_size][offset + net_idx ];
-
-        auto &nodes = net->getNodes(); // reference to avoid copy
-        net->sortPositionsMaxMinX(); // This sort might be redundant? 
-        for(int j = 0; j < net_size; j++) {
-            input_data[base_addr + 2*net_idx + j*8] = nodes[j]->getProbeX();
-
-            // check for correct ordering
-            if(j > 0) if(input_data[base_addr + 2*net_idx + 0*8] < input_data[base_addr + 2*net_idx + j*8])  {
-                Logger::log_debug("MAX COORD MUST BE FIRST! Net: " + net->getName()
-                    + "\n1st input: " + std::to_string(input_data[base_addr + 2*net_idx + 0*8])
-                    + "\n" + std::to_string(j+1) + "nd input: " + std::to_string(input_data[base_addr + 2*net_idx + j*8]));
-                exit(2);
-            }
-            if(j > 1) if(input_data[base_addr + 2*net_idx + 1*8] > input_data[base_addr + 2*net_idx + j*8]) {
-                Logger::log_debug("MIN COORD MUST BE 2ND! Net: " + net->getName()
-                    + "\n2nd input: " + std::to_string(input_data[base_addr + 2*net_idx + 1*8])
-                    + "\n" + std::to_string(j+1) + "nd input: " + std::to_string(input_data[base_addr + 2*net_idx + j*8]));
-                exit(2);
-            }
-
-            //if(nodes[j]->getX() != nodes[j]->getX()) // check for nan
-            //{
-            //    Logger::log_warning(string("NaN detected:\n" + net->to_string() + "\n"));
-            //    nan = true;
-            //}
-        }
-
-        // prep y data
-        net->sortPositionsMaxMinY();
-        for(int j = 0; j < net_size; j++) {
-            input_data[base_addr + 2*net_idx + j*8 + 1] = nodes[j]->getProbeY();
-            //if(nodes[j]->getY() != nodes[j]->getY()) // check for nan
-            //{
-            //    Logger::log_warning(string("NaN detected:\n" + net->to_string() + "\n"));
-            //    nan = true;
-            //}
-        }
-    }
-
-    // DEBUG: print the prepared data!
-    //if(nan)
-    //if(net_size == 5)
-    //{
-    //    cout << endl << "Prepared XY data @offset = " << offset << std::setprecision(3);
-    //    for(int i = base_addr; i < base_addr + VEC_SIZE*net_size; i++) {
-    //        if((i-base_addr)%8 == 0) cout << endl;
-    //        cout << input_data[i] << " ";
-    //    }
-    //    cout << endl;
-    //}
-
-}
-
-// Debugging vars
-constexpr float MAX_PARTIAL = 2.0;
-static int nan_count = 0;
-constexpr int MAX_WARNINGS = 100;
-float max_size_good_x {0};
-float max_size_good_y {0};
-float min_size_nan_x {__FLT_MAX__};
-float min_size_nan_y {__FLT_MAX__};
-int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
-{
-    //int offset = mm_output_index[net_size]; // offset tracks which nets partials should be added to
-    //int offset = 0;
-    int base_addr = (2*offset*net_size)%(LCM_BUFFSIZE*VEC_SIZE); // TODO: This needs an explanation
-
-    for(int net_idx = 0; net_idx < NETS_PER_GROUP; net_idx ++) { // prepare XY data for 4 nets at a time
-        // check if we have reached the end of nets with this degree
-        if(net_idx + offset >= mmv_nets_by_degree[net_size].size()) {
-            // No store needed
-            //cout << "No data stored @offset=" << net_idx + offset << endl; 
-            continue;
-        }
-
-        // otherwise, store partials results in node.terms.partials
-        Net* net = mmv_nets_by_degree[net_size][offset + net_idx ];
-
-        std::vector<Node*> nodes = net->getNodes(); // should this be a reference, to avoid being a copy?
-
-        // nodes are already sorted by Y coords, so store them first
-        for(int n = 0; n < net_size; n++) {
-            Logger::log_debug("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
-            //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8 + 1]));
-            float partial = output_data[base_addr + 2*net_idx + n*8 + 1];
-            nodes[n]->next.probe_grad.y += partial;
-            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: probe_grad.y += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->next.probe_grad.y));
-
-            //debugging
-            float y_size = net->getBoundingBox().getYsize();
-            if(partial != partial) // check for nan
-            {
-                if(++nan_count < MAX_WARNINGS) {
-                    Logger::log_warning(string("NaN detected on Y partial for node: " + nodes[n]->getName() + " \nInputs:" + net->to_string() + "\n"));
-                    Logger::log_warning(string("partial: " + std::to_string(partial) + "\n"));
-                    Logger::log_warning(string("Net Name: " + net->getName() + "\n"));
-                    Logger::log_warning(string("BAD RESULT: net Y size = " + std::to_string(y_size)));
-                    if(y_size < min_size_nan_y)
-                        min_size_nan_y = y_size;
-                }
-            }
-            else {
-                if(nan_count < MAX_WARNINGS) 
-                    //Logger::log_warning(string("GOOD RESULT: net Y size = " + std::to_string(y_size)));
-                    if(y_size > max_size_good_y)
-                        max_size_good_y = y_size;
-            }
-        }
-
-        net->sortPositionsMaxMinX(); // X or Y
-        nodes = net->getNodes();
-
-        for(int n = 0; n < net_size; n++) {
-            Logger::log_debug("Net " + net->getName() + "[" + std::to_string(n) + "] is node " + nodes[n]->getName());
-            //float partial = max(-MAX_PARTIAL, min(MAX_PARTIAL, output_data[base_addr + 2*net_idx + n*8]));
-            float partial = output_data[base_addr + 2*net_idx + n*8 + 0];
-            nodes[n]->next.probe_grad.x += partial;
-            Logger::log_debug("Partial received from AIE for Node [" + std::to_string(n) + "] : " + nodes[n]->getName() + " on net " + net->getName() + " :::: probe_grad.x += " + std::to_string(partial) + " :::: Total Partial = " + std::to_string(nodes[n]->next.probe_grad.x));
-
-            //debugging
-            float x_size = net->getBoundingBox().getXsize();
-            if(partial != partial) // check for nan
-            {
-                if(++nan_count < MAX_WARNINGS) {
-                    Logger::log_warning(string("NaN detected on X partial for node: " + nodes[n]->getName() + " \nInputs:" + net->to_string() + "\n"));
-                    Logger::log_warning(string("partial: " + std::to_string(partial) + "\n"));
-                    Logger::log_warning(string("BAD RESULT: net X size = " + std::to_string(x_size)));
-                    if(x_size < min_size_nan_x)
-                        min_size_nan_x = x_size;
-                }
-            }
-            else {
-                if(nan_count < MAX_WARNINGS) 
-                    //Logger::log_warning(string("GOOD RESULT: net X size = " + std::to_string(x_size)));
-                    if(x_size > max_size_good_x)
-                        max_size_good_x = x_size;
-            }
-        }
-    }
-
-    //Logger::log_debug(("max_size_good_x: " + std::to_string(max_size_good_x)));
-    //Logger::log_debug(("max_size_good_y: " + std::to_string(max_size_good_y)));
-    //Logger::log_debug(("min_size_nan_x: " +  std::to_string(min_size_nan_x)));
-    //Logger::log_debug(("min_size_nan_y: " +  std::to_string(min_size_nan_y)));
-
-    // DEBUG: print the stored data!
-    //if(net_size == 5)
-    //{
-    //    cout << "\nStored XY data @offset = " << offset;
-    //    for(int i = 0; i < 2*NETS_PER_GROUP*net_size; i++) {
-    //        if(i%8 == 0) cout << endl;
-    //        cout << output_data[base_addr + i] << " ";
-    //    }
-    //    cout << endl;
-    //}
-
-    return nan_count;
 }
 
         /// parser callback functions 
@@ -718,9 +460,9 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         void DataBase::add_def_component(DefParser::Component const& c) 
         // Create a new component (Node) and add it to the database
         {
-            Component* new_comp = new Component(c.comp_name);
+            Component* new_comp_p = new Component(c.comp_name);
             MacroClass* macro = mm_macros[c.macro_name];
-            new_comp->setMacroClass(macro);
+            new_comp_p->setMacroClass(macro);
             // XPlace-faithful status (file_lefdef_db.cpp:1565-1595): a PLACED cell is movable only if
             // its LEF CLASS is CORE or BLOCK; PLACED non-CORE/BLOCK cells (VIA/feedthrough/fill) are
             // pre-placed and treated as FIXED. UNPLACED/FIXED pass through unchanged.
@@ -729,23 +471,23 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                 const string& cls = macro->getClass();
                 if (cls != "CORE" && cls != "BLOCK") status = "FIXED";
             }
-            new_comp->setPlacementStatus(status);
-            new_comp->setNodePos(Position((float)c.origin[0], (float)c.origin[1]));
+            new_comp_p->setPlacementStatus(status);
+            new_comp_p->setNodePos(Position((float)c.origin[0], (float)c.origin[1]));
             // TODO: assert component is created correctly
-            mm_components.emplace(std::make_pair(new_comp->getName(), new_comp));
+            mm_components.emplace(std::make_pair(new_comp_p->getName(), new_comp_p));
         }
 
         void DataBase::resize_def_pin(int s) {}
 
         void DataBase::add_def_pin(DefParser::Pin const& p) {
-            IOPad* new_iopad = new IOPad(p.pin_name);
+            IOPad* new_iopad_p = new IOPad(p.pin_name);
             std::vector<int> bb = p.vBbox.front();
-            new_iopad->setBoundingBox(bb[0], bb[1], bb[2], bb[3]);
-            new_iopad->setPlacementStatus(p.status);
-            new_iopad->setNodePos(Position((float)p.origin[0], (float)p.origin[1]));
-            new_iopad->setDirection(p.direct); // primary input or output
+            new_iopad_p->setBoundingBox(bb[0], bb[1], bb[2], bb[3]);
+            new_iopad_p->setPlacementStatus(p.status);
+            new_iopad_p->setNodePos(Position((float)p.origin[0], (float)p.origin[1]));
+            new_iopad_p->setDirection(p.direct); // primary input or output
 
-            mm_iopads.emplace(std::make_pair(new_iopad->getName(), new_iopad));
+            mm_iopads.emplace(std::make_pair(new_iopad_p->getName(), new_iopad_p));
         }
 
         void DataBase::resize_def_net(int s) {}
@@ -753,15 +495,15 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         void DataBase::add_def_net(DefParser::Net const& def_net) 
         // Create a new net, add it to the database
         {
-            Net* new_net = new Net(def_net.net_name);
+            Net* new_net_p = new Net(def_net.net_name);
             for (auto net_pin : def_net.vNetPin)
             {
                 if (net_pin.first == "PIN")
                 {
                     IOPad* iopad_p = mm_iopads[net_pin.second];
                     assert(iopad_p != NULL && "PIN name points to nullptr while reading .DEF\n");
-                    new_net->addNode(iopad_p);
-                    iopad_p->addNet(new_net);
+                    new_net_p->addNode(iopad_p);
+                    iopad_p->addNet(new_net_p);
                 }
                 else // it is a component
                 {
@@ -776,18 +518,18 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                         pin_offset.x *= scale;
                         pin_offset.y *= scale;
                     }
-                    new_net->addNode(comp_p, pin_offset, net_pin.second);
-                    comp_p->addNet(new_net);
+                    new_net_p->addNode(comp_p, pin_offset, net_pin.second);
+                    comp_p->addNet(new_net_p);
                 }
             }
-            mm_nets.emplace(std::make_pair(new_net->getName(), new_net));
-            mv_nets.push_back(new_net);
+            mm_nets.emplace(std::make_pair(new_net_p->getName(), new_net_p));
+            mv_nets.push_back(new_net_p);
 
-            int degree = new_net->getDegree();
+            int degree = new_net_p->getDegree();
             if (mmv_nets_by_degree.count(degree) == 0) {
                 mmv_nets_by_degree.emplace(std::make_pair(degree, std::vector<Net*>()));
             }
-            mmv_nets_by_degree[degree].push_back(new_net); //emplace_back(new_net) might work more effienctly
+            mmv_nets_by_degree[degree].push_back(new_net_p); //emplace_back(new_net) might work more effienctly
         }
 
         void DataBase::resize_def_blockage(int) {}
@@ -822,24 +564,24 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
 
         /// @brief add terminal (fixed macro or IO pad) as a Component with FIXED status
         void DataBase::add_bookshelf_terminal(string& name, int width, int height) {
-            Component* comp = new Component(name);
+            Component* comp_p = new Component(name);
             string macro_name = "macro_" + std::to_string(width) + "_" + std::to_string(height);
             MacroClass* macro_p = mm_macros[macro_name];
             if(macro_p == NULL) {
                 macro_p = new MacroClass(macro_name, width, height);
                 mm_macros[macro_name] = macro_p;
             }
-            comp->setMacroClass(macro_p);
-            comp->setPlacementStatus(PlacementStatus::FIXED);
-            comp->setNodePos(Position(0, 0));
-            mm_components.emplace(std::make_pair(name, comp));
+            comp_p->setMacroClass(macro_p);
+            comp_p->setPlacementStatus(PlacementStatus::FIXED);
+            comp_p->setNodePos(Position(0, 0));
+            mm_components.emplace(std::make_pair(name, comp_p));
         }
 
         /// @brief add terminal_NI
         //void DataBase::add_bookshelf_terminal_NI(string&, int, int) {}
         /// @brief add node 
         void DataBase::add_bookshelf_node(string& name, int width, int height, bool notsurewhatthisboolisfor) {
-            Component* new_comp = new Component(name);
+            Component* new_comp_p = new Component(name);
             // for Bookshelf format, no macro classes are defined by the design
             // So we create macros named "macro_width_height"
             string macro_name = "macro_" + std::to_string(width) + "_" + std::to_string(height);
@@ -849,22 +591,22 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                 //mm_macros.emplace(std::make_pair(macro_name, macro_p));
                 mm_macros[macro_name] = macro_p;
             }
-            new_comp->setMacroClass(macro_p);
-            new_comp->setPlacementStatus(PlacementStatus::UNPLACED);
-            new_comp->setNodePos(Position(0, 0)); // default position (0, 0)
-            mm_components.emplace(std::make_pair(new_comp->getName(), new_comp));
+            new_comp_p->setMacroClass(macro_p);
+            new_comp_p->setPlacementStatus(PlacementStatus::UNPLACED);
+            new_comp_p->setNodePos(Position(0, 0)); // default position (0, 0)
+            mm_components.emplace(std::make_pair(new_comp_p->getName(), new_comp_p));
         }
         /// @brief add net 
         void DataBase::add_bookshelf_net(BookshelfParser::Net const& bookshelf_net) { 
-            Net* new_net = new Net(bookshelf_net.net_name);
+            Net* new_net_p = new Net(bookshelf_net.net_name);
                 //cout << "Add net: " << bookshelf_net.net_name << endl;
             for (BookshelfParser::NetPin net_pin : bookshelf_net.vNetPin)
             {
                 //cout << "\tNetPin: " << net_pin.node_name << endl;
                 if(mm_iopads.count(net_pin.node_name) > 0) {
                     IOPad* iopad_p = mm_iopads[net_pin.node_name];
-                    new_net->addNode(iopad_p);
-                    iopad_p->addNet(new_net);
+                    new_net_p->addNode(iopad_p);
+                    iopad_p->addNet(new_net_p);
                 } else if(mm_components.count(net_pin.node_name)){ // it's a component
                     Component* comp_p = mm_components[net_pin.node_name];
                     // Bookshelf pin offsets are relative to the cell CENTER; sw_only node_pos is the
@@ -874,23 +616,23 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
                     Position pin_offset(0, 0);
                     pin_offset.x = comp_p->getXsize() / 2.0f + (float)net_pin.offset[0];
                     pin_offset.y = comp_p->getYsize() / 2.0f + (float)net_pin.offset[1];
-                    new_net->addNode(comp_p, pin_offset, net_pin.pin_name);
-                    comp_p->addNet(new_net);
+                    new_net_p->addNode(comp_p, pin_offset, net_pin.pin_name);
+                    comp_p->addNet(new_net_p);
                 } else {
                     Logger::log_error("Node was not found while parsing bookshelf nets.");
                     exit(7);
                 }
             }
 
-            mm_nets.emplace(std::make_pair(new_net->getName(), new_net));
-            mv_nets.push_back(new_net);
+            mm_nets.emplace(std::make_pair(new_net_p->getName(), new_net_p));
+            mv_nets.push_back(new_net_p);
             
             // Add net to degree map for easy access
-            int degree = new_net->getDegree();
+            int degree = new_net_p->getDegree();
             if (mmv_nets_by_degree.count(degree) == 0) {
                 mmv_nets_by_degree.emplace(std::make_pair(degree, std::vector<Net*>()));
             }
-            mmv_nets_by_degree[degree].push_back(new_net);
+            mmv_nets_by_degree[degree].push_back(new_net_p);
 
          }
 
@@ -916,12 +658,12 @@ int DataBase::storeNetGroup(float * output_data, int net_size, int offset)
         }
         /// @brief set node position — all bookshelf nodes (terminals + cells) are now Components
         void DataBase::set_bookshelf_node_position(string const& name, double x, double y, string const& orientation, string const& placement_status, bool notsurewhatfor) {
-            Component* comp = mm_components[name];
-            assert(comp != NULL && "invalid component name!");
-            comp->setNodePos(Position(x, y));
-            comp->setOrientation(orientation);
+            Component* comp_p = mm_components[name];
+            assert(comp_p != NULL && "invalid component name!");
+            comp_p->setNodePos(Position(x, y));
+            comp_p->setOrientation(orientation);
             if(placement_status == "FIXED") {
-                comp->setPlacementStatus(PlacementStatus::FIXED);
+                comp_p->setPlacementStatus(PlacementStatus::FIXED);
                 // Bookshelf format doesn't explicitly give die area,
                 // so we infer it from the outermost fixed terminal coordinates
                 if(x > m_max_x) m_max_x = x;
@@ -1002,14 +744,14 @@ void DataBase::printNets()
 
         sortPositionsByX();
         cout << "X descending: ";
-        for(auto node : net_p->getNodes())
-            cout << node->next.node_pos.x << '\t';
+        for(auto node_p : net_p->getNodes())
+            cout << node_p->next.node_pos.x << '\t';
         cout << endl;
 
         sortPositionsByY();
         cout << "Y descending: ";
-        for(auto node : net_p->getNodes())
-            cout << node->next.node_pos.y << '\t';
+        for(auto node_p : net_p->getNodes())
+            cout << node_p->next.node_pos.y << '\t';
         cout << endl;
         cout << endl;
 
@@ -1065,7 +807,7 @@ void DataBase::printOverlaps()
         Table overlaps;
         overlaps.add_row(RowStream{} << "bin" << "overlap");
         for (BinOverlap b : node_p->getBinOverlaps())
-            overlaps.add_row(RowStream{} << b.bin->bb.getPos().to_string() << b.overlap);
+            overlaps.add_row(RowStream{} << b.bin_p->bb.getPos().to_string() << b.overlap);
         overlaps.format().font_align(FontAlign::center);
 
         Table top;
@@ -1121,11 +863,11 @@ void DataBase::writeDieArea(std::ofstream& out) const {
 void DataBase::writeComponents(std::ofstream& out) const {
     out << "COMPONENTS " << mm_components.size() << " ;\n";
     for (const auto& item : mm_components) {
-        auto comp = item.second;
-        out << "    - " << comp->getName() << " " << comp->getMacro()->getName() << "\n"
+        auto comp_p = item.second;
+        out << "    - " << comp_p->getName() << " " << comp_p->getMacro()->getName() << "\n"
             << "      + " << "PLACED"/*comp->getStatus()*/ << " ( "
-            << comp->getX() + m_die_shift.x << " " << comp->getY() + m_die_shift.y << " ) "
-            << comp->getOrientation() << " ;\n";
+            << comp_p->getX() + m_die_shift.x << " " << comp_p->getY() + m_die_shift.y << " ) "
+            << comp_p->getOrientation() << " ;\n";
     }
     out << "END COMPONENTS\n\n";
 }
@@ -1133,17 +875,17 @@ void DataBase::writeComponents(std::ofstream& out) const {
 void DataBase::writePins(std::ofstream& out) const {
     out << "PINS " << mm_iopads.size() << " ;\n";
     for (const auto& item : mm_iopads) {
-        IOPad* iopad = item.second;
-        out << "    - " << iopad->getName() << " + NET " << iopad->getName()
-            << "\n      + DIRECTION " << iopad->getDirection()
+        IOPad* iopad_p = item.second;
+        out << "    - " << iopad_p->getName() << " + NET " << iopad_p->getName()
+            << "\n      + DIRECTION " << iopad_p->getDirection()
             << "\n";
-        if (iopad->isPlaced()) {
+        if (iopad_p->isPlaced()) {
             out << "      + PLACED "
-                << " ( " << iopad->getX() << " " << iopad->getY() << " ) "
-                << iopad->getOrientation() << "\n";
+                << " ( " << iopad_p->getX() << " " << iopad_p->getY() << " ) "
+                << iopad_p->getOrientation() << "\n";
         }
-        out << "      + LAYER " << iopad->getLayer()
-            << iopad->getBoundingBox().getDEFstring()
+        out << "      + LAYER " << iopad_p->getLayer()
+            << iopad_p->getBoundingBox().getDEFstring()
             << " ;\n";
     }
     out << "END PINS\n\n";
@@ -1171,14 +913,14 @@ void DataBase::writeNets(std::ofstream& out) const {
     // Write regular nets
     out << "NETS " << mm_nets.size() << " ;\n";
     for (const auto& item : mm_nets) {
-        Net* net = item.second;
-        out << "    - " << net->getName();
+        Net* net_p = item.second;
+        out << "    - " << net_p->getName();
         int count = 0;
-        for (const auto& pin : net->mv_pins) {
-            if (dynamic_cast<IOPad*>(pin.node)) {
-                out << " ( PIN " << pin.node->getName() << " )";
+        for (const auto& pin : net_p->mv_pins) {
+            if (dynamic_cast<IOPad*>(pin.node_p)) {
+                out << " ( PIN " << pin.node_p->getName() << " )";
             } else {
-                out << " ( " << pin.node->getName() << " " << pin.pin_name << " )";
+                out << " ( " << pin.node_p->getName() << " " << pin.pin_name << " )";
             }
             if(++count == 4) { // print 4 nodes, then newline
                 out << endl;

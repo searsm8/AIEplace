@@ -1,5 +1,9 @@
-#ifndef GRID_H
-#define GRID_H
+/**
+ * @file Grid.h
+ * @brief The density grid: the die partitioned into bins_per_row x bins_per_col Bin cells,
+ *        over which the electrostatic density/overflow are computed.
+ */
+#pragma once
 
 #include "Common.h"
 #include "Bin.h"
@@ -62,4 +66,3 @@ public:
 };
 
 AIEPLACE_NAMESPACE_END
-#endif

@@ -1,5 +1,8 @@
-#ifndef VISUALIZER_H
-#define VISUALIZER_H
+/**
+ * @file Visualizer.h
+ * @brief Cairo-based renderer for placement snapshots and metric plots (PNG export).
+ */
+#pragma once
 
 #include "Common.h"
 
@@ -35,8 +38,8 @@ class Visualizer
     const float DIE_SCALE = 0.80; // die occupies 80% of canvas
     const float DIE_START = (1 - DIE_SCALE) / 2; // 10% margin on all sides
     const float MIN_SIZE = 0.001; // Minimum size to be visible
-    cairo_surface_t *surface;
-    cairo_t *cr;
+    cairo_surface_t *m_surface;
+    cairo_t *m_cairo_ctx;
 
     public:
 
@@ -47,8 +50,8 @@ class Visualizer
     float scale(float f);
     void drawComponent(Component* c);
     void drawIOPad(IOPad* p);
-    void highlightNet(Net* net);
-    void highlightNode(Node* node);
+    void highlightNet(Net* net_p);
+    void highlightNode(Node* node_p);
     void drawCross(float x, float y, float cross_size = 0.004);
     void drawReticle(float x, float y, float reticle_size = 0.008);
     void drawArrow(float x, float y, float x_mag, float y_mag);
@@ -58,8 +61,8 @@ class Visualizer
 
 class CairoPlotter {
 private:
-    cairo_surface_t* surface;
-    cairo_t* cr;
+    cairo_surface_t* m_surface;
+    cairo_t* m_cairo_ctx;
     int width, height;
     int margin = 60;
     
@@ -78,64 +81,64 @@ private:
         double plot_height = height - 2 * margin;
         
         // Set line properties
-        cairo_set_line_width(cr, 2.0);
-        cairo_set_source_rgb(cr, 0.2, 0.2, 0.2);
+        cairo_set_line_width(m_cairo_ctx, 2.0);
+        cairo_set_source_rgb(m_cairo_ctx, 0.2, 0.2, 0.2);
         
         // Draw X axis
-        cairo_move_to(cr, margin, height - margin);
-        cairo_line_to(cr, width - margin, height - margin);
-        cairo_stroke(cr);
+        cairo_move_to(m_cairo_ctx, margin, height - margin);
+        cairo_line_to(m_cairo_ctx, width - margin, height - margin);
+        cairo_stroke(m_cairo_ctx);
         
         // Draw Y axis
-        cairo_move_to(cr, margin, margin);
-        cairo_line_to(cr, margin, height - margin);
-        cairo_stroke(cr);
+        cairo_move_to(m_cairo_ctx, margin, margin);
+        cairo_line_to(m_cairo_ctx, margin, height - margin);
+        cairo_stroke(m_cairo_ctx);
         
         // Add grid lines
-        cairo_set_line_width(cr, 0.5);
-        cairo_set_source_rgb(cr, 0.8, 0.8, 0.8);
+        cairo_set_line_width(m_cairo_ctx, 0.5);
+        cairo_set_source_rgb(m_cairo_ctx, 0.8, 0.8, 0.8);
         
         // Vertical grid lines
         for (int i = 1; i < 10; i++) {
             double x = margin + i * plot_width / 10;
-            cairo_move_to(cr, x, margin);
-            cairo_line_to(cr, x, height - margin);
-            cairo_stroke(cr);
+            cairo_move_to(m_cairo_ctx, x, margin);
+            cairo_line_to(m_cairo_ctx, x, height - margin);
+            cairo_stroke(m_cairo_ctx);
         }
         
         // Horizontal grid lines
         for (int i = 1; i < 10; i++) {
             double y = margin + i * plot_height / 10;
-            cairo_move_to(cr, margin, y);
-            cairo_line_to(cr, width - margin, y);
-            cairo_stroke(cr);
+            cairo_move_to(m_cairo_ctx, margin, y);
+            cairo_line_to(m_cairo_ctx, width - margin, y);
+            cairo_stroke(m_cairo_ctx);
         }
         
         // Add labels
-        cairo_set_source_rgb(cr, 0, 0, 0);
-        cairo_select_font_face(cr, "Arial", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
-        cairo_set_font_size(cr, 14);
+        cairo_set_source_rgb(m_cairo_ctx, 0, 0, 0);
+        cairo_select_font_face(m_cairo_ctx, "Arial", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(m_cairo_ctx, 14);
         
         // X-axis label
         cairo_text_extents_t extents;
-        cairo_text_extents(cr, x_label.c_str(), &extents);
-        cairo_move_to(cr, (width - extents.width) / 2, height - 10);
-        cairo_show_text(cr, x_label.c_str());
+        cairo_text_extents(m_cairo_ctx, x_label.c_str(), &extents);
+        cairo_move_to(m_cairo_ctx, (width - extents.width) / 2, height - 10);
+        cairo_show_text(m_cairo_ctx, x_label.c_str());
         
         // Y-axis label (rotated)
-        cairo_save(cr);
-        cairo_translate(cr, 15, height / 2);
-        cairo_rotate(cr, -M_PI / 2);
-        cairo_text_extents(cr, y_label.c_str(), &extents);
-        cairo_move_to(cr, -extents.width / 2, 0);
-        cairo_show_text(cr, y_label.c_str());
-        cairo_restore(cr);
+        cairo_save(m_cairo_ctx);
+        cairo_translate(m_cairo_ctx, 15, height / 2);
+        cairo_rotate(m_cairo_ctx, -M_PI / 2);
+        cairo_text_extents(m_cairo_ctx, y_label.c_str(), &extents);
+        cairo_move_to(m_cairo_ctx, -extents.width / 2, 0);
+        cairo_show_text(m_cairo_ctx, y_label.c_str());
+        cairo_restore(m_cairo_ctx);
     }
     
     void drawTicks(double x_min, double x_max, double y_min, double y_max) {
-        cairo_set_source_rgb(cr, 0, 0, 0);
-        cairo_set_font_size(cr, 10);
-        cairo_set_line_width(cr, 1.0);
+        cairo_set_source_rgb(m_cairo_ctx, 0, 0, 0);
+        cairo_set_font_size(m_cairo_ctx, 10);
+        cairo_set_line_width(m_cairo_ctx, 1.0);
         
         double plot_width = width - 2 * margin;
         double plot_height = height - 2 * margin;
@@ -146,16 +149,16 @@ private:
             double x_pos = margin + i * plot_width / 10;
             
             // Tick mark
-            cairo_move_to(cr, x_pos, height - margin);
-            cairo_line_to(cr, x_pos, height - margin + 5);
-            cairo_stroke(cr);
+            cairo_move_to(m_cairo_ctx, x_pos, height - margin);
+            cairo_line_to(m_cairo_ctx, x_pos, height - margin + 5);
+            cairo_stroke(m_cairo_ctx);
             
             // Label
             std::string label = std::to_string((int)x_val);
             cairo_text_extents_t extents;
-            cairo_text_extents(cr, label.c_str(), &extents);
-            cairo_move_to(cr, x_pos - extents.width / 2, height - margin + 20);
-            cairo_show_text(cr, label.c_str());
+            cairo_text_extents(m_cairo_ctx, label.c_str(), &extents);
+            cairo_move_to(m_cairo_ctx, x_pos - extents.width / 2, height - margin + 20);
+            cairo_show_text(m_cairo_ctx, label.c_str());
         }
         
         // Y-axis ticks and labels
@@ -164,33 +167,33 @@ private:
             double y_pos = height - margin - i * plot_height / 10;
             
             // Tick mark
-            cairo_move_to(cr, margin - 5, y_pos);
-            cairo_line_to(cr, margin, y_pos);
-            cairo_stroke(cr);
+            cairo_move_to(m_cairo_ctx, margin - 5, y_pos);
+            cairo_line_to(m_cairo_ctx, margin, y_pos);
+            cairo_stroke(m_cairo_ctx);
             
             // Label
             char buffer[32];
             snprintf(buffer, sizeof(buffer), "%.2e", y_val);
             cairo_text_extents_t extents;
-            cairo_text_extents(cr, buffer, &extents);
-            cairo_move_to(cr, margin - extents.width - 10, y_pos + extents.height / 2);
-            cairo_show_text(cr, buffer);
+            cairo_text_extents(m_cairo_ctx, buffer, &extents);
+            cairo_move_to(m_cairo_ctx, margin - extents.width - 10, y_pos + extents.height / 2);
+            cairo_show_text(m_cairo_ctx, buffer);
         }
     }
 
 public:
     CairoPlotter(int w, int h) : width(w), height(h) {
-        surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
-        cr = cairo_create(surface);
+        m_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+        m_cairo_ctx = cairo_create(m_surface);
         
         // Fill background with white
-        cairo_set_source_rgb(cr, 1, 1, 1);
-        cairo_paint(cr);
+        cairo_set_source_rgb(m_cairo_ctx, 1, 1, 1);
+        cairo_paint(m_cairo_ctx);
     }
     
     ~CairoPlotter() {
-        cairo_destroy(cr);
-        cairo_surface_destroy(surface);
+        cairo_destroy(m_cairo_ctx);
+        cairo_surface_destroy(m_surface);
     }
     
     void plotHistory(const std::vector<float>& data, 
@@ -219,8 +222,8 @@ public:
         drawTicks(x_min, x_max, y_min, y_max);
         
         // Plot the data
-        cairo_set_source_rgb(cr, r, g, b);
-        cairo_set_line_width(cr, 2.0);
+        cairo_set_source_rgb(m_cairo_ctx, r, g, b);
+        cairo_set_line_width(m_cairo_ctx, 2.0);
         
         // Draw the line
         bool first_point = true;
@@ -229,32 +232,32 @@ public:
             double y = mapY(data[i], y_min, y_max, plot_height);
             
             if (first_point) {
-                cairo_move_to(cr, x, y);
+                cairo_move_to(m_cairo_ctx, x, y);
                 first_point = false;
             } else {
-                cairo_line_to(cr, x, y);
+                cairo_line_to(m_cairo_ctx, x, y);
             }
         }
-        cairo_stroke(cr);
+        cairo_stroke(m_cairo_ctx);
         
         // Draw points
-        cairo_set_source_rgb(cr, r * 0.8, g * 0.8, b * 0.8);
+        cairo_set_source_rgb(m_cairo_ctx, r * 0.8, g * 0.8, b * 0.8);
         for (size_t i = 0; i < data.size(); ++i) {
             double x = mapX(i, x_min, x_max, plot_width);
             double y = mapY(data[i], y_min, y_max, plot_height);
             
-            cairo_arc(cr, x, y, 3, 0, 2 * M_PI);
-            cairo_fill(cr);
+            cairo_arc(m_cairo_ctx, x, y, 3, 0, 2 * M_PI);
+            cairo_fill(m_cairo_ctx);
         }
         
         // Add title
-        cairo_set_source_rgb(cr, 0, 0, 0);
-        cairo_select_font_face(cr, "Arial", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
-        cairo_set_font_size(cr, 16);
+        cairo_set_source_rgb(m_cairo_ctx, 0, 0, 0);
+        cairo_select_font_face(m_cairo_ctx, "Arial", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(m_cairo_ctx, 16);
         cairo_text_extents_t extents;
-        cairo_text_extents(cr, title.c_str(), &extents);
-        cairo_move_to(cr, (width - extents.width) / 2, 30);
-        cairo_show_text(cr, title.c_str());
+        cairo_text_extents(m_cairo_ctx, title.c_str(), &extents);
+        cairo_move_to(m_cairo_ctx, (width - extents.width) / 2, 30);
+        cairo_show_text(m_cairo_ctx, title.c_str());
     }
     
     void plotDualHistory(const std::vector<float>& data1, const std::vector<float>& data2,
@@ -280,8 +283,8 @@ public:
         drawAxes(x_min, x_max, y_min, y_max, "Iteration", "Normalized Values");
         
         // Plot first dataset (HPWL) in blue
-        cairo_set_source_rgb(cr, 0.0, 0.5, 1.0);
-        cairo_set_line_width(cr, 2.0);
+        cairo_set_source_rgb(m_cairo_ctx, 0.0, 0.5, 1.0);
+        cairo_set_line_width(m_cairo_ctx, 2.0);
         
         bool first_point = true;
         for (size_t i = 0; i < data1.size(); ++i) {
@@ -290,17 +293,17 @@ public:
             double y = mapY(normalized_val, y_min, y_max, plot_height);
             
             if (first_point) {
-                cairo_move_to(cr, x, y);
+                cairo_move_to(m_cairo_ctx, x, y);
                 first_point = false;
             } else {
-                cairo_line_to(cr, x, y);
+                cairo_line_to(m_cairo_ctx, x, y);
             }
         }
-        cairo_stroke(cr);
+        cairo_stroke(m_cairo_ctx);
         
         // Plot second dataset (Learning Coeff) in red
-        cairo_set_source_rgb(cr, 1.0, 0.2, 0.2);
-        cairo_set_line_width(cr, 2.0);
+        cairo_set_source_rgb(m_cairo_ctx, 1.0, 0.2, 0.2);
+        cairo_set_line_width(m_cairo_ctx, 2.0);
         
         first_point = true;
         for (size_t i = 0; i < data2.size(); ++i) {
@@ -309,50 +312,49 @@ public:
             double y = mapY(normalized_val, y_min, y_max, plot_height);
             
             if (first_point) {
-                cairo_move_to(cr, x, y);
+                cairo_move_to(m_cairo_ctx, x, y);
                 first_point = false;
             } else {
-                cairo_line_to(cr, x, y);
+                cairo_line_to(m_cairo_ctx, x, y);
             }
         }
-        cairo_stroke(cr);
+        cairo_stroke(m_cairo_ctx);
         
         // Add legend
-        cairo_set_font_size(cr, 12);
+        cairo_set_font_size(m_cairo_ctx, 12);
         
         // HPWL legend
-        cairo_set_source_rgb(cr, 0.0, 0.5, 1.0);
-        cairo_rectangle(cr, width - 150, 50, 20, 10);
-        cairo_fill(cr);
-        cairo_set_source_rgb(cr, 0, 0, 0);
-        cairo_move_to(cr, width - 125, 60);
-        cairo_show_text(cr, label1.c_str());
+        cairo_set_source_rgb(m_cairo_ctx, 0.0, 0.5, 1.0);
+        cairo_rectangle(m_cairo_ctx, width - 150, 50, 20, 10);
+        cairo_fill(m_cairo_ctx);
+        cairo_set_source_rgb(m_cairo_ctx, 0, 0, 0);
+        cairo_move_to(m_cairo_ctx, width - 125, 60);
+        cairo_show_text(m_cairo_ctx, label1.c_str());
         
         // Learning Coeff legend
-        cairo_set_source_rgb(cr, 1.0, 0.2, 0.2);
-        cairo_rectangle(cr, width - 150, 70, 20, 10);
-        cairo_fill(cr);
-        cairo_set_source_rgb(cr, 0, 0, 0);
-        cairo_move_to(cr, width - 125, 80);
-        cairo_show_text(cr, label2.c_str());
+        cairo_set_source_rgb(m_cairo_ctx, 1.0, 0.2, 0.2);
+        cairo_rectangle(m_cairo_ctx, width - 150, 70, 20, 10);
+        cairo_fill(m_cairo_ctx);
+        cairo_set_source_rgb(m_cairo_ctx, 0, 0, 0);
+        cairo_move_to(m_cairo_ctx, width - 125, 80);
+        cairo_show_text(m_cairo_ctx, label2.c_str());
         
         // Add title
-        cairo_set_source_rgb(cr, 0, 0, 0);
-        cairo_select_font_face(cr, "Arial", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
-        cairo_set_font_size(cr, 16);
+        cairo_set_source_rgb(m_cairo_ctx, 0, 0, 0);
+        cairo_select_font_face(m_cairo_ctx, "Arial", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(m_cairo_ctx, 16);
         cairo_text_extents_t extents;
-        cairo_text_extents(cr, title.c_str(), &extents);
-        cairo_move_to(cr, (width - extents.width) / 2, 30);
-        cairo_show_text(cr, title.c_str());
+        cairo_text_extents(m_cairo_ctx, title.c_str(), &extents);
+        cairo_move_to(m_cairo_ctx, (width - extents.width) / 2, 30);
+        cairo_show_text(m_cairo_ctx, title.c_str());
     }
     
     void savePNG(const std::string& filename) {
-        cairo_surface_write_to_png(surface, filename.c_str());
+        cairo_surface_write_to_png(m_surface, filename.c_str());
     }
 };
 
 
 AIEPLACE_NAMESPACE_END
 
-#endif
 #endif

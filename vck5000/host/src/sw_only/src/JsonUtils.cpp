@@ -1,3 +1,7 @@
+/**
+ * @file JsonUtils.cpp
+ * @brief Implementation of the comment-stripping JSON preprocessor declared in JsonUtils.h.
+ */
 #include "JsonUtils.h"
 
 namespace JsonUtils {

@@ -1,6 +1,9 @@
-// TODO: add header
-#ifndef AIEPLACE_NODE_H
-#define AIEPLACE_NODE_H
+/**
+ * @file Node.h
+ * @brief Abstract placeable object (Component or IOPad): its position, iteration state,
+ *        net memberships, and bin overlaps. The unit the placement gradient acts on.
+ */
+#pragma once
 
 #include "Common.h"
 #include "MacroClass.h"
@@ -19,9 +22,10 @@ enum PlacementStatus
     UNKNOWN = 0x4
 };
 
+/// @brief A node's overlap with one bin: the bin and the deposited area.
 struct BinOverlap
 {
-    Bin* bin;
+    Bin* bin_p;
     double overlap;
 };
 
@@ -33,8 +37,8 @@ private:
     string m_name;
     string m_orient;
     std::mutex m_mutex;
-    PlacementStatus m_status;
-    bool m_is_large; // True if the area of the node is at least 1/16th the area of a bin
+    PlacementStatus m_status = UNKNOWN;
+    bool m_is_large = false; // True if the area of the node is at least 1/16th the area of a bin
     std::vector<Net*> mv_nets; // List of all nets this node is on
     std::vector<BinOverlap> mv_bin_overlaps; // List of bins this node is currently overlapping
 
@@ -112,7 +116,7 @@ public:
     void addBinOverlap(Bin* bin_p, double node_overlap)
     {
         BinOverlap b;
-        b.bin = bin_p;
+        b.bin_p = bin_p;
         b.overlap = node_overlap;
         mv_bin_overlaps.push_back(b);
     }
@@ -162,4 +166,3 @@ public:
 
 AIEPLACE_NAMESPACE_END
 
-#endif

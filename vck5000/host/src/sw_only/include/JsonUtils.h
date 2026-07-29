@@ -1,5 +1,4 @@
-#ifndef JSON_UTILS_H
-#define JSON_UTILS_H
+#pragma once
 
 #include <string>
 
@@ -24,4 +23,3 @@ namespace JsonUtils {
 
 }
 
-#endif // JSON_UTILS_H
