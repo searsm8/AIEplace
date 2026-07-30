@@ -102,7 +102,7 @@ public:
     static inline void log_trace(const MsgType& msg)    { iLogger->log("TRACE", msg); }
     static inline void log_detail(const MsgType& msg)   { iLogger->log("DETAIL", msg); }
     static inline void log_debug(const MsgType& msg)    { iLogger->log("DEBUG", msg); }
-    static inline void log_data(const MsgType& msg)     { iLogger->log("DATA", msg); }
+    static inline void log_iter(const MsgType& msg)      { iLogger->log("ITER", msg); }
     static inline void log_info(const MsgType& msg)     { iLogger->log("INFO", msg); }
     static inline void log_warning(const MsgType& msg)  { iLogger->log("WARNING", msg); }
     static inline void log_error(const MsgType& msg)    { iLogger->log("ERROR", msg); }

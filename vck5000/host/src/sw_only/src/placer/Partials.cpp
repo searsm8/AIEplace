@@ -8,7 +8,6 @@
 #include <cmath>
 #include <cassert>
 #include <chrono>
-#include <unordered_map>
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -246,132 +245,15 @@ void Placer::computeHpwlPartials_CPU()
                 Logger::log_error("B: " + B.to_string());
                 Logger::log_error("C: " + C.to_string());
                 // Hard divergence: flag it and stop computing partials rather than exit(1).
-                // run() breaks on m_diverged so finalization restores the best-so-far placement
+                // run() breaks on m_nan_detected so finalization restores the best-so-far placement
                 // and still writes a results row (a DSE sweep no longer loses the run).
-                m_diverged = true;
+                m_nan_detected = true;
                 return;
             }
 
             pins[i].node_p->next.probe_grad += partial;
         }
     }
-}
-
-void Placer::compareHpwlPartials()
-{
-    // Ensure LUT is initialized for simple method
-    if (hpwl_lut.empty()) initHpwlLut();
-
-    // Collect all movable nodes (components + fillers, not IOPads)
-    std::vector<Node*> movable_nodes;
-    for (auto item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        movable_nodes.push_back(item.second);
-    }
-    for (auto filler_p : db.getFillers())
-        movable_nodes.push_back(filler_p);
-
-    // --- Run CPU method ---
-    for (Node* n : movable_nodes) n->next.probe_grad.clear();
-    computeHpwlPartials_CPU();
-
-    // Save CPU gradients
-    std::unordered_map<Node*, Gradient> cpu_grads;
-    cpu_grads.reserve(movable_nodes.size());
-    for (Node* n : movable_nodes)
-        cpu_grads[n] = n->next.probe_grad;
-
-    // --- Run simple method ---
-    for (Node* n : movable_nodes) n->next.probe_grad.clear();
-    computeHpwlPartials_simple();
-
-    // --- Compare ---
-    double sum_abs_err_x = 0, sum_abs_err_y = 0;
-    double sum_sq_err_x = 0, sum_sq_err_y = 0;
-    double sum_rel_err = 0;
-    int rel_err_count = 0;
-    int outliers_5pct = 0, outliers_10pct = 0;
-    float max_abs_err_x = 0, max_abs_err_y = 0;
-    std::string max_err_node_x, max_err_node_y;
-
-    // For Pearson R^2
-    double sum_cpu_x = 0, sum_cpu_y = 0;
-    double sum_simple_x = 0, sum_simple_y = 0;
-    double sum_cpu_x2 = 0, sum_cpu_y2 = 0;
-    double sum_simple_x2 = 0, sum_simple_y2 = 0;
-    double sum_prod_x = 0, sum_prod_y = 0;
-
-    int n_nodes = movable_nodes.size();
-
-    for (Node* n : movable_nodes) {
-        Gradient g_cpu = cpu_grads[n];
-        Gradient g_simple = n->next.probe_grad;
-
-        float err_x = std::abs(g_simple.x - g_cpu.x);
-        float err_y = std::abs(g_simple.y - g_cpu.y);
-
-        sum_abs_err_x += err_x;
-        sum_abs_err_y += err_y;
-        sum_sq_err_x += err_x * err_x;
-        sum_sq_err_y += err_y * err_y;
-
-        if (err_x > max_abs_err_x) { max_abs_err_x = err_x; max_err_node_x = n->getName(); }
-        if (err_y > max_abs_err_y) { max_abs_err_y = err_y; max_err_node_y = n->getName(); }
-
-        // Relative error (magnitude-based, skip near-zero CPU gradients)
-        float mag_cpu = std::sqrt(g_cpu.x * g_cpu.x + g_cpu.y * g_cpu.y);
-        if (mag_cpu > 1e-6f) {
-            float mag_err = std::sqrt(err_x * err_x + err_y * err_y);
-            float rel = mag_err / mag_cpu;
-            sum_rel_err += rel;
-            rel_err_count++;
-            if (rel > 0.05f) outliers_5pct++;
-            if (rel > 0.10f) outliers_10pct++;
-        }
-
-        // Correlation accumulators
-        sum_cpu_x += g_cpu.x;       sum_cpu_y += g_cpu.y;
-        sum_simple_x += g_simple.x; sum_simple_y += g_simple.y;
-        sum_cpu_x2 += g_cpu.x * g_cpu.x;       sum_cpu_y2 += g_cpu.y * g_cpu.y;
-        sum_simple_x2 += g_simple.x * g_simple.x; sum_simple_y2 += g_simple.y * g_simple.y;
-        sum_prod_x += g_cpu.x * g_simple.x;
-        sum_prod_y += g_cpu.y * g_simple.y;
-    }
-
-    auto pearson_r2 = [](double sum_a, double sum_b, double sum_a2, double sum_b2, double sum_ab, int n) -> double {
-        double num = n * sum_ab - sum_a * sum_b;
-        double den = std::sqrt((n * sum_a2 - sum_a * sum_a) * (n * sum_b2 - sum_b * sum_b));
-        if (den < 1e-12) return 1.0;
-        double r = num / den;
-        return r * r;
-    };
-
-    double r2_x = pearson_r2(sum_cpu_x, sum_simple_x, sum_cpu_x2, sum_simple_x2, sum_prod_x, n_nodes);
-    double r2_y = pearson_r2(sum_cpu_y, sum_simple_y, sum_cpu_y2, sum_simple_y2, sum_prod_y, n_nodes);
-
-    Logger::log_info("=== HPWL Gradient Comparison: CPU vs Simple ===");
-    Logger::log_info("Movable nodes compared: " + std::to_string(n_nodes));
-    Logger::log_info("Max abs error  X: " + std::to_string(max_abs_err_x) + " (node " + max_err_node_x + ")");
-    Logger::log_info("Max abs error  Y: " + std::to_string(max_abs_err_y) + " (node " + max_err_node_y + ")");
-    Logger::log_info("Mean abs error X: " + std::to_string(sum_abs_err_x / n_nodes));
-    Logger::log_info("Mean abs error Y: " + std::to_string(sum_abs_err_y / n_nodes));
-    Logger::log_info("RMS error      X: " + std::to_string(std::sqrt(sum_sq_err_x / n_nodes)));
-    Logger::log_info("RMS error      Y: " + std::to_string(std::sqrt(sum_sq_err_y / n_nodes)));
-    if (rel_err_count > 0) {
-        Logger::log_info("Mean relative error: " + std::to_string(sum_rel_err / rel_err_count)
-            + " (over " + std::to_string(rel_err_count) + " non-zero nodes)");
-    }
-    Logger::log_info("Outliers >5% relative error:  " + std::to_string(outliers_5pct)
-        + " (" + std::to_string(100.0 * outliers_5pct / std::max(rel_err_count, 1)) + "%)");
-    Logger::log_info("Outliers >10% relative error: " + std::to_string(outliers_10pct)
-        + " (" + std::to_string(100.0 * outliers_10pct / std::max(rel_err_count, 1)) + "%)");
-    Logger::log_info("R^2 (Pearson)  X: " + std::to_string(r2_x));
-    Logger::log_info("R^2 (Pearson)  Y: " + std::to_string(r2_y));
-    Logger::log_info("=== End Comparison ===");
-
-    // Restore CPU gradients so caller gets the reference result
-    for (Node* n : movable_nodes)
-        n->next.probe_grad = cpu_grads[n];
 }
 
 AIEPLACE_NAMESPACE_END

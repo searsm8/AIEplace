@@ -199,7 +199,8 @@ void Grid::printElectricFields()
         for( int y_index = 0; y_index < m_bins_per_col; y_index++)
         {
             Bin b = m_bins[x_index][y_index];
-            cout << "Bin["<<x_index<<"]["<<y_index<<"]\tEx: " << b.eField.x << "\tEy: " << b.eField.y << endl;
+            Logger::log_info("Bin[" + std::to_string(x_index) + "][" + std::to_string(y_index) +
+                              "]\tEx: " + std::to_string(b.eField.x) + "\tEy: " + std::to_string(b.eField.y));
         }
 }
 AIEPLACE_NAMESPACE_END

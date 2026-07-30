@@ -37,8 +37,6 @@ public:
     std::vector<Node*> mv_nodes; // List of all nodes on this net
     std::vector<NetPin> mv_pins; // Parallel to mv_nodes: each node + pin offset + pin name
 
-    int tally = 0; // TODO: unused debugging counter — remove once confirmed dead
-
     // Constructors
     Net() : m_degree(0) {}
     Net(string name) : m_name(name), m_degree(0) {}

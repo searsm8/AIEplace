@@ -227,7 +227,15 @@ bool DataBase::readDEF()
     clearerr(stdout);
 
     if (success) {
-        Logger::log_info(".def file parsing successful: " + def_file.string());
+        // Marks the transition from "reading input files" to "reporting on the parsed design" —
+        // everything logged from here on describes the design that was just read.
+        Table section;
+        section.add_row({"Reading Input"});
+        section.format().font_align(FontAlign::center).font_style({FontStyle::bold});
+        Table content;
+        content.add_row(RowStream{} << "DEF file" << def_file.string());
+        section.add_row({content});
+        Logger::log_info(section);
         return true;
     } else {
         Logger::log_error(".def file parsing FAILED: " + def_file.string());
@@ -719,8 +727,8 @@ void DataBase::printIOPads() const
     for(auto item : mm_iopads)
     {
         IOPad* iopad_p = item.second;
-        cout << iopad_p->getName() << iopad_p->next.node_pos.to_string() << endl;
-        cout << "\tArea: " << iopad_p->getArea() << "\tStatus: " << iopad_p->getStatus() << endl;
+        Logger::log_info(iopad_p->getName() + iopad_p->next.node_pos.to_string());
+        Logger::log_info("\tArea: " + std::to_string(iopad_p->getArea()) + "\tStatus: " + std::to_string(iopad_p->getStatus()));
     }
 }
 
@@ -729,8 +737,8 @@ void DataBase::printComponents() const
     for(auto item : mm_components)
     {
         Component* comp_p = item.second;
-        cout << comp_p->getName() << comp_p->next.node_pos.to_string() << endl;
-        cout << "\t" << comp_p->getMacro()->getName() << "\tArea: " << comp_p->getArea() << "\tStatus: " << comp_p->getStatus() << endl;
+        Logger::log_info(comp_p->getName() + comp_p->next.node_pos.to_string());
+        Logger::log_info("\t" + comp_p->getMacro()->getName() + "\tArea: " + std::to_string(comp_p->getArea()) + "\tStatus: " + std::to_string(comp_p->getStatus()));
     }
 }
 
@@ -740,20 +748,19 @@ void DataBase::printNets()
     for(auto item : mm_nets)
     {
         Net* net_p = item.second;
-        cout << endl << "NET: " << net_p->to_string() << endl;
+        Logger::log_info("NET: " + net_p->to_string());
 
         sortPositionsByX();
-        cout << "X descending: ";
+        string x_line = "X descending: ";
         for(auto node_p : net_p->getNodes())
-            cout << node_p->next.node_pos.x << '\t';
-        cout << endl;
+            x_line += std::to_string(node_p->next.node_pos.x) + '\t';
+        Logger::log_info(x_line);
 
         sortPositionsByY();
-        cout << "Y descending: ";
+        string y_line = "Y descending: ";
         for(auto node_p : net_p->getNodes())
-            cout << node_p->next.node_pos.y << '\t';
-        cout << endl;
-        cout << endl;
+            y_line += std::to_string(node_p->next.node_pos.y) + '\t';
+        Logger::log_info(y_line);
 
         if (++count > 100) return;
     }
@@ -761,20 +768,21 @@ void DataBase::printNets()
 
 void DataBase::printNetsByDegree() const
 {
-    cout << "&&& Nets by degree:" << endl;
+    Logger::log_info("&&& Nets by degree:");
 
     for (auto item : mmv_nets_by_degree)
     {
-        cout << item.second.size() << " nets of degree " << item.first << ".\n";
+        Logger::log_info(std::to_string(item.second.size()) + " nets of degree " + std::to_string(item.first) + ".");
     }
 }
 
 void DataBase::printInfo()
 {
     Table top;
-    top.add_row({"DataBase info"});
+    top.add_row({"Benchmark info"});
 
     Table data;
+    data.add_row(RowStream{} << "Benchmark" << getBenchmarkName());
     data.add_row(RowStream{} << "Macros" << mm_macros.size());
     data.add_row(RowStream{} << "IO Pads" << mm_iopads.size());
     data.add_row(RowStream{} << "Components" << mm_components.size());

@@ -11,6 +11,7 @@ using json = nlohmann::json;
 #include <iomanip>
 #include <fstream>
 #include <sstream>
+#include <random>
 
 #define DEVICE_ID 0 // Device ID to find VCK5000
 
@@ -42,7 +43,17 @@ private:
     void writeResultsCSV(float final_hpwl, float final_hpwl_exact, float final_overflow,
                          float total_runtime, float iteration_avg,
                          float hpwl_improvement, const std::string& run_id);
-    
+
+    // writeResultsCSV's steps, broken out for readability
+    float lookupXplaceReferenceHPWL(const std::string& bench_name);
+    std::vector<std::pair<std::string, std::string>> parseDSEParams();
+    void writeResultsCSVHeader(std::ofstream& out_file,
+                               const std::vector<std::pair<std::string, std::string>>& dse_params);
+    void writeResultsCSVRow(std::ofstream& out_file, float final_hpwl_exact, float total_runtime,
+                            float iteration_avg,
+                            const std::vector<std::pair<std::string, std::string>>& dse_params,
+                            float xplace_ref);
+
     // Helper functions
     std::string escapeJsonString(const std::string& input);
     std::string generateRunId();
@@ -91,7 +102,6 @@ public:
     bool precond_coef_escalation = true; // double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef)
     bool enable_density_clamp = true;   // clamp sub-bin cells in the density solve (XPlace expand_ratio)
     bool dct_normalize = true;   // apply 1/N per forward DCT (bounds a_uv intermediates; global scale absorbed by lambda)
-    bool compare_hpwl_methods = false;
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
     float avg_node_size = 1.0f; // average movable cell area; grid-sizing divisor for the no-macros case
     float density_force_fraction = 0.0f; // density's share of total preconditioner force-mass, in [0,1]
@@ -140,7 +150,10 @@ public:
     // Execution tracking
     int iteration = 0;
     bool quiet = false; // if true, suppress all console output except errors (for DSE runs)
-    bool m_diverged = false; // set when a NaN appears in the HPWL partials (hard divergence);
+    bool interactive = true; // if false, suppress the per-iteration live-status table (for
+                             // non-interactive single runs, e.g. piped to a log file); orthogonal
+                             // to quiet, which controls overall logging verbosity
+    bool m_nan_detected = false; // set when a NaN appears in the HPWL partials (hard divergence);
                              // run() breaks the loop so printFinalResults() still emits a
                              // best-so-far results row instead of the process aborting.
 
@@ -209,17 +222,12 @@ public:
                                         // out_density (optional): area deposited per bin (col*ny+row).
     void dumpBinDensity(const std::string& path_prefix); // ρ maps (smoothed+exact) for XPlace compare
 
-
-    // Comparison functions for verification
-    void compareDensityResults();
-    void compareHpwlPartials();
-
     // Main algorithm loop functions
     void run();
     void performIteration();
 
     // Main algorithm iteration functions
-    void initializeFirstIteration();    // iteration-1 only: bootstrap gradients + solver state
+    void performIterationZero();        // bootstrap gradients + solver state, before iteration 1
     void combineGradients();            // subtract electro from probe_grad in-place
     float computeLipschitzEstimate();    // BB step estimate: ||Δv|| / ||Δ∇f||
     void estimateInitialStep();         // XPlace-style iteration-1 BB learning-rate estimate
@@ -250,6 +258,37 @@ public:
     void printIterationResults();
     void printFinalResults();
     void initializeFocus();
+
+    // printIterationResults's steps, broken out for readability
+    void printDSEInfoTable();                             // config output.DSE_info
+    void printIterationSummaryTable(float hpwl, float overflow);
+    void exportIterationVisualization(float overflow);    // no-op build without CREATE_VISUALIZATION
+    void appendIterationLog(float hpwl, float overflow);  // iterations.dat
+
+    // initializeFocus's steps, broken out for readability
+    void addNamedFocusNets();               // config output.focus_nets
+    void addRandomFocusNets(std::mt19937& rng);   // config output.rand_focus_nets
+    void addRandomFocusNodes(std::mt19937& rng);  // config output.rand_focus_nodes
+    void addRandomMacroNets(std::mt19937& rng);   // config output.rand_macro_nets
+    void addRandomFocusIO(std::mt19937& rng);     // config output.rand_focus_IO
+
+    // printFinalResults's steps, broken out for readability
+    struct FinalMetrics {
+        float final_hpwl, final_hpwl_exact;
+        float final_overflow, final_smoothed_overflow;
+        float total_runtime, iteration_avg;
+        float hpwl_improvement;
+        bool has_improvement;
+    };
+    BestSolution& restoreBestSolution(); // primary (converged) > fallback (Pareto) > last; restores its placement
+    FinalMetrics computeFinalMetrics();
+    void logOverflowDiagnostics(const FinalMetrics& metrics);
+    void dumpBestPlacementDensity();
+    void exportSummaryReports(const BestSolution& chosen, const FinalMetrics& metrics,
+                              const std::string& run_output_dir);
+    void exportVisualizationArtifacts(const BestSolution& chosen, const FinalMetrics& metrics,
+                                      const std::string& run_output_dir);
+    void writeFinalDesignArtifacts(const std::string& run_output_dir);
 };
 
 AIEPLACE_NAMESPACE_END

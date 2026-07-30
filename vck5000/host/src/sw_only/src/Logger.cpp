@@ -28,7 +28,7 @@ void Logger::setup_logging(bool quiet)
     Logger::string_colors["DETAIL"] = Color::cyan;
     Logger::string_colors["DEBUG"] = Color::magenta;
     Logger::string_colors["INFO"] = Color::green;
-    Logger::string_colors["DATA"] = Color::blue;
+    Logger::string_colors["ITER"] = Color::blue;
     Logger::string_colors["WARNING"] = Color::yellow;
     Logger::string_colors["ERROR"] = Color::red;
     Logger::string_colors["CRITICAL"] = Color::red;
@@ -43,9 +43,9 @@ void Logger::setup_logging(bool quiet)
 
     // DEFAULT LOGGING KEYS
     //Logger::activate_logging_key("TRACE");  // For program execution tracing, e.g. function calls
-    Logger::activate_logging_key("DETAIL"); // Used to give detail on things that most people won't care about. Usually off.
-    //Logger::activate_logging_key("DEBUG");  // Used only by developers for debugging!
-    Logger::activate_logging_key("DATA");   // Used to give info on things that some people might care about. Usually on.
+    //Logger::activate_logging_key("DETAIL"); // Used to give detail on things that most people won't care about. Usually off.
+    //Logger::activate_logging_key("DEBUG");  // Used developers for debugging. Usuaully off.
+    Logger::activate_logging_key("ITER");   // Per-iteration live-status progress line.
     Logger::activate_logging_key("INFO");   // Used to give data on things that most people will care about. Always on.
     Logger::activate_logging_key("WARNING");// Something bad has happened!
     Logger::activate_logging_key("ERROR");  // Something VERY bad has happened!
@@ -76,6 +76,9 @@ bool Logger::log(string key, MsgType msg)
             .font_align(FontAlign::right)
             .font_color(getColor(key));
         top.print(std::cout);
+        std::cout.flush(); // stdout may not be line-buffered (piped/non-tty); force it so output
+                           // appears as it happens instead of batching until the process exits —
+                           // easy to miss now that per-iteration output volume is low.
         return true;
     }
 }

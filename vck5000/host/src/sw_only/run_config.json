@@ -82,20 +82,21 @@
     "convergence_hpwl_improvement_threshold": 0.01, // If HPWL improvement over window is below this, HPWL convergence is met.
     "convergence_overflow_threshold": 0.07, // Stop when smoothed overflow/movable-area < this. Matches XPlace --stop_overflow default 0.07 (apples-to-apples; do not override lower in sweeps).
     "convergence_iterations": 30, // Extra iterations to run after overflow drops below threshold (XPlace uses 30)
-    "maximum_utilization": 1.0  // Default target density. Overridden by benchmark's
-                                // placement.constraints if present (e.g. ISPD2015).
+    "maximum_utilization": 1.0  // Default target density. Overridden by benchmark's placement.constraints if present (e.g. ISPD2015).
   },
 
   "output": {
-    "visualize": true, // if true, will export visualization images
+    "quiet": false,      // if true, suppress all std output. Errors still printed. Useful for batch or DSE runs.
+    "interactive": true, // if false, suppress the per-iteration live-status table.
+    "results_dir": "results/single_runs", // overridden by DSE
+    
+    // Visualization options
+    "visualize": false, // if true, will export visualization images
     "iterations_per_export": 10,
-    "quiet": false,    // if true, suppress all console output except errors (for DSE)
-    "results_dir": "results/single_runs",
     "focus_nets": [], // focus nets are highlighted in visualization exports.
     "rand_focus_IO": 0, // not yet implemented
     "rand_focus_nets": 0,
     "rand_macro_nets": 3,
-    "rand_focus_nodes": 0, // not yet implemented
-    "compare_hpwl_methods": false     // one-time comparison of CPU vs simple HPWL gradients at iteration 1
+    "rand_focus_nodes": 0 // not yet implemented
   }
 }

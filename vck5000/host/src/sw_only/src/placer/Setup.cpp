@@ -1,91 +1,18 @@
-#include "DCT.h"
+/**
+ * @file Setup.cpp
+ * @brief Pre-run setup: constructor-phase bring-up (config parse, LEF/DEF database read,
+ *        area analysis, grid sizing, preconditioner/visualization setup) plus the one-time
+ *        initial-placement and initial-density-weight steps run before iteration 1.
+ *        Split out of AIEplace.cpp.
+ */
+
 #include "AIEplace.h"
 #include "JsonUtils.h"
 #include <cmath>
-#include <cassert>
+#include <algorithm>
 #include <random>
 
 AIEPLACE_NAMESPACE_BEGIN
-
-using namespace tabulate; // table types for clean display, scoped to this .cpp (not leaked via Logger.h)
-
-/**
- * @brief Run the ePlace algorithm
- *
- * Initialize the placement, then perform iterations
- * until the convergence condition is met.
- */
-void Placer::run()
-{
-    initializePlacement();
-    while( true )
-    {
-        performIteration();
-        if(checkConvergence() || m_diverged )
-            break;
-    }
-}
-
-/**
- * @brief Run one placement iteration: compute the wirelength and density gradients, combine
- *        them, take a Barzilai-Borwein (optionally backtracked) Nesterov step, then update the
- *        gamma/lambda schedule and best-solution tracking.
- */
-void Placer::performIteration()
-{
-    TIME_FUNCTION();
-
-    Logger::log_detail("BEGIN iteration " + std::to_string(iteration));
-    ++iteration;
-
-    if (iteration == 1)
-        initializeFirstIteration();
-
-    updatePrecondWeights();
-
-    if (iteration == 1)
-        estimateInitialStep();
-
-    performNextStep(enable_backtracking);
-
-    recordIterationResults();
-    printIterationResults();
-
-    updateSchedule();
-
-    if (m_diverged)
-        Logger::log_error("Stopping: NaN in HPWL partials at iteration " +
-                          std::to_string(iteration) + " (hard divergence)");
-}
-
-/**
- * @brief Iteration-1 bootstrap: compute the first gradients and initialize solver state.
- *        Probe positions (v_1 = u_1) are already set by initializePlacement().
- */
-void Placer::initializeFirstIteration()
-{
-    iterationReset();
-
-    computeHpwlPartials();      // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
-    if (compare_hpwl_methods) compareHpwlPartials();
-    computeElectricFields();    // ∇D from ρ → bin eFields
-
-    initializeDensityWeight();
-    recordInitialHPWL();
-}
-
-Placer::Placer(std::string config_filepath)
-{
-    m_config_filepath = config_filepath;
-
-    setupDesign();
-    Logger::log_info("Database setup time: " + std::to_string(Logger::getFunctionTime("setupDesign") / 1.0e6) + " s");
-
-    setupGrid();
-    createRunOutputStructure();
-    configureGammaSchedule();
-    initializeVisualization();
-}
 
 /// @brief Config parse + grid decision + DB read + fillers + area analysis, timed as one unit.
 void Placer::setupDesign()
@@ -136,16 +63,6 @@ void Placer::loadDesignDatabase()
         db.addFillers(target_density);
 }
 
-
-/**
- * @brief Constructor. initialize a new Placer object and the placement system
- * Initialize a new Placer object by reading JSON configuration file.
- * Initializes the database from LEF/DEF files. (See DataBase.cpp constructor)
- * Initialize the grid structure based on size of benchmark.
- * If hardware acceleration is enabled, initializes XRT/AIE drivers.
- *
- * @param config_filepath Path to the JSON configuration file
- */
 /**
  * @brief Parse the (comment-stripped) JSON config file named by m_config_filepath into
  *        cfg, then read every hyperparameter, compute-method, and convergence setting.
@@ -176,6 +93,7 @@ void Placer::loadConfiguration()
     // Setup logging (quiet mode suppresses all output except errors)
     quiet = cfg["output"].value("quiet", quiet);
     Logger::setup_logging(quiet);
+    interactive = cfg["output"].value("interactive", interactive);
     printWelcomeBanner();
     Logger::log_info("Reading runtime configuration from: " + m_config_filepath);
 
@@ -224,7 +142,6 @@ void Placer::loadConfiguration()
     backtrack_epsilon = cfg["params"]["backtrack_epsilon"];
 
     // Read other stuff
-    compare_hpwl_methods = cfg["output"].value("compare_hpwl_methods", compare_hpwl_methods);
     MAX_THREADS = cfg["params"]["max_threads"];
     input_dir = fs::path(cfg["input"]["benchmark"]);
     results_dir = fs::path(cfg["output"]["results_dir"].get<std::string>());
@@ -320,16 +237,6 @@ void Placer::initializeVisualization()
 }
 
 /**
- * @brief Reset all nodes and nets in preparation for the next iteration
- */
-void Placer::iterationReset()
-{
-    grid.iterationReset();
-    db.iterationReset();
-}
-
-
-/**
  * @brief Initialize placement of all movable nodes: a tight Gaussian cluster at the die center
  *        (XPlace-style; per-axis sigma = 0.001 * die span), relying on the density force to
  *        spread the near-coincident cells over early iterations. Benchmark-provided (PLACED)
@@ -348,15 +255,6 @@ void Placer::initializePlacement()
     std::normal_distribution<float> gauss(0.0f, 1.0f);
     float gauss_sigma_x = grid.getDieWidth() * 0.001f;
     float gauss_sigma_y = grid.getDieHeight() * 0.001f;
-
-    Table top;
-    top.add_row(RowStream{} << "Initial Placement");
-    Table data;
-    data.add_row(RowStream{} << "Center" << target_pos.x << target_pos.y);
-    data.add_row(RowStream{} << "Sigma" << gauss_sigma_x << gauss_sigma_y);
-    top.add_row({data});
-    top.format().font_align(FontAlign::center);
-    Logger::log_info(top);
 
     float bin_area_16th = grid.getBinWidth() * grid.getBinHeight() / 16;
     int placed_count = 0, randomized_count = 0;
@@ -436,94 +334,6 @@ void Placer::initializeDensityWeight()
     Logger::log_info("Initial HPWL gradient L1 norm: " + std::to_string(HPWL_L1_norm));
     Logger::log_info("Initial density gradient L1 norm: " + std::to_string(density_L1_norm));
     Logger::log_info("Initialized density_weight: " + std::to_string(density_weight));
-}
-
-
-
-/// @brief Log per-iteration step diagnostics (gradient norms, step length, overflow) — DEBUG key only.
-void Placer::logStepDiagnostics()
-{
-    Logger::log_info("=== Step Diagnostics (iteration " + std::to_string(iteration) + ") ===");
-    Logger::log_info("  step_length (α̂):  " + PREC_P(step_length, 6));
-    Logger::log_info("  momentum_coeff:    " + PREC_P(momentum_coeff, 6));
-    Logger::log_info("  nesterov_ak:       " + PREC_P(nesterov_ak, 6));
-    Logger::log_info("  backtrack_steps:   " + std::to_string(backtrack_steps));
-
-    // Gradient statistics (from current state used for stepping)
-    float grad_L1 = 0.0f, max_grad = 0.0f;
-    for (auto item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        Node* n = item.second;
-        grad_L1 += fabs(n->current.probe_grad.x) + fabs(n->current.probe_grad.y);
-        max_grad = std::max(max_grad, std::max(fabs(n->current.probe_grad.x), fabs(n->current.probe_grad.y)));
-    }
-    Logger::log_info("  grad L1 norm:      " + SCI(grad_L1));
-    Logger::log_info("  max |grad|:        " + SCI(max_grad));
-    Logger::log_info("  α̂ * max|grad|:     " + SCI(step_length * max_grad) + "  (max single-step displacement)");
-
-    // Position delta statistics
-    float max_node_delta = 0.0f, max_probe_overshoot = 0.0f;
-    int clamped_count = 0;
-    float die_w = (float)grid.getDieWidth(), die_h = (float)grid.getDieHeight();
-    for (auto item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        Node* n = item.second;
-        float dx = fabs(n->next.node_pos.x - n->current.node_pos.x);
-        float dy = fabs(n->next.node_pos.y - n->current.node_pos.y);
-        max_node_delta = std::max(max_node_delta, std::max(dx, dy));
-
-        float ox = fabs(n->next.probe_pos.x - n->next.node_pos.x);
-        float oy = fabs(n->next.probe_pos.y - n->next.node_pos.y);
-        max_probe_overshoot = std::max(max_probe_overshoot, std::max(ox, oy));
-
-        bool at_boundary = (n->next.node_pos.x <= 0 || n->next.node_pos.x >= die_w ||
-                           n->next.node_pos.y <= 0 || n->next.node_pos.y >= die_h);
-        if (at_boundary)
-            clamped_count++;
-    }
-    Logger::log_info("  max |Δnode_pos|:   " + SCI(max_node_delta));
-    Logger::log_info("  max probe overshoot: " + SCI(max_probe_overshoot));
-    Logger::log_info("  nodes at boundary: " + std::to_string(clamped_count));
-
-    // Sample trace: first 3 components
-    int count = 0;
-    for (auto item : db.getComponents()) {
-        if (count >= 3) break;
-        if (item.second->getStatus() == FIXED) continue;
-        Node* n = item.second;
-        Logger::log_info("  --- Sample node: " + n->getName() + " ---");
-        Logger::log_info("    current.node_pos (u_k):   (" + PREC_P(n->current.node_pos.x, 2) + ", " + PREC_P(n->current.node_pos.y, 2) + ")");
-        Logger::log_info("    current.probe_pos (v_k):  (" + PREC_P(n->current.probe_pos.x, 2) + ", " + PREC_P(n->current.probe_pos.y, 2) + ")");
-        Logger::log_info("    current.probe_grad:       (" + SCI(n->current.probe_grad.x) + ", " + SCI(n->current.probe_grad.y) + ")");
-        Logger::log_info("    α̂ * grad:                 (" + SCI(step_length * n->current.probe_grad.x) + ", " + SCI(step_length * n->current.probe_grad.y) + ")");
-        Logger::log_info("    next.node_pos (u_{k+1}):  (" + PREC_P(n->next.node_pos.x, 2) + ", " + PREC_P(n->next.node_pos.y, 2) + ")");
-        Logger::log_info("    next.probe_pos (v_{k+1}): (" + PREC_P(n->next.probe_pos.x, 2) + ", " + PREC_P(n->next.probe_pos.y, 2) + ")");
-        Logger::log_info("    next.probe_grad:          (" + SCI(n->next.probe_grad.x) + ", " + SCI(n->next.probe_grad.y) + ")");
-        count++;
-    }
-    Logger::log_info("=== End Step Diagnostics ===");
-}
-
-/// @brief Save current movable + filler positions as the best-so-far solution (divergence guard).
-void Placer::snapshotBestPlacement()
-{
-    for (auto item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        item.second->best_solution_pos = item.second->next.node_pos;
-    }
-    for (auto filler_p : db.getFillers())
-        filler_p->best_solution_pos = filler_p->next.node_pos;
-}
-
-/// @brief Restore movable + filler positions from the saved best-so-far solution.
-void Placer::restoreBestPlacement()
-{
-    for (auto item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        item.second->next.node_pos = item.second->best_solution_pos;
-    }
-    for (auto filler_p : db.getFillers())
-        filler_p->next.node_pos = filler_p->best_solution_pos;
 }
 
 AIEPLACE_NAMESPACE_END

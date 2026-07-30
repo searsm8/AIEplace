@@ -1,8 +1,12 @@
 #ifndef PL_ALGO_FORMATS_HPP
 #define PL_ALGO_FORMATS_HPP
 
-// formats.hpp -- formal data-flow format definitions for the pl_algo (PL-centric) design.
-//
+/**
+ * @file formats.hpp
+ * @brief The single source of truth for the byte/beat layout at every edge of the
+ *        pl_algo placement iteration — the data-flow contract top.cpp and every
+ *        module agree on. See DATAFLOW.md for the narrative description.
+ */
 // This is the single source of truth for the byte/beat layout at every edge of the
 // placement iteration. The whole flow is being re-defined for the PL, so the layouts
 // here are the contract that top.cpp and every module agree on. See DATAFLOW.md for

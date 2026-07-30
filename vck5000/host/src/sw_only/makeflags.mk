@@ -5,8 +5,8 @@ BUILD_VIZ ?= 1# Set to 1 to build with visualization support.
 THIRD_PARTY = $(PROJECT_ROOT)/../third_party
 
 HOST_MAIN = main.cpp
-HOST_SRCS = AIEplace.cpp Schedule.cpp Step.cpp Partials.cpp \
-	    Density.cpp Output.cpp DataBase.cpp \
+HOST_SRCS = placer/AIEplace.cpp placer/Setup.cpp placer/Schedule.cpp placer/Step.cpp \
+	    placer/Partials.cpp placer/Density.cpp placer/Output.cpp DataBase.cpp \
 	    Grid.cpp Net.cpp DCT.cpp Logger.cpp \
 	    Common.cpp JsonUtils.cpp
 HOST_OBJS = $(addprefix $(BUILD_DIR_HOST)/obj/, $(HOST_MAIN:.cpp=.o) $(HOST_SRCS:.cpp=.o))

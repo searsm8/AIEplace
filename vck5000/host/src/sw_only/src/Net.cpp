@@ -56,7 +56,7 @@ string Net::to_string()
     {
         if(pin.node_p == nullptr)
         {
-            cout << "nullptr found!" << endl;
+            Logger::log_error("nullptr found!");
             exit(1);
         }
         s += "\t" + pin.node_p->getName() + " (Pin " + pin.pin_name + ") : " + pin.node_p->next.probe_pos.to_string() + "\n";
@@ -79,7 +79,7 @@ position_type Net::computeWirelength(string method)
     else
     {
         // Invalid, emit error
-        cout << "ERROR: no wirelength method named " << method << endl;
+        Logger::log_error("No wirelength method named " + method);
         exit(1);
     }
 }

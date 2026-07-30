@@ -1,5 +1,9 @@
-// top.cpp -- pl_algo PL kernel.
-//
+/**
+ * @file top.cpp
+ * @brief pl_algo PL kernel: one kernel whose active datapath is selected by `mode`.
+ *        A bring-up scaffold that verifies each module independently on the way to
+ *        the unified per-iteration datapath (Stage 5).
+ */
 // One kernel, modules selected by `mode` (host_interface.hpp top_mode). Bring-up
 // scaffold: each module is verified independently through one kernel while we
 // build toward the unified per-iteration datapath (Stage 5).

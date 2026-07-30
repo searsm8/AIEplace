@@ -248,4 +248,68 @@ void Placer::performNextStep(bool backtracking_enabled)
     if (Logger::isKeyActive("DEBUG")) logStepDiagnostics();
 }
 
+/// @brief Log per-iteration step diagnostics (gradient norms, step length, overflow) — DEBUG key only.
+void Placer::logStepDiagnostics()
+{
+    Logger::log_info("=== Step Diagnostics (iteration " + std::to_string(iteration) + ") ===");
+    Logger::log_info("  step_length (α̂):  " + PREC_P(step_length, 6));
+    Logger::log_info("  momentum_coeff:    " + PREC_P(momentum_coeff, 6));
+    Logger::log_info("  nesterov_ak:       " + PREC_P(nesterov_ak, 6));
+    Logger::log_info("  backtrack_steps:   " + std::to_string(backtrack_steps));
+
+    // Gradient statistics (from current state used for stepping)
+    float grad_L1 = 0.0f, max_grad = 0.0f;
+    for (auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
+        Node* n = item.second;
+        grad_L1 += fabs(n->current.probe_grad.x) + fabs(n->current.probe_grad.y);
+        max_grad = std::max(max_grad, std::max(fabs(n->current.probe_grad.x), fabs(n->current.probe_grad.y)));
+    }
+    Logger::log_info("  grad L1 norm:      " + SCI(grad_L1));
+    Logger::log_info("  max |grad|:        " + SCI(max_grad));
+    Logger::log_info("  α̂ * max|grad|:     " + SCI(step_length * max_grad) + "  (max single-step displacement)");
+
+    // Position delta statistics
+    float max_node_delta = 0.0f, max_probe_overshoot = 0.0f;
+    int clamped_count = 0;
+    float die_w = (float)grid.getDieWidth(), die_h = (float)grid.getDieHeight();
+    for (auto item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
+        Node* n = item.second;
+        float dx = fabs(n->next.node_pos.x - n->current.node_pos.x);
+        float dy = fabs(n->next.node_pos.y - n->current.node_pos.y);
+        max_node_delta = std::max(max_node_delta, std::max(dx, dy));
+
+        float ox = fabs(n->next.probe_pos.x - n->next.node_pos.x);
+        float oy = fabs(n->next.probe_pos.y - n->next.node_pos.y);
+        max_probe_overshoot = std::max(max_probe_overshoot, std::max(ox, oy));
+
+        bool at_boundary = (n->next.node_pos.x <= 0 || n->next.node_pos.x >= die_w ||
+                           n->next.node_pos.y <= 0 || n->next.node_pos.y >= die_h);
+        if (at_boundary)
+            clamped_count++;
+    }
+    Logger::log_info("  max |Δnode_pos|:   " + SCI(max_node_delta));
+    Logger::log_info("  max probe overshoot: " + SCI(max_probe_overshoot));
+    Logger::log_info("  nodes at boundary: " + std::to_string(clamped_count));
+
+    // Sample trace: first 3 components
+    int count = 0;
+    for (auto item : db.getComponents()) {
+        if (count >= 3) break;
+        if (item.second->getStatus() == FIXED) continue;
+        Node* n = item.second;
+        Logger::log_info("  --- Sample node: " + n->getName() + " ---");
+        Logger::log_info("    current.node_pos (u_k):   (" + PREC_P(n->current.node_pos.x, 2) + ", " + PREC_P(n->current.node_pos.y, 2) + ")");
+        Logger::log_info("    current.probe_pos (v_k):  (" + PREC_P(n->current.probe_pos.x, 2) + ", " + PREC_P(n->current.probe_pos.y, 2) + ")");
+        Logger::log_info("    current.probe_grad:       (" + SCI(n->current.probe_grad.x) + ", " + SCI(n->current.probe_grad.y) + ")");
+        Logger::log_info("    α̂ * grad:                 (" + SCI(step_length * n->current.probe_grad.x) + ", " + SCI(step_length * n->current.probe_grad.y) + ")");
+        Logger::log_info("    next.node_pos (u_{k+1}):  (" + PREC_P(n->next.node_pos.x, 2) + ", " + PREC_P(n->next.node_pos.y, 2) + ")");
+        Logger::log_info("    next.probe_pos (v_{k+1}): (" + PREC_P(n->next.probe_pos.x, 2) + ", " + PREC_P(n->next.probe_pos.y, 2) + ")");
+        Logger::log_info("    next.probe_grad:          (" + SCI(n->next.probe_grad.x) + ", " + SCI(n->next.probe_grad.y) + ")");
+        count++;
+    }
+    Logger::log_info("=== End Step Diagnostics ===");
+}
+
 AIEPLACE_NAMESPACE_END
