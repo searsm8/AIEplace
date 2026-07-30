@@ -159,7 +159,7 @@ void Visualizer::drawArrow(float x, float y, float x_mag, float y_mag)
 
 void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
 {
-    Logger::log_info("Exporting placement visualization to PNG...");
+    Logger::log_detail("Exporting placement visualization to PNG...");
     // Draw items from back to front in order of Fillers, Components, Pins, Nets, Focus Nets, Focus Nodes
     // Start with a white background
     cairo_set_source_rgb (m_cairo_ctx, 1.0, 1.0, 1.0); // white
@@ -194,7 +194,7 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
 
 void Visualizer::drawFillerCells(DataBase& db)
 {
-    for (auto item : db.getFillers()) {
+    for (const auto& item : db.getFillers()) {
        drawComponent(item);
     }
     cairo_set_source_rgb (m_cairo_ctx, 0.9, 0.9, 0.9);  // grey
@@ -203,7 +203,7 @@ void Visualizer::drawFillerCells(DataBase& db)
 
 void Visualizer::drawFixedComponents(DataBase& db)
 {
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
        if (item.second->getStatus() == FIXED)
            drawComponent(item.second);
     }
@@ -216,7 +216,7 @@ void Visualizer::drawFixedComponents(DataBase& db)
 
 void Visualizer::drawMovableStandardCells(DataBase& db, double macro_area_thresh)
 {
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
        Component* c = item.second;
        if (c->getStatus() == FIXED) continue;
        if ((double) c->getXsize() * c->getYsize() > macro_area_thresh) continue; // macros drawn red below
@@ -228,7 +228,7 @@ void Visualizer::drawMovableStandardCells(DataBase& db, double macro_area_thresh
 
 void Visualizer::drawMovableMacros(DataBase& db, double macro_area_thresh)
 {
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
        Component* c = item.second;
        if (c->getStatus() == FIXED) continue;
        if ((double) c->getXsize() * c->getYsize() <= macro_area_thresh) continue;
@@ -240,7 +240,7 @@ void Visualizer::drawMovableMacros(DataBase& db, double macro_area_thresh)
 
 void Visualizer::drawAllIOPads(DataBase& db)
 {
-    for (auto item : db.getIOPads())
+    for (const auto& item : db.getIOPads())
         drawIOPad(item.second);
 
     cairo_set_source_rgb (m_cairo_ctx, 1.0, 0.64, 0.0); // orange
@@ -305,7 +305,7 @@ void Visualizer::exportPlacementPNG(fs::path dir, const PlotInfo& info)
     Table t;
     t.add_row(RowStream{} << "VISUALIZER output PNG to ");
     t.add_row(RowStream{} << dir);
-    Logger::log_info(t);
+    Logger::log_detail(t);
     cairo_surface_write_to_png (m_surface, dir.c_str());
 }
 
@@ -353,7 +353,7 @@ void Visualizer::drawElectricField(Grid& grid, fs::path dir, int iteration)
     Table t;
     t.add_row(RowStream{} << "VISUALIZER output E-field to ");
     t.add_row(RowStream{} << dir);
-    Logger::log_info(t);
+    Logger::log_detail(t);
     cairo_surface_write_to_png (m_surface, dir.c_str());
 
 }

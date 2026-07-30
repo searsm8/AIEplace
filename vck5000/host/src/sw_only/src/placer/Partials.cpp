@@ -15,17 +15,15 @@ AIEPLACE_NAMESPACE_BEGIN
 ///        (cpu / simple) to accumulate the WA-HPWL partials for this iteration.
 void Placer::computeHpwlPartials()
 {
-    TIME_FUNCTION();
-
     // Clear probe_grad before accumulation, otherwise gradients compound across iterations.
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         item.second->next.probe_grad.clear();
     }
     for (auto filler_p : db.getFillers()) {
         filler_p->next.probe_grad.clear();
     }
-    for (auto item : db.getIOPads()) {
+    for (const auto& item : db.getIOPads()) {
         item.second->next.probe_grad.clear();
     }
 
@@ -60,7 +58,7 @@ void Placer::initHpwlLut()
     // Set gamma-dependent scalars for the initial gamma value
     hpwl_lut_range = LUT_GAMMA_MULTIPLIER * gamma;
     inv_lut_step   = 1.0f / (LUT_STEP_NORM * gamma);
-    Logger::log_info("HPWL LUT initialized: " + std::to_string(hpwl_lut_size)
+    Logger::log_detail("HPWL LUT initialized: " + std::to_string(hpwl_lut_size)
         + " entries (normalized), init_gamma=" + std::to_string(gamma));
 }
 
@@ -144,6 +142,49 @@ void Placer::computeHpwlPartials_simple()
     }
 }
 
+/*
+ * Divergence diagnostics for computeHpwlPartials_CPU. Both dump the full local state of the
+ * offending net so a failure is debuggable from the log alone; both are cold paths that end the
+ * run, so they are kept out of the gradient loop to leave the math readable.
+ * (Non-const refs because Term/Net to_string() and getName() are not const in this codebase.)
+ */
+
+/// @brief Log a zero B term: every A term of that net underflowed to 0, so the WA denominator
+///        vanished. Usually means gamma has collapsed or pin coordinates have blown up.
+static void logZeroBTermDiagnostic(Net* net_p, const std::vector<NetPin>& pins,
+                                   std::vector<Term>& A, Term& B,
+                                   float min_x, float max_x, float min_y, float max_y)
+{
+    int net_size = (int)pins.size();
+    Logger::log_error("Zero value detected in B terms, cannot compute partials for net " + net_p->getName());
+    Logger::log_error("B: " + B.to_string());
+    Logger::log_error(net_p->to_string());
+    for (int i = 0; i < net_size; i++)
+        Logger::log_error("A[" + std::to_string(i) + "]: " + A[i].to_string() + " node: " + pins[i].node_p->getName());
+    Logger::log_error("max_x: " + std::to_string(max_x) + " min_x: " + std::to_string(min_x) +
+                      " max_y: " + std::to_string(max_y) + " min_y: " + std::to_string(min_y));
+    Logger::log_error("Pin positions:");
+    for (int i = 0; i < net_size; i++) {
+        Position p = pins[i].getProbePos();
+        Logger::log_error("Node " + pins[i].node_p->getName() +
+                          " pin_x: " + std::to_string(p.x) + " pin_y: " + std::to_string(p.y));
+    }
+}
+
+/// @brief Log a NaN partial for one pin, with the A/B/C terms it was formed from.
+static void logNaNPartialDiagnostic(Net* net_p, const NetPin& pin, const Gradient& partial,
+                                    Term& A_i, Term& B, Term& C, int net_size)
+{
+    Logger::log_error("NaN detected in partials for node " + pin.node_p->getName() +
+                      " in net " + net_p->getName());
+    Logger::log_error("partial x: " + std::to_string(partial.x) + " y: " + std::to_string(partial.y));
+    Logger::log_error("net size: " + std::to_string(net_size));
+    Logger::log_error(net_p->to_string());
+    Logger::log_error("A: " + A_i.to_string());
+    Logger::log_error("B: " + B.to_string());
+    Logger::log_error("C: " + C.to_string());
+}
+
 /**
  * @brief Exact weighted-average HPWL gradient on the CPU — the golden reference the AIE
  *        and 'simple' backends are checked against. High-degree nets are masked out to
@@ -173,7 +214,7 @@ void Placer::computeHpwlPartials_CPU()
 
         // Compute A terms directly into our flat vector
         std::vector<Term> A(net_size);
-        for (size_t i = 0; i < net_size; i++) {
+        for (int i = 0; i < net_size; i++) {
             Position p = pins[i].getProbePos();
             A[i].plus.x  = exp((p.x - max_x) * inv_gamma);
             A[i].minus.x = exp((min_x - p.x) * inv_gamma);
@@ -184,7 +225,7 @@ void Placer::computeHpwlPartials_CPU()
         // Compute B and C terms
         Term B, C;
         B.clear(); C.clear();
-        for (size_t i = 0; i < net_size; i++) {
+        for (int i = 0; i < net_size; i++) {
             Position p = pins[i].getProbePos();
             B.plus.x  += A[i].plus.x;
             B.minus.x += A[i].minus.x;
@@ -196,32 +237,25 @@ void Placer::computeHpwlPartials_CPU()
             C.minus.y += A[i].minus.y * p.y;
         }
 
+        // Guard BEFORE dividing: a zero B term makes the reciprocals below inf/NaN, so the
+        // diagnostic has to run first or it only reports damage already done (and the asserts
+        // compile out under NDEBUG, leaving a silent NaN to propagate into the gradient).
+        if(B.plus.x == 0 || B.minus.x == 0 || B.plus.y == 0 || B.minus.y == 0) {
+            logZeroBTermDiagnostic(net_p, pins, A, B, min_x, max_x, min_y, max_y);
+            // Same hard-divergence path as the NaN check below: flag and stop rather than
+            // emitting inf gradients, so finalization still reports a best-so-far result.
+            m_nan_detected = true;
+            return;
+        }
+
         // Pre-compute common terms
         float bpx_sq_inv = 1.0f / (B.plus.x * B.plus.x);
         float bmx_sq_inv = 1.0f / (B.minus.x * B.minus.x);
         float bpy_sq_inv = 1.0f / (B.plus.y * B.plus.y);
         float bmy_sq_inv = 1.0f / (B.minus.y * B.minus.y);
 
-        if(B.plus.x == 0 || B.minus.x == 0 || B.plus.y == 0 || B.minus.y == 0) {
-            Logger::log_error("Zero value detected in B terms, cannot compute partials for net " + net_p->getName());
-            Logger::log_error("B: " + B.to_string());
-            Logger::log_error(net_p->to_string());
-            for (size_t i = 0; i < net_size; i++)
-                Logger::log_error("A[" + std::to_string(i) + "]: " + A[i].to_string() + " node: " + pins[i].node_p->getName());
-            Logger::log_error("max_x: " + std::to_string(max_x) + " min_x: " + std::to_string(min_x) + " max_y: " + std::to_string(max_y) + " min_y: " + std::to_string(min_y));
-            Logger::log_error("Pin positions:");
-            for (size_t i = 0; i < net_size; i++) {
-                Position p = pins[i].getProbePos();
-                Logger::log_error("Node " + pins[i].node_p->getName() + " pin_x: " + std::to_string(p.x) + " pin_y: " + std::to_string(p.y));
-            }
-        }
-        assert(B.plus.x  != 0 && "B.plus.x is zero, cannot compute partials");
-        assert(B.minus.x != 0 && "B.minus.x is zero, cannot compute partials");
-        assert(B.plus.y  != 0 && "B.plus.y is zero, cannot compute partials");
-        assert(B.minus.y != 0 && "B.minus.y is zero, cannot compute partials");
-
         // Compute partials and store — gradient accumulates onto parent node
-        for (size_t i = 0; i < net_size; i++) {
+        for (int i = 0; i < net_size; i++) {
             Position p = pins[i].getProbePos();
 
             Gradient partial;
@@ -237,13 +271,7 @@ void Placer::computeHpwlPartials_CPU()
 
             //check for NaNs
             if(partial.x != partial.x || partial.y != partial.y) {
-                Logger::log_error("NaN detected in partials for node " + pins[i].node_p->getName() + " in net " + net_p->getName());
-                Logger::log_error("partial x: " + std::to_string(partial.x) + " y: " + std::to_string(partial.y));
-                Logger::log_error("net size: " + std::to_string(net_size));
-                Logger::log_error(net_p->to_string());
-                Logger::log_error("A: " + A[i].to_string());
-                Logger::log_error("B: " + B.to_string());
-                Logger::log_error("C: " + C.to_string());
+                logNaNPartialDiagnostic(net_p, pins[i], partial, A[i], B, C, net_size);
                 // Hard divergence: flag it and stop computing partials rather than exit(1).
                 // run() breaks on m_nan_detected so finalization restores the best-so-far placement
                 // and still writes a results row (a DSE sweep no longer loses the run).

@@ -13,8 +13,8 @@ xclbin = "bin/aieplace.hw.xclbin"
 
 [params]
 # Computation method selection
-partials_compute_method = "cpu" # choose: aie, cpu, simple, hybrid, threaded
-density_compute_method  = "cpu" # choose: aie, cpu
+partials_compute_method = "cpu" # choose: cpu (exact WA gradient, the golden) or simple (LUT approximation)
+density_compute_method  = "cpu" # choose: cpu (only option in sw_only; AIE/PL offload lives in the pl_algo variant)
 # bins_per_row intentionally OMITTED -> grid auto-sized by the ePlace formula (AIEplace.cpp).
 # Set it here (or per-run) only to force a fixed grid (ad-hoc override / AIE datapath).
 wirelength_method = "HPWL"      # choose: HPWL
@@ -33,6 +33,18 @@ enable_filler       = true      # whether to include filler cells in placement (
 auto_enable_preconditioning = true
 precond_coef_escalation = true  # double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef); false = diagnostic (fixed precond_coef)
 enable_density_clamp = true     # clamp sub-bin cells to ~bin size in the density solve (XPlace expand_ratio); smooths the force
+
+# --- TEMPORARY A/B toggles (TODO #11). Two documented divergences from XPlace, both default
+# false = legacy sw_only behavior. Delete the losing branch once the A/B has decided. ---
+xplace_die_projection = false   # #11a. false = legacy: clamp the position by the RAW cell size, then
+                                 # shift the sqrt(2)-expanded footprint back in-die at deposit time.
+                                 # true  = XPlace trunc_node_pos_fn: clamp the position so the
+                                 # EXPANDED footprint is already in-die (deposit-time shift disabled),
+                                 # so the deposited mass stays centred on the cell.
+macro_td_expand_ratio = false   # #11b. true = movable macros deposit at weight = target_density
+                                 # instead of the area-conserving real/clamped ratio (XPlace
+                                 # database.py:921). No effect when maximum_utilization == 1.0, so
+                                 # ISPD2005 is unaffected; only bites on ISPD2015/MMS.
 dct_normalize = true            # 1/N per FORWARD DCT (bounds a_uv; global scale absorbed by lambda). The
                                  # inverse transform is deliberately NOT normalized (field-faithful: the forward
                                  # already carries 1/N^2; normalizing the inverse too would double-normalize and
@@ -43,7 +55,6 @@ init_gamma = 4          # plays XPlace's wa_coeff role; with gamma_bin_scaled, b
 gamma_schedule = true   # if true, gamma follows overflow-driven schedule (XPlace-style); starts at 10x base_gamma
 gamma_bin_scaled = true # tie base_gamma to bin geometry referenced to gamma_ref_grid (grid-independent); false = legacy bare init_gamma constant
 gamma_ref_grid = 512    # reference grid for gamma_bin_scaled: base_gamma = init_gamma*(die_w+die_h)/gamma_ref_grid; keeps absolute gamma grid-independent (512 matches the tuned suite)
-max_threads = 1         # multithreading not yet implemented
 init_step_seed = 0.01   # SEED for the iteration-1 Barzilai-Borwein step estimate (XPlace args.lr),
                         # not the literal first step: estimateInitialStep() takes one trial step of
                         # this size, then sets α = ||Δpos|| / ||Δgrad||. A robust internal default;
@@ -72,7 +83,11 @@ maximum_utilization = 1.0  # Default target density. Overridden by benchmark's p
 
 [output]
 quiet = false       # if true, suppress all std output. Errors still printed. Useful for batch or DSE runs.
-interactive = true  # if false, suppress the per-iteration live-status table.
+# interactive: leave unset to follow the stream -- a terminal gets the banner and the live-status
+# table, a pipe (DSE sweep, nohup log) gets neither. Set true/false to force. Either way the run
+# directory gets run.log, the full-detail report; the console only ever shows a curated subset.
+#interactive = true
+iterations_per_status = 10 # live-status table cadence: print every Nth iteration (plus iteration 1)
 results_dir = "results/single_runs" # overridden by DSE
 
 # Visualization options

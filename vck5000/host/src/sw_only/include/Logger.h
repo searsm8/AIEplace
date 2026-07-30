@@ -1,14 +1,13 @@
 /**
  * @file Logger.h
- * @brief Singleton logger with severity keys, scientific-notation helpers, and tabulate-based
- *        table/report formatting.
+ * @brief Static logger with an ordered severity scale, scientific-notation helpers, and
+ *        tabulate-based table/report formatting.
  */
 #pragma once
 
 #include "Common.h"
 #include "Grid.h"
 #include <unordered_set>
-#include <mutex>
 #include <climits>
 #include <variant>
 #include <tabulate/table.hpp>
@@ -47,20 +46,33 @@ class Timer;
 class ScopeTimer;
 class MemoryTracker;
 
-
+/**
+ * @brief Ordered severity scale. One console threshold admits every level at or above it, so
+ *        raising the bar can never leave a chattier level enabled by accident — the failure
+ *        mode of the old independently-toggled key set.
+ *
+ *        TRACE/DEBUG sit BELOW DETAIL on purpose: the run report captures DETAIL and above, so
+ *        the two developer-dump levels stay opt-in and never bloat it. ITER (the per-iteration
+ *        live-status line) sits just below INFO so a non-interactive run can keep every INFO
+ *        message while dropping the live status, with the same single threshold.
+ */
+enum class LogLevel { TRACE = 0, DEBUG, DETAIL, ITER, INFO, WARNING, ERROR, CRITICAL, OFF };
 
 class Logger {
 private:
-    // Singleton class pattern
-    static Logger* iLogger; // single instance of logger
-    static std::mutex iMutex;
-
     // Define type to match tabulate's expected types:
     using MsgType = std::variant<std::string, const char*, std::string_view, tabulate::Table>;
 
-    static std::unordered_set<string> keys;
-    static std::map<string, tabulate::Color> string_colors;
+    static LogLevel console_level;                  // console threshold; OFF disables the console
+    static bool console_color;                      // ANSI on stdout — TTY only, never in a pipe
+    static std::unordered_set<string> custom_keys;  // named channels, orthogonal to the scale
 
+    // Full-detail run report: everything at REPORT_LEVEL and above goes here regardless of the
+    // console threshold, so the console can stay curated without losing the nuisance detail.
+    // Lines logged before the run directory exists are held in the backlog and flushed on open.
+    static constexpr LogLevel REPORT_LEVEL = LogLevel::DETAIL;
+    static std::ofstream report_file;
+    static std::vector<string> report_backlog;
 
     struct FunctionStatBlock {
         long long total_time = 0;        // Total time in microseconds
@@ -72,41 +84,43 @@ private:
 
     static std::unordered_map<string, FunctionStatBlock> function_stats_map;
 
-    // Constructor, private for singleton
-    Logger();
+    static string render(const MsgType& msg);
+    static void emit(const string& tag, const char* ansi, const string& text,
+                     bool to_console, bool to_report);
 
 public:
-    // Singleton access
-    static Logger& getLogger();
-    static Logger& getMutex();
-
     // Setup functions
-    static void setup_logging(bool quiet = false);
+    static void setup_logging(LogLevel console);
+    static void openReport(fs::path dir, string filename = "run.log");
 
     static inline void activate_logging_key(string key)
-    { Logger::keys.insert(key); }
+    { Logger::custom_keys.insert(key); }
 
     static inline void deactivate_logging_key(string key)
-    { Logger::keys.erase(key); }
+    { Logger::custom_keys.erase(key); }
 
     static inline bool isKeyActive(const string& key)
-    { return Logger::keys.count(key) > 0; }
+    { return Logger::custom_keys.count(key) > 0; }
+
+    /// @brief True if @p level would reach the console or the report. Gate expensive diagnostic
+    ///        computation on this so it is not built only to be discarded.
+    static inline bool isLevelActive(LogLevel level)
+    { return level >= console_level || level >= REPORT_LEVEL; }
 
 
-    // Primary logging fucntions
-    static bool log(string key, MsgType msg);
-
-    static tabulate::Color getColor(string key);
+    // Primary logging functions
+    static bool log(LogLevel level, const MsgType& msg);
+    static bool log_key(const string& key, const MsgType& msg);
 
     // inline functions for convenience
-    static inline void log_trace(const MsgType& msg)    { iLogger->log("TRACE", msg); }
-    static inline void log_detail(const MsgType& msg)   { iLogger->log("DETAIL", msg); }
-    static inline void log_debug(const MsgType& msg)    { iLogger->log("DEBUG", msg); }
-    static inline void log_iter(const MsgType& msg)      { iLogger->log("ITER", msg); }
-    static inline void log_info(const MsgType& msg)     { iLogger->log("INFO", msg); }
-    static inline void log_warning(const MsgType& msg)  { iLogger->log("WARNING", msg); }
-    static inline void log_error(const MsgType& msg)    { iLogger->log("ERROR", msg); }
-    static inline void log_critical(const MsgType& msg) { iLogger->log("CRITICAL", msg); }
+    static inline void log_trace(const MsgType& msg)    { log(LogLevel::TRACE, msg); }
+    static inline void log_debug(const MsgType& msg)    { log(LogLevel::DEBUG, msg); }
+    static inline void log_detail(const MsgType& msg)   { log(LogLevel::DETAIL, msg); }
+    static inline void log_iter(const MsgType& msg)     { log(LogLevel::ITER, msg); }
+    static inline void log_info(const MsgType& msg)     { log(LogLevel::INFO, msg); }
+    static inline void log_warning(const MsgType& msg)  { log(LogLevel::WARNING, msg); }
+    static inline void log_error(const MsgType& msg)    { log(LogLevel::ERROR, msg); }
+    static inline void log_critical(const MsgType& msg) { log(LogLevel::CRITICAL, msg); }
 
     // Report generation functions
     static void export_markdown(tabulate::Table t, fs::path dir, string filename = "statistics");

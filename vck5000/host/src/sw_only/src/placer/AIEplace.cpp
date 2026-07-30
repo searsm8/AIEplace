@@ -70,7 +70,7 @@ Placer::Placer(std::string config_filepath)
     m_config_filepath = config_filepath;
 
     setupDesign();
-    Logger::log_info("Database setup time: " + 
+    Logger::log_detail("Database setup time: " + 
             std::to_string(Logger::getFunctionTime("setupDesign") / 1.0e6) + " s");
 
     setupGrid();
@@ -92,7 +92,7 @@ void Placer::iterationReset()
 /// @brief Save current movable + filler positions as the best-so-far solution (divergence guard).
 void Placer::snapshotBestPlacement()
 {
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         item.second->best_solution_pos = item.second->next.node_pos;
     }
@@ -103,7 +103,7 @@ void Placer::snapshotBestPlacement()
 /// @brief Restore movable + filler positions from the saved best-so-far solution.
 void Placer::restoreBestPlacement()
 {
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         item.second->next.node_pos = item.second->best_solution_pos;
     }

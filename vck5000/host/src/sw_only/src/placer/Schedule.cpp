@@ -54,7 +54,7 @@ void Placer::configureGammaSchedule()
     inv_gamma = 1.0f / gamma;
     if (partials_method == "simple")
         initHpwlLut();
-    Logger::log_info("WA gamma: base_gamma=" + std::to_string(base_gamma) +
+    Logger::log_detail("WA gamma: base_gamma=" + std::to_string(base_gamma) +
                      " (bin_scaled=" + std::string(gamma_bin_scaled ? "true" : "false") +
                      "), initial gamma=" + std::to_string(gamma));
 }
@@ -131,7 +131,7 @@ void Placer::updateDensityWeight()
     {
         density_weight *= 2.0f;
         last_density_jolt_iter = iteration;
-        Logger::log_info("Overflow plateau detected (ovfw=" +
+        Logger::log_detail("Overflow plateau detected (ovfw=" +
             PREC(ovfw_history.back()) + "), 2x density weight jolt -> " +
             PREC(density_weight));
     }
@@ -243,7 +243,7 @@ void Placer::updatePrecondWeights()
 
     // Area term for a2: RAW node area, matching XPlace alpha_2 = pcoef·λ·mov_node_area — the
     // coordinate-scale-invariant form (sw_only runs in the same raw-DBU frame as XPlace).
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         Node* node_p = item.second;
         float num_pins = (float)node_p->getNets().size();
@@ -386,7 +386,7 @@ bool Placer::checkOverflowCountdown()
     if (convergence_iterations_remaining < 0) {
         // First crossing below threshold — start countdown
         convergence_iterations_remaining = convergence_iterations;
-        Logger::log_info("Overflow below " + PREC(overflow_threshold) +
+        Logger::log_detail("Overflow below " + PREC(overflow_threshold) +
                         ", starting convergence countdown (" +
                         std::to_string(convergence_iterations) + " iterations)");
     }

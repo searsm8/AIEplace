@@ -10,6 +10,7 @@
 #include <cmath>
 #include <algorithm>
 #include <random>
+#include <unistd.h> // isatty
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -22,13 +23,70 @@ void Placer::setupDesign()
     loadDesignDatabase();
     analyzeDesignArea(bins_auto);
     configurePreconditioner();
+    tagMovableMacros();
 }
 
 void Placer::setupGrid()
 {
     grid = Grid(db.getDieArea(), bins_per_row, bins_per_row);
     grid.setClampDensity(enable_density_clamp);
+    // TODO #11a: when the position itself is projected so the expanded footprint is in-die, the
+    // deposit-time shift must be OFF or the same correction is applied twice.
+    grid.setShiftFootprintInDie(!xplace_die_projection);
+    grid.setMacroTargetDensityWeight(macro_td_expand_ratio);   // TODO #11b
+    grid.setTargetDensity(target_density);
     die_size = min(grid.getDieWidth(), grid.getDieHeight());
+}
+
+/**
+ * @brief Tag movable macros with XPlace's is_mov_macro rule (database.py:621-632), used only by
+ *        the TODO #11b experiment. A MOVABLE node is a macro iff all three hold:
+ *          1. height > 2.01 * row_height          (taller than ~two standard-cell rows)
+ *          2. area   > 10 * mean(area of the smallest 99.9% of movable nodes)
+ *          3. both dimensions non-degenerate
+ *        Fillers are excluded (XPlace's masked_fill spans only the real movable range), as are
+ *        FIXED nodes (XPlace clears is_mov_macro above mov_rhs).
+ *
+ * row_height uses the mean movable cell height — the same proxy analyzeDesignArea already uses for
+ * the ePlace grid formula; sw_only has no parsed row pitch exposed here.
+ *
+ * NOTE: this is a finer rule than the die-area heuristic behind Placer::num_movable_macros (which
+ * drives the auto-preconditioner). Two macro definitions now coexist — unify later, see TODO #11.
+ */
+void Placer::tagMovableMacros()
+{
+    std::vector<float> movable_areas;
+    float height_sum = 0.0f;
+    for (const auto& item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
+        movable_areas.push_back(item.second->getArea());
+        height_sum += item.second->getYsize();
+    }
+    if (movable_areas.empty()) return;
+
+    float row_height = height_sum / movable_areas.size();
+
+    // Threshold from the smallest 99.9% of movable areas, so a handful of huge macros cannot drag
+    // the mean up and hide themselves.
+    std::vector<float> ascending_areas = movable_areas;
+    std::sort(ascending_areas.begin(), ascending_areas.end());
+    size_t small_count = std::max<size_t>(1, (size_t)(ascending_areas.size() * 0.999));
+    float mean_small_area = std::accumulate(ascending_areas.begin(),
+                                            ascending_areas.begin() + small_count, 0.0f) / small_count;
+    float macro_area_threshold = 10.0f * mean_small_area;
+
+    int tagged = 0;
+    for (const auto& item : db.getComponents()) {
+        Component* comp_p = item.second;
+        if (comp_p->getStatus() == FIXED) continue;
+        bool is_tall  = comp_p->getYsize() > 2.01f * row_height;
+        bool is_large = comp_p->getArea() > macro_area_threshold;
+        bool is_sized = comp_p->getXsize() > 1e-4f && comp_p->getYsize() > 1e-4f;
+        comp_p->setMovableMacro(is_tall && is_large && is_sized);
+        if (comp_p->isMovableMacro()) tagged++;
+    }
+    Logger::log_detail("Movable macros (XPlace is_mov_macro rule): " + std::to_string(tagged)
+        + "  [row_height=" + PREC(row_height) + ", area_thresh=" + SCI(macro_area_threshold) + "]");
 }
 
 /**
@@ -63,8 +121,8 @@ void Placer::loadDesignDatabase()
 }
 
 /**
- * @brief Parse the (comment-stripped) JSON config file named by m_config_filepath into
- *        cfg, then read every hyperparameter, compute-method, and convergence setting.
+ * @brief Parse the TOML config file named by m_config_filepath into cfg (toml++), then read
+ *        every hyperparameter, compute-method, and convergence setting.
  *        gamma/base_gamma are only seeded here; they are finalized once the grid exists.
  */
 void Placer::loadConfiguration()
@@ -92,10 +150,14 @@ void Placer::loadConfiguration()
         exit(1);
     }
 
-    // Setup logging (quiet mode suppresses all output except errors)
+    // Console verbosity. `interactive` follows the stream unless the config forces it: a terminal
+    // gets the banner and the live-status table, a pipe (DSE sweep, nohup log) gets neither.
+    // Either way the full-detail run report is written to the run directory (see openReport).
     quiet = cfg["output"]["quiet"].value_or(quiet);
-    Logger::setup_logging(quiet);
-    interactive = cfg["output"]["interactive"].value_or(interactive);
+    interactive = cfg["output"]["interactive"].value_or(isatty(fileno(stdout)) != 0);
+    Logger::setup_logging(quiet       ? LogLevel::ERROR   // errors only
+                          : interactive ? LogLevel::ITER  // + per-iteration live status
+                                        : LogLevel::INFO);
     printWelcomeBanner();
     Logger::log_info("Reading runtime configuration from: " + m_config_filepath);
 
@@ -113,15 +175,15 @@ void Placer::loadConfiguration()
     init_step_seed = cfg["params"]["init_step_seed"].value<float>()
                    .value_or(cfg["params"]["init_step_length"].value_or(0.01f));
     if (!cfg["params"]["init_step_seed"] && cfg["params"]["init_step_length"])
-        Logger::log_info("Config uses deprecated 'init_step_length'; treat as 'init_step_seed'.");
+        Logger::log_warning("Config uses deprecated 'init_step_length'; treat as 'init_step_seed'.");
     step_length = init_step_seed; // placeholder; estimateInitialStep() overwrites on iteration 1
     density_weight = 1.0f; // will be updated on iteration 1 after computing gradients
 
     // Read compute methods
     partials_method = ConfigUtils::require<std::string>(cfg, "params", "partials_compute_method");
     density_method = ConfigUtils::require<std::string>(cfg, "params", "density_compute_method");
-    Logger::log_info("Partials compute method: " + partials_method);
-    Logger::log_info("Density compute method:  " + density_method);
+    Logger::log_detail("Partials compute method: " + partials_method);
+    Logger::log_detail("Density compute method:  " + density_method);
 
     // Read Convergence criteria
     max_iterations = ConfigUtils::require<int>(cfg, "params", "convergence_max_iterations");
@@ -136,6 +198,8 @@ void Placer::loadConfiguration()
     auto_enable_preconditioning = cfg["params"]["auto_enable_preconditioning"].value_or(auto_enable_preconditioning);
     precond_coef_escalation = cfg["params"]["precond_coef_escalation"].value_or(precond_coef_escalation);
     enable_density_clamp = cfg["params"]["enable_density_clamp"].value_or(enable_density_clamp);
+    xplace_die_projection = cfg["params"]["xplace_die_projection"].value_or(xplace_die_projection);
+    macro_td_expand_ratio = cfg["params"]["macro_td_expand_ratio"].value_or(macro_td_expand_ratio);
     dct_normalize = cfg["params"]["dct_normalize"].value_or(dct_normalize);
     convergence_window = ConfigUtils::require<int>(cfg, "params", "convergence_window");
     convergence_iterations = cfg["params"]["convergence_iterations"].value_or(convergence_iterations);
@@ -143,7 +207,6 @@ void Placer::loadConfiguration()
     backtrack_epsilon = ConfigUtils::require<float>(cfg, "params", "backtrack_epsilon");
 
     // Read other stuff
-    MAX_THREADS = ConfigUtils::require<int>(cfg, "params", "max_threads");
     input_dir = fs::path(ConfigUtils::require<std::string>(cfg, "input", "benchmark"));
     results_dir = fs::path(ConfigUtils::require<std::string>(cfg, "output", "results_dir"));
 }
@@ -260,7 +323,7 @@ void Placer::initializePlacement()
     float bin_area_16th = grid.getBinWidth() * grid.getBinHeight() / 16;
     int placed_count = 0, randomized_count = 0;
 
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
         Component* comp_p = item.second;
 
         // If components are already tagged as PLACED or FIXED, leave them alone
@@ -276,7 +339,7 @@ void Placer::initializePlacement()
 
         comp_p->checkIfLarge(bin_area_16th);
     }
-    Logger::log_info("Initial placement: " + std::to_string(placed_count) +
+    Logger::log_detail("Initial placement: " + std::to_string(placed_count) +
                      " from benchmark, " + std::to_string(randomized_count) + " randomized");
 
     // Place Fillers uniformly at random across the whole die (XPlace get_filler_pos):
@@ -289,9 +352,25 @@ void Placer::initializePlacement()
     }
 
     // Initialize IO pad state (fixed, but need valid probe_pos for gradient computation)
-    for (auto item : db.getIOPads())
+    for (const auto& item : db.getIOPads())
         item.second->initializeState(item.second->next.node_pos);
 
+
+    // TODO #11a: XPlace applies trunc_node_pos_fn once before the first gradient (initializer.py
+    // init_params). It matters here because fillers are seeded uniformly at random, so some start
+    // with their expanded footprint hanging off the die. Legacy mode skips this — the deposit-time
+    // shift absorbs it — so gating keeps the legacy trajectory bit-identical.
+    if (xplace_die_projection) {
+        for (const auto& item : db.getComponents()) {
+            if (item.second->getStatus() == FIXED) continue;
+            enforceDieBoundaries(item.second);
+            item.second->cacheState();   // resync current with the projected next
+        }
+        for (auto filler_p : db.getFillers()) {
+            enforceDieBoundaries(filler_p);
+            filler_p->cacheState();
+        }
+    }
 
     //printIterationResults(); // Prints "iteration 0" starting statistics
     iteration = 0;
@@ -311,7 +390,7 @@ void Placer::initializeDensityWeight()
 {
     float HPWL_L1_norm = 0.0f;
     float density_L1_norm = 0.0f;
-    for(auto item : db.getComponents()) {
+    for(const auto& item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         Node* node_p = item.second;
 
@@ -332,9 +411,9 @@ void Placer::initializeDensityWeight()
     last_gwl_L1  = HPWL_L1_norm;    // seeds density_force_fraction for iteration 1
     last_gden_L1 = density_L1_norm;
 
-    Logger::log_info("Initial HPWL gradient L1 norm: " + std::to_string(HPWL_L1_norm));
-    Logger::log_info("Initial density gradient L1 norm: " + std::to_string(density_L1_norm));
-    Logger::log_info("Initialized density_weight: " + std::to_string(density_weight));
+    Logger::log_detail("Initial HPWL gradient L1 norm: " + std::to_string(HPWL_L1_norm));
+    Logger::log_detail("Initial density gradient L1 norm: " + std::to_string(density_L1_norm));
+    Logger::log_detail("Initialized density_weight: " + std::to_string(density_weight));
 }
 
 AIEPLACE_NAMESPACE_END

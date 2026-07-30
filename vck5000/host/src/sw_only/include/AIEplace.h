@@ -3,7 +3,7 @@
 #include "Common.h"
 #include "DataBase.h"
 #include "Grid.h"
-#include "Logger.h" // or DebugFramework
+#include "Logger.h"
 #include "toml.hpp"
 
 #include <chrono>
@@ -21,8 +21,9 @@
 AIEPLACE_NAMESPACE_BEGIN
 
 namespace ConfigUtils {
-    /// @brief Required config read: logs an error and exits if [section].key is absent (mirrors
-    /// the old nlohmann behavior, where indexing a missing required key threw at parse time).
+    /// @brief Required config read: logs an error and exits if [section].key is absent.
+    /// toml++ returns an empty optional for a missing key rather than throwing, so the
+    /// "this key is mandatory" contract has to be expressed here.
     template <typename T>
     T require(const toml::table& cfg, std::string_view section, std::string_view key)
     {
@@ -46,6 +47,7 @@ private:
     void loadDesignDatabase();             // read LEF/DEF, apply benchmark max_util, add fillers
     void analyzeDesignArea(bool bins_auto); // movable/fixed area stats, macro count, ePlace-formula grid size
     void configurePreconditioner();        // auto-enable decision from num_movable_macros
+    void tagMovableMacros();               // XPlace is_mov_macro rule (TODO #11b)
     void setupGrid();                      // build the Grid from bins_per_row, clamp density, set die_size
     void configureGammaSchedule();         // grid-independent base_gamma, gamma/inv_gamma, LUT init
     void initializeVisualization();        // no-op when CREATE_VISUALIZATION isn't defined
@@ -112,6 +114,13 @@ public:
     int  formula_bins_per_row = 0;           // grid the ePlace auto-formula picks (recorded even when overridden)
     bool precond_coef_escalation = true; // double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef)
     bool enable_density_clamp = true;   // clamp sub-bin cells in the density solve (XPlace expand_ratio)
+    // --- TEMPORARY A/B toggles (TODO #11): two documented divergences from XPlace, both default
+    // OFF = legacy sw_only behavior. Remove the losing branch once the A/B has decided. ---
+    bool xplace_die_projection = false; // #11a: constrain the POSITION so the EXPANDED footprint is
+                                        // in-die (XPlace trunc_node_pos_fn), instead of clamping the
+                                        // position by raw size and shifting the footprint at deposit.
+    bool macro_td_expand_ratio = false; // #11b: movable macros deposit at weight = target_density
+                                        // instead of the area-conserving ratio (XPlace database.py:921)
     bool dct_normalize = true;   // apply 1/N per forward DCT (bounds a_uv intermediates; global scale absorbed by lambda)
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
     float avg_node_size = 1.0f; // average movable cell area; grid-sizing divisor for the no-macros case
@@ -126,7 +135,6 @@ public:
 
     int die_size; // minimum of width and height of the die area
     int bins_per_row; // grid size
-    int MAX_THREADS; // max number of threads to use
 
     // Methods of computation, loaded from config file
     std::string partials_method;
@@ -160,10 +168,11 @@ public:
 
     // Execution tracking
     int iteration = 0;
-    bool quiet = false; // if true, suppress all console output except errors (for DSE runs)
-    bool interactive = true; // if false, suppress the per-iteration live-status table (for
-                             // non-interactive single runs, e.g. piped to a log file); orthogonal
-                             // to quiet, which controls overall logging verbosity
+    // Console verbosity, resolved in loadConfiguration(). quiet wins: errors only. Otherwise
+    // interactive defaults to isatty(stdout) — a terminal gets the banner and the per-iteration
+    // live-status table, a pipe gets the bare minimum. The run report is written either way.
+    bool quiet = false;
+    bool interactive = true;
     bool m_nan_detected = false; // set when a NaN appears in the HPWL partials (hard divergence);
                              // run() breaks the loop so printFinalResults() still emits a
                              // best-so-far results row instead of the process aborting.

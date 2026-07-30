@@ -21,7 +21,8 @@ using namespace tabulate; // table types, scoped to this .cpp (not leaked via Lo
 
 void Placer::printWelcomeBanner(bool show_info)
 {
-    if (!Logger::isKeyActive("INFO"))
+    // Decoration: terminal only. A piped log opens on the first real message instead.
+    if (!interactive || quiet)
         return;
 
     // Raw string logo
@@ -98,8 +99,8 @@ void Placer::printIterationSummaryTable(float hpwl, float overflow)
     // iteration 1 too, so a slow/large design gives immediate confirmation it's running instead
     // of going silent for the entire first X iterations (which reads as a hang).
     if (!interactive) return;
-    int X = 10;
-    if (iteration != 1 && iteration % X != 0) return;
+    int cadence = cfg["output"]["iterations_per_status"].value_or(10);
+    if (iteration != 1 && iteration % cadence != 0) return;
 
     // Transposed: one header line of field names, one line of values, so the whole report
     // fits on 2 lines instead of one row per field. Header line only printed the first time.
@@ -212,7 +213,10 @@ void Placer::createRunOutputStructure()
 
     fs::create_directories(output_dir);
 
-    Logger::log_info("Created output directory: " + output_dir.string());
+    // From here on the full-detail report captures everything; the backlog of lines logged
+    // during setup (before this directory existed) is flushed into it now.
+    Logger::openReport(output_dir);
+    Logger::log_detail("Created output directory: " + output_dir.string());
 }
 
 void Placer::writeResultsCSV(float final_hpwl, float final_hpwl_exact, float final_overflow,
@@ -458,7 +462,7 @@ void Placer::logOverflowDiagnostics(const FinalMetrics& metrics)
 {
     float ovf_clamp_filler = computeOverflow(true,  nullptr, true);
     float ovf_sharp_filler = computeOverflow(false, nullptr, true);
-    Logger::log_info("[OVFW-DIAG] clamp/no-filler=" + PREC(metrics.final_smoothed_overflow)
+    Logger::log_detail("[OVFW-DIAG] clamp/no-filler=" + PREC(metrics.final_smoothed_overflow)
         + "  sharp/no-filler=" + PREC(metrics.final_overflow)
         + "  clamp/+filler=" + PREC(ovf_clamp_filler)
         + "  sharp/+filler=" + PREC(ovf_sharp_filler)
@@ -605,7 +609,7 @@ float Placer::getMemoryUsageMB()
 void Placer::recordInitialHPWL()
 {
     m_initial_hpwl = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), cfg["params"]["ignore_net_degree"].value_or(100));
-    Logger::log_info("Initial HPWL recorded: " + std::to_string(m_initial_hpwl));
+    Logger::log_detail("Initial HPWL recorded: " + std::to_string(m_initial_hpwl));
 }
 
 void Placer::initializeFocus()
@@ -631,7 +635,7 @@ void Placer::addNamedFocusNets()
         auto it = nets.find(net_name);
         if (it != nets.end()) {
             db.addFocusNet(it->second);
-            Logger::log_info("Focus net (named): " + net_name
+            Logger::log_detail("Focus net (named): " + net_name
                 + " (" + std::to_string(it->second->getNodes().size()) + " nodes)");
         } else {
             Logger::log_warning("Focus net not found: " + net_name);
@@ -654,7 +658,7 @@ void Placer::addRandomFocusNets(std::mt19937& rng)
     int count = std::min(num_focus_nets, (int)all_nets.size());
     for (int i = 0; i < count; i++) {
         db.addFocusNet(all_nets[i]);
-        Logger::log_info("Focus net (rand) " + std::to_string(i) + ": " + all_nets[i]->getName()
+        Logger::log_detail("Focus net (rand) " + std::to_string(i) + ": " + all_nets[i]->getName()
             + " (" + std::to_string(all_nets[i]->getNodes().size()) + " nodes)");
     }
 }
@@ -673,7 +677,7 @@ void Placer::addRandomFocusNodes(std::mt19937& rng)
     int count = std::min(num_focus_nodes, (int)movable.size());
     for (int i = 0; i < count; i++) {
         db.addFocusNode(movable[i]);
-        Logger::log_info("Focus node (rand) " + std::to_string(i) + ": " + movable[i]->getName()
+        Logger::log_detail("Focus node (rand) " + std::to_string(i) + ": " + movable[i]->getName()
             + " pos=(" + std::to_string(movable[i]->getPos().x) + ","
             + std::to_string(movable[i]->getPos().y) + ")");
     }
@@ -700,7 +704,7 @@ void Placer::addRandomMacroNets(std::mt19937& rng)
     int count = std::min(num_macro_nets, (int)macro_nets.size());
     for (int i = 0; i < count; i++) {
         db.addFocusNet(macro_nets[i]);
-        Logger::log_info("Focus net (macro) " + std::to_string(i) + ": " + macro_nets[i]->getName()
+        Logger::log_detail("Focus net (macro) " + std::to_string(i) + ": " + macro_nets[i]->getName()
             + " (" + std::to_string(macro_nets[i]->getNodes().size()) + " nodes)");
     }
 }
@@ -721,7 +725,7 @@ void Placer::addRandomFocusIO(std::mt19937& rng)
     int count = std::min(num_focus_io, (int)fixed_nodes.size());
     for (int i = 0; i < count; i++) {
         db.addFocusNode(fixed_nodes[i]);
-        Logger::log_info("Focus IO (rand) " + std::to_string(i) + ": " + fixed_nodes[i]->getName()
+        Logger::log_detail("Focus IO (rand) " + std::to_string(i) + ": " + fixed_nodes[i]->getName()
             + " pos=(" + std::to_string(fixed_nodes[i]->getPos().x) + ","
             + std::to_string(fixed_nodes[i]->getPos().y) + ")");
     }

@@ -43,7 +43,7 @@ float Placer::computeLipschitzEstimate()
         grad_norm_sq += dgx*dgx + dgy*dgy;
     };
 
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         accumulate(item.second);
     }
@@ -73,7 +73,7 @@ void Placer::combineGradients()
     // last_gwl_L1 = Σ‖∇wl‖₁ (probe_grad before the subtraction), last_gden_L1 = Σ‖λ·∇den‖₁ (the
     // electrostatic force, which already carries λ). The force-ratio dff (next iteration) reads these.
     float gwl_L1 = 0.0f, gden_L1 = 0.0f;
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         Gradient& g = item.second->next.probe_grad;
         gwl_L1 += fabsf(g.x) + fabsf(g.y);
@@ -92,24 +92,53 @@ void Placer::combineGradients()
 
 
 /**
- * @brief Clamp node positions so the entire cell stays within the die area.
+ * @brief Clamp node positions so the cell stays within the die area.
  *
- * The node position is the lower-left corner of the cell, so the upper bound
- * must account for the cell's width/height to prevent the right/top edge from
- * extending past the die boundary.
+ * The node position is the lower-left corner of the cell, so the upper bound must account for the
+ * cell's width/height to prevent the right/top edge from extending past the die boundary.
+ *
+ * Two modes (TODO #11a A/B):
+ *  - legacy (default): bound the RAW cell, [0, die - size]. The sqrt(2)-expanded density footprint
+ *    can then still hang off the edge, and computeNodeFootprint shifts it back at deposit time.
+ *  - xplace_die_projection: bound the cell so the EXPANDED footprint is in-die, which is XPlace's
+ *    trunc_node_pos_fn (run_placement_nesterov.py:5-11) re-applied on every gradient evaluation.
+ *    The deposit-time shift is then disabled (Grid::setShiftFootprintInDie) — the position is
+ *    already legal, so the deposited mass stays centered on the cell instead of sliding off it.
  */
 void Placer::enforceDieBoundaries(Node* node_p)
 {
-    float max_x = (float)grid.getDieWidth()  - node_p->getXsize();
-    float max_y = (float)grid.getDieHeight() - node_p->getYsize();
+    const float die_w = (float)grid.getDieWidth();
+    const float die_h = (float)grid.getDieHeight();
+    const float w = node_p->getXsize();
+    const float h = node_p->getYsize();
+
+    float min_x = 0.0f,          min_y = 0.0f;
+    float max_x = die_w - w,     max_y = die_h - h;
+
+    if (xplace_die_projection) {
+        // XPlace bounds the CENTRE to [expanded/2, die - expanded/2]. Our position is the lower-left
+        // (centre = pos + raw/2), so the equivalent bound on the lower-left is
+        //     [ (cw - w)/2 , die_w - (cw + w)/2 ]
+        // which collapses to the legacy [0, die_w - w] exactly when cw == w (macros, clamp off).
+        float cw = w, ch = h;
+        if (enable_density_clamp) {
+            cw = std::max(w, grid.getBinWidth()  * (float)M_SQRT2);
+            ch = std::max(h, grid.getBinHeight() * (float)M_SQRT2);
+        }
+        min_x = 0.5f * (cw - w);   max_x = die_w - 0.5f * (cw + w);
+        min_y = 0.5f * (ch - h);   max_y = die_h - 0.5f * (ch + h);
+        // A footprint wider than the die would invert the interval (UB in std::clamp) — centre it.
+        if (min_x > max_x) min_x = max_x = 0.5f * (die_w - w);
+        if (min_y > max_y) min_y = max_y = 0.5f * (die_h - h);
+    }
 
     // Clamp node_pos
-    node_p->next.node_pos.x = std::clamp(node_p->next.node_pos.x, 0.0f, max_x);
-    node_p->next.node_pos.y = std::clamp(node_p->next.node_pos.y, 0.0f, max_y);
+    node_p->next.node_pos.x = std::clamp(node_p->next.node_pos.x, min_x, max_x);
+    node_p->next.node_pos.y = std::clamp(node_p->next.node_pos.y, min_y, max_y);
 
     // Clamp probe_pos
-    node_p->next.probe_pos.x = std::clamp(node_p->next.probe_pos.x, 0.0f, max_x);
-    node_p->next.probe_pos.y = std::clamp(node_p->next.probe_pos.y, 0.0f, max_y);
+    node_p->next.probe_pos.x = std::clamp(node_p->next.probe_pos.x, min_x, max_x);
+    node_p->next.probe_pos.y = std::clamp(node_p->next.probe_pos.y, min_y, max_y);
 }
 
 
@@ -119,7 +148,7 @@ void Placer::enforceDieBoundaries(Node* node_p)
  */
 void Placer::advanceIterationState()
 {
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         item.second->cacheState();
     }
@@ -136,7 +165,7 @@ void Placer::advanceIterationState()
  */
 void Placer::stepAllNodes()
 {
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         item.second->step(step_length, momentum_coeff);
         enforceDieBoundaries(item.second);
@@ -186,11 +215,11 @@ void Placer::estimateInitialStep()
 
     // Barzilai-Borwein estimate α = ‖Δv‖₂ / ‖P·Δg‖₂ (no magnitude clamp — as in XPlace).
     step_length = computeLipschitzEstimate();
-    Logger::log_info("Estimated initial step_length (BB): " + PREC_P(step_length, 6) +
+    Logger::log_detail("Estimated initial step_length (BB): " + PREC_P(step_length, 6) +
                      "  (seed " + PREC_P(init_step_seed, 4) + ")");
 
     // Undo the probe step: restore x0 / g0 into next so the real first step starts from x0.
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         item.second->restoreState();
     }
@@ -245,35 +274,35 @@ void Placer::performNextStep(bool backtracking_enabled)
 
     backtrack_steps = tries; // for logging
 
-    if (Logger::isKeyActive("DEBUG")) logStepDiagnostics();
+    if (Logger::isLevelActive(LogLevel::DEBUG)) logStepDiagnostics();
 }
 
-/// @brief Log per-iteration step diagnostics (gradient norms, step length, overflow) — DEBUG key only.
+/// @brief Log per-iteration step diagnostics (gradient norms, step length, overflow) — DEBUG only.
 void Placer::logStepDiagnostics()
 {
-    Logger::log_info("=== Step Diagnostics (iteration " + std::to_string(iteration) + ") ===");
-    Logger::log_info("  step_length (α̂):  " + PREC_P(step_length, 6));
-    Logger::log_info("  momentum_coeff:    " + PREC_P(momentum_coeff, 6));
-    Logger::log_info("  nesterov_ak:       " + PREC_P(nesterov_ak, 6));
-    Logger::log_info("  backtrack_steps:   " + std::to_string(backtrack_steps));
+    Logger::log_debug("=== Step Diagnostics (iteration " + std::to_string(iteration) + ") ===");
+    Logger::log_debug("  step_length (α̂):  " + PREC_P(step_length, 6));
+    Logger::log_debug("  momentum_coeff:    " + PREC_P(momentum_coeff, 6));
+    Logger::log_debug("  nesterov_ak:       " + PREC_P(nesterov_ak, 6));
+    Logger::log_debug("  backtrack_steps:   " + std::to_string(backtrack_steps));
 
     // Gradient statistics (from current state used for stepping)
     float grad_L1 = 0.0f, max_grad = 0.0f;
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         Node* n = item.second;
         grad_L1 += fabs(n->current.probe_grad.x) + fabs(n->current.probe_grad.y);
         max_grad = std::max(max_grad, std::max(fabs(n->current.probe_grad.x), fabs(n->current.probe_grad.y)));
     }
-    Logger::log_info("  grad L1 norm:      " + SCI(grad_L1));
-    Logger::log_info("  max |grad|:        " + SCI(max_grad));
-    Logger::log_info("  α̂ * max|grad|:     " + SCI(step_length * max_grad) + "  (max single-step displacement)");
+    Logger::log_debug("  grad L1 norm:      " + SCI(grad_L1));
+    Logger::log_debug("  max |grad|:        " + SCI(max_grad));
+    Logger::log_debug("  α̂ * max|grad|:     " + SCI(step_length * max_grad) + "  (max single-step displacement)");
 
     // Position delta statistics
     float max_node_delta = 0.0f, max_probe_overshoot = 0.0f;
     int clamped_count = 0;
     float die_w = (float)grid.getDieWidth(), die_h = (float)grid.getDieHeight();
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         Node* n = item.second;
         float dx = fabs(n->next.node_pos.x - n->current.node_pos.x);
@@ -289,27 +318,27 @@ void Placer::logStepDiagnostics()
         if (at_boundary)
             clamped_count++;
     }
-    Logger::log_info("  max |Δnode_pos|:   " + SCI(max_node_delta));
-    Logger::log_info("  max probe overshoot: " + SCI(max_probe_overshoot));
-    Logger::log_info("  nodes at boundary: " + std::to_string(clamped_count));
+    Logger::log_debug("  max |Δnode_pos|:   " + SCI(max_node_delta));
+    Logger::log_debug("  max probe overshoot: " + SCI(max_probe_overshoot));
+    Logger::log_debug("  nodes at boundary: " + std::to_string(clamped_count));
 
     // Sample trace: first 3 components
     int count = 0;
-    for (auto item : db.getComponents()) {
+    for (const auto& item : db.getComponents()) {
         if (count >= 3) break;
         if (item.second->getStatus() == FIXED) continue;
         Node* n = item.second;
-        Logger::log_info("  --- Sample node: " + n->getName() + " ---");
-        Logger::log_info("    current.node_pos (u_k):   (" + PREC_P(n->current.node_pos.x, 2) + ", " + PREC_P(n->current.node_pos.y, 2) + ")");
-        Logger::log_info("    current.probe_pos (v_k):  (" + PREC_P(n->current.probe_pos.x, 2) + ", " + PREC_P(n->current.probe_pos.y, 2) + ")");
-        Logger::log_info("    current.probe_grad:       (" + SCI(n->current.probe_grad.x) + ", " + SCI(n->current.probe_grad.y) + ")");
-        Logger::log_info("    α̂ * grad:                 (" + SCI(step_length * n->current.probe_grad.x) + ", " + SCI(step_length * n->current.probe_grad.y) + ")");
-        Logger::log_info("    next.node_pos (u_{k+1}):  (" + PREC_P(n->next.node_pos.x, 2) + ", " + PREC_P(n->next.node_pos.y, 2) + ")");
-        Logger::log_info("    next.probe_pos (v_{k+1}): (" + PREC_P(n->next.probe_pos.x, 2) + ", " + PREC_P(n->next.probe_pos.y, 2) + ")");
-        Logger::log_info("    next.probe_grad:          (" + SCI(n->next.probe_grad.x) + ", " + SCI(n->next.probe_grad.y) + ")");
+        Logger::log_debug("  --- Sample node: " + n->getName() + " ---");
+        Logger::log_debug("    current.node_pos (u_k):   (" + PREC_P(n->current.node_pos.x, 2) + ", " + PREC_P(n->current.node_pos.y, 2) + ")");
+        Logger::log_debug("    current.probe_pos (v_k):  (" + PREC_P(n->current.probe_pos.x, 2) + ", " + PREC_P(n->current.probe_pos.y, 2) + ")");
+        Logger::log_debug("    current.probe_grad:       (" + SCI(n->current.probe_grad.x) + ", " + SCI(n->current.probe_grad.y) + ")");
+        Logger::log_debug("    α̂ * grad:                 (" + SCI(step_length * n->current.probe_grad.x) + ", " + SCI(step_length * n->current.probe_grad.y) + ")");
+        Logger::log_debug("    next.node_pos (u_{k+1}):  (" + PREC_P(n->next.node_pos.x, 2) + ", " + PREC_P(n->next.node_pos.y, 2) + ")");
+        Logger::log_debug("    next.probe_pos (v_{k+1}): (" + PREC_P(n->next.probe_pos.x, 2) + ", " + PREC_P(n->next.probe_pos.y, 2) + ")");
+        Logger::log_debug("    next.probe_grad:          (" + SCI(n->next.probe_grad.x) + ", " + SCI(n->next.probe_grad.y) + ")");
         count++;
     }
-    Logger::log_info("=== End Step Diagnostics ===");
+    Logger::log_debug("=== End Step Diagnostics ===");
 }
 
 AIEPLACE_NAMESPACE_END

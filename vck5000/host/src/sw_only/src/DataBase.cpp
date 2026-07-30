@@ -12,7 +12,7 @@ using namespace tabulate; // table types, scoped to this .cpp (not leaked via Lo
 DataBase::DataBase(fs::path input_dir)
     : m_input_dir(input_dir) {
     TIME_BLOCK("DataBase read input");
-    Logger::log_info("Reading design from directory: " + m_input_dir.string());
+    Logger::log_detail("Reading design from directory: " + m_input_dir.string());
     m_max_x = 0;
     m_max_y = 0;
 
@@ -37,7 +37,7 @@ void DataBase::readDesignFiles()
             MacroClass* macro = item.second;
             macro->setSize(macro->getXsize() * scale, macro->getYsize() * scale);
         }
-        Logger::log_info("Scaled " + std::to_string(mm_macros.size()) +
+        Logger::log_detail("Scaled " + std::to_string(mm_macros.size()) +
                         " LEF macro sizes by " + std::to_string(m_units_per_micron) +
                         " (microns -> dbu)");
     }
@@ -107,7 +107,7 @@ void DataBase::computeAreaBreakdown()
     double movable_sum = 0;
     double fixed_sum = 0;
     int fixed_count = 0;
-    for (auto item : mm_components) {
+    for (const auto& item : mm_components) {
         Component* comp_p = item.second;
         if (comp_p->getStatus() == FIXED) {
             float ox = std::max(0.0f, std::min(comp_p->getX() + comp_p->getXsize(), die_xu) - std::max(comp_p->getX(), die_xl));
@@ -122,10 +122,10 @@ void DataBase::computeAreaBreakdown()
     m_total_movable_area = (float)movable_sum;
     m_total_component_area = m_total_fixed_area + m_total_movable_area;
 
-    Logger::log_info("Fixed components: " + std::to_string(fixed_count)
+    Logger::log_detail("Fixed components: " + std::to_string(fixed_count)
         + " (area: " + std::to_string((long long)m_total_fixed_area)
         + ", " + std::to_string((int)(100.0f * m_total_fixed_area / m_die_area.getArea())) + "% of die)");
-    Logger::log_info("Movable components: " + std::to_string((int)mm_components.size() - fixed_count)
+    Logger::log_detail("Movable components: " + std::to_string((int)mm_components.size() - fixed_count)
         + " (area: " + std::to_string((long long)m_total_movable_area) + ")");
 }
 
@@ -184,7 +184,7 @@ bool DataBase::readLEF()
         success = runParserSilenced([&]() { return LefParser::read(*this, file.string()); });
 
         if (success) {
-            Logger::log_info(".lef file parsing successful: " + file.string());
+            Logger::log_detail(".lef file parsing successful: " + file.string());
         } else {
             Logger::log_error(".lef file parsing FAILED: " + file.string());
         }
@@ -208,7 +208,7 @@ bool DataBase::readDEF()
             def_file = def_files[i];
     }
 
-    Logger::log_info("Begin parsing .DEF design...");
+    Logger::log_detail("Begin parsing .DEF design...");
     bool success = runParserSilenced([&]() { return DefParser::read(*this, def_file); });
 
     if (success) {
@@ -220,7 +220,7 @@ bool DataBase::readDEF()
         Table content;
         content.add_row(RowStream{} << "DEF file" << def_file.string());
         section.add_row({content});
-        Logger::log_info(section);
+        Logger::log_detail(section);
         return true;
     } else {
         Logger::log_error(".def file parsing FAILED: " + def_file.string());
@@ -243,11 +243,11 @@ bool DataBase::readBookshelf()
         Logger::log_warning("Multiple .aux files found! Using first one: " + aux_files[0].string());
     }
 
-    Logger::log_info("Begin parsing bookshelf design...");
+    Logger::log_detail("Begin parsing bookshelf design...");
     bool success = runParserSilenced([&]() { return BookshelfParser::read(*this, aux_files[0]); });
 
     if (success) {
-        Logger::log_info("Bookshelf parsing successful!");
+        Logger::log_detail("Bookshelf parsing successful!");
         return true;
     } else {
         Logger::log_error("Bookshelf parsing FAILED!");
@@ -269,7 +269,7 @@ bool DataBase::addFillers(float target_utilization)
     // largest 5% so macros and min-width cells don't skew it. (The previous code sized the
     // filler from the smallest *macro*, which yields ~0 fillers on standard-cell designs.)
     std::vector<float> widths, heights;
-    for (auto item : mm_components) {
+    for (const auto& item : mm_components) {
         Component* comp_p = item.second;
         if (comp_p->getStatus() == FIXED) continue;
         widths.push_back(comp_p->getXsize());
@@ -296,16 +296,16 @@ bool DataBase::addFillers(float target_utilization)
     MacroClass* filler_macro = new MacroClass("filler", filler_xsize, filler_ysize);
     mm_macros.emplace(std::make_pair("filler_macroclass", filler_macro));
 
-    Logger::log_info("Adding filler cells to database...");
-    Logger::log_info("Filler cell size: (" + PREC(filler_xsize) + ", " + PREC(filler_ysize) + ")");
+    Logger::log_detail("Adding filler cells to database...");
+    Logger::log_detail("Filler cell size: (" + PREC(filler_xsize) + ", " + PREC(filler_ysize) + ")");
 
     // Fill the placeable whitespace up to the target utilization (XPlace: target_density *
     // stdcell_placeable_area - mov_stdcell_area). With no movable macros this reduces to
     // target_util * (die - fixed) - movable_area.
     float available_area = getDieArea().getArea() - m_total_fixed_area;
     float unfilled_area = available_area * target_utilization - m_total_movable_area;
-    Logger::log_info("Available area (die - fixed): " + PREC(available_area));
-    Logger::log_info("Total area to fill: " + PREC(unfilled_area));
+    Logger::log_detail("Available area (die - fixed): " + PREC(available_area));
+    Logger::log_detail("Total area to fill: " + PREC(unfilled_area));
 
     int fillers_needed = std::max(0, (int)(unfilled_area / filler_macro->getArea()));
 
@@ -317,7 +317,7 @@ bool DataBase::addFillers(float target_utilization)
         filler_p->setNodePos(Position(0.0f, 0.0f)); // position will be updated during placement
         mv_fillers.push_back(filler_p);
     }
-    Logger::log_info("Total fillers added: " + stringify(fillers_needed));
+    Logger::log_detail("Total fillers added: " + stringify(fillers_needed));
     return true;
 }
 
@@ -325,11 +325,11 @@ bool DataBase::addFillers(float target_utilization)
 */
 void DataBase::iterationReset()
 {
-    for (auto item : mm_components)
+    for (const auto& item : mm_components)
         item.second->iterationReset();
     for (auto filler_p : mv_fillers)
         filler_p->iterationReset();
-    for (auto item : mm_iopads)
+    for (const auto& item : mm_iopads)
         item.second->iterationReset();
 }
 
@@ -337,14 +337,14 @@ void DataBase::iterationReset()
 // For all Nets in the database, sort Positions (X descending)
 void DataBase::sortPositionsByX()
 {
-    for (auto item : mm_nets)
+    for (const auto& item : mm_nets)
         item.second->sortPositionsByX();
 }
 
 // For all Nets in the database, sort Positions (Y descending)
 void DataBase::sortPositionsByY()
 {
-    for (auto item : mm_nets)
+    for (const auto& item : mm_nets)
         item.second->sortPositionsByY();
 }
 
@@ -354,7 +354,7 @@ float DataBase::computeTotalWirelength(string method, int max_net_degree)
     // excluded from the HPWL metric so the reported number, the density-weight schedule's
     // delta_hpwl, and convergence all measure the SAME masked wirelength XPlace does.
     float total = 0;
-    for (auto item : mm_nets)
+    for (const auto& item : mm_nets)
         if (item.second->getDegree() <= max_net_degree)
             total += item.second->computeWirelength(method);
     return total;
@@ -667,7 +667,7 @@ float DataBase::computeTotalComponentArea()
         /// @brief set design name 
         void DataBase::set_bookshelf_design(string& s) { 
             m_design_name = s;
-            Logger::log_info("Bookshelf design: " + s);
+            Logger::log_detail("Bookshelf design: " + s);
         }
 
         /// @brief a callback when a bookshelf file reaches to the end 
@@ -687,7 +687,7 @@ float DataBase::computeTotalComponentArea()
                 m_die_area = Box(Position(0, 0),
                                  Position((float)m_max_x, (float)m_max_y));
             }
-            Logger::log_info("End of Bookshelf design reading.");
+            Logger::log_detail("End of Bookshelf design reading.");
         }
         
 // Print info functions
@@ -699,7 +699,7 @@ void DataBase::printNodes() const
 
 void DataBase::printIOPads() const
 {
-    for(auto item : mm_iopads)
+    for(const auto& item : mm_iopads)
     {
         IOPad* iopad_p = item.second;
         Logger::log_info(iopad_p->getName() + iopad_p->next.node_pos.to_string());
@@ -709,7 +709,7 @@ void DataBase::printIOPads() const
 
 void DataBase::printComponents() const
 {
-    for(auto item : mm_components)
+    for(const auto& item : mm_components)
     {
         Component* comp_p = item.second;
         Logger::log_info(comp_p->getName() + comp_p->next.node_pos.to_string());
@@ -720,7 +720,7 @@ void DataBase::printComponents() const
 void DataBase::printNets()
 {
     int count = 0;
-    for(auto item : mm_nets)
+    for(const auto& item : mm_nets)
     {
         Net* net_p = item.second;
         Logger::log_info("NET: " + net_p->to_string());
@@ -745,7 +745,7 @@ void DataBase::printNetsByDegree() const
 {
     Logger::log_info("&&& Nets by degree:");
 
-    for (auto item : mmv_nets_by_degree)
+    for (const auto& item : mmv_nets_by_degree)
     {
         Logger::log_info(std::to_string(item.second.size()) + " nets of degree " + std::to_string(item.first) + ".");
     }
@@ -756,11 +756,21 @@ void DataBase::printInfo()
     Table top;
     top.add_row({"Benchmark info"});
 
+    // The fixed/movable/filler breakdown used to be four separate console lines during the load;
+    // it belongs with the rest of the design's shape, so it lives here and the loose lines are DETAIL.
+    int fixed_count = 0;
+    for (const auto& item : mm_components)
+        if (item.second->getStatus() == FIXED) fixed_count++;
+
     Table data;
     data.add_row(RowStream{} << "Benchmark" << getBenchmarkName());
     data.add_row(RowStream{} << "Macros" << mm_macros.size());
     data.add_row(RowStream{} << "IO Pads" << mm_iopads.size());
     data.add_row(RowStream{} << "Components" << mm_components.size());
+    data.add_row(RowStream{} << "  fixed" << std::to_string(fixed_count)
+        + " (" + std::to_string((int)(100.0f * m_total_fixed_area / m_die_area.getArea())) + "% of die)");
+    data.add_row(RowStream{} << "  movable" << (int)mm_components.size() - fixed_count);
+    data.add_row(RowStream{} << "Fillers" << mv_fillers.size());
     data.add_row(RowStream{} << "Nets" << mm_nets.size());
     data.add_row(RowStream{} << "Die Area" << m_die_area.getArea());
     data.add_row(RowStream{} << "Component area: " << computeTotalComponentArea());
@@ -775,7 +785,7 @@ void DataBase::printOverlaps()
 {
     // for each node in db
     int count = 0;
-    for (auto item : getComponents())
+    for (const auto& item : getComponents())
     {
         if(count++ > 100) return;
         // print overlaps
