@@ -16,7 +16,16 @@ DataBase::DataBase(fs::path input_dir)
     m_max_x = 0;
     m_max_y = 0;
 
-    // try to read LEF/DEF
+    readDesignFiles();
+    readPlacementConstraints();
+    computeNetDegreeTotal();
+    computeAreaBreakdown();
+}
+
+// Reads LEF/DEF (scaling LEF macro sizes to DEF's dbu units), falling back to Bookshelf if
+// either LEF or DEF is missing. Exits if neither format could be read.
+void DataBase::readDesignFiles()
+{
     bool LEF_success = readLEF();
     bool DEF_success = readDEF();
 
@@ -42,61 +51,8 @@ DataBase::DataBase(fs::path input_dir)
             exit(1);
         }
     }
-
-    // Read placement constraints (maximum_utilization) if present
-    readPlacementConstraints();
-
-    // Add IO pins as focus nets for visualizer
-    //int focus_nets_added = 0;
-    //const int FOCUS_IO_LIMIT = 2;
-    //for (auto item : mm_pins) {
-    //    if(focus_nets_added >= FOCUS_IO_LIMIT)
-    //        break;
-    //    Pin* pin = item.second;
-    //    for(auto net : pin->getNets()) {
-    //        addFocusNet(net);
-    //        Logger::log_info("Adding IO pin net to visualizer focus nets: " + net->to_string());
-    //        if(++focus_nets_added >= FOCUS_IO_LIMIT)
-    //            break;
-    //    }
-    //}
-
-    m_total_net_degree = 0;
-    for (auto* net_p : mv_nets) {
-        m_total_net_degree += net_p->getDegree();
-    }
-
-    // Cache area breakdown (constant for the lifetime of the design). FIXED components are
-    // clipped to the die — XPlace counts only the fixed area that lands inside the die
-    // (fixed_node_area = init_density_map inside the core), so terminals overhanging the die
-    // don't inflate the placeable-area denominator that sets the filler count. Movable area
-    // is the raw sum (movable cells sit inside the die).
-    float die_xl = m_die_area.getPosBottomLeft().x, die_yl = m_die_area.getPosBottomLeft().y;
-    float die_xu = m_die_area.getPosTopRight().x,   die_yu = m_die_area.getPosTopRight().y;
-    double movable_sum = 0;
-    double fixed_sum = 0;
-    int fixed_count = 0;
-    for (auto item : mm_components) {
-        Component* comp_p = item.second;
-        if (comp_p->getStatus() == FIXED) {
-            float ox = std::max(0.0f, std::min(comp_p->getX() + comp_p->getXsize(), die_xu) - std::max(comp_p->getX(), die_xl));
-            float oy = std::max(0.0f, std::min(comp_p->getY() + comp_p->getYsize(), die_yu) - std::max(comp_p->getY(), die_yl));
-            fixed_sum += (double)ox * oy;
-            fixed_count++;
-        } else {
-            movable_sum += comp_p->getArea();
-        }
-    }
-    m_total_fixed_area = (float)fixed_sum;
-    m_total_movable_area = (float)movable_sum;
-    m_total_component_area = m_total_fixed_area + m_total_movable_area;
-
-    Logger::log_info("Fixed components: " + std::to_string(fixed_count)
-        + " (area: " + std::to_string((long long)m_total_fixed_area)
-        + ", " + std::to_string((int)(100.0f * m_total_fixed_area / m_die_area.getArea())) + "% of die)");
-    Logger::log_info("Movable components: " + std::to_string((int)mm_components.size() - fixed_count)
-        + " (area: " + std::to_string((long long)m_total_movable_area) + ")");
 }
+
 
 /**
  * Read placement.constraints file if present (ISPD2015 format).
@@ -131,6 +87,49 @@ void DataBase::readPlacementConstraints()
 }
 
 
+void DataBase::computeNetDegreeTotal()
+{
+    m_total_net_degree = 0;
+    for (auto* net_p : mv_nets) {
+        m_total_net_degree += net_p->getDegree();
+    }
+}
+
+// Cache area breakdown (constant for the lifetime of the design). FIXED components are
+// clipped to the die — XPlace counts only the fixed area that lands inside the die
+// (fixed_node_area = init_density_map inside the core), so terminals overhanging the die
+// don't inflate the placeable-area denominator that sets the filler count. Movable area
+// is the raw sum (movable cells sit inside the die).
+void DataBase::computeAreaBreakdown()
+{
+    float die_xl = m_die_area.getPosBottomLeft().x, die_yl = m_die_area.getPosBottomLeft().y;
+    float die_xu = m_die_area.getPosTopRight().x,   die_yu = m_die_area.getPosTopRight().y;
+    double movable_sum = 0;
+    double fixed_sum = 0;
+    int fixed_count = 0;
+    for (auto item : mm_components) {
+        Component* comp_p = item.second;
+        if (comp_p->getStatus() == FIXED) {
+            float ox = std::max(0.0f, std::min(comp_p->getX() + comp_p->getXsize(), die_xu) - std::max(comp_p->getX(), die_xl));
+            float oy = std::max(0.0f, std::min(comp_p->getY() + comp_p->getYsize(), die_yu) - std::max(comp_p->getY(), die_yl));
+            fixed_sum += (double)ox * oy;
+            fixed_count++;
+        } else {
+            movable_sum += comp_p->getArea();
+        }
+    }
+    m_total_fixed_area = (float)fixed_sum;
+    m_total_movable_area = (float)movable_sum;
+    m_total_component_area = m_total_fixed_area + m_total_movable_area;
+
+    Logger::log_info("Fixed components: " + std::to_string(fixed_count)
+        + " (area: " + std::to_string((long long)m_total_fixed_area)
+        + ", " + std::to_string((int)(100.0f * m_total_fixed_area / m_die_area.getArea())) + "% of die)");
+    Logger::log_info("Movable components: " + std::to_string((int)mm_components.size() - fixed_count)
+        + " (area: " + std::to_string((long long)m_total_movable_area) + ")");
+}
+
+
 /**
  * Search the specified directory path for files with the specified extension.
  *
@@ -154,10 +153,26 @@ std::vector<fs::path> DataBase::findExtensions(fs::path dir_path, string extensi
     return matches;
 }
 
-bool DataBase::readLEF() 
+// Runs parse_fn with stdout redirected to /dev/null, then restores the ORIGINAL stdout.
+// (The old code restored to a hardcoded "/dev/tty", which blocks under a headless
+//  launch — e.g. dse.py sweeps — when the controlling terminal buffer fills.)
+bool DataBase::runParserSilenced(std::function<bool()> parse_fn)
+{
+    fflush(stdout);
+    int saved_stdout = dup(STDOUT_FILENO);
+    if (!freopen("/dev/null", "w", stdout)) { /* non-fatal: stdout stays as-is, parser noise is not */ }
+    bool success = parse_fn();
+    fflush(stdout);
+    dup2(saved_stdout, STDOUT_FILENO);
+    close(saved_stdout);
+    clearerr(stdout);
+    return success;
+}
+
+bool DataBase::readLEF()
 {
     std::vector<fs::path> lef_files = findExtensions(m_input_dir, ".lef");
-    if (lef_files.size() == 0) 
+    if (lef_files.size() == 0)
     {
         Logger::log_warning("No .lef files found.");
         return false;
@@ -166,17 +181,7 @@ bool DataBase::readLEF()
     bool success = true;
     for(fs::path file : lef_files)
     {
-        // Silence the LEF parser's stdout noise, then restore the ORIGINAL stdout.
-        // (The old code restored to a hardcoded "/dev/tty", which blocks under a headless
-        //  launch — e.g. dse.py sweeps — when the controlling terminal buffer fills.)
-        fflush(stdout);
-        int saved_stdout = dup(STDOUT_FILENO);
-        if (!freopen("/dev/null", "w", stdout)) { /* non-fatal: stdout stays as-is, parser noise is not */ }
-        success = LefParser::read(*this, file.string());
-        fflush(stdout);
-        dup2(saved_stdout, STDOUT_FILENO);
-        close(saved_stdout);
-        clearerr(stdout);
+        success = runParserSilenced([&]() { return LefParser::read(*this, file.string()); });
 
         if (success) {
             Logger::log_info(".lef file parsing successful: " + file.string());
@@ -196,14 +201,6 @@ bool DataBase::readDEF()
         return false;
     }
 
-    //if (def_files.size() > 1)
-    //{
-    //    cout << "ERROR: Multiple .def files found, but only one is expected:" << endl;
-    //    for (fs::path file : def_files)
-    //        cout << file.string() << endl;
-    //    return false;
-    //}
-    
     fs::path def_file;
     for(int i = 0; i < def_files.size(); i++)
     {
@@ -211,20 +208,8 @@ bool DataBase::readDEF()
             def_file = def_files[i];
     }
 
-
-
     Logger::log_info("Begin parsing .DEF design...");
-    // Silence the DEF parser's stdout noise, then restore the ORIGINAL stdout.
-    // (The old code restored to a hardcoded "/dev/tty", which blocks under a headless
-    //  launch — e.g. dse.py sweeps — when the controlling terminal buffer fills.)
-    fflush(stdout);
-    int saved_stdout = dup(STDOUT_FILENO);
-    if (!freopen("/dev/null", "w", stdout)) { /* non-fatal: stdout stays as-is, parser noise is not */ }
-    bool success = DefParser::read(*this, def_file);
-    fflush(stdout);
-    dup2(saved_stdout, STDOUT_FILENO);
-    close(saved_stdout);
-    clearerr(stdout);
+    bool success = runParserSilenced([&]() { return DefParser::read(*this, def_file); });
 
     if (success) {
         // Marks the transition from "reading input files" to "reporting on the parsed design" —
@@ -259,17 +244,7 @@ bool DataBase::readBookshelf()
     }
 
     Logger::log_info("Begin parsing bookshelf design...");
-    // Silence the (noisy) bookshelf parser's stdout, then restore the ORIGINAL stdout.
-    // (Was disabled because the old /dev/tty restore hung; the dup/dup2 save-restore is
-    //  headless-safe, so we can suppress the spew again without the hang.)
-    fflush(stdout);
-    int saved_stdout = dup(STDOUT_FILENO);
-    if (!freopen("/dev/null", "w", stdout)) { /* non-fatal: stdout stays as-is, parser noise is not */ }
-    bool success = BookshelfParser::read(*this, aux_files[0]);
-    fflush(stdout);
-    dup2(saved_stdout, STDOUT_FILENO);
-    close(saved_stdout);
-    clearerr(stdout);
+    bool success = runParserSilenced([&]() { return BookshelfParser::read(*this, aux_files[0]); });
 
     if (success) {
         Logger::log_info("Bookshelf parsing successful!");
@@ -390,8 +365,8 @@ float DataBase::computeTotalComponentArea()
     return m_total_component_area;
 }
 
-        /// parser callback functions 
-        ///==== LEF Callbacks ====
+
+    //  ======== LEF Callbacks ======== 
         void DataBase::lef_version_cbk(std::string const& v) {}
         void DataBase::lef_version_cbk(double v) {}
         void DataBase::lef_casesensitive_cbk(int v) {}
@@ -792,7 +767,7 @@ void DataBase::printInfo()
 
     top.add_row({data});
     top.format().font_align(FontAlign::center);
-    Logger::log_data(top);
+    Logger::log_info(top);
 }
 
 

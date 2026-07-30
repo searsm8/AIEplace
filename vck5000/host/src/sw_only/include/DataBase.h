@@ -13,6 +13,7 @@
 #include "Net.h"
 #include "Bin.h"
 #include "Logger.h"
+#include <functional>
 #include <sstream>
 
 #include <limbo/parsers/lef/adapt/LefDriver.h>             // LEF parser
@@ -59,6 +60,14 @@ private:
     float m_total_component_area = 0.0f; // all components (movable + fixed), cached after construction
     float m_total_fixed_area = 0.0f;     // fixed components only
     float m_total_movable_area = 0.0f;   // movable components only (= total - fixed)
+
+    // DataBase()'s steps, broken out for readability
+    void readDesignFiles();
+    void computeNetDegreeTotal();
+    void computeAreaBreakdown();
+
+    // Runs parse_fn with stdout redirected to /dev/null, then restores the original stdout fd.
+    static bool runParserSilenced(std::function<bool()> parse_fn);
 
 public:
     /// Default Constructor

@@ -170,15 +170,39 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     cairo_set_line_width (m_cairo_ctx, 0.004);
     cairo_rectangle (m_cairo_ctx, DIE_START, DIE_START, DIE_SCALE, DIE_SCALE);
     cairo_stroke(m_cairo_ctx);
-    
-    // Draw Fillers
+
+    drawFillerCells(db);
+    drawFixedComponents(db);
+
+    // Movable cells split by size: std cells blue, large movable macros red.
+    // Macro = movable component whose area exceeds a small fraction of the die (die-relative so it
+    // generalizes across benchmarks; ~0.02% of die area cleanly separates ISPD2005/MMS macros from std cells).
+    double macro_area_thresh = 0.0002 * (double) m_die_width * (double) m_die_height;
+    drawMovableStandardCells(db, macro_area_thresh);
+    drawMovableMacros(db, macro_area_thresh);
+
+    drawAllIOPads(db);
+    drawFocusHighlights(db);
+
+    // draw reticle in center
+    cairo_set_source_rgb (m_cairo_ctx, 0.0, 0.0, 0.0); // black
+    drawReticle(0.5, 0.5);
+
+    drawPlacementInfoOverlay(info);
+    exportPlacementPNG(dir, info);
+}
+
+void Visualizer::drawFillerCells(DataBase& db)
+{
     for (auto item : db.getFillers()) {
        drawComponent(item);
     }
-    cairo_set_source_rgb (m_cairo_ctx, 0.9, 0.9, 0.9);  // grey 
+    cairo_set_source_rgb (m_cairo_ctx, 0.9, 0.9, 0.9);  // grey
     cairo_fill(m_cairo_ctx);
+}
 
-    // Draw Fixed Components 
+void Visualizer::drawFixedComponents(DataBase& db)
+{
     for (auto item : db.getComponents()) {
        if (item.second->getStatus() == FIXED)
            drawComponent(item.second);
@@ -188,13 +212,10 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     cairo_set_source_rgb (m_cairo_ctx, 0.0, 0.0, 0.0); // black border
     cairo_set_line_width (m_cairo_ctx, 0.001);
     cairo_stroke(m_cairo_ctx);
+}
 
-    // Movable cells split by size: std cells blue, large movable macros red.
-    // Macro = movable component whose area exceeds a small fraction of the die (die-relative so it
-    // generalizes across benchmarks; ~0.02% of die area cleanly separates ISPD2005/MMS macros from std cells).
-    double macro_area_thresh = 0.0002 * (double) m_die_width * (double) m_die_height;
-
-    // Draw Movable Standard Cells (blue)
+void Visualizer::drawMovableStandardCells(DataBase& db, double macro_area_thresh)
+{
     for (auto item : db.getComponents()) {
        Component* c = item.second;
        if (c->getStatus() == FIXED) continue;
@@ -203,8 +224,10 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     }
     cairo_set_source_rgb (m_cairo_ctx, 0.0, 0.0, 1.0); // blue
     cairo_fill(m_cairo_ctx);
+}
 
-    // Draw Movable Macros (red)
+void Visualizer::drawMovableMacros(DataBase& db, double macro_area_thresh)
+{
     for (auto item : db.getComponents()) {
        Component* c = item.second;
        if (c->getStatus() == FIXED) continue;
@@ -213,33 +236,35 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     }
     cairo_set_source_rgb (m_cairo_ctx, 1.0, 0.0, 0.0); // red for movable macros
     cairo_fill(m_cairo_ctx);
+}
 
-    // Draw IO Pads
+void Visualizer::drawAllIOPads(DataBase& db)
+{
     for (auto item : db.getIOPads())
         drawIOPad(item.second);
 
-    cairo_set_source_rgb (m_cairo_ctx, 1.0, 0.64, 0.0); // orange 
+    cairo_set_source_rgb (m_cairo_ctx, 1.0, 0.64, 0.0); // orange
     cairo_fill(m_cairo_ctx);
+}
 
-    // Highlight Focus Nets
-    for(Net* net_p : db.getFocusNets()) 
+void Visualizer::drawFocusHighlights(DataBase& db)
+{
+    for(Net* net_p : db.getFocusNets())
         highlightNet(net_p);
 
-    // Highlight Focus Nodes
-    for(Node* node_p : db.getFocusNodes()) 
+    for(Node* node_p : db.getFocusNodes())
         highlightNode(node_p);
+}
 
-    // draw reticle in center
-    cairo_set_source_rgb (m_cairo_ctx, 0.0, 0.0, 0.0); // black
-    drawReticle(0.5, 0.5);
-
+void Visualizer::drawPlacementInfoOverlay(const PlotInfo& info)
+{
     // print current iteration and other info at bottom of image
     cairo_select_font_face (m_cairo_ctx, "Sans", CAIRO_FONT_SLANT_NORMAL,
                                CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size (m_cairo_ctx, .02);
 
     cairo_move_to (m_cairo_ctx, .01, .04);
-    std::string bench_str = "Benchmark: " + info.benchmark_name; 
+    std::string bench_str = "Benchmark: " + info.benchmark_name;
     cairo_show_text (m_cairo_ctx, bench_str.c_str());
 
     cairo_move_to (m_cairo_ctx, .01, .99);
@@ -265,9 +290,10 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     }
 
     cairo_stroke(m_cairo_ctx);
+}
 
-
-    // export image
+void Visualizer::exportPlacementPNG(fs::path dir, const PlotInfo& info)
+{
     fs::create_directories(dir); // ensure this directory exists
     string filename;
     if (!info.filename_override.empty()) {

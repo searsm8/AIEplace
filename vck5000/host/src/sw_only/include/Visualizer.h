@@ -41,11 +41,21 @@ class Visualizer
     cairo_surface_t *m_surface;
     cairo_t *m_cairo_ctx;
 
+    // drawPlacement()'s steps, broken out for readability
+    void drawFillerCells(DataBase& db);
+    void drawFixedComponents(DataBase& db);
+    void drawMovableStandardCells(DataBase& db, double macro_area_thresh);
+    void drawMovableMacros(DataBase& db, double macro_area_thresh);
+    void drawAllIOPads(DataBase& db);
+    void drawFocusHighlights(DataBase& db);
+    void drawPlacementInfoOverlay(const PlotInfo& info);
+    void exportPlacementPNG(fs::path dir, const PlotInfo& info);
+
     public:
 
     // Constructor
     Visualizer() {};
-    
+
     void init(Box die_area);
     float scale(float f);
     void drawComponent(Component* c);

@@ -83,66 +83,6 @@ bool Logger::log(string key, MsgType msg)
     }
 }
 
-//bool Logger::log(KeyType key, std::string msg)
-//{
-//    // if the key is in the active key set, print it
-//    if(Logger::keys.find(key) == Logger::keys.end())
-//        return false;
-//    else {
-//        Table table;
-//        table.add_row({"["+key+"]", msg});
-//
-//        table.format().hide_border();
-//
-//        table.column(0).format()
-//            .width(12)
-//            .font_style({FontStyle::bold, FontStyle::italic})
-//            .font_align(FontAlign::right)
-//            .font_color(getColor(key));
-//
-//        table.column(1).format()
-//            .border_left(":");
-//
-//        table.print(std::cout);
-//        return true;
-//    }
-//}
-
-//bool Logger::log(string key, string msg)
-//{
-//    return true;
-//}
-
-//bool log_detail(std::string msg)
-//{ return log("DETAIL", msg); }
-//bool log_info(std::string msg)
-//{ return log("INFO", msg); }
-//bool log_debug(std::string msg)
-//{ return log("DEBUG", msg); }
-//bool log_warning(std::string msg)
-//{ return log("WARNING", msg); }
-//bool log_error(std::string msg)
-//{ return log("ERROR", msg); }
-//bool log_data(std::string msg)
-//{ return log("DATA", msg); }
-//
-//bool log_detail(Table t)
-//{ return log("DETAIL", t); }
-//bool log_info(Table t)
-//{ return log("INFO", t); }
-//bool log_debug(Table t)
-//{ return log("DEBUG", t); }
-//bool log_warning(Table t)
-//{ return log("WARNING", t); }
-//bool log_error(Table t)
-//{ return log("ERROR", t); }
-//bool log_data(Table t)
-//{ return log("DATA", t); }
-//
-//void log_space()
-//{
-//    std::cout << std::endl;
-//}
 
 Color Logger::getColor(string key)
 {

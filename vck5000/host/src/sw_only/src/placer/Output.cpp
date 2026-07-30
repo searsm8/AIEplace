@@ -524,7 +524,7 @@ void Placer::exportSummaryReports(const BestSolution& chosen, const FinalMetrics
     statistics.add_row({results});
     statistics.add_row({hyperparams});
 
-    Logger::log_data(statistics);
+    Logger::log_info(statistics);
     Logger::export_markdown(statistics, run_output_dir, "run_summary");
 
     Table function_stats = Logger::printFunctionStats();
