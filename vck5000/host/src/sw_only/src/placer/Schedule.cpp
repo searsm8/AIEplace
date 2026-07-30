@@ -78,8 +78,8 @@ void Placer::updateDensityWeight()
     float prev_hpwl    = hpwl_history[hpwl_history.size() - 2];
     float delta_hpwl   = current_hpwl - prev_hpwl;
 
-    float dw_min_step = cfg["params"]["density_weight_min_step"]; // μ lower clamp (0.95)
-    float dw_max_step = cfg["params"]["density_weight_max_step"]; // μ growth base (1.05)
+    float dw_min_step = ConfigUtils::require<float>(cfg, "params", "density_weight_min_step"); // μ lower clamp (0.95)
+    float dw_max_step = ConfigUtils::require<float>(cfg, "params", "density_weight_max_step"); // μ growth base (1.05)
 
     // μ > 1 grows λ. Grow near the max rate (decaying toward 0.98·max) while wirelength is
     // still improving; damp toward ~1.0 once wirelength worsens, so density does not
@@ -97,7 +97,7 @@ void Placer::updateDensityWeight()
     // superblue stalls at overflow ~0.8). So the fixed-K default is reverted. Config
     // `density_weight_worsening_hpwl_norm` still exposes K: set it >0 to use the fixed-K form (only
     // correct if delta_hpwl is first site-width-normalized into XPlace's frame).
-    float worsening_hpwl_norm = cfg["params"].value("density_weight_worsening_hpwl_norm", -1.0f);
+    float worsening_hpwl_norm = cfg["params"]["density_weight_worsening_hpwl_norm"].value_or(-1.0f);
     float mu;
     if (delta_hpwl < 0.0f) {
         mu = dw_max_step * std::max(std::pow(0.9999f, (float)iteration), 0.98f);
@@ -114,12 +114,12 @@ void Placer::updateDensityWeight()
     // Emergency 2x jolt: if overflow has plateaued at a high value, double density_weight
     // to break out of the stall. Modeled after XPlace's enlarge_density mechanism.
     // (param_scheduler.py lines 293-304)
-    int plateau_window = cfg["params"]["adaptation_window"];
-    float plateau_threshold = cfg["params"]["slow_improvement_threshold"];
-    float high_ovfw = cfg["params"]["high_overflow_threshold"];
+    int plateau_window = ConfigUtils::require<int>(cfg, "params", "adaptation_window");
+    float plateau_threshold = ConfigUtils::require<float>(cfg, "params", "slow_improvement_threshold");
+    float high_ovfw = ConfigUtils::require<float>(cfg, "params", "high_overflow_threshold");
     // Xplace uses 1000 (effectively once per run). Lower it to let the jolt re-fire and
     // repeatedly double lambda through a stall (a deliberate deviation from Xplace).
-    int min_jolt_interval = cfg["params"].value("density_jolt_interval", 1000);
+    int min_jolt_interval = cfg["params"]["density_jolt_interval"].value_or(1000);
 
     bool past_warmup          = (iteration > plateau_window);
     bool jolt_cooldown_expired = (iteration - last_density_jolt_iter >= min_jolt_interval);

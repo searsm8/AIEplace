@@ -100,7 +100,7 @@ void Placer::computeHpwlPartials_simple()
 
     const float range = hpwl_lut_range;
 
-    int ignore_net_degree = cfg["params"].value("ignore_net_degree", 100); // XPlace net_mask
+    int ignore_net_degree = cfg["params"]["ignore_net_degree"].value_or(100); // XPlace net_mask
     for (Net* net_p : db.getNetsVector()) {
         const std::vector<NetPin>& pins = net_p->getPins();
         int net_size = net_p->getDegree();
@@ -156,7 +156,7 @@ void Placer::computeHpwlPartials_CPU()
     // (clock/reset/scan spanning the die) are excluded from the wirelength gradient. Their
     // WA gradient pulls hundreds of unrelated cells and is noise for placement; XPlace drops
     // them from both the gradient and the HPWL metric (see computeTotalWirelength).
-    int ignore_net_degree = cfg["params"].value("ignore_net_degree", 100);
+    int ignore_net_degree = cfg["params"]["ignore_net_degree"].value_or(100);
     for (Net* net_p : db.getNetsVector()) {
         const std::vector<NetPin>& pins = net_p->getPins();
         int net_size = net_p->getDegree();

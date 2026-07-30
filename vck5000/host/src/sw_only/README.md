@@ -22,9 +22,8 @@ Logger (Logger.h/cpp) — Singleton logger with key-based filtering, colored out
 GraphDriver (GraphDriver.h) — XRT-based driver for AIE compute graphs (partials and density). Manages buffer I/O with VCK5000 hardware.
 Visualizer (Visualizer.h) — Cairo-based placement visualization and convergence plotting (behind CREATE_VISUALIZATION flag).
 Output.cpp — Results reporting, CSV export, DEF output, GIF generation.
-JsonUtils — Strips // and # comments from JSON config files.
 Algorithm Flow
-Constructor reads JSON config, initializes DB from LEF/DEF, creates grid, optionally initializes XRT/AIE.
+Constructor reads TOML config (toml++), initializes DB from LEF/DEF, creates grid, optionally initializes XRT/AIE.
 run() — Random initial placement, then iterate until convergence.
 performIteration() — Each iteration:
 Reset per-iteration state

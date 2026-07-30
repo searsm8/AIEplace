@@ -1,0 +1,85 @@
+# =============================================================================
+# AIEPlace Configuration Options
+# =============================================================================
+# Default configuration parameters for running the AIEPlace placement
+# algorithm: method selection, input file paths, and hyperparameters.
+# =============================================================================
+
+[input]
+benchmark = "host/benchmarks/ispd2005/adaptec1"
+# benchmark = "host/benchmarks/ispd2005/bigblue1"
+
+xclbin = "bin/aieplace.hw.xclbin"
+
+[params]
+# Computation method selection
+partials_compute_method = "cpu" # choose: aie, cpu, simple, hybrid, threaded
+density_compute_method  = "cpu" # choose: aie, cpu
+# bins_per_row intentionally OMITTED -> grid auto-sized by the ePlace formula (AIEplace.cpp).
+# Set it here (or per-run) only to force a fixed grid (ad-hoc override / AIE datapath).
+wirelength_method = "HPWL"      # choose: HPWL
+ignore_net_degree = 100         # XPlace net_mask: nets with more pins than this are excluded
+                                 # from BOTH the WA wirelength gradient and the HPWL metric
+                                 # (matches XPlace ignore_net_degree=100). Makes reported HPWL
+                                 # apples-to-apples with XPlace's masked numbers. Set very
+                                 # large to include all nets (legacy behavior).
+enable_backtracking = true      # whether to use backtracking line search for step length selection
+enable_momentum     = true      # whether to use momentum in the optimization (Nesterov Accelerated Gradient)
+enable_filler       = true      # whether to include filler cells in placement (XPlace always does)
+# Preconditioner (diagonal, damps large macro movement, XPlace-style). Leave enable_preconditioning
+# UNSET to use the smart default: auto-ON iff the design has movable macros (essential for MMS
+# convergence, a wash on fixed-macro designs). Set it explicitly to force ON/OFF. auto_enable_preconditioning
+# (default true) governs the auto behavior when enable_preconditioning is absent.
+auto_enable_preconditioning = true
+precond_coef_escalation = true  # double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef); false = diagnostic (fixed precond_coef)
+enable_density_clamp = true     # clamp sub-bin cells to ~bin size in the density solve (XPlace expand_ratio); smooths the force
+dct_normalize = true            # 1/N per FORWARD DCT (bounds a_uv; global scale absorbed by lambda). The
+                                 # inverse transform is deliberately NOT normalized (field-faithful: the forward
+                                 # already carries 1/N^2; normalizing the inverse too would double-normalize and
+                                 # inflate lambda ~N^2 -- verified == compute_eField_naive and matches XPlace).
+
+# Hyperparameters
+init_gamma = 4          # plays XPlace's wa_coeff role; with gamma_bin_scaled, base_gamma = init_gamma*(bin_w+bin_h)
+gamma_schedule = true   # if true, gamma follows overflow-driven schedule (XPlace-style); starts at 10x base_gamma
+gamma_bin_scaled = true # tie base_gamma to bin geometry referenced to gamma_ref_grid (grid-independent); false = legacy bare init_gamma constant
+gamma_ref_grid = 512    # reference grid for gamma_bin_scaled: base_gamma = init_gamma*(die_w+die_h)/gamma_ref_grid; keeps absolute gamma grid-independent (512 matches the tuned suite)
+max_threads = 1         # multithreading not yet implemented
+init_step_seed = 0.01   # SEED for the iteration-1 Barzilai-Borwein step estimate (XPlace args.lr),
+                        # not the literal first step: estimateInitialStep() takes one trial step of
+                        # this size, then sets α = ||Δpos|| / ||Δgrad||. A robust internal default;
+                        # rarely needs tuning now that the first step self-calibrates per design.
+density_weight_init_multiplier = 8e-5 # multiplier used to set density penalty
+                                       # 0.01 means that density will contribute about 1% as much
+                                       # as wirelength to the cost function at the start of placement
+density_weight_min_step = 0.95  # minimum step size for density_weight updates to prevent stagnation
+density_weight_max_step = 1.05  # maximum step size for density_weight updates to avoid divergence
+
+# Overflow plateau detection for emergency 2x density weight jolt
+adaptation_window = 25
+slow_improvement_threshold = 0.001
+high_overflow_threshold = 0.7
+backtrack_max_tries = 10
+backtrack_epsilon = 1.05
+
+# Convergence criteria (adaptive algorithm will stop early if met)
+convergence_min_iterations = 50
+convergence_max_iterations = 1200
+convergence_window = 5  # Number of iterations used to determine convergence.
+convergence_hpwl_improvement_threshold = 0.01 # If HPWL improvement over window is below this, HPWL convergence is met.
+convergence_overflow_threshold = 0.07 # Stop when smoothed overflow/movable-area < this. Matches XPlace --stop_overflow default 0.07 (apples-to-apples; do not override lower in sweeps).
+convergence_iterations = 30 # Extra iterations to run after overflow drops below threshold (XPlace uses 30)
+maximum_utilization = 1.0  # Default target density. Overridden by benchmark's placement.constraints if present (e.g. ISPD2015).
+
+[output]
+quiet = false       # if true, suppress all std output. Errors still printed. Useful for batch or DSE runs.
+interactive = true  # if false, suppress the per-iteration live-status table.
+results_dir = "results/single_runs" # overridden by DSE
+
+# Visualization options
+visualize = false # if true, will export visualization images
+iterations_per_export = 10
+focus_nets = [] # focus nets are highlighted in visualization exports.
+rand_focus_IO = 0 # not yet implemented
+rand_focus_nets = 0
+rand_macro_nets = 3
+rand_focus_nodes = 0 # not yet implemented

@@ -1,0 +1,10 @@
+# Python dependencies for vck5000's tooling (tools/*.py, host/benchmarks/*.py).
+# Install with: pip install -r requirements.txt
+
+tomlkit>=0.13     # dse.py — reads/writes run_config.toml
+numpy>=1.24       # morris.py, sobol.py, analyze_morris.py, analyze_sobol.py, compare_density.py
+matplotlib>=3.7   # analyze_morris.py, analyze_sobol.py, compare_density.py
+SALib>=1.4.5      # morris.py, sobol.py, analyze_morris.py, analyze_sobol.py — Sobol/Morris sensitivity analysis
+Pillow>=10.0      # gif_builder.py
+pyunpack>=0.3     # host/benchmarks/ispd2005_2015.py, ispd2019.py — benchmark archive extraction
+patool>=1.12      # pyunpack's extraction backend (may also need unrar/7z on PATH for some archive formats)

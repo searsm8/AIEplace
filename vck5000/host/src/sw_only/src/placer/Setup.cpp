@@ -7,7 +7,6 @@
  */
 
 #include "AIEplace.h"
-#include "JsonUtils.h"
 #include <cmath>
 #include <algorithm>
 #include <random>
@@ -39,9 +38,9 @@ void Placer::setupGrid()
  */
 bool Placer::resolveGridResolution()
 {
-    bool bins_auto = !cfg["params"].contains("bins_per_row");
+    bool bins_auto = !bool(cfg["params"]["bins_per_row"]);
     if (!bins_auto) {
-        bins_per_row = cfg["params"]["bins_per_row"];
+        bins_per_row = cfg["params"]["bins_per_row"].value_or(bins_per_row);
         Logger::log_info("Grid resolution: " + std::to_string(bins_per_row) + " x " + std::to_string(bins_per_row));
     }
     return bins_auto;
@@ -59,7 +58,7 @@ void Placer::loadDesignDatabase()
                         std::to_string(target_density));
     }
 
-    if (cfg["params"]["enable_filler"])
+    if (ConfigUtils::require<bool>(cfg, "params", "enable_filler"))
         db.addFillers(target_density);
 }
 
@@ -70,7 +69,7 @@ void Placer::loadDesignDatabase()
  */
 void Placer::loadConfiguration()
 {
-    // Read configuration file (supports JSON with comments)
+    // Read configuration file
     std::ifstream config_file(m_config_filepath);
     // check if config file was found
     if (!config_file.is_open()) {
@@ -80,71 +79,73 @@ void Placer::loadConfiguration()
 
     pgrm_start_time = getTime();
 
-    // Read file content and strip comments
     std::stringstream buffer;
     buffer << config_file.rdbuf();
     config_file.close();
-    std::string config_content = buffer.str();
-    std::string json_content = JsonUtils::stripComments(config_content);
 
-    // Parse JSON
-    cfg = json::parse(json_content);
+    // Parse TOML
+    try {
+        cfg = toml::parse(buffer.str(), m_config_filepath);
+    } catch (const toml::parse_error& err) {
+        Logger::log_error("Failed to parse configuration file: " + m_config_filepath
+            + "\n" + std::string(err.description()));
+        exit(1);
+    }
 
     // Setup logging (quiet mode suppresses all output except errors)
-    quiet = cfg["output"].value("quiet", quiet);
+    quiet = cfg["output"]["quiet"].value_or(quiet);
     Logger::setup_logging(quiet);
-    interactive = cfg["output"].value("interactive", interactive);
+    interactive = cfg["output"]["interactive"].value_or(interactive);
     printWelcomeBanner();
     Logger::log_info("Reading runtime configuration from: " + m_config_filepath);
 
     // Read hyperparameters. gamma/base_gamma are finalized after the grid is built
     // (gamma_bin_scaled ties base_gamma to the bin geometry — see after grid creation).
-    // The .value() fallbacks below reference the member itself, so each configurable
+    // The .value_or() fallbacks below reference the member itself, so each configurable
     // default is defined ONCE — at the member's header initializer (single source of truth).
-    base_gamma    = cfg["params"]["init_gamma"];
-    gamma_schedule = cfg["params"].value("gamma_schedule", gamma_schedule);
-    gamma_bin_scaled = cfg["params"].value("gamma_bin_scaled", gamma_bin_scaled);
-    gamma_ref_grid   = cfg["params"].value("gamma_ref_grid", gamma_ref_grid);
+    base_gamma    = ConfigUtils::require<float>(cfg, "params", "init_gamma");
+    gamma_schedule = cfg["params"]["gamma_schedule"].value_or(gamma_schedule);
+    gamma_bin_scaled = cfg["params"]["gamma_bin_scaled"].value_or(gamma_bin_scaled);
+    gamma_ref_grid   = cfg["params"]["gamma_ref_grid"].value_or(gamma_ref_grid);
     // init_step_seed: BB trial-step SEED for estimateInitialStep() (XPlace args.lr, default
     // 0.01) — not the literal first step. The real iteration-1 α is calibrated by the
     // Barzilai-Borwein estimate. Back-compat: accept the old init_step_length key if present.
-    init_step_seed = cfg["params"].contains("init_step_seed")
-                   ? cfg["params"]["init_step_seed"].get<float>()
-                   : cfg["params"].value("init_step_length", 0.01f);
-    if (!cfg["params"].contains("init_step_seed") && cfg["params"].contains("init_step_length"))
+    init_step_seed = cfg["params"]["init_step_seed"].value<float>()
+                   .value_or(cfg["params"]["init_step_length"].value_or(0.01f));
+    if (!cfg["params"]["init_step_seed"] && cfg["params"]["init_step_length"])
         Logger::log_info("Config uses deprecated 'init_step_length'; treat as 'init_step_seed'.");
     step_length = init_step_seed; // placeholder; estimateInitialStep() overwrites on iteration 1
     density_weight = 1.0f; // will be updated on iteration 1 after computing gradients
 
     // Read compute methods
-    partials_method = cfg["params"]["partials_compute_method"];
-    density_method = cfg["params"]["density_compute_method"];
+    partials_method = ConfigUtils::require<std::string>(cfg, "params", "partials_compute_method");
+    density_method = ConfigUtils::require<std::string>(cfg, "params", "density_compute_method");
     Logger::log_info("Partials compute method: " + partials_method);
     Logger::log_info("Density compute method:  " + density_method);
 
     // Read Convergence criteria
-    max_iterations = cfg["params"]["convergence_max_iterations"];
-    min_iterations = cfg["params"]["convergence_min_iterations"];
-    hpwl_improvement_threshold = cfg["params"]["convergence_hpwl_improvement_threshold"];
-    overflow_threshold = cfg["params"]["convergence_overflow_threshold"];
-    target_density = cfg["params"].value("maximum_utilization", target_density);
-    enable_backtracking = cfg["params"]["enable_backtracking"];
-    enable_momentum = cfg["params"]["enable_momentum"];
-    precond_explicitly_set = cfg["params"].contains("enable_preconditioning");
-    enable_preconditioning = cfg["params"].value("enable_preconditioning", enable_preconditioning);
-    auto_enable_preconditioning = cfg["params"].value("auto_enable_preconditioning", auto_enable_preconditioning);
-    precond_coef_escalation = cfg["params"].value("precond_coef_escalation", precond_coef_escalation);
-    enable_density_clamp = cfg["params"].value("enable_density_clamp", enable_density_clamp);
-    dct_normalize = cfg["params"].value("dct_normalize", dct_normalize);
-    convergence_window = cfg["params"]["convergence_window"];
-    convergence_iterations = cfg["params"].value("convergence_iterations", convergence_iterations);
-    max_backtracking_attempts = cfg["params"]["backtrack_max_tries"];
-    backtrack_epsilon = cfg["params"]["backtrack_epsilon"];
+    max_iterations = ConfigUtils::require<int>(cfg, "params", "convergence_max_iterations");
+    min_iterations = ConfigUtils::require<int>(cfg, "params", "convergence_min_iterations");
+    hpwl_improvement_threshold = ConfigUtils::require<float>(cfg, "params", "convergence_hpwl_improvement_threshold");
+    overflow_threshold = ConfigUtils::require<float>(cfg, "params", "convergence_overflow_threshold");
+    target_density = cfg["params"]["maximum_utilization"].value_or(target_density);
+    enable_backtracking = ConfigUtils::require<bool>(cfg, "params", "enable_backtracking");
+    enable_momentum = ConfigUtils::require<bool>(cfg, "params", "enable_momentum");
+    precond_explicitly_set = bool(cfg["params"]["enable_preconditioning"]);
+    enable_preconditioning = cfg["params"]["enable_preconditioning"].value_or(enable_preconditioning);
+    auto_enable_preconditioning = cfg["params"]["auto_enable_preconditioning"].value_or(auto_enable_preconditioning);
+    precond_coef_escalation = cfg["params"]["precond_coef_escalation"].value_or(precond_coef_escalation);
+    enable_density_clamp = cfg["params"]["enable_density_clamp"].value_or(enable_density_clamp);
+    dct_normalize = cfg["params"]["dct_normalize"].value_or(dct_normalize);
+    convergence_window = ConfigUtils::require<int>(cfg, "params", "convergence_window");
+    convergence_iterations = cfg["params"]["convergence_iterations"].value_or(convergence_iterations);
+    max_backtracking_attempts = ConfigUtils::require<int>(cfg, "params", "backtrack_max_tries");
+    backtrack_epsilon = ConfigUtils::require<float>(cfg, "params", "backtrack_epsilon");
 
     // Read other stuff
-    MAX_THREADS = cfg["params"]["max_threads"];
-    input_dir = fs::path(cfg["input"]["benchmark"]);
-    results_dir = fs::path(cfg["output"]["results_dir"].get<std::string>());
+    MAX_THREADS = ConfigUtils::require<int>(cfg, "params", "max_threads");
+    input_dir = fs::path(ConfigUtils::require<std::string>(cfg, "input", "benchmark"));
+    results_dir = fs::path(ConfigUtils::require<std::string>(cfg, "output", "results_dir"));
 }
 
 /**
@@ -229,7 +230,7 @@ void Placer::configurePreconditioner()
 void Placer::initializeVisualization()
 {
     #ifdef CREATE_VISUALIZATION
-        if(cfg["output"]["visualize"]) {
+        if (cfg["output"]["visualize"].value_or(false)) {
             initializeFocus();
             viz.init(db.getDieArea());
         }
@@ -249,7 +250,7 @@ void Placer::initializePlacement()
 
     // Fixed seed (random_seed >= 0) gives identical initial placement across runs — needed for
     // controlled A/B tests; default -1 keeps the time-based seed.
-    int seed = cfg["params"].value("random_seed", -1);
+    int seed = cfg["params"]["random_seed"].value_or(-1);
     std::srand(seed >= 0 ? (unsigned)seed : (unsigned)std::time(nullptr));
     std::mt19937 gauss_gen(seed >= 0 ? (unsigned)seed : (unsigned)std::time(nullptr));
     std::normal_distribution<float> gauss(0.0f, 1.0f);
@@ -326,7 +327,7 @@ void Placer::initializeDensityWeight()
         density_L1_norm += fabs(electro_force.x) + fabs(electro_force.y);
     }
 
-    float initial_multiplier = cfg["params"]["density_weight_init_multiplier"];
+    float initial_multiplier = ConfigUtils::require<float>(cfg, "params", "density_weight_init_multiplier");
     density_weight = (HPWL_L1_norm / (density_L1_norm + 1e-8f)) * initial_multiplier;
     last_gwl_L1  = HPWL_L1_norm;    // seeds density_force_fraction for iteration 1
     last_gden_L1 = density_L1_norm;

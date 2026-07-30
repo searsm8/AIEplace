@@ -1,6 +1,6 @@
 # dse.py
 # Design Space Exploration python script
-# Runs bin/AIEplace.exe while modifying host/run_config.json between runs
+# Runs bin/AIEplace.exe while modifying host/run_config.toml between runs
 
 import copy
 import datetime
@@ -13,6 +13,8 @@ import time
 from collections import OrderedDict
 from typing import Any, Union, List, Tuple
 
+import tomlkit
+
 import benchmarks  # master benchmark manifest (rejects out-of-scope designs at launch)
 
 # Maximum number of parallel AIEplace processes.
@@ -23,7 +25,7 @@ MAX_PARALLEL = 8
 # Compiled placer binary (current sw_only build) and the base config it reads.
 # Both paths are relative to vck5000/, which is where this script must be run from.
 EXE_PATH = "build/hw/host/sw_only/aieplace_sw_only.exe"
-CONFIG_PATH = "host/src/sw_only/run_config.json"
+CONFIG_PATH = "host/src/sw_only/run_config.toml"
 
 
 # =============================================================================
@@ -98,7 +100,7 @@ dse_sweep = OrderedDict([
 # Explicit one-off runs (in ADDITION to the Cartesian product above)
 # =============================================================================
 # Each dict is one run: a set of {param: value} overrides applied to the base
-# run_config.json. Use this for specific configs the product can't express — e.g.
+# run_config.toml. Use this for specific configs the product can't express — e.g.
 # per-benchmark grids, or a hand-picked combination. "benchmark" goes in the
 # "input" section (and is prefixed with host/benchmarks/); every other key goes in
 # "params". Add an optional "label" to name the run in the results table.
@@ -143,7 +145,7 @@ def _full_suite():
         "mgc_pci_bridge32_a":("ispd2015/mgc_pci_bridge32_a",512),
         "mgc_pci_bridge32_b":("ispd2015/mgc_pci_bridge32_b",512),
     }
-    # No convergence_overflow_threshold override -> uses run_config.json's 0.07 (XPlace-matched).
+    # No convergence_overflow_threshold override -> uses run_config.toml's 0.07 (XPlace-matched).
     return [
         {"label": f"{name}@{n}", "benchmark": path, "bins_per_row": n, "random_seed": 42}
         for name, (path, n) in grid.items()
@@ -292,56 +294,10 @@ explicit_runs = _RUN_SETS[os.environ.get("DSE_RUN_SET", "full_suite")]()
 # Utility Functions
 # =============================================================================
 
-def strip_json_comments(text: str) -> str:
-    """
-    Strip // and # comments from JSON text, respecting quoted strings.
-    Mirrors the C++ JsonUtils::stripComments() so we can share one config file.
-    """
-    result = []
-    i = 0
-    in_string = False
-    while i < len(text):
-        c = text[i]
-        # Handle escape sequences inside strings
-        if in_string and c == '\\' and i + 1 < len(text):
-            result.append(text[i:i+2])
-            i += 2
-            continue
-        # Toggle string state on unescaped quotes
-        if c == '"':
-            in_string = not in_string
-            result.append(c)
-            i += 1
-            continue
-        # Inside a string, just copy
-        if in_string:
-            result.append(c)
-            i += 1
-            continue
-        # // comment — skip to end of line
-        if c == '/' and i + 1 < len(text) and text[i+1] == '/':
-            while i < len(text) and text[i] != '\n':
-                i += 1
-            continue
-        # # comment — skip to end of line
-        if c == '#':
-            while i < len(text) and text[i] != '\n':
-                i += 1
-            continue
-        result.append(c)
-        i += 1
-    return ''.join(result)
-
-
-def load_config(path: str) -> dict:
-    """Load a JSON config file, stripping // and # comments and trailing commas."""
-    import re
+def load_config(path: str) -> tomlkit.TOMLDocument:
+    """Load a TOML config file."""
     with open(path, 'r') as f:
-        raw = f.read()
-    stripped = strip_json_comments(raw)
-    # Remove trailing commas before } or ] (invalid JSON but common in hand-edited configs)
-    stripped = re.sub(r',\s*([}\]])', r'\1', stripped)
-    return json.loads(stripped)
+        return tomlkit.load(f)
 
 def write_run_config(config: dict, config_path: str, run_num: int, total_runs: int,
                      columns: list, section_for, label=None) -> None:
@@ -375,7 +331,7 @@ def write_run_config(config: dict, config_path: str, run_num: int, total_runs: i
     config["output"]["DSE_info"] = "\n".join(parts)
 
     with open(config_path, 'w') as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
+        tomlkit.dump(config, f)
 
 
 def modify_config_parameter(
@@ -387,7 +343,7 @@ def modify_config_parameter(
     quiet: bool = False
 ) -> None:
     """
-    Modify a parameter in a JSON config file at any nested level.
+    Modify a parameter in a TOML config file at any nested level.
 
     Args:
         config_path (str): Path to the input config file
@@ -436,7 +392,7 @@ def modify_config_parameter(
         save_path = output_path if output_path else config_path
 
         with open(save_path, 'w') as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
+            tomlkit.dump(config, f)
 
         if not quiet:
             display_path = ".".join(section_path) if section_path else "root"
@@ -445,8 +401,8 @@ def modify_config_parameter(
     except FileNotFoundError:
         print(f"Error: Config file '{config_path}' not found")
         sys.exit(1)
-    except json.JSONDecodeError:
-        print(f"Error: '{config_path}' is not a valid JSON file")
+    except tomlkit.exceptions.ParseError:
+        print(f"Error: '{config_path}' is not a valid TOML file")
         sys.exit(1)
     except (KeyError, ValueError) as e:
         print(f"Error: {str(e)}")
@@ -543,7 +499,7 @@ def dse():
     AIEplace once for each configuration. Runs up to MAX_PARALLEL processes
     concurrently, each with its own config file copy and log file.
     """
-    # Load the single config file (strips // and # comments)
+    # Load the single base config file
     base_config = load_config(CONFIG_PATH)
 
     # Section lookup for any parameter: sweep dims carry their own section; explicit-run
@@ -626,8 +582,8 @@ def dse():
                 target = target[key]
             target[param] = actual_value
 
-        # Write the clean (comment-free) JSON config for this run
-        run_config_path = os.path.join(config_dir, f"run_{run_num:03d}.json")
+        # Write this run's TOML config
+        run_config_path = os.path.join(config_dir, f"run_{run_num:03d}.toml")
         write_run_config(config, run_config_path, run_num, total_runs, columns,
                          section_for, label=(label or "") if has_labels else None)
 

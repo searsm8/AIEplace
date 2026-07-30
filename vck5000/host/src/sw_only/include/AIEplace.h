@@ -4,8 +4,7 @@
 #include "DataBase.h"
 #include "Grid.h"
 #include "Logger.h" // or DebugFramework
-#include "json.h"
-using json = nlohmann::json;
+#include "toml.hpp"
 
 #include <chrono>
 #include <iomanip>
@@ -18,8 +17,21 @@ using json = nlohmann::json;
 #ifdef CREATE_VISUALIZATION
     #include "Visualizer.h"
 #endif
-   
+
 AIEPLACE_NAMESPACE_BEGIN
+
+namespace ConfigUtils {
+    /// @brief Required config read: logs an error and exits if [section].key is absent (mirrors
+    /// the old nlohmann behavior, where indexing a missing required key threw at parse time).
+    template <typename T>
+    T require(const toml::table& cfg, std::string_view section, std::string_view key)
+    {
+        if (auto v = cfg[section][key].value<T>())
+            return *v;
+        Logger::log_error("Missing required config key: [" + std::string(section) + "] " + std::string(key));
+        exit(1);
+    }
+}
 
 class Placer
 {
@@ -55,7 +67,6 @@ private:
                             float xplace_ref);
 
     // Helper functions
-    std::string escapeJsonString(const std::string& input);
     std::string generateRunId();
     bool checkConvergence();
     bool reachedMaxIterations();       // safety fallback: iteration >= max_iterations
@@ -70,7 +81,7 @@ public:
     Grid grid;
 
     // Configuration object
-    json cfg;
+    toml::table cfg;
     fs::path input_dir;
     fs::path output_dir;
     fs::path results_dir;

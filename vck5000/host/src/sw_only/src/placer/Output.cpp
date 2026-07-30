@@ -71,10 +71,10 @@ void Placer::printIterationResults()
 /// @brief Log the DSE sweep's parameter table (config output.DSE_info), if this run has one.
 void Placer::printDSEInfoTable()
 {
-    if (!cfg["output"].contains("DSE_info")) return;
+    if (!cfg["output"]["DSE_info"]) return;
 
     Table DSE_info;
-    std::string dse_info_str = cfg["output"]["DSE_info"].get<std::string>();
+    std::string dse_info_str = cfg["output"]["DSE_info"].value_or(std::string{});
     std::istringstream stream(dse_info_str);
     std::string line;
 
@@ -131,8 +131,8 @@ void Placer::printIterationSummaryTable(float hpwl, float overflow)
 void Placer::exportIterationVisualization(float overflow)
 {
     #ifdef CREATE_VISUALIZATION
-        if (!cfg["output"]["visualize"]) return;
-        if (iteration > 1 && iteration % int(cfg["output"]["iterations_per_export"]) != 0) return;
+        if (!cfg["output"]["visualize"].value_or(false)) return;
+        if (iteration > 1 && iteration % cfg["output"]["iterations_per_export"].value_or(10) != 0) return;
 
         PlotInfo info = {iteration, hpwl_history.back(), overflow, step_length, density_weight, db.getBenchmarkName()};
         viz.drawPlacement(db, output_dir / "placement", info);
@@ -207,8 +207,8 @@ void Placer::createRunOutputStructure()
 
     // Create directory structure: <results_dir>/<benchmark_name>/<timestamped_run_name>/
     output_dir = results_dir / db.getBenchmarkName() / (timestamp + "_" +
-                                       cfg["params"]["partials_compute_method"].get<std::string>() + "_" +
-                                       cfg["params"]["density_compute_method"].get<std::string>());
+                                       ConfigUtils::require<std::string>(cfg, "params", "partials_compute_method") + "_" +
+                                       ConfigUtils::require<std::string>(cfg, "params", "density_compute_method"));
 
     fs::create_directories(output_dir);
 
@@ -272,10 +272,10 @@ float Placer::lookupXplaceReferenceHPWL(const std::string& bench_name)
 std::vector<std::pair<std::string, std::string>> Placer::parseDSEParams()
 {
     std::vector<std::pair<std::string, std::string>> dse_params;
-    if (!cfg["output"].contains("DSE_info"))
+    if (!cfg["output"]["DSE_info"])
         return dse_params;
 
-    std::string dse_str = cfg["output"]["DSE_info"].get<std::string>();
+    std::string dse_str = cfg["output"]["DSE_info"].value_or(std::string{});
     std::istringstream stream(dse_str);
     std::string line;
     int line_num = 0;
@@ -421,13 +421,13 @@ Placer::FinalMetrics Placer::computeFinalMetrics()
     FinalMetrics m;
 
     algo_time = Logger::getFunctionTime("run") / 1e6; // Convert microseconds to seconds
-    m.final_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"], cfg["params"].value("ignore_net_degree", 100));
+    m.final_hpwl = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), cfg["params"]["ignore_net_degree"].value_or(100));
     // Exact HPWL over ALL nets (no net-degree mask). The masked final_hpwl above drops nets with
     // > ignore_net_degree pins (matching XPlace's GP metric); this includes them, matching XPlace's
     // post-GP "exact HPWL" / published-number convention (get_obj_hpwl is unmasked). Report both:
     // masked for the schedule + GP-vs-GP, exact for the apples-to-apples vs XPlace's headline HPWL.
     // A huge cap (not -1, which would exclude every net) includes every degree.
-    m.final_hpwl_exact = db.computeTotalWirelength(cfg["params"]["wirelength_method"], 1000000000);
+    m.final_hpwl_exact = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), 1000000000);
     // Exact (physical) overflow — sharp footprints, the real spreading quality. Reported
     // alongside the smoothed overflow that drove convergence (see computeOverflow).
     m.final_overflow = computeOverflow(false);
@@ -469,7 +469,7 @@ void Placer::logOverflowDiagnostics(const FinalMetrics& metrics)
 ///        comparison against XPlace. Gated by config so normal runs are unaffected.
 void Placer::dumpBestPlacementDensity()
 {
-    if (cfg["params"].contains("dump_density") && cfg["params"]["dump_density"])
+    if (cfg["params"]["dump_density"].value_or(false))
         dumpBinDensity((output_dir / (db.getBenchmarkName() + "_density")).string());
 }
 
@@ -514,9 +514,9 @@ void Placer::exportSummaryReports(const BestSolution& chosen, const FinalMetrics
     hyperparams.add_row(RowStream{} << "bins_per_row" << bins_per_row);
     hyperparams.add_row(RowStream{} << "formula_grid" << formula_bins_per_row);
     hyperparams.add_row(RowStream{} << "num_movable_macros" << num_movable_macros);
-    hyperparams.add_row(RowStream{} << "partials method" << cfg["params"]["partials_compute_method"]);
-    hyperparams.add_row(RowStream{} << "density method" << cfg["params"]["density_compute_method"]);
-    hyperparams.add_row(RowStream{} << "wirelength method" << cfg["params"]["wirelength_method"]);
+    hyperparams.add_row(RowStream{} << "partials method" << ConfigUtils::require<std::string>(cfg, "params", "partials_compute_method"));
+    hyperparams.add_row(RowStream{} << "density method" << ConfigUtils::require<std::string>(cfg, "params", "density_compute_method"));
+    hyperparams.add_row(RowStream{} << "wirelength method" << ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"));
     hyperparams.column(0).format().font_align(FontAlign::right);
     hyperparams.column(1).format().font_align(FontAlign::left);
 
@@ -536,7 +536,7 @@ void Placer::exportVisualizationArtifacts(const BestSolution& chosen, const Fina
                                            const std::string& run_output_dir)
 {
     #ifdef CREATE_VISUALIZATION
-        if (!cfg["output"]["visualize"]) return;
+        if (!cfg["output"]["visualize"].value_or(false)) return;
 
         PlotInfo info;
         if (chosen.valid) {
@@ -562,41 +562,8 @@ void Placer::writeFinalDesignArtifacts(const std::string& run_output_dir)
     db.writeDEF(run_output_dir);
 
     std::ifstream src(m_config_filepath);
-    std::ofstream dst(run_output_dir + "/config_used.json");
+    std::ofstream dst(run_output_dir + "/config_used.toml");
     dst << src.rdbuf();
-}
-
-// Helper function to escape JSON strings
-std::string Placer::escapeJsonString(const std::string& input)
-{
-    std::string output;
-    output.reserve(input.length() + 10); // Reserve some extra space for escapes
-
-    for (char c : input) {
-        switch (c) {
-            case '"':  output += "\\\""; break;
-            case '\\': output += "\\\\"; break;
-            case '\b': output += "\\b";  break;
-            case '\f': output += "\\f";  break;
-            case '\n': output += "\\n";  break;
-            case '\r': output += "\\r";  break;
-            case '\t': output += "\\t";  break;
-            default:
-                if (c < 0x20) {
-                    output += "\\u";
-                    output += "0000";
-                    // Simple hex conversion for control characters
-                    char hex[3];
-                    sprintf(hex, "%02x", (unsigned char)c);
-                    output[output.length() - 2] = hex[0];
-                    output[output.length() - 1] = hex[1];
-                } else {
-                    output += c;
-                }
-                break;
-        }
-    }
-    return output;
 }
 
 // Helper function to generate unique run ID
@@ -637,7 +604,7 @@ float Placer::getMemoryUsageMB()
 // Additional function to track initial HPWL (call this at the start of placement)
 void Placer::recordInitialHPWL()
 {
-    m_initial_hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"], cfg["params"].value("ignore_net_degree", 100));
+    m_initial_hpwl = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), cfg["params"]["ignore_net_degree"].value_or(100));
     Logger::log_info("Initial HPWL recorded: " + std::to_string(m_initial_hpwl));
 }
 
@@ -655,11 +622,12 @@ void Placer::initializeFocus()
 /// @brief Add nets named in config output.focus_nets to the visualization focus set.
 void Placer::addNamedFocusNets()
 {
-    if (!cfg["output"].contains("focus_nets")) return;
+    const toml::array* focus_nets = cfg["output"]["focus_nets"].as_array();
+    if (!focus_nets) return;
 
     auto& nets = db.getNets();
-    for (const auto& name : cfg["output"]["focus_nets"]) {
-        string net_name = name.get<string>();
+    for (auto&& elem : *focus_nets) {
+        string net_name = elem.value_or(string{});
         auto it = nets.find(net_name);
         if (it != nets.end()) {
             db.addFocusNet(it->second);
@@ -674,7 +642,7 @@ void Placer::addNamedFocusNets()
 /// @brief Add a random sample of nets (config output.rand_focus_nets) to the visualization focus set.
 void Placer::addRandomFocusNets(std::mt19937& rng)
 {
-    int num_focus_nets = cfg["output"].value("rand_focus_nets", 0);
+    int num_focus_nets = cfg["output"]["rand_focus_nets"].value_or(0);
     if (num_focus_nets <= 0) return;
 
     auto& nets = db.getNets();
@@ -694,7 +662,7 @@ void Placer::addRandomFocusNets(std::mt19937& rng)
 /// @brief Add a random sample of movable nodes (config output.rand_focus_nodes) to the visualization focus set.
 void Placer::addRandomFocusNodes(std::mt19937& rng)
 {
-    int num_focus_nodes = cfg["output"].value("rand_focus_nodes", 0);
+    int num_focus_nodes = cfg["output"]["rand_focus_nodes"].value_or(0);
     if (num_focus_nodes <= 0) return;
 
     std::vector<Node*> movable;
@@ -715,7 +683,7 @@ void Placer::addRandomFocusNodes(std::mt19937& rng)
 ///        Component only, not IOPad) to the visualization focus set.
 void Placer::addRandomMacroNets(std::mt19937& rng)
 {
-    int num_macro_nets = cfg["output"].value("rand_macro_nets", 0);
+    int num_macro_nets = cfg["output"]["rand_macro_nets"].value_or(0);
     if (num_macro_nets <= 0) return;
 
     auto& nets = db.getNets();
@@ -740,7 +708,7 @@ void Placer::addRandomMacroNets(std::mt19937& rng)
 /// @brief Add a random sample of IOPads/fixed components (config output.rand_focus_IO) to the visualization focus set.
 void Placer::addRandomFocusIO(std::mt19937& rng)
 {
-    int num_focus_io = cfg["output"].value("rand_focus_IO", 0);
+    int num_focus_io = cfg["output"]["rand_focus_IO"].value_or(0);
     if (num_focus_io <= 0) return;
 
     std::vector<Node*> fixed_nodes;
@@ -761,13 +729,13 @@ void Placer::addRandomFocusIO(std::mt19937& rng)
 
 void Placer::recordIterationResults()
 {
-    float hpwl = db.computeTotalWirelength(cfg["params"]["wirelength_method"], cfg["params"].value("ignore_net_degree", 100));
+    float hpwl = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), cfg["params"]["ignore_net_degree"].value_or(100));
     // Drive convergence off the smoothed overflow (clamped footprints; equivalent to XPlace's
     // expand_ratio-inflated field): the smoothed density the optimizer minimizes, which descends
     // toward the stop threshold. The exact overflow is reported separately as the physical result.
     // convergence_include_fillers=true mirrors XPlace's GP-stop metric (overflow_fn), which counts
     // filler density too; default false keeps the filler-excluded (XPlace-exact) signal.
-    bool conv_incl_fillers = cfg["params"].value("convergence_include_fillers", false);
+    bool conv_incl_fillers = cfg["params"]["convergence_include_fillers"].value_or(false);
     float overflow = computeOverflow(true, nullptr, conv_incl_fillers);   // convergence signal
 
     hpwl_history.push_back(hpwl);

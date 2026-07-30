@@ -8,7 +8,7 @@ HOST_MAIN = main.cpp
 HOST_SRCS = placer/AIEplace.cpp placer/Setup.cpp placer/Schedule.cpp placer/Step.cpp \
 	    placer/Partials.cpp placer/Density.cpp placer/Output.cpp DataBase.cpp \
 	    Grid.cpp Net.cpp DCT.cpp Logger.cpp \
-	    Common.cpp JsonUtils.cpp
+	    Common.cpp
 HOST_OBJS = $(addprefix $(BUILD_DIR_HOST)/obj/, $(HOST_MAIN:.cpp=.o) $(HOST_SRCS:.cpp=.o))
 HOST_DEPS = $(HOST_OBJS:.o=.d)
 
