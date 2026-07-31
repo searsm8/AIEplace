@@ -22,6 +22,7 @@ AIEPLACE_NAMESPACE_BEGIN
  */
 float Placer::computeLipschitzEstimate()
 {
+    TIME_FUNCTION();
     float pos_norm_sq  = 0.0f;
     float grad_norm_sq = 0.0f;
 
@@ -69,6 +70,7 @@ float Placer::computeLipschitzEstimate()
  */
 void Placer::combineGradients()
 {
+    TIME_FUNCTION();
     // Refresh the committed-gradient L1 norms while both force components are in hand:
     // last_gwl_L1 = Σ‖∇wl‖₁ (probe_grad before the subtraction), last_gden_L1 = Σ‖λ·∇den‖₁ (the
     // electrostatic force, which already carries λ). The force-ratio dff (next iteration) reads these.
@@ -165,6 +167,7 @@ void Placer::advanceIterationState()
  */
 void Placer::stepAllNodes()
 {
+    TIME_FUNCTION();
     for (const auto& item : db.getComponents()) {
         if (item.second->getStatus() == FIXED) continue;
         item.second->step(step_length, momentum_coeff);

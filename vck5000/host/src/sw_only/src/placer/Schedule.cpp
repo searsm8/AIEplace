@@ -231,6 +231,7 @@ bool Placer::checkDivergence(int window, float threshold)
  */
 void Placer::updatePrecondWeights()
 {
+    TIME_FUNCTION();
     float lambda_area_coef = precond_coef * density_weight;
 
     // Accumulate the two force-mass components for density_force_fraction:

@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# TODO #12 regression harness: run a fixed design set with a FIXED RNG seed and collect the
+# artifacts that pin down numerical behavior, so two builds (or two thread counts) can be
+# compared with a plain `diff -r`.
+#
+#   bash tools/verify_swonly.sh <out_dir> [iters] [set]
+#     set = fast (default, ~15 s)  |  full (adds the big/slow designs)
+#
+# Collected per design: iterations.dat (the per-iteration HPWL/overflow/step trace),
+# RowBasedPlacement.def (every final cell position), function_statistics.md (timing).
+# The iteration is chaotic, so a single-ULP divergence at iteration 1 is visible in
+# iterations.dat by iteration ~10 -- it is a sharper equality test than it looks.
+set -u
+
+OUT=${1:-/tmp/mt12/verify}
+ITERS=${2:-20}
+SET=${3:-fast}
+ROOT=/home/msears/phd/AIEplace/vck5000
+EXE=$ROOT/build/hw/host/sw_only/aieplace_sw_only.exe
+BASE=$ROOT/host/src/sw_only/run_config.toml
+
+FAST="
+adaptec1:host/benchmarks/ispd2005/adaptec1
+mgc_fft_1:host/benchmarks/ispd2015/mgc_fft_1
+mgc_matrix_mult_1:host/benchmarks/ispd2015/mgc_matrix_mult_1
+adaptec1_g1024:host/benchmarks/ispd2005/adaptec1:1024
+"
+SLOW="
+superblue11:host/benchmarks/ispd2015/mgc_superblue11_a
+newblue3:host/benchmarks/mms/newblue3
+"
+
+DESIGNS=$FAST
+[ "$SET" = full ] && DESIGNS="$FAST$SLOW"
+
+mkdir -p "$OUT"
+cd "$ROOT" || exit 1
+
+for entry in $DESIGNS; do
+    label=${entry%%:*}
+    rest=${entry#*:}
+    bench=${rest%%:*}
+    bins=""
+    [ "$rest" != "$bench" ] && bins=${rest#*:}
+    [ -d "$bench" ] || { echo "SKIP $label"; continue; }
+
+    cfg=$OUT/$label.toml
+    sed -e "s|^benchmark = .*|benchmark = \"$bench\"|" \
+        -e "s|^convergence_min_iterations = .*|convergence_min_iterations = $ITERS|" \
+        -e "s|^convergence_max_iterations = .*|convergence_max_iterations = $ITERS|" \
+        -e "s|^results_dir = .*|results_dir = \"$OUT/runs/$label\"|" \
+        "$BASE" > "$cfg"
+    # random_seed pins the initial placement; without it every run starts somewhere different.
+    sed -i "s|^\[params\]$|[params]\nrandom_seed = 42${bins:+\nbins_per_row = $bins}|" "$cfg"
+
+    printf '%-20s ' "$label"
+    start=$(date +%s.%N)
+    "$EXE" "$cfg" > "$OUT/$label.log" 2>&1
+    end=$(date +%s.%N)
+
+    run=$(ls -d "$OUT/runs/$label"/*/*/ 2>/dev/null | tail -1)
+    mkdir -p "$OUT/artifacts/$label"
+    for f in iterations.dat RowBasedPlacement.def function_statistics.md; do
+        [ -f "$run/$f" ] && cp "$run/$f" "$OUT/artifacts/$label/"
+    done
+    printf 'wall %6.2f s   final: %s\n' "$(echo "$end - $start" | bc)" \
+           "$(tail -1 "$OUT/artifacts/$label/iterations.dat" 2>/dev/null)"
+done
+
+echo "artifacts -> $OUT/artifacts   (compare two runs with: diff -r A/artifacts B/artifacts)"

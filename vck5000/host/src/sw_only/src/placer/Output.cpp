@@ -733,6 +733,7 @@ void Placer::addRandomFocusIO(std::mt19937& rng)
 
 void Placer::recordIterationResults()
 {
+    TIME_FUNCTION();
     float hpwl = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), cfg["params"]["ignore_net_degree"].value_or(100));
     // Drive convergence off the smoothed overflow (clamped footprints; equivalent to XPlace's
     // expand_ratio-inflated field): the smoothed density the optimizer minimizes, which descends

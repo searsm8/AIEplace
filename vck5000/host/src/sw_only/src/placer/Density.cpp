@@ -107,31 +107,41 @@ void Placer::compute_eField_naive()
 /** @brief: Compute the intermediate term a_uv using DCTs*/
 void Placer::compute_a_uv_DCT()
 {
+    TIME_FUNCTION();
+    const int num_rows = grid.getBinsPerCol();
+    const int num_cols = grid.getBinsPerRow();
     std::vector< std::vector<float> > density = grid.getBinDensities(); // rho
-    std::vector< std::vector<float> > temp;
-    std::vector< std::vector<float> > a_uv;
+    std::vector< std::vector<float> > temp(num_rows, std::vector<float>(num_cols));
+    std::vector< std::vector<float> > a_uv(num_rows, std::vector<float>(num_cols));
 
     // Perform 1-D DCT on rows of density (rho) matrix (FFT, O(N log N); verified == DCT_naive)
-    for (int row_index = 0; row_index < grid.getBinsPerCol(); row_index++)
-        temp.push_back(DCT_fft(density[row_index], dct_normalize));
+    {   TIME_BLOCK("dct_rowpass");
+        for (int row_index = 0; row_index < num_rows; row_index++)
+            DCT_fft(density[row_index].data(), temp[row_index].data(), num_cols, dct_normalize);
+    }
 
-    temp = transpose(temp);
+    {   TIME_BLOCK("dct_transpose"); temp = transpose(temp); }
 
     // Perform 1-D DCT on transposed matrix
-    for (int col_index = 0; col_index < grid.getBinsPerRow(); col_index++)
-        a_uv.push_back(DCT_fft(temp[col_index], dct_normalize));
+    {   TIME_BLOCK("dct_rowpass");
+        for (int col_index = 0; col_index < num_cols; col_index++)
+            DCT_fft(temp[col_index].data(), a_uv[col_index].data(), num_rows, dct_normalize);
+    }
 
-    a_uv = transpose(a_uv);
+    {   TIME_BLOCK("dct_transpose"); a_uv = transpose(a_uv); }
 
-    for (int u = 0; u < grid.getBinsPerRow(); u++)
-        for (int v = 0; v < grid.getBinsPerCol(); v++) {
-           grid.getBin(u, v).a_uv = a_uv[u][v];
-        }
+    {   TIME_BLOCK("dct_grid_io");
+        for (int u = 0; u < num_cols; u++)
+            for (int v = 0; v < num_rows; v++) {
+               grid.getBin(u, v).a_uv = a_uv[u][v];
+            }
+    }
 }
 
 /** @brief: Compute the eField values using DCTs*/
 void Placer::compute_eField_DCT()
 {
+    TIME_FUNCTION();
     int num_rows = grid.getBinsPerCol();
     int num_cols = grid.getBinsPerRow();
     std::vector< std::vector<float> > Ex     (num_rows, std::vector<float>(num_cols));
@@ -141,6 +151,7 @@ void Placer::compute_eField_DCT()
     float w = 2 * M_PI / num_cols;
     Ex[0][0] = 0; Ey[0][0] = 0;
 
+    {   TIME_BLOCK("dct_spectral");
     for (int u = 0; u < num_rows; u++) {
         for (int v = 0; v < num_cols; v++) {
             if ( u == 0 && v == 0) continue; // avoid division by 0
@@ -152,34 +163,39 @@ void Placer::compute_eField_DCT()
             Ey[u][v] = a_uv[u][v] * w_v / denom;
         }
     }
+    }
 
     // Inverse transforms are left UNNORMALIZED (default). The forward a_uv already carries the 1/N^2;
     // re-applying 1/N on the inverse would double-normalize — a spurious extra 1/N^2 vs the naive
     // DREAMPlace field that inflates lambda ~N^2 and corrupts the preconditioner (the distortion grows
     // with grid). Unnormalized = field-faithful: verified == compute_eField_naive and matches XPlace.
     // compute IDCT on all rows of Ex, and IDXST on all rows of Ey (FFT; verified == naive)
-    for (int row_index = 0; row_index < num_rows; row_index++) {
-        Ex[row_index] = IDCT_fft (Ex[row_index]);
-        Ey[row_index] = IDXST_fft(Ey[row_index]);
+    {   TIME_BLOCK("dct_rowpass");     // transforms run in place (out may alias in)
+        for (int row_index = 0; row_index < num_rows; row_index++) {
+            IDCT_fft (Ex[row_index].data(), Ex[row_index].data(), num_cols);
+            IDXST_fft(Ey[row_index].data(), Ey[row_index].data(), num_cols);
+        }
     }
 
-    Ex = transpose(Ex);
-    Ey = transpose(Ey);
+    {   TIME_BLOCK("dct_transpose"); Ex = transpose(Ex); Ey = transpose(Ey); }
 
     // compute IDCT on all rows of Ey, and IDXST on all rows of Ex
-    for (int row_index = 0; row_index < num_rows; row_index++) {
-        Ex[row_index] = IDXST_fft (Ex[row_index]);
-        Ey[row_index] = IDCT_fft(Ey[row_index]);
+    {   TIME_BLOCK("dct_rowpass");
+        for (int row_index = 0; row_index < num_rows; row_index++) {
+            IDXST_fft(Ex[row_index].data(), Ex[row_index].data(), num_cols);
+            IDCT_fft (Ey[row_index].data(), Ey[row_index].data(), num_cols);
+        }
     }
 
-    Ex = transpose(Ex);
-    Ey = transpose(Ey);
+    {   TIME_BLOCK("dct_transpose"); Ex = transpose(Ex); Ey = transpose(Ey); }
 
     // Put results in the grid bins
-    for (int x = 0; x < num_cols; x++) {
-        for (int y = 0; y < num_rows; y++) {
-            grid.getBin(x, y).eField.x = Ex[x][y];
-            grid.getBin(x, y).eField.y = Ey[x][y];
+    {   TIME_BLOCK("dct_grid_io");
+        for (int x = 0; x < num_cols; x++) {
+            for (int y = 0; y < num_rows; y++) {
+                grid.getBin(x, y).eField.x = Ex[x][y];
+                grid.getBin(x, y).eField.y = Ey[x][y];
+            }
         }
     }
 }
@@ -233,6 +249,7 @@ void Placer::computeOverlaps()
  */
 float Placer::computeOverflow(bool clamp, std::vector<float>* out_density, bool include_fillers)
 {
+    TIME_FUNCTION();
     const int nx = grid.getBinsPerRow();
     const int ny = grid.getBinsPerCol();
     const float bin_w = grid.getBinWidth();

@@ -84,6 +84,7 @@ Placer::Placer(std::string config_filepath)
  */
 void Placer::iterationReset()
 {
+    TIME_FUNCTION();
     grid.iterationReset();
     db.iterationReset();
 }
