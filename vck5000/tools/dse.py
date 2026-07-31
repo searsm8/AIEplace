@@ -22,6 +22,12 @@ import benchmarks  # master benchmark manifest (rejects out-of-scope designs at 
 # A good default 4 or 8 to speed up DSE on a typical multi-core machine without overwhelming it.
 MAX_PARALLEL = 8
 
+# OpenMP threads given to each run, set in run_dse() once the worker count is known.
+# The placer itself is multithreaded (TODO #12) and takes every core but one when left alone,
+# so N concurrent runs would oversubscribe the box N-fold. Split the CPUs across the workers
+# instead. An OMP_NUM_THREADS already in the environment still wins.
+THREADS_PER_RUN = 1
+
 # Compiled placer binary (current sw_only build) and the base config it reads.
 # Both paths are relative to vck5000/, which is where this script must be run from.
 EXE_PATH = "build/hw/host/sw_only/aieplace_sw_only.exe"
@@ -437,10 +443,13 @@ class ParallelRun:
     def start(self):
         """Launch the subprocess with stdout/stderr discarded."""
         self.t0 = time.time()
+        env = dict(os.environ)
+        env.setdefault("OMP_NUM_THREADS", str(THREADS_PER_RUN))
         self.process = subprocess.Popen(
             [EXE_PATH, self.config_path],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=env,
         )
 
     def poll(self):
@@ -550,7 +559,10 @@ def dse():
           f"+ {len(explicit_runs)} explicit run(s) = {total_runs} total")
 
     parallel = min(MAX_PARALLEL, total_runs)
-    print(f"DSE: Running with {parallel} parallel workers")
+    global THREADS_PER_RUN
+    THREADS_PER_RUN = max(1, (os.cpu_count() or 1) // parallel)
+    print(f"DSE: Running with {parallel} parallel workers, "
+          f"OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS', THREADS_PER_RUN)} each")
 
     # Give every DSE sweep its own subdirectory so runs never collide
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
