@@ -7,6 +7,7 @@
 #     set = fast (default, ~15 s)  |  full (adds the big/slow designs)
 #   env: DETERMINISTIC=false  -> force params.deterministic off (the atomics path)
 #        OMP_NUM_THREADS=N    -> passed through to the placer
+#        EXE=<path>           -> run a different binary (e.g. a saved pre-change reference)
 #
 # Collected per design: iterations.dat (the per-iteration HPWL/overflow/step trace),
 # RowBasedPlacement.def (every final cell position), function_statistics.md (timing).
@@ -18,7 +19,7 @@ OUT=${1:-/tmp/mt12/verify}
 ITERS=${2:-20}
 SET=${3:-fast}
 ROOT=/home/msears/phd/AIEplace/vck5000
-EXE=$ROOT/build/hw/host/sw_only/aieplace_sw_only.exe
+EXE=${EXE:-$ROOT/build/hw/host/sw_only/aieplace_sw_only.exe}
 BASE=$ROOT/host/src/sw_only/run_config.toml
 
 FAST="
