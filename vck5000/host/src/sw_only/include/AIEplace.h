@@ -116,10 +116,13 @@ public:
     bool enable_density_clamp = true;   // clamp sub-bin cells in the density solve (XPlace expand_ratio)
     // --- TEMPORARY A/B toggles (TODO #11): two documented divergences from XPlace, both default
     // OFF = legacy sw_only behavior. Remove the losing branch once the A/B has decided. ---
-    bool xplace_die_projection = false; // #11a: constrain the POSITION so the EXPANDED footprint is
-                                        // in-die (XPlace trunc_node_pos_fn), instead of clamping the
-                                        // position by raw size and shifting the footprint at deposit.
-    bool macro_td_expand_ratio = false; // #11b: movable macros deposit at weight = target_density
+    bool xplace_die_projection = true; // #11a, ADOPTED 2026-07-31 (MMS A/B: exactly neutral, pure
+                                        // faithfulness win). Constrain the POSITION so the EXPANDED
+                                        // footprint is in-die (XPlace trunc_node_pos_fn), instead of
+                                        // clamping the position by raw size and shifting at deposit.
+    bool macro_td_expand_ratio = false; // #11b, REJECTED 2026-07-31 (MMS A/B: mean +5.2% HPWL worse,
+                                        // worst on the macro-heavy designs it targeted). Leave false.
+                                        // true = movable macros deposit at weight = target_density
                                         // instead of the area-conserving ratio (XPlace database.py:921)
     bool dct_normalize = true;   // apply 1/N per forward DCT (bounds a_uv intermediates; global scale absorbed by lambda)
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)

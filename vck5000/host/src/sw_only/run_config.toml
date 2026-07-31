@@ -34,17 +34,21 @@ auto_enable_preconditioning = true
 precond_coef_escalation = true  # double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef); false = diagnostic (fixed precond_coef)
 enable_density_clamp = true     # clamp sub-bin cells to ~bin size in the density solve (XPlace expand_ratio); smooths the force
 
-# --- TEMPORARY A/B toggles (TODO #11). Two documented divergences from XPlace, both default
-# false = legacy sw_only behavior. Delete the losing branch once the A/B has decided. ---
-xplace_die_projection = false   # #11a. false = legacy: clamp the position by the RAW cell size, then
-                                 # shift the sqrt(2)-expanded footprint back in-die at deposit time.
-                                 # true  = XPlace trunc_node_pos_fn: clamp the position so the
-                                 # EXPANDED footprint is already in-die (deposit-time shift disabled),
-                                 # so the deposited mass stays centred on the cell.
-macro_td_expand_ratio = false   # #11b. true = movable macros deposit at weight = target_density
-                                 # instead of the area-conserving real/clamped ratio (XPlace
-                                 # database.py:921). No effect when maximum_utilization == 1.0, so
-                                 # ISPD2005 is unaffected; only bites on ISPD2015/MMS.
+# --- TEMPORARY A/B toggles (TODO #11). DECIDED 2026-07-31 by the MMS A/B
+# (1_MARK_TO_REVIEW/NEW_REPORT_footprint_ab_20260731.md): #11a ADOPTED (exactly neutral, mean
+# +0.0% HPWL / 15 designs -- pure faithfulness win), #11b REJECTED (mean +5.2% HPWL WORSE / 7
+# designs, worst on the macro-heavy designs it was meant to help). Toggles kept for now so the
+# rejected branch stays reachable for reference; delete both + the losing branch once sw_only
+# settles (see TODO #11 cleanup steps). ---
+xplace_die_projection = true    # #11a, ADOPTED. false = legacy: clamp the position by the RAW cell
+                                 # size, then shift the sqrt(2)-expanded footprint back in-die at
+                                 # deposit time. true = XPlace trunc_node_pos_fn: clamp the position
+                                 # so the EXPANDED footprint is already in-die (deposit-time shift
+                                 # disabled), so the deposited mass stays centred on the cell.
+macro_td_expand_ratio = false   # #11b, REJECTED -- leave false. true = movable macros deposit at
+                                 # weight = target_density instead of the area-conserving
+                                 # real/clamped ratio (XPlace database.py:921). No effect when
+                                 # maximum_utilization == 1.0 (ISPD2005); only bites on MMS/ISPD2015.
 deterministic = true            # reduction policy for the threaded iteration (see Common.h).
                                  # true  = additions happen in the same order the single-threaded
                                  #         code used, so results are bit-identical to the serial
