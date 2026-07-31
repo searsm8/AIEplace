@@ -136,6 +136,16 @@ public:
     int die_size; // minimum of width and height of the die area
     int bins_per_row; // grid size
 
+    // Scratch for the per-iteration reductions that must add in index order (see Common.h).
+    // Members, not locals, so the buffers are allocated once for the whole run.
+    OrderedReduce m_ordered_reduce;
+    // Threaded gradient scatter under g_deterministic: the per-net partials are computed in
+    // parallel into m_pin_partials, indexed by m_net_pin_offset[net] + pin, then replayed onto
+    // the shared nodes serially in net order. Built once by buildPinPartialIndex().
+    std::vector<int> m_net_pin_offset;
+    std::vector<Gradient> m_pin_partials;
+    void buildPinPartialIndex();
+
     // Methods of computation, loaded from config file
     std::string partials_method;
     std::string density_method;

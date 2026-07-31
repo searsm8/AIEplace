@@ -130,5 +130,75 @@ struct Term
 long getTime();
 double getInterval(long start_time, long end_time);
 
+/**
+ * @brief Run-wide reduction policy for the threaded iteration (config params.deterministic).
+ *
+ * The placement iteration is parallelized with OpenMP over nodes, nets and grid rows. `+` on
+ * floats is not associative, so a threaded loop is only bit-reproducible if it does not
+ * reorder additions. Three kinds of loop, and only the third is governed by this flag:
+ *
+ *   1. Disjoint writes (node steps, per-row transforms, bin clears) — threaded always. The
+ *      per-item arithmetic is untouched and nothing is summed, so the schedule cannot matter.
+ *   2. Scalar reductions (L1 norms, total HPWL, total overflow) — threaded always, through
+ *      OrderedReduce below, which sums in index order for a few percent of extra memory
+ *      traffic. Not worth a policy switch.
+ *   3. SCATTER reductions — depositing cell area into shared bins, and accumulating a net's
+ *      gradient onto shared nodes. These are the expensive ones and the only ones the flag
+ *      governs:
+ *        false — one atomic add per deposit. Fastest, but the order in which several threads
+ *                hit the same bin or node follows their interleaving, so results move slightly
+ *                from run to run even at a fixed thread count.
+ *        true  — the per-item work (footprint geometry, the WA exponentials) still runs
+ *                threaded, but the shared add is replayed serially in the original item order,
+ *                so the result is bit-identical to the serial golden at any thread count.
+ *
+ * Default true: sw_only is the reference every pl_algo hardware block is verified against, so
+ * reproducibility is the property that matters most. Sweeps that only need throughput can set
+ * it false. Set once during setup and never written again, so the hot loops can read it freely.
+ */
+extern bool g_deterministic;
+
+/**
+ * @brief A sum whose terms are computed in parallel but ADDED UP in index order.
+ *
+ * An `omp reduction` gives a different low bit for a different thread count, because each
+ * thread folds its own partial and the partials are combined in whatever order they finish.
+ * Here the per-item work — which is what costs anything — runs threaded into a scratch array,
+ * and the accumulation then runs on one thread in increasing index: the same additions, in the
+ * same sequence, as the equivalent single-threaded loop. The scratch is a member so the
+ * per-iteration allocation happens once.
+ */
+class OrderedReduce
+{
+    std::vector<float> m_partials;
+
+public:
+    /// @brief @p per_item(i) -> the i-th term. Returns the terms summed in increasing i.
+    template <typename F>
+    float sum(int count, F&& per_item)
+    {
+        if ((int)m_partials.size() < count) m_partials.resize(count);
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i < count; i++) m_partials[i] = per_item(i);
+
+        float total = 0.0f;
+        for (int i = 0; i < count; i++) total += m_partials[i];
+        return total;
+    }
+
+    /// @brief Two sums from one pass: @p per_item(i, first_i, second_i) writes both terms.
+    ///        Each is accumulated in increasing i, independently of the other.
+    template <typename F>
+    void sum2(int count, F&& per_item, float& first, float& second)
+    {
+        if ((int)m_partials.size() < 2 * count) m_partials.resize(2 * count);
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i < count; i++) per_item(i, m_partials[2*i], m_partials[2*i + 1]);
+
+        first = 0.0f; second = 0.0f;
+        for (int i = 0; i < count; i++) { first += m_partials[2*i]; second += m_partials[2*i + 1]; }
+    }
+};
+
 AIEPLACE_NAMESPACE_END
 

@@ -15,6 +15,9 @@ std::vector< std::vector<float> > transpose   (const std::vector< std::vector<fl
     int num_cols = input[0].size();
     std::vector< std::vector<float> > output(num_cols, std::vector<float>(num_rows));
 
+    // Parallel over input rows: each iteration writes one element of every output row, and
+    // no two iterations touch the same element, so the result does not depend on the schedule.
+    #pragma omp parallel for schedule(static)
     for (int row_index = 0; row_index < num_rows; row_index++)
     {
         for (int col_index = 0; col_index < num_cols; col_index++)

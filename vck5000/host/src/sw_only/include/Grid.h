@@ -114,7 +114,10 @@ public:
 
     void iterationReset();
 
-    void computeBinOverlaps(Node* node_p);
+    // The density deposit in two halves: the geometry, which touches only the node and so is
+    // always safe to thread, and the scatter into shared bins, which is the reduction.
+    void computeNodeOverlaps(Node* node_p, bool deposit_atomically);
+    void depositNodeOverlaps(Node* node_p);
     void clampFixedDensity(float target_density);
 
     std::vector< std::vector<float> > getBinDensities(); // rho = overlap / bin_area

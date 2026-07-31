@@ -115,7 +115,10 @@ void Placer::compute_a_uv_DCT()
     std::vector< std::vector<float> > a_uv(num_rows, std::vector<float>(num_cols));
 
     // Perform 1-D DCT on rows of density (rho) matrix (FFT, O(N log N); verified == DCT_naive)
+    // Every 1-D transform in a pass reads and writes only its own row, so threading the row
+    // loop reorders nothing -- the result is bit-exact at any thread count.
     {   TIME_BLOCK("dct_rowpass");
+        #pragma omp parallel for schedule(static)
         for (int row_index = 0; row_index < num_rows; row_index++)
             DCT_fft(density[row_index].data(), temp[row_index].data(), num_cols, dct_normalize);
     }
@@ -124,6 +127,7 @@ void Placer::compute_a_uv_DCT()
 
     // Perform 1-D DCT on transposed matrix
     {   TIME_BLOCK("dct_rowpass");
+        #pragma omp parallel for schedule(static)
         for (int col_index = 0; col_index < num_cols; col_index++)
             DCT_fft(temp[col_index].data(), a_uv[col_index].data(), num_rows, dct_normalize);
     }
@@ -131,6 +135,7 @@ void Placer::compute_a_uv_DCT()
     {   TIME_BLOCK("dct_transpose"); a_uv = transpose(a_uv); }
 
     {   TIME_BLOCK("dct_grid_io");
+        #pragma omp parallel for schedule(static)
         for (int u = 0; u < num_cols; u++)
             for (int v = 0; v < num_rows; v++) {
                grid.getBin(u, v).a_uv = a_uv[u][v];
@@ -152,6 +157,7 @@ void Placer::compute_eField_DCT()
     Ex[0][0] = 0; Ey[0][0] = 0;
 
     {   TIME_BLOCK("dct_spectral");
+    #pragma omp parallel for schedule(static)
     for (int u = 0; u < num_rows; u++) {
         for (int v = 0; v < num_cols; v++) {
             if ( u == 0 && v == 0) continue; // avoid division by 0
@@ -171,6 +177,7 @@ void Placer::compute_eField_DCT()
     // with grid). Unnormalized = field-faithful: verified == compute_eField_naive and matches XPlace.
     // compute IDCT on all rows of Ex, and IDXST on all rows of Ey (FFT; verified == naive)
     {   TIME_BLOCK("dct_rowpass");     // transforms run in place (out may alias in)
+        #pragma omp parallel for schedule(static)
         for (int row_index = 0; row_index < num_rows; row_index++) {
             IDCT_fft (Ex[row_index].data(), Ex[row_index].data(), num_cols);
             IDXST_fft(Ey[row_index].data(), Ey[row_index].data(), num_cols);
@@ -181,6 +188,7 @@ void Placer::compute_eField_DCT()
 
     // compute IDCT on all rows of Ey, and IDXST on all rows of Ex
     {   TIME_BLOCK("dct_rowpass");
+        #pragma omp parallel for schedule(static)
         for (int row_index = 0; row_index < num_rows; row_index++) {
             IDXST_fft(Ex[row_index].data(), Ex[row_index].data(), num_cols);
             IDCT_fft (Ey[row_index].data(), Ey[row_index].data(), num_cols);
@@ -191,6 +199,7 @@ void Placer::compute_eField_DCT()
 
     // Put results in the grid bins
     {   TIME_BLOCK("dct_grid_io");
+        #pragma omp parallel for schedule(static)
         for (int x = 0; x < num_cols; x++) {
             for (int y = 0; y < num_rows; y++) {
                 grid.getBin(x, y).eField.x = Ex[x][y];
@@ -210,23 +219,38 @@ void Placer::computeOverlaps()
 {
     TIME_FUNCTION();
     Logger::log_trace("Begin computeOverlaps()");
+    const auto& fixed   = db.getFixedComponents();
+    const auto& movable = db.getMovableComponents();
+    const auto& fillers = db.getFillers();
+
+    // The two passes are ordered and must stay so: clampFixedDensity reads the fixed baseline.
+    // Within a pass the geometry is per-node and always threaded; only the scatter into shared
+    // bins depends on the policy. Dynamic scheduling because a fixed macro covering thousands
+    // of bins costs orders of magnitude more than a standard cell.
+    auto deposit_pass = [&](const auto& node_vec) {
+        #pragma omp parallel for schedule(dynamic, 512)
+        for (int i = 0; i < (int)node_vec.size(); i++)
+            grid.computeNodeOverlaps(node_vec[i], !g_deterministic);
+        if (!g_deterministic) return;   // the deposit was fused into the pass above
+
+        // Ordered deposit: one thread, node order, and within a node the order its own geometry
+        // loop built the list -- so every bin sees exactly the sequence of adds the
+        // single-threaded code performed. Costs a second pass over the nodes, which is why the
+        // atomics path fuses instead.
+        for (int i = 0; i < (int)node_vec.size(); i++)
+            grid.depositNodeOverlaps(node_vec[i]);
+    };
 
     // Pass 1: Fixed components — their density is clamped so bins fully covered
     // by fixed macros register as "at capacity" but not overflowed.
-    for (const auto& item : db.getComponents())
-        if (item.second->getStatus() == FIXED)
-            grid.computeBinOverlaps(item.second);
+    deposit_pass(fixed);
 
     grid.clampFixedDensity(target_density);
 
     // Pass 2: Movable components and fillers — any density on top of
     // the clamped fixed baseline counts as real overflow.
-    for (const auto& item : db.getComponents())
-        if (item.second->getStatus() != FIXED)
-            grid.computeBinOverlaps(item.second);
-
-    for (auto filler_p : db.getFillers())
-        grid.computeBinOverlaps(filler_p);
+    deposit_pass(movable);
+    deposit_pass(fillers);
 }
 
 /**
@@ -275,23 +299,37 @@ float Placer::computeOverflow(bool clamp, std::vector<float>* out_density, bool 
             for (int r = row_lo; r <= row_hi; r++) {
                 float oy = std::min(yh, (r + 1) * bin_h) - std::max(yl, r * bin_h);
                 if (oy <= 0.0f) continue;
-                density[c * ny + r] += ox * oy * weight;
+                if (g_deterministic) {           // shared bin: same reduction as computeOverlaps
+                    density[c * ny + r] += ox * oy * weight;
+                } else {
+                    #pragma omp atomic
+                    density[c * ny + r] += ox * oy * weight;
+                }
             }
         }
     };
 
-    // Fixed baseline at exact size, capped per bin (mirrors clampFixedDensity).
-    for (const auto& item : db.getComponents())
-        if (item.second->getStatus() == FIXED) deposit(item.second, false);
-    for (float& d : density) d = std::min(d, cap);
+    // Unlike computeOverlaps this scatter has no per-node list to replay, and it is a metric
+    // rather than the solver's field, so the deterministic path simply stays serial. It is a
+    // few percent of the iteration and the whole function is memory-bound either way.
+    auto deposit_pass = [&](const auto& node_vec, bool clamp_node) {
+        #pragma omp parallel for schedule(dynamic, 512) if(!g_deterministic)
+        for (int i = 0; i < (int)node_vec.size(); i++) deposit(node_vec[i], clamp_node);
+    };
+
+    // Fixed baseline at exact size, capped per bin (mirrors clampFixedDensity). The passes are
+    // ordered (the cap reads the fixed baseline); within a pass the nodes are independent.
+    deposit_pass(db.getFixedComponents(), false);
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)density.size(); i++) density[i] = std::min(density[i], cap);
 
     // Movable real cells (clamped when requested). Fillers included only for the diagnostic
     // that mirrors XPlace's filler-inclusive GP stop signal (default: excluded).
-    for (const auto& item : db.getComponents())
-        if (item.second->getStatus() != FIXED) deposit(item.second, clamp);
-    if (include_fillers)
-        for (auto filler_p : db.getFillers()) deposit(filler_p, clamp);
+    deposit_pass(db.getMovableComponents(), clamp);
+    if (include_fillers) deposit_pass(db.getFillers(), clamp);
 
+    // A linear scan of a contiguous array: already memory-bound, so it stays serial rather than
+    // buying a fraction of a millisecond at the cost of an ordering caveat.
     float overflow_area = 0.0f;
     for (float d : density) overflow_area += std::max(0.0f, d - cap);
 

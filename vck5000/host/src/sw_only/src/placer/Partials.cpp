@@ -16,16 +16,12 @@ AIEPLACE_NAMESPACE_BEGIN
 void Placer::computeHpwlPartials()
 {
     // Clear probe_grad before accumulation, otherwise gradients compound across iterations.
-    for (const auto& item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        item.second->next.probe_grad.clear();
-    }
-    for (auto filler_p : db.getFillers()) {
-        filler_p->next.probe_grad.clear();
-    }
-    for (const auto& item : db.getIOPads()) {
-        item.second->next.probe_grad.clear();
-    }
+    const auto& nodes  = db.getMovableNodes();
+    const auto& iopads = db.getIOPadNodes();
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)nodes.size(); i++)  nodes[i]->next.probe_grad.clear();
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)iopads.size(); i++) iopads[i]->next.probe_grad.clear();
 
     if(partials_method == "cpu") {
         computeHpwlPartials_CPU();
@@ -99,7 +95,11 @@ void Placer::computeHpwlPartials_simple()
     const float range = hpwl_lut_range;
 
     int ignore_net_degree = cfg["params"]["ignore_net_degree"].value_or(100); // XPlace net_mask
-    for (Net* net_p : db.getNetsVector()) {
+    const auto& nets = db.getNetsVector();
+
+    #pragma omp parallel for schedule(dynamic, 256) if(!g_deterministic)
+    for (int net_index = 0; net_index < (int)nets.size(); net_index++) {
+        Net* net_p = nets[net_index];
         const std::vector<NetPin>& pins = net_p->getPins();
         int net_size = net_p->getDegree();
         if (net_size <= 1 || net_size > ignore_net_degree) continue;
@@ -135,9 +135,17 @@ void Placer::computeHpwlPartials_simple()
             float plus_y  = (d_max_y < range) ? lutLookup(d_max_y) * norm_y : 0.0f;
             float minus_y = (d_min_y < range) ? lutLookup(d_min_y) * norm_y : 0.0f;
 
-            // Gradient accumulates onto the parent node
-            pin.node_p->next.probe_grad.x += plus_x - minus_x;
-            pin.node_p->next.probe_grad.y += plus_y - minus_y;
+            // Gradient accumulates onto the parent node -- shared across nets, see the CPU
+            // backend for why the add is atomic under !g_deterministic.
+            if (g_deterministic) {
+                pin.node_p->next.probe_grad.x += plus_x - minus_x;
+                pin.node_p->next.probe_grad.y += plus_y - minus_y;
+            } else {
+                #pragma omp atomic
+                pin.node_p->next.probe_grad.x += plus_x - minus_x;
+                #pragma omp atomic
+                pin.node_p->next.probe_grad.y += plus_y - minus_y;
+            }
         }
     }
 }
@@ -198,7 +206,20 @@ void Placer::computeHpwlPartials_CPU()
     // WA gradient pulls hundreds of unrelated cells and is noise for placement; XPlace drops
     // them from both the gradient and the HPWL metric (see computeTotalWirelength).
     int ignore_net_degree = cfg["params"]["ignore_net_degree"].value_or(100);
-    for (Net* net_p : db.getNetsVector()) {
+    const auto& nets = db.getNetsVector();
+    if (g_deterministic) buildPinPartialIndex();
+
+    // Nets are independent right up to the last line, where each pin's partial is added onto
+    // its parent node — and a node sits on many nets, so that add is the shared write, and the
+    // only thing here the reduction policy governs. Everything above it, including the four
+    // exponentials per pin that dominate the cost, is threaded either way.
+    #pragma omp parallel for schedule(dynamic, 256)
+    for (int net_index = 0; net_index < (int)nets.size(); net_index++) {
+        // Replaces the early return -- `return` is illegal from an OpenMP loop. m_nan_detected
+        // is a one-way latch (only ever set true) so the unsynchronized read is benign: the
+        // worst case is another thread logging one more diagnostic before the run stops.
+        if (m_nan_detected) continue;
+        Net* net_p = nets[net_index];
         const std::vector<NetPin>& pins = net_p->getPins();
         int net_size = net_p->getDegree();
 
@@ -212,8 +233,11 @@ void Placer::computeHpwlPartials_CPU()
             min_y = std::min(min_y, p.y); max_y = std::max(max_y, p.y);
         }
 
-        // Compute A terms directly into our flat vector
-        std::vector<Term> A(net_size);
+        // Per-thread scratch for the A terms. This ran millions of times per iteration and a
+        // fresh std::vector per net would put every thread in the allocator at once; the loop
+        // below writes all four fields of every element it uses, so reuse needs no clearing.
+        static thread_local std::vector<Term> A;
+        if ((int)A.size() < net_size) A.resize(net_size);
         for (int i = 0; i < net_size; i++) {
             Position p = pins[i].getProbePos();
             A[i].plus.x  = exp((p.x - max_x) * inv_gamma);
@@ -244,8 +268,10 @@ void Placer::computeHpwlPartials_CPU()
             logZeroBTermDiagnostic(net_p, pins, A, B, min_x, max_x, min_y, max_y);
             // Same hard-divergence path as the NaN check below: flag and stop rather than
             // emitting inf gradients, so finalization still reports a best-so-far result.
+            // Every later net is skipped by the guard at the top of the loop, so the set of
+            // nets that contributed a gradient is the same one the old early `return` left.
             m_nan_detected = true;
-            return;
+            continue;
         }
 
         // Pre-compute common terms
@@ -276,12 +302,58 @@ void Placer::computeHpwlPartials_CPU()
                 // run() breaks on m_nan_detected so finalization restores the best-so-far placement
                 // and still writes a results row (a DSE sweep no longer loses the run).
                 m_nan_detected = true;
-                return;
+                break;   // the top-of-loop guard then skips every remaining net
             }
 
-            pins[i].node_p->next.probe_grad += partial;
+            // The one shared write: a node is on many nets, so several threads can land on the
+            // same probe_grad. Either add it now under an atomic, or park it for the ordered
+            // replay below — which is what buys bit-identical results.
+            if (g_deterministic) {
+                m_pin_partials[m_net_pin_offset[net_index] + i] = partial;
+            } else {
+                #pragma omp atomic
+                pins[i].node_p->next.probe_grad.x += partial.x;
+                #pragma omp atomic
+                pins[i].node_p->next.probe_grad.y += partial.y;
+            }
         }
     }
+
+    // A divergence flag means this iteration's gradient is about to be discarded — run() breaks
+    // and finalization restores an earlier best placement — so the replay is skipped rather
+    // than reproducing a half-filled buffer. The recorded HPWL and overflow of that last
+    // iteration read positions, not gradients, so they are unaffected.
+    if (!g_deterministic || m_nan_detected) return;
+
+    // Ordered replay: nets in index order, pins in index order — exactly the sequence of adds
+    // the single-threaded loop performed, so every node's probe_grad rounds identically.
+    for (int net_index = 0; net_index < (int)nets.size(); net_index++) {
+        const std::vector<NetPin>& pins = nets[net_index]->getPins();
+        int net_size = nets[net_index]->getDegree();
+        if (net_size <= 1 || net_size > ignore_net_degree) continue;  // same mask as above
+        int base = m_net_pin_offset[net_index];
+        for (int i = 0; i < net_size; i++)
+            pins[i].node_p->next.probe_grad += m_pin_partials[base + i];
+    }
+}
+
+/// @brief Size the per-pin partial buffer and its per-net offsets. Net degrees never change
+///        after parsing, so the offsets are computed once and the buffer reused every iteration.
+///        Only the ordered-replay path needs it, and it is the larger of the two allocations
+///        this file makes (8 bytes per pin, ~32 MB on superblue11), so it is built on demand.
+void Placer::buildPinPartialIndex()
+{
+    const auto& nets = db.getNetsVector();
+    if (m_net_pin_offset.size() == nets.size() + 1) return;
+
+    m_net_pin_offset.resize(nets.size() + 1);
+    int running_total = 0;
+    for (size_t i = 0; i < nets.size(); i++) {
+        m_net_pin_offset[i] = running_total;
+        running_total += nets[i]->getDegree();
+    }
+    m_net_pin_offset[nets.size()] = running_total;
+    m_pin_partials.resize(running_total);
 }
 
 AIEPLACE_NAMESPACE_END

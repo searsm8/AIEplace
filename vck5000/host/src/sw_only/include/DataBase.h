@@ -44,6 +44,26 @@ private:
     vector<Net *> mv_focus_nets; // list of nets to be highlighted with visualizer
     vector<Node *> mv_focus_nodes; // list of nodes to be highlighted with visualizer
 
+    // Index-addressable views of the maps above, built once by buildNodeIndex(). A std::map
+    // cannot drive an `omp parallel for` (no random access), and walking its red-black tree
+    // ~10x per iteration pointer-chases 200k-1M entries for nothing. Each vector holds its
+    // map's iteration order, so a loop over it visits nodes in exactly the order the serial
+    // map loops did -- that identical order is what keeps the reductions bit-reproducible.
+    vector<Component *> mv_movable_components; // non-FIXED components, in mm_components order
+    vector<Component *> mv_fixed_components;   // FIXED components,     in mm_components order
+    vector<Node *> mv_iopad_nodes;             // in mm_iopads order
+    vector<Net *> mv_nets_by_name;             // mm_nets order (mv_nets is insertion order)
+
+    // "Everything that moves": mv_movable_components followed by mv_fillers. That is the order
+    // every per-node loop in the placer already visited them in (movable components, then
+    // fillers), and several of those loops carry a running float sum ACROSS the boundary --
+    // splitting them into two loops would re-associate that sum and change the low bits. One
+    // vector keeps the order, and halves the number of parallel regions per iteration.
+    vector<Node *> mv_movable_nodes;
+    int m_filler_start_index = 0;  // index in mv_movable_nodes where the fillers begin
+
+    OrderedReduce m_ordered_reduce; // scratch for computeTotalWirelength (see Common.h)
+
     Box m_die_area;
     int m_max_x, m_max_y; // used when reading Bookshelf format to find die_area
     // Bookshelf die is derived from the .scl core-row bounding box (matches XPlace),
@@ -85,6 +105,15 @@ public:
     const map<string, IOPad *> &getIOPads() { return mm_iopads; }
     const map<string, Net *> &getNets() { return mm_nets; }
     const vector<Net *> &getNetsVector() { return mv_nets; }
+
+    // Flat views for the threaded iteration loops -- see buildNodeIndex().
+    const vector<Node *> &getMovableNodes() { return mv_movable_nodes; }
+    int getFillerStartIndex() { return m_filler_start_index; } // fillers are [this, size())
+    const vector<Component *> &getMovableComponents() { return mv_movable_components; }
+    const vector<Component *> &getFixedComponents() { return mv_fixed_components; }
+    const vector<Node *> &getIOPadNodes() { return mv_iopad_nodes; }
+    const vector<Net *> &getNetsByName() { return mv_nets_by_name; }
+
     const map<int, std::vector<Net *>> &getNetsByDegree() { return mmv_nets_by_degree; }
     int getNetCountOfDegree(int degree) { return mmv_nets_by_degree[degree].size(); }
     int getTotalNetDegree() { return m_total_net_degree; }
@@ -101,6 +130,10 @@ public:
     bool readBookshelf();
 
     bool addFillers(float target_utilization);
+
+    /// @brief (Re)build the flat node/net index. Call once after parsing and filler creation;
+    ///        placement never adds a node or changes a PlacementStatus, so it stays valid.
+    void buildNodeIndex();
 
     void iterationReset();
     void sortPositionsByX();

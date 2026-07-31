@@ -65,25 +65,26 @@ void Grid::init()
 /// @brief Clear every bin's per-iteration accumulators (overlap, a_uv, field) before the next solve.
 void Grid::iterationReset()
 {
+    #pragma omp parallel for schedule(static)
     for( int x_index = 0; x_index < m_bins_per_row; x_index++)
         for( int y_index = 0; y_index < m_bins_per_col; y_index++)
             m_bins[x_index][y_index].iterationReset();
 }
 
 /**
- * @brief Distribute a node's area across all grid bins it overlaps.
+ * @brief Record how a node's area splits across the grid bins its density footprint overlaps.
  *
- * For each bin the node's bounding box intersects, compute the rectangular
- * intersection area and add it to that bin's total_overlap. Also records the
- * per-bin overlap on the node (for electrostatic force computation).
+ * Always appends the per-bin intersection areas to the node's OWN BinOverlap list — private to
+ * the node, and in an order fixed by this loop, so the electrostatic force gather that later
+ * walks it sums identically every run. This half is all of the geometry and most of the cost,
+ * and is safe to thread under either reduction policy.
  *
- * Small nodes that fit entirely within one bin get the fast path (no
- * intersection math — area goes directly to the single bin). Large nodes
- * that span multiple bins get the exact intersection area for each bin.
- *
- * @param node_p Pointer to the node whose overlap to distribute.
+ * @param deposit_atomically also add each area into the SHARED bin, under an atomic. That is
+ *        the reduction, so it is fused in here only for the !g_deterministic path, where it
+ *        saves a second pass over every node. The ordered path leaves it to
+ *        depositNodeOverlaps() instead.
  */
-void Grid::computeBinOverlaps(Node* node_p)
+void Grid::computeNodeOverlaps(Node* node_p, bool deposit_atomically)
 {
     NodeFootprint fp = computeNodeFootprint(node_p, footprintConfig());
     float node_xl = fp.xl, node_yl = fp.yl;
@@ -107,10 +108,24 @@ void Grid::computeBinOverlaps(Node* node_p)
 
             float overlap_area = overlap_w * overlap_h * weight;  // area-conserving deposit
             Bin& bin = m_bins[col][row];
-            bin.total_overlap += overlap_area;
+            if (deposit_atomically) {
+                #pragma omp atomic
+                bin.total_overlap += overlap_area;
+            }
             node_p->addBinOverlap(&bin, overlap_area);
         }
     }
+}
+
+/**
+ * @brief Add a node's recorded overlaps into the shared bins — the scatter half of the density
+ *        deposit, split out so it can be replayed on one thread in the original node order.
+ *        That replay is what makes the bin totals bit-identical to the serial golden.
+ */
+void Grid::depositNodeOverlaps(Node* node_p)
+{
+    for (BinOverlap& bo : node_p->getBinOverlaps())
+        bo.bin_p->total_overlap += bo.overlap;
 }
 
 /**
@@ -119,6 +134,7 @@ void Grid::computeBinOverlaps(Node* node_p)
  */
 void Grid::clampFixedDensity(float target_density)
 {
+    #pragma omp parallel for schedule(static)
     for (int col = 0; col < m_bins_per_row; col++)
         for (int row = 0; row < m_bins_per_col; row++) {
             float cap = m_bins[col][row].bb.getArea() * target_density;
@@ -129,12 +145,12 @@ void Grid::clampFixedDensity(float target_density)
 std::vector< std::vector<float> > Grid::getBinDensities()
 {
     // Compute per-bin density (rho = total_overlap / bin_area)
-    std::vector< std::vector<float> > density;
+    std::vector< std::vector<float> > density(m_bins_per_row, std::vector<float>(m_bins_per_col));
     float bin_area_inv = 1 / m_bins[0][0].bb.getArea();
 
+    #pragma omp parallel for schedule(static)
     for (int col = 0; col < m_bins_per_row; col++)
     {
-        density.push_back(std::vector<float>(m_bins_per_col));
         for (int row = 0; row < m_bins_per_col; row++)
         {
             density[col][row] = m_bins[col][row].total_overlap * bin_area_inv;
@@ -145,11 +161,11 @@ std::vector< std::vector<float> > Grid::getBinDensities()
 
 std::vector< std::vector<float> > Grid::get_a_uv()
 {
-    std::vector< std::vector<float> > a_uv;
+    std::vector< std::vector<float> > a_uv(m_bins_per_row, std::vector<float>(m_bins_per_col));
 
+    #pragma omp parallel for schedule(static)
     for (int col = 0; col < m_bins_per_row; col++)
     {
-        a_uv.push_back(std::vector<float>(m_bins_per_col));
         for (int row = 0; row < m_bins_per_col; row++)
         {
             a_uv[col][row] = m_bins[col][row].a_uv;

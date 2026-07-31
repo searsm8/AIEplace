@@ -45,6 +45,17 @@ macro_td_expand_ratio = false   # #11b. true = movable macros deposit at weight 
                                  # instead of the area-conserving real/clamped ratio (XPlace
                                  # database.py:921). No effect when maximum_utilization == 1.0, so
                                  # ISPD2005 is unaffected; only bites on ISPD2015/MMS.
+deterministic = true            # reduction policy for the threaded iteration (see Common.h).
+                                 # true  = additions happen in the same order the single-threaded
+                                 #         code used, so results are bit-identical to the serial
+                                 #         golden at ANY thread count. This is the reference every
+                                 #         pl_algo hardware block is verified against -- keep it on
+                                 #         unless you are only after throughput.
+                                 # false = atomics / OpenMP reductions. Faster, but the summation
+                                 #         order follows thread interleaving, so results move
+                                 #         slightly run to run.
+                                 # Thread count is OpenMP's default (all cores); cap a concurrent
+                                 # sweep with OMP_NUM_THREADS.
 dct_normalize = true            # 1/N per FORWARD DCT (bounds a_uv; global scale absorbed by lambda). The
                                  # inverse transform is deliberately NOT normalized (field-faithful: the forward
                                  # already carries 1/N^2; normalizing the inverse too would double-normalize and

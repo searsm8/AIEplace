@@ -6,6 +6,9 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
+// See the contract in Common.h. Overwritten once from params.deterministic during setup.
+bool g_deterministic = true;
+
 // Execution time tracking functions
 long getTime() {
     struct timeval tm;

@@ -93,23 +93,19 @@ void Placer::iterationReset()
 /// @brief Save current movable + filler positions as the best-so-far solution (divergence guard).
 void Placer::snapshotBestPlacement()
 {
-    for (const auto& item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        item.second->best_solution_pos = item.second->next.node_pos;
-    }
-    for (auto filler_p : db.getFillers())
-        filler_p->best_solution_pos = filler_p->next.node_pos;
+    const auto& nodes = db.getMovableNodes();
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)nodes.size(); i++)
+        nodes[i]->best_solution_pos = nodes[i]->next.node_pos;
 }
 
 /// @brief Restore movable + filler positions from the saved best-so-far solution.
 void Placer::restoreBestPlacement()
 {
-    for (const auto& item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        item.second->next.node_pos = item.second->best_solution_pos;
-    }
-    for (auto filler_p : db.getFillers())
-        filler_p->next.node_pos = filler_p->best_solution_pos;
+    const auto& nodes = db.getMovableNodes();
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)nodes.size(); i++)
+        nodes[i]->next.node_pos = nodes[i]->best_solution_pos;
 }
 
 AIEPLACE_NAMESPACE_END

@@ -321,16 +321,38 @@ bool DataBase::addFillers(float target_utilization)
     return true;
 }
 
+/// @brief Build the flat, index-addressable views of the node/net maps — see DataBase.h.
+void DataBase::buildNodeIndex()
+{
+    mv_movable_components.clear();
+    mv_fixed_components.clear();
+    mv_iopad_nodes.clear();
+    mv_nets_by_name.clear();
+    mv_movable_nodes.clear();
+
+    for (const auto& item : mm_components) {
+        if (item.second->getStatus() == FIXED) mv_fixed_components.push_back(item.second);
+        else                                   mv_movable_components.push_back(item.second);
+    }
+    for (const auto& item : mm_iopads) mv_iopad_nodes.push_back(item.second);
+    for (const auto& item : mm_nets)   mv_nets_by_name.push_back(item.second);
+
+    for (Component* comp_p : mv_movable_components) mv_movable_nodes.push_back(comp_p);
+    m_filler_start_index = (int)mv_movable_nodes.size();
+    for (Component* filler_p : mv_fillers) mv_movable_nodes.push_back(filler_p);
+}
+
 /** @brief: Reset all nodes and nets in preparation for the next iteration.
 */
 void DataBase::iterationReset()
 {
-    for (const auto& item : mm_components)
-        item.second->iterationReset();
-    for (auto filler_p : mv_fillers)
-        filler_p->iterationReset();
-    for (const auto& item : mm_iopads)
-        item.second->iterationReset();
+    // Per-node clears with no shared state, so threading them reorders nothing.
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)mv_movable_nodes.size(); i++) mv_movable_nodes[i]->iterationReset();
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)mv_fixed_components.size(); i++) mv_fixed_components[i]->iterationReset();
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)mv_iopad_nodes.size(); i++) mv_iopad_nodes[i]->iterationReset();
 }
 
 
@@ -353,11 +375,12 @@ float DataBase::computeTotalWirelength(string method, int max_net_degree)
     // max_net_degree matches XPlace's ignore_net_degree (net_mask): nets with more pins are
     // excluded from the HPWL metric so the reported number, the density-weight schedule's
     // delta_hpwl, and convergence all measure the SAME masked wirelength XPlace does.
-    float total = 0;
-    for (const auto& item : mm_nets)
-        if (item.second->getDegree() <= max_net_degree)
-            total += item.second->computeWirelength(method);
-    return total;
+    // mv_nets_by_name is mm_nets' own order, so summing in index order reproduces the original
+    // map walk exactly. Masked-out nets contribute +0.0f, which is an exact no-op on the sum.
+    return m_ordered_reduce.sum((int)mv_nets_by_name.size(), [&](int i) {
+        Net* net_p = mv_nets_by_name[i];
+        return (net_p->getDegree() <= max_net_degree) ? net_p->computeWirelength(method) : 0.0f;
+    });
 }
 
 float DataBase::computeTotalComponentArea()

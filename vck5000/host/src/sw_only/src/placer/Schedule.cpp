@@ -244,24 +244,21 @@ void Placer::updatePrecondWeights()
 
     // Area term for a2: RAW node area, matching XPlace alpha_2 = pcoef·λ·mov_node_area — the
     // coordinate-scale-invariant form (sw_only runs in the same raw-DBU frame as XPlace).
-    for (const auto& item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        Node* node_p = item.second;
-        float num_pins = (float)node_p->getNets().size();
-        float area = node_p->getArea();
-        float a2 = lambda_area_coef * area;
-        a1_norm += num_pins;
-        a2_norm += a2;
-        if (enable_preconditioning)
-            node_p->precond_weight = std::max(1.0f, num_pins + a2);
-    }
-    for (auto filler_p : db.getFillers()) {
-        float area = filler_p->getArea();
-        float a2 = lambda_area_coef * area;
-        a2_norm += a2;  // fillers carry no pins, so they add no wirelength mass
-        if (enable_preconditioning)
-            filler_p->precond_weight = std::max(1.0f, a2);
-    }
+    // One loop over movable-then-filler so a2_norm accumulates in the original order (see
+    // DataBase::mv_movable_nodes); fillers carry no pins, so they add no wirelength mass.
+    const auto& nodes = db.getMovableNodes();
+    const int filler_start = db.getFillerStartIndex();
+
+    m_ordered_reduce.sum2((int)nodes.size(),
+        [&](int i, float& a1_term, float& a2_term) {
+            Node* node_p = nodes[i];
+            float num_pins = (i < filler_start) ? (float)node_p->getNets().size() : 0.0f;
+            float a2 = lambda_area_coef * node_p->getArea();
+            a1_term = num_pins;
+            a2_term = a2;
+            if (enable_preconditioning)
+                node_p->precond_weight = std::max(1.0f, num_pins + a2);
+        }, a1_norm, a2_norm);
 
     // density_force_fraction: force-magnitude ratio ‖λ·∇den‖₁ / (‖∇wl‖₁ + ‖λ·∇den‖₁), invariant to the
     // field-normalization constant. Uses the PREVIOUS iteration's committed gradient L1 norms (last_g*_L1,

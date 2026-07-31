@@ -23,6 +23,13 @@ CXXFLAGS += -g
 CXXFLAGS += -O2 # optimization level (experiment: was -O0; perturbs golden low bits)
 #CXXFLAGS += -Wall
 
+# OpenMP: the placement iteration is threaded over nodes/nets/grid rows (TODO #12). Thread
+# count is OpenMP's default (every core) unless OMP_NUM_THREADS is set -- a concurrent sweep
+# should set it, or 4 runs x 8 threads oversubscribes an 8-core box. Building WITHOUT this
+# flag still compiles and runs: every pragma is ignored and the loops run serially.
+CXXFLAGS += -fopenmp
+LDFLAGS  += -fopenmp
+
 LDFLAGS += -L$(HOST_DIR)/lib
 LDLIBS += -lpthread -lrt -lstdc++
 LDLIBS += -lstdc++fs

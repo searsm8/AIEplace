@@ -5,6 +5,8 @@
 #
 #   bash tools/verify_swonly.sh <out_dir> [iters] [set]
 #     set = fast (default, ~15 s)  |  full (adds the big/slow designs)
+#   env: DETERMINISTIC=false  -> force params.deterministic off (the atomics path)
+#        OMP_NUM_THREADS=N    -> passed through to the placer
 #
 # Collected per design: iterations.dat (the per-iteration HPWL/overflow/step trace),
 # RowBasedPlacement.def (every final cell position), function_statistics.md (timing).
@@ -52,6 +54,7 @@ for entry in $DESIGNS; do
         "$BASE" > "$cfg"
     # random_seed pins the initial placement; without it every run starts somewhere different.
     sed -i "s|^\[params\]$|[params]\nrandom_seed = 42${bins:+\nbins_per_row = $bins}|" "$cfg"
+    [ -n "${DETERMINISTIC:-}" ] && sed -i "s|^deterministic = .*|deterministic = $DETERMINISTIC|" "$cfg"
 
     printf '%-20s ' "$label"
     start=$(date +%s.%N)

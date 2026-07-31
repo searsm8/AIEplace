@@ -56,7 +56,43 @@ make host HOST=sw_only
   `compute_eField_DCT`); the naive O(N⁴) `*_naive` pair is kept alongside as the verification
   reference for that path.
 
+## Threading
+
+The placement iteration is parallelized with OpenMP (`-fopenmp`; building without it still
+compiles and runs, single-threaded). There is no thread-count config key — OpenMP's default is
+used, minus one CPU (see `configureThreadPool` in `Setup.cpp` for why), and `OMP_NUM_THREADS`
+overrides it. **A concurrent sweep must set `OMP_NUM_THREADS`**, or N runs × all cores each will
+oversubscribe the box.
+
+`+` on floats is not associative, so a threaded loop is only reproducible if it does not reorder
+additions. Three kinds of loop, and `params.deterministic` governs only the third:
+
+| | example | threaded? |
+|---|---|---|
+| **Disjoint writes** | `stepAllNodes`, the 1-D transform row passes, bin clears | always — nothing is summed |
+| **Scalar reductions** | L1 gradient norms, total HPWL, BB norms | always, via `OrderedReduce` (`Common.h`), which computes terms in parallel and adds them in index order |
+| **Scatter reductions** | cell area → shared bins, net gradients → shared nodes | always for the per-item work; the shared add is what the flag switches |
+
+- `deterministic = true` (default) — the shared add is replayed on one thread in the original
+  item order. **Bit-identical to the single-threaded golden at any thread count**, which is what
+  `tools/verify_swonly.sh` + `tools/compare_swonly.sh` check.
+- `deterministic = false` — one atomic add per deposit. Faster, but the order in which threads
+  hit the same bin or node follows their interleaving, so results move slightly run to run.
+
+Keep it on unless you only want throughput: sw_only is the reference every `pl_algo` hardware
+block is verified against, and the ordered path costs little (see the numbers in TODO #12).
+
+Two loops are deliberately left serial: the final linear scan in `computeOverflow` (already
+memory-bound, so parallelizing only buys an ordering caveat), and `computeOverflow`'s deposit
+under `deterministic` (a metric, not the solver's field, and it has no per-node list to replay
+the way `computeOverlaps` does).
+
 ## Verification references
 
 `computeHpwlPartials_CPU` (`Partials.cpp`), `compute_eField_DCT` (`Density.cpp`), `computeOverlaps`
 and `computeOverflow` (`Density.cpp`) are the functions the hardware blocks are checked against.
+
+`tools/verify_swonly.sh <dir>` runs a fixed design set with a pinned RNG seed and collects
+`iterations.dat` + `RowBasedPlacement.def`; `tools/compare_swonly.sh <ref> <new>` diffs two such
+trees. Run it after any change that is supposed to be behavior-preserving.
+`tools/profile_swonly.sh` re-measures the per-function split across designs and grid sizes.

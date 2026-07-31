@@ -11,14 +11,55 @@
 #include <algorithm>
 #include <random>
 #include <unistd.h> // isatty
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 AIEPLACE_NAMESPACE_BEGIN
+
+/**
+ * @brief Pick the OpenMP team size: every logical CPU but one, unless OMP_NUM_THREADS says
+ *        otherwise.
+ *
+ * Filling *every* logical CPU is a performance cliff, not a maximum. libgomp's default wait
+ * policy is a busy spin, so when the team size equals the CPU count the workers spinning
+ * after a parallel region occupy all of them and the master is descheduled while it runs the
+ * serial stretch to the next region. Measured on this 8-vCPU box with a loop of small parallel
+ * regions separated by serial work: 1 thread 0.68 s, 4 threads 0.70 s, 7 threads 0.73 s,
+ * 8 threads 5.89 s — an 8x cliff at exactly the CPU count, and the same effect cost the
+ * placer 8.1 -> 13.4 s on adaptec1 before this was in place.
+ *
+ * The alternative fix, OMP_WAIT_POLICY=passive, cannot be applied from here: libgomp reads its
+ * environment in a library constructor, so a setenv() in main() is already too late (verified).
+ * Reserving one CPU is settable at runtime and costs almost nothing.
+ *
+ * An explicit OMP_NUM_THREADS always wins, so a concurrent sweep can still divide the box up:
+ * 4 runs x 8 threads on 8 CPUs oversubscribes badly.
+ */
+static void configureThreadPool()
+{
+#ifdef _OPENMP
+    if (getenv("OMP_NUM_THREADS")) {
+        Logger::log_detail("OpenMP threads: " + std::to_string(omp_get_max_threads())
+                           + " (from OMP_NUM_THREADS)");
+        return;
+    }
+    int threads = std::max(1, omp_get_num_procs() - 1);
+    omp_set_num_threads(threads);
+    Logger::log_detail("OpenMP threads: " + std::to_string(threads) + " of "
+                       + std::to_string(omp_get_num_procs()) + " CPUs (one reserved; see "
+                       "configureThreadPool). Override with OMP_NUM_THREADS.");
+#else
+    Logger::log_detail("Built without OpenMP: placement runs single-threaded.");
+#endif
+}
 
 /// @brief Config parse + grid decision + DB read + fillers + area analysis, timed as one unit.
 void Placer::setupDesign()
 {
     TIME_FUNCTION();
     loadConfiguration();
+    configureThreadPool();
     bool bins_auto = resolveGridResolution();
     loadDesignDatabase();
     analyzeDesignArea(bins_auto);
@@ -118,6 +159,10 @@ void Placer::loadDesignDatabase()
 
     if (ConfigUtils::require<bool>(cfg, "params", "enable_filler"))
         db.addFillers(target_density);
+
+    // Every node now exists and every PlacementStatus is final, so the flat iteration index
+    // the threaded loops walk can be built once here.
+    db.buildNodeIndex();
 }
 
 /**
@@ -201,6 +246,7 @@ void Placer::loadConfiguration()
     xplace_die_projection = cfg["params"]["xplace_die_projection"].value_or(xplace_die_projection);
     macro_td_expand_ratio = cfg["params"]["macro_td_expand_ratio"].value_or(macro_td_expand_ratio);
     dct_normalize = cfg["params"]["dct_normalize"].value_or(dct_normalize);
+    g_deterministic = cfg["params"]["deterministic"].value_or(g_deterministic); // see Common.h
     convergence_window = ConfigUtils::require<int>(cfg, "params", "convergence_window");
     convergence_iterations = cfg["params"]["convergence_iterations"].value_or(convergence_iterations);
     max_backtracking_attempts = ConfigUtils::require<int>(cfg, "params", "backtrack_max_tries");

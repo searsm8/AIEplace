@@ -25,31 +25,27 @@ float Placer::computeLipschitzEstimate()
     TIME_FUNCTION();
     float pos_norm_sq  = 0.0f;
     float grad_norm_sq = 0.0f;
+    const auto& nodes = db.getMovableNodes();
 
-    auto accumulate = [&](Node* node_p) {
-        // ||v̂_{k+1} - v_k||²
-        float dx = node_p->next.probe_pos.x - node_p->current.probe_pos.x;
-        float dy = node_p->next.probe_pos.y - node_p->current.probe_pos.y;
-        pos_norm_sq += dx*dx + dy*dy;
+    m_ordered_reduce.sum2((int)nodes.size(),
+        [&](int i, float& pos_term, float& grad_term) {
+            Node* node_p = nodes[i];
+            // ||v̂_{k+1} - v_k||²
+            float dx = node_p->next.probe_pos.x - node_p->current.probe_pos.x;
+            float dy = node_p->next.probe_pos.y - node_p->current.probe_pos.y;
+            pos_term = dx*dx + dy*dy;
 
-        // ||∇f(v̂_{k+1}) - ∇f(v_k)||² of the PRECONDITIONED gradient — must match Node::step,
-        // which moves by (1/precond_weight)·grad. The BB estimate α=‖Δv‖/‖Δg‖ is only valid when
-        // Δg is the same map that is stepped; using the raw gradient here makes α too small when
-        // preconditioning is on (P≥1 ⇒ raw grad larger), starving the step so density never spreads.
-        // precond_weight is fixed within the iteration, so dividing the difference is exact; it is
-        // 1.0 when preconditioning is off, leaving that path unchanged.
-        float inv_pw = 1.0f / node_p->precond_weight;
-        float dgx = inv_pw * (node_p->next.probe_grad.x - node_p->current.probe_grad.x);
-        float dgy = inv_pw * (node_p->next.probe_grad.y - node_p->current.probe_grad.y);
-        grad_norm_sq += dgx*dgx + dgy*dgy;
-    };
-
-    for (const auto& item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        accumulate(item.second);
-    }
-    for (auto filler_p : db.getFillers())
-        accumulate(filler_p);
+            // ||∇f(v̂_{k+1}) - ∇f(v_k)||² of the PRECONDITIONED gradient — must match Node::step,
+            // which moves by (1/precond_weight)·grad. The BB estimate α=‖Δv‖/‖Δg‖ is only valid when
+            // Δg is the same map that is stepped; using the raw gradient here makes α too small when
+            // preconditioning is on (P≥1 ⇒ raw grad larger), starving the step so density never spreads.
+            // precond_weight is fixed within the iteration, so dividing the difference is exact; it is
+            // 1.0 when preconditioning is off, leaving that path unchanged.
+            float inv_pw = 1.0f / node_p->precond_weight;
+            float dgx = inv_pw * (node_p->next.probe_grad.x - node_p->current.probe_grad.x);
+            float dgy = inv_pw * (node_p->next.probe_grad.y - node_p->current.probe_grad.y);
+            grad_term = dgx*dgx + dgy*dgy;
+        }, pos_norm_sq, grad_norm_sq);
 
     float estimate = sqrtf(pos_norm_sq) / sqrtf(grad_norm_sq + 1e-8f);
     Logger::log_detail("New steplength estimate: " + PREC_P(estimate, 4));
@@ -74,22 +70,21 @@ void Placer::combineGradients()
     // Refresh the committed-gradient L1 norms while both force components are in hand:
     // last_gwl_L1 = Σ‖∇wl‖₁ (probe_grad before the subtraction), last_gden_L1 = Σ‖λ·∇den‖₁ (the
     // electrostatic force, which already carries λ). The force-ratio dff (next iteration) reads these.
-    float gwl_L1 = 0.0f, gden_L1 = 0.0f;
-    for (const auto& item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        Gradient& g = item.second->next.probe_grad;
-        gwl_L1 += fabsf(g.x) + fabsf(g.y);
-        Gradient electro = computeElectrostaticForce(item.second);
-        gden_L1 += fabsf(electro.x) + fabsf(electro.y);
-        g -= electro;
-    }
-    for (auto filler_p : db.getFillers()) {
-        Gradient electro = computeElectrostaticForce(filler_p);
-        gden_L1 += fabsf(electro.x) + fabsf(electro.y);  // fillers carry density force, no wirelength
-        filler_p->next.probe_grad -= electro;
-    }
-    last_gwl_L1  = gwl_L1;
-    last_gden_L1 = gden_L1;
+    // Each node's gradient update touches only that node, so the loop itself is bit-exact
+    // threaded; the two L1 norms are the only reduction, and OrderedReduce keeps them in node
+    // order whatever the thread count (cheap here — the force gather dominates the per-node cost).
+    const auto& nodes = db.getMovableNodes();
+    const int filler_start = db.getFillerStartIndex();
+
+    m_ordered_reduce.sum2((int)nodes.size(),
+        [&](int i, float& gwl_term, float& gden_term) {
+            Gradient& g = nodes[i]->next.probe_grad;
+            // fillers are on no nets, so they contribute no wirelength gradient
+            gwl_term = (i < filler_start) ? fabsf(g.x) + fabsf(g.y) : 0.0f;
+            Gradient electro = computeElectrostaticForce(nodes[i]);
+            gden_term = fabsf(electro.x) + fabsf(electro.y);
+            g -= electro;
+        }, last_gwl_L1, last_gden_L1);
 }
 
 
@@ -150,11 +145,9 @@ void Placer::enforceDieBoundaries(Node* node_p)
  */
 void Placer::advanceIterationState()
 {
-    for (const auto& item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        item.second->cacheState();
-    }
-    for (auto filler_p : db.getFillers())  filler_p->cacheState();
+    const auto& nodes = db.getMovableNodes();
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)nodes.size(); i++) nodes[i]->cacheState();
 }
 
 /**
@@ -168,14 +161,13 @@ void Placer::advanceIterationState()
 void Placer::stepAllNodes()
 {
     TIME_FUNCTION();
-    for (const auto& item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        item.second->step(step_length, momentum_coeff);
-        enforceDieBoundaries(item.second);
-    }
-    for (auto filler_p : db.getFillers()) {
-        filler_p->step(step_length, momentum_coeff);
-        enforceDieBoundaries(filler_p);
+    const auto& nodes = db.getMovableNodes();
+
+    // Each node's step reads and writes only its own state, so this is bit-exact threaded.
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)nodes.size(); i++) {
+        nodes[i]->step(step_length, momentum_coeff);
+        enforceDieBoundaries(nodes[i]);
     }
 }
 
@@ -222,11 +214,9 @@ void Placer::estimateInitialStep()
                      "  (seed " + PREC_P(init_step_seed, 4) + ")");
 
     // Undo the probe step: restore x0 / g0 into next so the real first step starts from x0.
-    for (const auto& item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        item.second->restoreState();
-    }
-    for (auto filler_p : db.getFillers()) filler_p->restoreState();
+    const auto& nodes = db.getMovableNodes();
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)nodes.size(); i++) nodes[i]->restoreState();
 }
 
 
