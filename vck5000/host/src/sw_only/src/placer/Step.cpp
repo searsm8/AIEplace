@@ -94,13 +94,11 @@ void Placer::combineGradients()
  * The node position is the lower-left corner of the cell, so the upper bound must account for the
  * cell's width/height to prevent the right/top edge from extending past the die boundary.
  *
- * Two modes (TODO #11a A/B):
- *  - legacy (default): bound the RAW cell, [0, die - size]. The sqrt(2)-expanded density footprint
- *    can then still hang off the edge, and computeNodeFootprint shifts it back at deposit time.
- *  - xplace_die_projection: bound the cell so the EXPANDED footprint is in-die, which is XPlace's
- *    trunc_node_pos_fn (run_placement_nesterov.py:5-11) re-applied on every gradient evaluation.
- *    The deposit-time shift is then disabled (Grid::setShiftFootprintInDie) — the position is
- *    already legal, so the deposited mass stays centered on the cell instead of sliding off it.
+ * This is XPlace's projected gradient (trunc_node_pos_fn, run_placement_nesterov.py:5-11, applied
+ * on every gradient evaluation): the bound uses the sqrt(2)-EXPANDED size, so the density footprint
+ * — not just the raw cell — is always fully in-die. That is why computeNodeFootprint needs no
+ * deposit-time correction: the deposited mass stays centred on the cell it belongs to. (TODO #11a,
+ * adopted 2026-07-31; the legacy raw-size bound + deposit-time shift measured neutral and is gone.)
  */
 void Placer::enforceDieBoundaries(Node* node_p)
 {
@@ -109,25 +107,20 @@ void Placer::enforceDieBoundaries(Node* node_p)
     const float w = node_p->getXsize();
     const float h = node_p->getYsize();
 
-    float min_x = 0.0f,          min_y = 0.0f;
-    float max_x = die_w - w,     max_y = die_h - h;
-
-    if (xplace_die_projection) {
-        // XPlace bounds the CENTRE to [expanded/2, die - expanded/2]. Our position is the lower-left
-        // (centre = pos + raw/2), so the equivalent bound on the lower-left is
-        //     [ (cw - w)/2 , die_w - (cw + w)/2 ]
-        // which collapses to the legacy [0, die_w - w] exactly when cw == w (macros, clamp off).
-        float cw = w, ch = h;
-        if (enable_density_clamp) {
-            cw = std::max(w, grid.getBinWidth()  * (float)M_SQRT2);
-            ch = std::max(h, grid.getBinHeight() * (float)M_SQRT2);
-        }
-        min_x = 0.5f * (cw - w);   max_x = die_w - 0.5f * (cw + w);
-        min_y = 0.5f * (ch - h);   max_y = die_h - 0.5f * (ch + h);
-        // A footprint wider than the die would invert the interval (UB in std::clamp) — centre it.
-        if (min_x > max_x) min_x = max_x = 0.5f * (die_w - w);
-        if (min_y > max_y) min_y = max_y = 0.5f * (die_h - h);
+    // XPlace bounds the CENTRE to [expanded/2, die - expanded/2]. Our position is the lower-left
+    // (centre = pos + raw/2), so the equivalent bound on the lower-left is
+    //     [ (cw - w)/2 , die_w - (cw + w)/2 ]
+    // which collapses to [0, die_w - w] exactly when cw == w (macros, clamp off).
+    float cw = w, ch = h;
+    if (enable_density_clamp) {
+        cw = std::max(w, grid.getBinWidth()  * (float)M_SQRT2);
+        ch = std::max(h, grid.getBinHeight() * (float)M_SQRT2);
     }
+    float min_x = 0.5f * (cw - w), max_x = die_w - 0.5f * (cw + w);
+    float min_y = 0.5f * (ch - h), max_y = die_h - 0.5f * (ch + h);
+    // A footprint wider than the die would invert the interval (UB in std::clamp) — centre it.
+    if (min_x > max_x) min_x = max_x = 0.5f * (die_w - w);
+    if (min_y > max_y) min_y = max_y = 0.5f * (die_h - h);
 
     // Clamp node_pos
     node_p->next.node_pos.x = std::clamp(node_p->next.node_pos.x, min_x, max_x);

@@ -31,14 +31,11 @@ NodeFootprint computeNodeFootprint(Node* node_p, const FootprintConfig& cfg)
             weight = cfg.target_density;
     }
 
+    // No in-die correction here: enforceDieBoundaries already projects every movable node's
+    // node_pos AND probe_pos using this same expanded size, so the footprint is legal by
+    // construction (TODO #11a). Fixed nodes are clipped geometrically by the caller.
     float xl = node_p->getProbeX() + 0.5f * w - 0.5f * cw;
     float yl = node_p->getProbeY() + 0.5f * h - 0.5f * ch;
-    if (cfg.shift_in_die && node_p->getStatus() != FIXED) {   // movable/filler: shift to stay in-die
-        if (xl + cw > cfg.grid_w) xl = cfg.grid_w - cw;
-        if (yl + ch > cfg.grid_h) yl = cfg.grid_h - ch;
-        if (xl < 0.0f) xl = 0.0f;
-        if (yl < 0.0f) yl = 0.0f;
-    }
 
     return NodeFootprint{xl, yl, xl + cw, yl + ch, weight};
 }

@@ -369,9 +369,28 @@ void Placer::writeResultsCSVRow(std::ofstream& out_file, float final_hpwl_exact,
     out_file << endl;
 }
 
+/// @brief Stable token for the run's termination mode (see StopReason); grep target for sweeps.
+const char* Placer::stopReasonName(StopReason reason)
+{
+    switch (reason) {
+        case StopReason::CONVERGED:        return "converged";
+        case StopReason::MAX_ITERATIONS:   return "max_iterations";
+        case StopReason::NAN_METRICS:      return "nan_metrics";
+        case StopReason::NAN_PARTIALS:     return "nan_partials";
+        case StopReason::DIVERGED_HPWL:    return "diverged_hpwl";
+        case StopReason::DIVERGENCE_GUARD: return "divergence_guard";
+        case StopReason::RUNNING:          break;
+    }
+    return "unknown";
+}
+
 void Placer::printFinalResults()
 {
     Logger::log_info("AIEplace algorithm complete.");
+    // One canonical, machine-readable line per run. Every stop path already logs its own
+    // prose; this is the one a sweep runner greps.
+    Logger::log_info("[STOP] reason=" + std::string(stopReasonName(m_stop_reason))
+                   + " iteration=" + std::to_string(iteration));
 
     BestSolution& chosen = restoreBestSolution();
 
@@ -380,7 +399,7 @@ void Placer::printFinalResults()
     std::string run_id = generateRunId();
 
     FinalMetrics metrics = computeFinalMetrics();
-    logOverflowDiagnostics(metrics);
+    logOverflowDiagnostics();
     dumpBestPlacementDensity();
 
     exportSummaryReports(chosen, metrics, run_output_dir);
@@ -432,10 +451,13 @@ Placer::FinalMetrics Placer::computeFinalMetrics()
     // masked for the schedule + GP-vs-GP, exact for the apples-to-apples vs XPlace's headline HPWL.
     // A huge cap (not -1, which would exclude every net) includes every degree.
     m.final_hpwl_exact = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), 1000000000);
-    // Exact (physical) overflow — sharp footprints, the real spreading quality. Reported
-    // alongside the smoothed overflow that drove convergence (see computeOverflow).
-    m.final_overflow = computeOverflow(false);
-    m.final_smoothed_overflow = computeOverflow(true);
+    // Exact (physical) overflow — sharp footprints, the real spreading quality. Fillers are
+    // INCLUDED: XPlace's reported overflow (evaluate_placement) counts filler density, so this
+    // is the directly XPlace-comparable headline number. Excluding them reads ~2x low.
+    m.final_overflow = computeOverflow(false, nullptr, true);
+    // The smoothed overflow the run actually converged on — same filler policy as the
+    // convergence signal (recordIterationResults), so the report explains why it stopped.
+    m.final_smoothed_overflow = computeOverflow(true, nullptr, convergenceIncludesFillers());
 
     m.total_runtime = getInterval(pgrm_start_time, getTime());
     m.iteration_avg = (iteration > 0) ? m.total_runtime / iteration : 0.0f;
@@ -450,23 +472,26 @@ Placer::FinalMetrics Placer::computeFinalMetrics()
     return m;
 }
 
+/// @brief Whether the GP-stop signal counts filler density, as XPlace's overflow_fn does.
+bool Placer::convergenceIncludesFillers()
+{
+    return cfg["params"]["convergence_include_fillers"].value_or(false);
+}
+
 /**
  * @brief DIAGNOSTIC: overflow the four ways {clamp,sharp}×{no-filler,+filler} on the
  *        restored-best placement, to reconcile our convergence metric with XPlace. XPlace's
- *        GP STOP signal is clamp+filler (overflow_fn on mov+filler density); our convergence
- *        signal is clamp,no-filler (= XPlace's exact eval). Measures whether including fillers
- *        reproduces XPlace's lower stop overflow. Temporary — remove once the convergence
- *        metric is reconciled.
+ *        GP STOP signal is clamp+filler (overflow_fn on mov+filler density) and its reported
+ *        overflow is sharp+filler. Self-contained (does not reuse FinalMetrics) so the labels
+ *        stay truthful whatever filler policy the headline metrics use.
  */
-void Placer::logOverflowDiagnostics(const FinalMetrics& metrics)
+void Placer::logOverflowDiagnostics()
 {
-    float ovf_clamp_filler = computeOverflow(true,  nullptr, true);
-    float ovf_sharp_filler = computeOverflow(false, nullptr, true);
-    Logger::log_detail("[OVFW-DIAG] clamp/no-filler=" + PREC(metrics.final_smoothed_overflow)
-        + "  sharp/no-filler=" + PREC(metrics.final_overflow)
-        + "  clamp/+filler=" + PREC(ovf_clamp_filler)
-        + "  sharp/+filler=" + PREC(ovf_sharp_filler)
-        + "  (XPlace GP stop = clamp/+filler)");
+    Logger::log_detail("[OVFW-DIAG] clamp/no-filler=" + PREC(computeOverflow(true,  nullptr, false))
+        + "  sharp/no-filler=" + PREC(computeOverflow(false, nullptr, false))
+        + "  clamp/+filler="   + PREC(computeOverflow(true,  nullptr, true))
+        + "  sharp/+filler="   + PREC(computeOverflow(false, nullptr, true))
+        + "  (XPlace GP stop = clamp/+filler, XPlace report = sharp/+filler)");
 }
 
 /// @brief Optional: dump the restored-best bin-density map (smoothed + exact) for offline
@@ -498,8 +523,11 @@ void Placer::exportSummaryReports(const BestSolution& chosen, const FinalMetrics
         results.add_row(RowStream{} << "Initial HPWL" << std::scientific << std::setprecision(3) << m_initial_hpwl);
         results.add_row(RowStream{} << "HPWL improvement (%)" << std::fixed << std::setprecision(2) << metrics.hpwl_improvement);
     }
-    results.add_row(RowStream{} << "Final Overflow (smoothed)" << std::scientific << std::setprecision(3) << metrics.final_smoothed_overflow);
-    results.add_row(RowStream{} << "Final Overflow (exact)" << std::scientific << std::setprecision(3) << metrics.final_overflow);
+    results.add_row(RowStream{} << (convergenceIncludesFillers() ? "Final Overflow (smoothed, +fillers)"
+                                                                 : "Final Overflow (smoothed, no fillers)")
+                                << std::scientific << std::setprecision(3) << metrics.final_smoothed_overflow);
+    results.add_row(RowStream{} << "Final Overflow (exact, +fillers)" << std::scientific << std::setprecision(3) << metrics.final_overflow);
+    results.add_row({"Stop reason", stopReasonName(m_stop_reason)});
     if (chosen.valid) {
         std::string type = (&chosen == &best_primary) ? "primary" : "fallback";
         std::ostringstream best_str;
@@ -740,8 +768,7 @@ void Placer::recordIterationResults()
     // toward the stop threshold. The exact overflow is reported separately as the physical result.
     // convergence_include_fillers=true mirrors XPlace's GP-stop metric (overflow_fn), which counts
     // filler density too; default false keeps the filler-excluded (XPlace-exact) signal.
-    bool conv_incl_fillers = cfg["params"]["convergence_include_fillers"].value_or(false);
-    float overflow = computeOverflow(true, nullptr, conv_incl_fillers);   // convergence signal
+    float overflow = computeOverflow(true, nullptr, convergenceIncludesFillers()); // convergence signal
 
     hpwl_history.push_back(hpwl);
     step_length_history.push_back(step_length);

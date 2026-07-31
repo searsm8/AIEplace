@@ -73,6 +73,7 @@ void Placer::setupDesign()
     loadDesignDatabase();
     analyzeDesignArea(bins_auto);
     configurePreconditioner();
+    applyMixedSizeStopPolicy();   // needs num_movable_macros from analyzeDesignArea
     tagMovableMacros();
 }
 
@@ -80,9 +81,6 @@ void Placer::setupGrid()
 {
     grid = Grid(db.getDieArea(), bins_per_row, bins_per_row);
     grid.setClampDensity(enable_density_clamp);
-    // TODO #11a: when the position itself is projected so the expanded footprint is in-die, the
-    // deposit-time shift must be OFF or the same correction is applied twice.
-    grid.setShiftFootprintInDie(!xplace_die_projection);
     grid.setMacroTargetDensityWeight(macro_td_expand_ratio);   // TODO #11b
     grid.setTargetDensity(target_density);
     die_size = min(grid.getDieWidth(), grid.getDieHeight());
@@ -252,7 +250,6 @@ void Placer::loadConfiguration()
     auto_enable_preconditioning = cfg["params"]["auto_enable_preconditioning"].value_or(auto_enable_preconditioning);
     precond_coef_escalation = cfg["params"]["precond_coef_escalation"].value_or(precond_coef_escalation);
     enable_density_clamp = cfg["params"]["enable_density_clamp"].value_or(enable_density_clamp);
-    xplace_die_projection = cfg["params"]["xplace_die_projection"].value_or(xplace_die_projection);
     macro_td_expand_ratio = cfg["params"]["macro_td_expand_ratio"].value_or(macro_td_expand_ratio);
     dct_normalize = cfg["params"]["dct_normalize"].value_or(dct_normalize);
     g_deterministic = cfg["params"]["deterministic"].value_or(g_deterministic); // see Common.h
@@ -344,6 +341,36 @@ void Placer::configurePreconditioner()
     }
 }
 
+/**
+ * @brief Mixed-size mode: this design places movable macros and standard cells SIMULTANEOUSLY,
+ *        which is XPlace's `include_macros` phase (param_scheduler.py set_mixsize_init_param,
+ *        `enable_mixed_size and not zero_macro_grad`). sw_only implements only that phase — it has
+ *        no macro-legalization + fixed-macro second pass — so the flag is simply "has movable
+ *        macros". XPlace loosens two stop rules while it holds; see applyMixedSizeStopPolicy.
+ */
+void Placer::applyMixedSizeStopPolicy()
+{
+    mixed_size_mode = (num_movable_macros > 0);
+    if (!mixed_size_mode) return;
+
+    // XPlace ALSO does `self.stop_overflow = args.stop_overflow * 2.0` here — its Mixed-GP target
+    // is 0.14, not 0.07, which is why its phase 1 ends at 0.10-0.18 exact overflow. We do NOT
+    // apply it yet, and the reason is that it is HALF of an inseparable pair.
+    //
+    // Doubling stop_overflow also doubles the guard-arm band (`overflow < stop_overflow * 5`,
+    // 0.35 -> 0.70). XPlace can afford that only because it simultaneously disables the
+    // overflow-plateau kill in this phase (`not include_macros`). We must keep that kill active —
+    // it is our only phase-1 exit until TODO #13 adds macro legalization + the fixed-macro pass.
+    // Applying the doubling alone (tried 2026-07-31) arms the guard during the EARLY plateau every
+    // design has before the density weight ramps: newblue1 died at iteration 258 with overflow
+    // still 0.70 and HPWL 2.39e7 vs 6.15e7 — an unspread placement.
+    //
+    // Re-enable BOTH together with #13. `mixed_size_mode` is already wired up for that.
+    Logger::log_info("Mixed-size mode: " + std::to_string(num_movable_macros)
+        + " movable macros (XPlace include_macros phase; stop overflow stays at "
+        + PREC(overflow_threshold) + " until TODO #13 adds phase 2).");
+}
+
 /// @brief Initialize the visualization focus set and canvas — a no-op build without CREATE_VISUALIZATION.
 void Placer::initializeVisualization()
 {
@@ -411,20 +438,17 @@ void Placer::initializePlacement()
         item.second->initializeState(item.second->next.node_pos);
 
 
-    // TODO #11a: XPlace applies trunc_node_pos_fn once before the first gradient (initializer.py
-    // init_params). It matters here because fillers are seeded uniformly at random, so some start
-    // with their expanded footprint hanging off the die. Legacy mode skips this — the deposit-time
-    // shift absorbs it — so gating keeps the legacy trajectory bit-identical.
-    if (xplace_die_projection) {
-        for (const auto& item : db.getComponents()) {
-            if (item.second->getStatus() == FIXED) continue;
-            enforceDieBoundaries(item.second);
-            item.second->cacheState();   // resync current with the projected next
-        }
-        for (auto filler_p : db.getFillers()) {
-            enforceDieBoundaries(filler_p);
-            filler_p->cacheState();
-        }
+    // XPlace applies trunc_node_pos_fn once before the first gradient (initializer.py init_params).
+    // It matters here because fillers are seeded uniformly at random, so some start with their
+    // expanded footprint hanging off the die.
+    for (const auto& item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
+        enforceDieBoundaries(item.second);
+        item.second->cacheState();   // resync current with the projected next
+    }
+    for (auto filler_p : db.getFillers()) {
+        enforceDieBoundaries(filler_p);
+        filler_p->cacheState();
     }
 
     //printIterationResults(); // Prints "iteration 0" starting statistics

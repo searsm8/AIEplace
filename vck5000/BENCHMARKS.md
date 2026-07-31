@@ -43,24 +43,26 @@ The master list of designs we work on: present in the XPlace dataset, tuned in X
 
 ## Tier 3 — MMS (mixed-size / movable macros; separate regime, preconditioner matters)
 
-| design | suite | XPlace grid | target density |
-|---|---|---|---|
-| adaptec1 | mms | 512 | 1 |
-| adaptec2 | mms | 1024 | 1 |
-| adaptec3 | mms | 1024 | 1 |
-| adaptec4 | mms | 1024 | 1 |
-| adaptec5 | mms | 1024 | 0.5 |
-| bigblue1 | mms | 512 | 1 |
-| bigblue2 | mms | 1024 | 1 |
-| bigblue3 | mms | 2048 | 1 |
-| bigblue4 | mms | 2048 | 1 |
-| newblue1 | mms | 512 | 0.8 |
-| newblue2 | mms | 1024 | 0.9 |
-| newblue3 | mms | 2048 | 0.8 |
-| newblue4 | mms | 1024 | 0.5 |
-| newblue5 | mms | 1024 | 0.5 |
-| newblue6 | mms | 2048 | 0.8 |
-| newblue7 | mms | 2048 | 0.8 |
+XPlace reference is the **Mixed-GP** endpoint (phase 1, macros movable) — the phase sw_only implements — NOT the post-macro-legalization `GP Stop!` number. Overflow includes fillers. See `_XPLACE_MMS_MIXED_GP` in `tools/benchmarks.py`.
+
+| design | suite | XPlace grid | target density | XPlace Mixed-GP HPWL | XPlace Mixed-GP overflow |
+|---|---|---|---|---|---|
+| adaptec1 | mms | 512 | 1 | 6.238e+07 | 0.1306 |
+| adaptec2 | mms | 1024 | 1 | 7.129e+07 | 0.0963 |
+| adaptec3 | mms | 1024 | 1 | 1.535e+08 | 0.1247 |
+| adaptec4 | mms | 1024 | 1 | 1.363e+08 | 0.1352 |
+| adaptec5 | mms | 1024 | 0.5 | 3.035e+08 | 0.1485 |
+| bigblue1 | mms | 512 | 1 | 8.295e+07 | 0.1741 |
+| bigblue2 | mms | 1024 | 1 | 1.212e+08 | 0.1052 |
+| bigblue3 | mms | 2048 | 1 | 2.706e+08 | 0.1235 |
+| bigblue4 | mms | 2048 | 1 | 6.241e+08 | 0.1295 |
+| newblue1 | mms | 512 | 0.8 | 5.946e+07 | 0.1361 |
+| newblue2 | mms | 1024 | 0.9 | 1.516e+08 | 0.1426 |
+| newblue3 | mms | 2048 | 0.8 | 2.828e+08 | 0.0400 |
+| newblue4 | mms | 1024 | 0.5 | 2.238e+08 | 0.1818 |
+| newblue5 | mms | 1024 | 0.5 | 3.792e+08 | 0.1697 |
+| newblue6 | mms | 2048 | 0.8 | 4.029e+08 | 0.1419 |
+| newblue7 | mms | 2048 | 0.8 | 8.638e+08 | 0.1517 |
 
 **Tier 1 + Tier 2 = 28 designs = the XPlace-paper suite (= dse.py `_full_suite`).**  Tier 3 = 16 mixed-size designs.
 

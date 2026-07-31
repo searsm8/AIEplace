@@ -27,9 +27,6 @@ struct FootprintConfig
     float bin_w = 1.0f,  bin_h = 1.0f;
     float grid_w = 1.0f, grid_h = 1.0f;
     bool  clamp = true;         // sqrt(2) density smoothing (config enable_density_clamp)
-    bool  shift_in_die = true;  // shift the expanded footprint back in-die at DEPOSIT time.
-                                // false under xplace_die_projection, where the position itself is
-                                // already constrained so the expanded footprint is legal (TODO #11a).
     bool  macro_target_density_weight = false; // TODO #11b experiment; see below
     float target_density = 1.0f;
 };
@@ -66,7 +63,6 @@ private:
     int m_bins_per_col;
     float m_bin_width, m_bin_height;
     bool m_clamp_density = true; // clamp sub-bin cells to >= sqrt(2) bins (area-conserving)
-    bool m_shift_footprint_in_die = true;      // see FootprintConfig::shift_in_die
     bool m_macro_target_density_weight = false; // see FootprintConfig::macro_target_density_weight
     float m_target_density = 1.0f;              // only used by the above experiment
     std::vector<std::vector<Bin> > m_bins; // 2D grid of bins to compute eField
@@ -92,7 +88,6 @@ public:
     float getBinWidth() { return m_bin_width; }
     float getBinHeight() { return m_bin_height; }
     void setClampDensity(bool clamp) { m_clamp_density = clamp; }
-    void setShiftFootprintInDie(bool shift) { m_shift_footprint_in_die = shift; }
     void setMacroTargetDensityWeight(bool on) { m_macro_target_density_weight = on; }
     void setTargetDensity(float target_density) { m_target_density = target_density; }
 
@@ -105,7 +100,6 @@ public:
         cfg.grid_w = m_bins_per_row * m_bin_width;
         cfg.grid_h = m_bins_per_col * m_bin_height;
         cfg.clamp  = clamp;
-        cfg.shift_in_die = m_shift_footprint_in_die;
         cfg.macro_target_density_weight = m_macro_target_density_weight;
         cfg.target_density = m_target_density;
         return cfg;

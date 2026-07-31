@@ -16,8 +16,12 @@ void Placer::run()
     while( true )
     {
         performIteration();
-        if(checkConvergence() || m_nan_detected )
+        if (checkConvergence())
             break;
+        if (m_nan_detected) {
+            m_stop_reason = StopReason::NAN_PARTIALS;
+            break;
+        }
     }
 }
 

@@ -47,6 +47,7 @@ private:
     void loadDesignDatabase();             // read LEF/DEF, apply benchmark max_util, add fillers
     void analyzeDesignArea(bool bins_auto); // movable/fixed area stats, macro count, ePlace-formula grid size
     void configurePreconditioner();        // auto-enable decision from num_movable_macros
+    void applyMixedSizeStopPolicy();       // XPlace include_macros phase: 2x stop overflow, no plateau kill
     void tagMovableMacros();               // XPlace is_mov_macro rule (TODO #11b)
     void setupGrid();                      // build the Grid from bins_per_row, clamp density, set die_size
     void configureGammaSchedule();         // grid-independent base_gamma, gamma/inv_gamma, LUT init
@@ -111,19 +112,20 @@ public:
                                              // convergence; a wash on fixed-macro designs). See #5 handoff.
     bool precond_explicitly_set = false;     // config named enable_preconditioning => honor it, skip auto
     int  num_movable_macros = 0;             // movable components with area > macro_area_frac * die area
+    bool mixed_size_mode = false;            // macros + std cells placed together (XPlace include_macros);
+                                             // set by applyMixedSizeStopPolicy, loosens the stop rules
     int  formula_bins_per_row = 0;           // grid the ePlace auto-formula picks (recorded even when overridden)
     bool precond_coef_escalation = true; // double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef)
     bool enable_density_clamp = true;   // clamp sub-bin cells in the density solve (XPlace expand_ratio)
-    // --- TEMPORARY A/B toggles (TODO #11): two documented divergences from XPlace, both default
-    // OFF = legacy sw_only behavior. Remove the losing branch once the A/B has decided. ---
-    bool xplace_die_projection = true; // #11a, ADOPTED 2026-07-31 (MMS A/B: exactly neutral, pure
-                                        // faithfulness win). Constrain the POSITION so the EXPANDED
-                                        // footprint is in-die (XPlace trunc_node_pos_fn), instead of
-                                        // clamping the position by raw size and shifting at deposit.
-    bool macro_td_expand_ratio = false; // #11b, REJECTED 2026-07-31 (MMS A/B: mean +5.2% HPWL worse,
-                                        // worst on the macro-heavy designs it targeted). Leave false.
-                                        // true = movable macros deposit at weight = target_density
-                                        // instead of the area-conserving ratio (XPlace database.py:921)
+    // TODO #11b — a documented, DELIBERATE divergence from XPlace, kept as a runtime toggle.
+    // XPlace really does overwrite the area-conserving expand_ratio with target_density for
+    // movable macros (database.py:921-923), so `true` is the faithful branch; we default it OFF
+    // because the MMS A/B measured mean +5.2% HPWL worse, worst on the macro-heavy designs it was
+    // meant to help. That verdict is CONFOUNDED with the stop criterion — every `true` arm halted
+    // 25-65 iterations early because macros deposit less mass into the smoothed overflow that
+    // drives convergence — so re-test it once the stop criterion is fixed (TODO #4).
+    bool macro_td_expand_ratio = false; // true = movable macros deposit at weight = target_density
+                                        // instead of the area-conserving real/clamped ratio
     bool dct_normalize = true;   // apply 1/N per forward DCT (bounds a_uv intermediates; global scale absorbed by lambda)
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
     float avg_node_size = 1.0f; // average movable cell area; grid-sizing divisor for the no-macros case
@@ -189,6 +191,14 @@ public:
     bool m_nan_detected = false; // set when a NaN appears in the HPWL partials (hard divergence);
                              // run() breaks the loop so printFinalResults() still emits a
                              // best-so-far results row instead of the process aborting.
+
+    // Why the run ended. Reported as a stable token so sweep runners can group results by
+    // termination mode without regex-matching free-text log lines: only `converged` means the
+    // overflow countdown completed; every other value marks a run that was cut short.
+    enum class StopReason { RUNNING, CONVERGED, MAX_ITERATIONS, NAN_METRICS,
+                            NAN_PARTIALS, DIVERGED_HPWL, DIVERGENCE_GUARD };
+    StopReason m_stop_reason = StopReason::RUNNING;
+    static const char* stopReasonName(StopReason reason);
 
     // Two-tier best solution tracking (XPlace-inspired):
     //   Primary: lowest HPWL among solutions with overflow < convergence threshold
@@ -279,6 +289,7 @@ public:
     void logStepDiagnostics();
 
     // Bookkeeping and visualization
+    bool convergenceIncludesFillers();   // config params.convergence_include_fillers
     void recordIterationResults();
     void snapshotBestPlacement();
     void restoreBestPlacement();
@@ -315,7 +326,7 @@ public:
     };
     BestSolution& restoreBestSolution(); // primary (converged) > fallback (Pareto) > last; restores its placement
     FinalMetrics computeFinalMetrics();
-    void logOverflowDiagnostics(const FinalMetrics& metrics);
+    void logOverflowDiagnostics();
     void dumpBestPlacementDensity();
     void exportSummaryReports(const BestSolution& chosen, const FinalMetrics& metrics,
                               const std::string& run_output_dir);

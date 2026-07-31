@@ -82,11 +82,43 @@ _ROWS = [
     ("newblue7", "mms", 3, 2048, 0.8),
 ]
 
+# XPlace MMS reference, design -> (mixed_gp_hpwl, mixed_gp_overflow).
+#
+# READ THIS BEFORE COMPARING. XPlace's mixed-size flow has TWO GP phases, and sw_only
+# implements only the first:
+#   1. Mixed-GP           — macros movable, ends at "After Mixed-GP, best solution eval"
+#   2. Macro Legalization — LP/cbc solve placing the macros, then `Reset optimizer` and a
+#                           SECOND full GP pass with the macros held fixed
+# The familiar "GP Stop!" masked_hpwl line is the end of phase 2. Comparing our single-phase
+# result against it compares different algorithms — use the phase-1 numbers below instead.
+# Two consequences that have burned us before:
+#   - Mixed-GP ends at 0.10-0.18 exact overflow on nearly every MMS design (newblue3 is the
+#     lone outlier at 0.040). It does NOT reach the 0.07 stop threshold. Us not reaching it
+#     with macros movable is not by itself a defect.
+#   - These overflows INCLUDE filler density (XPlace's convention). Compare them against
+#     sw_only's "Final Overflow (exact, +fillers)", not the filler-excluded variant.
+#
+# Source: local XPlace runs 2026-07-17, `--dataset mms --mixed_size True --seed 42`,
+# ~/phd/Xplace/result/<ts>_<design>/log/test.log. Same seed as our sweeps.
+_XPLACE_MMS_MIXED_GP = {
+    "adaptec1": (6.238490e7, 0.1306), "adaptec2": (7.128972e7, 0.0963),
+    "adaptec3": (1.534520e8, 0.1247), "adaptec4": (1.363127e8, 0.1352),
+    "adaptec5": (3.034692e8, 0.1485), "bigblue1": (8.295205e7, 0.1741),
+    "bigblue2": (1.212054e8, 0.1052), "bigblue3": (2.705605e8, 0.1235),
+    "bigblue4": (6.241426e8, 0.1295), "newblue1": (5.946208e7, 0.1361),
+    "newblue2": (1.516131e8, 0.1426), "newblue3": (2.828155e8, 0.0400),
+    "newblue4": (2.237576e8, 0.1818), "newblue5": (3.791967e8, 0.1697),
+    "newblue6": (4.028956e8, 0.1419), "newblue7": (8.638253e8, 0.1517),
+}
+
 # Canonical path is "suite/design" (matches host/benchmarks/<suite>/<design> and
 # the dse.py benchmark-override format).
 BENCHMARKS = {
     f"{suite}/{name}": dict(name=name, suite=suite, tier=tier,
-                            grid=grid, target_density=dens)
+                            grid=grid, target_density=dens,
+                            # phase-comparable XPlace reference; None outside the MMS tier
+                            xplace_gp_hpwl=_XPLACE_MMS_MIXED_GP[name][0] if suite == "mms" else None,
+                            xplace_gp_overflow=_XPLACE_MMS_MIXED_GP[name][1] if suite == "mms" else None)
     for (name, suite, tier, grid, dens) in _ROWS
 }
 
@@ -145,11 +177,22 @@ def to_markdown():
     }
     for tier in (1, 2, 3):
         rows = [BENCHMARKS[p] for p in by_tier(tier)]
-        lines += [f"## {tier_desc[tier]}", "",
-                  "| design | suite | XPlace grid | target density |",
-                  "|---|---|---|---|"]
+        ref = tier == 3   # only the MMS tier carries a phase-comparable XPlace reference
+        head = "| design | suite | XPlace grid | target density |"
+        if ref:
+            head += " XPlace Mixed-GP HPWL | XPlace Mixed-GP overflow |"
+        lines += [f"## {tier_desc[tier]}", ""]
+        if ref:
+            lines += ["XPlace reference is the **Mixed-GP** endpoint (phase 1, macros movable) — the "
+                      "phase sw_only implements — NOT the post-macro-legalization `GP Stop!` number. "
+                      "Overflow includes fillers. See `_XPLACE_MMS_MIXED_GP` in `tools/benchmarks.py`.",
+                      ""]
+        lines += [head, "|---|---|---|---|" + ("---|---|" if ref else "")]
         for m in rows:
-            lines.append(f"| {m['name']} | {m['suite']} | {m['grid']} | {m['target_density']:g} |")
+            row = f"| {m['name']} | {m['suite']} | {m['grid']} | {m['target_density']:g} |"
+            if ref:
+                row += f" {m['xplace_gp_hpwl']:.3e} | {m['xplace_gp_overflow']:.4f} |"
+            lines.append(row)
         lines.append("")
     lines += [
         f"**Tier 1 + Tier 2 = {len(by_tier(1)) + len(by_tier(2))} designs = the XPlace-paper suite "

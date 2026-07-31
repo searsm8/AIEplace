@@ -297,6 +297,7 @@ bool Placer::checkConvergence()
 bool Placer::reachedMaxIterations()
 {
     if (iteration < max_iterations) return false;
+    m_stop_reason = StopReason::MAX_ITERATIONS;
     Logger::log_info("Stopping: reached maximum iterations (" +
                     std::to_string(max_iterations) + ")");
     return true;
@@ -306,6 +307,7 @@ bool Placer::reachedMaxIterations()
 bool Placer::hasNaNMetrics()
 {
     if (!std::isnan(ovfw_history.back()) && !std::isnan(hpwl_history.back())) return false;
+    m_stop_reason = StopReason::NAN_METRICS;
     Logger::log_info("Stopping: NaN detected at iteration " + std::to_string(iteration));
     return true;
 }
@@ -318,18 +320,30 @@ const Placer::BestSolution& Placer::bestReference() const
          : best_primary;
 }
 
-/// @brief Coarse divergence backstop: HPWL has blown past 2x the best known solution.
+/**
+ * @brief Coarse divergence backstop: HPWL has blown past 2x the best known solution WHILE overflow
+ *        is getting worse. Both conjuncts are XPlace's (param_scheduler.py need_to_early_stop:
+ *        `overflow[ptr] > overflow[ptr-1] and hpwl[ptr] > best_metric["hpwl"] * 2`). The overflow
+ *        term is what makes this a divergence test rather than a spreading test — HPWL legitimately
+ *        climbs well past 2x best while cells spread, so on the HPWL term alone this fired on
+ *        healthy macro-heavy runs (adaptec5, newblue7) that were still descending in overflow.
+ */
 bool Placer::hasCoarseDivergence()
 {
     const BestSolution& best_ref = bestReference();
     float current_hpwl = hpwl_history.back();
     if (!best_ref.valid || current_hpwl <= 2.0f * best_ref.hpwl) return false;
+    if (ovfw_history.size() < 2) return false;
+    float overflow = ovfw_history.back(), prev_overflow = ovfw_history[ovfw_history.size() - 2];
+    if (overflow <= prev_overflow) return false;   // still spreading, not diverging
 
+    m_stop_reason = StopReason::DIVERGED_HPWL;
     Logger::log_info("Stopping: divergence detected at iteration " +
                     std::to_string(iteration) +
                     " (HPWL " + std::to_string(current_hpwl) +
                     " > 2x best " + std::to_string(best_ref.hpwl) +
-                    " from iter " + std::to_string(best_ref.iteration) + ")");
+                    " from iter " + std::to_string(best_ref.iteration) +
+                    ", overflow rising " + PREC(prev_overflow) + " -> " + PREC(overflow) + ")");
     return true;
 }
 
@@ -348,11 +362,23 @@ bool Placer::checkFineDivergenceGuard()
 
     if (checkDivergence(3, 0.01f * overflow))
         life -= 6;
+    // DELIBERATE DIVERGENCE from XPlace, and it is the mixed-size case that needs explaining.
+    // XPlace gates this kill on `not self.include_macros` (param_scheduler.py:467) — but that is
+    // not leniency: in XPlace, `need_to_early_stop()` firing during phase 1 TRIGGERS macro
+    // legalization and the optimizer reset (run_placement_nesterov.py:167-172), then clears the
+    // signal and continues. The guard is its phase-1 EXIT, not a kill.
+    //
+    // sw_only has no phase 2 yet (TODO #13), so we keep the plateau kill active in mixed-size and
+    // let it end the run at the same point XPlace would have handed off to macro legalization.
+    // Disabling it (tried 2026-07-31) just grinds to convergence_max_iterations with the density
+    // weight running away — newblue4/newblue5 went 670 -> 1200 iterations for a 0.02 overflow gain
+    // and a 45% HPWL inflation. Re-gate on `!mixed_size_mode` once #13 lands.
     if (overflow >= overflow_threshold && checkOverflowPlateau(50, 0.05f))
         life -= MAX_LIFE;
 
     if (life > 0) return false;
 
+    m_stop_reason = StopReason::DIVERGENCE_GUARD;
     Logger::log_info("Stopping: divergence guard exhausted at iteration " +
                     std::to_string(iteration) + " (best HPWL " +
                     std::to_string(best_ref.hpwl) + " from iter " +
@@ -391,6 +417,7 @@ bool Placer::checkOverflowCountdown()
     convergence_iterations_remaining--;
 
     if (convergence_iterations_remaining <= 0) {
+        m_stop_reason = StopReason::CONVERGED;
         Logger::log_info("Convergence achieved at iteration " +
                         std::to_string(iteration) +
                         " (overflow countdown complete)");
