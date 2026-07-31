@@ -73,7 +73,10 @@ private:
     int  m_row_count = 0;
     Position m_die_shift; // (0,0) unless a bookshelf die_shift was applied
     string m_design_name;
-    int m_units_per_micron;
+    // DEF convention default (matches this repo's ispd2015 .def samples); set_def_unit()
+    // overrides it for real DEF input. Bookshelf input (ISPD2005/MMS) never calls
+    // set_def_unit, so without this default the DEF written on output read garbage.
+    int m_units_per_micron = 1000;
     int m_total_net_degree;
     float m_maximum_utilization = 0.0f; // 0 = not specified by benchmark
     MacroClass* m_current_lef_macro = nullptr; // tracks current macro during LEF parsing for pin callbacks
