@@ -175,6 +175,10 @@ public:
     ScopeTimer& operator=(const ScopeTimer&) = delete;
 };
 
+// NOT thread-safe: the destructor updates Logger::function_stats_map, an unsynchronized static.
+// Place these OUTSIDE parallel regions only — timing a per-node or per-net body would race (and
+// would swamp the map with millions of updates anyway). Every current use sits at function or
+// pass scope; see TODO #5 if that ever has to change.
 #define TIME_FUNCTION() ScopeTimer scopeTimer(__func__)
 #define TIME_BLOCK(name) ScopeTimer scopeTimer(name)
 
