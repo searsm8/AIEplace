@@ -24,6 +24,8 @@ __pycache__/
 /tat
 /vck5000/bin/
 /vck5000/.claude/
+# stray host build output (the real output goes to build/)
+/vck5000/host/src/objs/
 
 # AIE compiler workdirs and simulator/golden output
 /vck5000/aie/Work/

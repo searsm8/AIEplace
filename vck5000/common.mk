@@ -73,7 +73,7 @@ XCLBIN = $(BUILD_DIR_XCLBIN)/aieplace_$(EXEC_CONFIG).xclbin
 HOST_DIR = $(PROJECT_ROOT)/host/src/$(HOST)
 BUILD_DIR_HOST = $(BUILD_DIR)/$(TARGET)/host/$(HOST)
 HOST_EXE = $(BUILD_DIR_HOST)/aieplace_$(HOST).exe
-HOST_RUN_CONFIG ?= $(HOST_DIR)/run_config.json
+HOST_RUN_CONFIG ?= $(HOST_DIR)/run_config.toml
 
 VPP_HLS_FLAGS = --hls.jobs 8
 VPP_VIVADO_FLAGS = --vivado.impl.jobs 8 --vivado.synth.jobs 8

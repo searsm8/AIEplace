@@ -1,5 +1,7 @@
 
-BUILD_XRT ?= # Set to 1 to build with XRT and VCK5000 support.
+# sw_only is the CPU-only golden reference by design -- there is no XRT/VCK5000 path here.
+# Hardware offload lives in the pl_algo variant (HOST=pl_algo, which honors BUILD_XRT).
+# See TODO #9: the two hosts merge once pl_algo bring-up completes.
 BUILD_VIZ ?= 1# Set to 1 to build with visualization support.
 
 THIRD_PARTY = $(PROJECT_ROOT)/../third_party
@@ -14,10 +16,6 @@ HOST_DEPS = $(HOST_OBJS:.o=.d)
 
 # General
 CPPFLAGS += -I $(HOST_DIR)/include
-# pl_algo module headers -- param_scheduler.hpp (scalar, cmath-only) is included by the golden
-# behind use_pl_scheduler for the closed-loop drop-in check (PL port S6 step 0).
-CPPFLAGS += -I$(PROJECT_ROOT)/pl/src/pl_algo/src
-CPPFLAGS += -I$(XILINX_XRT)/include/ -I$(XILINX_VIVADO)/include/
 
 CXXFLAGS += -std=c++2a
 CXXFLAGS += -g
@@ -49,23 +47,6 @@ CPPFLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 
 # Tabulate
 TABLE_DIR = ${THIRD_PARTY}/tabulate
-
-# TDD (Disabled for WSL)
-TBB_INCLUDE = ${HOME}/.local/include
-TBB_LIB = ${HOME}/.local/lib64
-#CPPFLAGS += -I${TBB_INCLUDE}
-#LDFLAGS += -L${TBB_LIB}
-#LDLIBS += -ltbb  # Disabled for WSL build - enable with -DUSE_TBB if needed
-
-
-# Enable XRT acceleration
-ifdef BUILD_XRT
-HOST_SRCS += GraphDriver.cpp
-CXXFLAGS += -DUSE_AIE_ACCELERATION
-CPPFLAGS += -DUSE_XILINX_XRT
-LDFLAGS += -L$(XILINX_XRT)/lib/
-LDLIBS += -lxrt_coreutil -lxrt++ -lxilinxopencl
-endif
 
 # Enable Vizualization
 ifdef BUILD_VIZ
