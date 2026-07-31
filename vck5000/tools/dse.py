@@ -17,16 +17,19 @@ import tomlkit
 
 import benchmarks  # master benchmark manifest (rejects out-of-scope designs at launch)
 
-# Maximum number of parallel AIEplace processes.
-# Set to 1 for sequential execution (original behavior).
-# A good default 4 or 8 to speed up DSE on a typical multi-core machine without overwhelming it.
-MAX_PARALLEL = 8
+# Number of concurrent AIEplace processes. The placer is multithreaded now (TODO #12) and
+# takes every core but one when left alone, so this stays at 1: measured empirically
+# (2026-07-31, 8-design mix, ISPD2005+2015) that 1 threaded run at a time and 8 concurrent
+# single-threaded runs come out the same on total wall clock -- per-run thread scaling is
+# sublinear (~1.67x at 7 threads) and concurrent single-threaded runs give some of that back
+# to L3/memory-bandwidth contention, so the two effects roughly cancel. Sequential is simpler
+# (no core-budget arithmetic, no memory-tiered concurrency, no oversubscription risk) for the
+# same throughput, so it's the one setting used everywhere. Raise only if a future box has
+# enough cores that per-run threading stops scaling before it saturates them.
+MAX_PARALLEL = 1
 
-# OpenMP threads given to each run, set in run_dse() once the worker count is known.
-# The placer itself is multithreaded (TODO #12) and takes every core but one when left alone,
-# so N concurrent runs would oversubscribe the box N-fold. Split the CPUs across the workers
-# instead. An OMP_NUM_THREADS already in the environment still wins.
-THREADS_PER_RUN = 1
+# OpenMP threads per run: left to the placer's own default (every core but one) by not setting
+# OMP_NUM_THREADS at all. An OMP_NUM_THREADS already in the environment still wins.
 
 # Compiled placer binary (current sw_only build) and the base config it reads.
 # Both paths are relative to vck5000/, which is where this script must be run from.
@@ -443,13 +446,10 @@ class ParallelRun:
     def start(self):
         """Launch the subprocess with stdout/stderr discarded."""
         self.t0 = time.time()
-        env = dict(os.environ)
-        env.setdefault("OMP_NUM_THREADS", str(THREADS_PER_RUN))
         self.process = subprocess.Popen(
             [EXE_PATH, self.config_path],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            env=env,
         )
 
     def poll(self):
@@ -559,10 +559,8 @@ def dse():
           f"+ {len(explicit_runs)} explicit run(s) = {total_runs} total")
 
     parallel = min(MAX_PARALLEL, total_runs)
-    global THREADS_PER_RUN
-    THREADS_PER_RUN = max(1, (os.cpu_count() or 1) // parallel)
-    print(f"DSE: Running with {parallel} parallel workers, "
-          f"OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS', THREADS_PER_RUN)} each")
+    print(f"DSE: Running with {parallel} parallel worker(s), "
+          f"OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS', '(placer default)')} each")
 
     # Give every DSE sweep its own subdirectory so runs never collide
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
