@@ -5,6 +5,44 @@ AIEPLACE_NAMESPACE_BEGIN
 
 using namespace tabulate; // table types, scoped to this .cpp (not leaked via Logger.h)
 
+/// @brief Density footprint geometry — see the contract in Grid.h.
+NodeFootprint computeNodeFootprint(Node* node_p, const FootprintConfig& cfg)
+{
+    const float w = node_p->getXsize();
+    const float h = node_p->getYsize();
+
+    float cw = w, ch = h, weight = 1.0f;
+    if (cfg.clamp) {
+        cw = std::max(w, cfg.bin_w * (float)M_SQRT2);
+        ch = std::max(h, cfg.bin_h * (float)M_SQRT2);
+        weight = (cw > 0.0f && ch > 0.0f) ? (w * h) / (cw * ch) : 0.0f;
+
+        // TODO #11b experiment: XPlace OVERWRITES the area-conserving ratio for movable macros with
+        // target_density when target_density < 1.0 (database.py:921-923) — it replaces the ratio, it
+        // does not scale it. Fillers are excluded there (the masked_fill spans only [mov_lhs,mov_rhs));
+        // isMovableMacro() is false for fillers and FIXED nodes here, so they are excluded too.
+        //
+        // Deliberately INSIDE the clamp branch: like the sqrt(2) inflation, this is part of the
+        // SMOOTHED density model the optimizer minimizes, which is the only density map XPlace has.
+        // computeOverflow(clamp=false) is a sw_only-only diagnostic meant to be the *physical*
+        // density — letting macros deposit 0.8x their real area there would deflate the metric and
+        // make the A/B arms incomparable on the one number that is supposed to be ground truth.
+        if (cfg.macro_target_density_weight && cfg.target_density < 1.0f && node_p->isMovableMacro())
+            weight = cfg.target_density;
+    }
+
+    float xl = node_p->getProbeX() + 0.5f * w - 0.5f * cw;
+    float yl = node_p->getProbeY() + 0.5f * h - 0.5f * ch;
+    if (cfg.shift_in_die && node_p->getStatus() != FIXED) {   // movable/filler: shift to stay in-die
+        if (xl + cw > cfg.grid_w) xl = cfg.grid_w - cw;
+        if (yl + ch > cfg.grid_h) yl = cfg.grid_h - ch;
+        if (xl < 0.0f) xl = 0.0f;
+        if (yl < 0.0f) yl = 0.0f;
+    }
+
+    return NodeFootprint{xl, yl, xl + cw, yl + ch, weight};
+}
+
 /// @brief Build the bins_per_row x bins_per_col grid and seed each bin's local density weight.
 void Grid::init()
 {
@@ -47,41 +85,10 @@ void Grid::iterationReset()
  */
 void Grid::computeBinOverlaps(Node* node_p)
 {
-    float w = node_p->getXsize();
-    float h = node_p->getYsize();
-
-    // Footprint: exact, or (when clamping) inflated to at least sqrt(2) bins per dimension
-    // with an area-conserving weight = real_area / clamped_area (XPlace's expand_ratio).
-    // Clamping smooths sub-bin cells to the grid resolution, so the density field — and hence
-    // the electrostatic force/gradient the optimizer follows — has no sub-bin spikes. Macros
-    // already exceed the clamp, so they are unaffected (weight stays 1). Must stay in sync with
-    // Placer::computeOverflow, which applies the same clamp to the smoothed overflow metric.
-    float cw = w, ch = h, weight = 1.0f;
-    if (m_clamp_density) {
-        const float SQRT2 = 1.41421356f;
-        cw = std::max(w, m_bin_width  * SQRT2);
-        ch = std::max(h, m_bin_height * SQRT2);
-        weight = (cw > 0.0f && ch > 0.0f) ? (w * h) / (cw * ch) : 0.0f;
-    }
-
-    // Footprint centered on the cell. Movable cells are shifted to stay inside the die so edge
-    // cells still deposit their full area-conserving mass (matches XPlace pre_normalize clamping).
-    // FIXED terminals are NOT shifted: IO pads/blockages sit in the margin outside the core-row
-    // die, and shifting would pile their full area onto the edge bins (a false density moat that
-    // repels cells/fillers). Instead they are geometrically clipped to the die below (XPlace drops
-    // out-of-die fixed density from init_density_map).
-    float grid_w = m_bins_per_row * m_bin_width;
-    float grid_h = m_bins_per_col * m_bin_height;
-    float node_xl = node_p->getProbeX() + 0.5f * w - 0.5f * cw;
-    float node_yl = node_p->getProbeY() + 0.5f * h - 0.5f * ch;
-    if (node_p->getStatus() != FIXED) {
-        if (node_xl + cw > grid_w) node_xl = grid_w - cw;
-        if (node_yl + ch > grid_h) node_yl = grid_h - ch;
-        if (node_xl < 0.0f) node_xl = 0.0f;
-        if (node_yl < 0.0f) node_yl = 0.0f;
-    }
-    float node_xh = node_xl + cw;
-    float node_yh = node_yl + ch;
+    NodeFootprint fp = computeNodeFootprint(node_p, footprintConfig());
+    float node_xl = fp.xl, node_yl = fp.yl;
+    float node_xh = fp.xh, node_yh = fp.yh;
+    float weight  = fp.weight;
 
     int col_lo = std::max(0, (int)(node_xl / m_bin_width));
     int col_hi = std::min(m_bins_per_row - 1, (int)(node_xh / m_bin_width));

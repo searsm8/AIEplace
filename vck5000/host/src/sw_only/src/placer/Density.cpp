@@ -12,11 +12,10 @@ AIEPLACE_NAMESPACE_BEGIN
 
 void Placer::computeElectricFields()
 {
-    TIME_FUNCTION();
-    computeOverlaps();          // update the density ρ at probe positions
+    computeOverlaps();                 // update the density ρ at probe positions
 
     if(density_method == "cpu") {
-        computeElectricFields_DCT(); // Compute E-fields on CPU using DCT for verification
+        computeElectricFields_DCT();   // Compute E-fields on CPU using DCT
         //computeElectricFields_CPU(); // Compute E-fields using naive algorithm
     } else {
         Logger::log_error("Invalid density_compute_method specified in config file "
@@ -198,7 +197,7 @@ void Placer::computeOverlaps()
 
     // Pass 1: Fixed components — their density is clamped so bins fully covered
     // by fixed macros register as "at capacity" but not overflowed.
-    for (auto item : db.getComponents())
+    for (const auto& item : db.getComponents())
         if (item.second->getStatus() == FIXED)
             grid.computeBinOverlaps(item.second);
 
@@ -206,7 +205,7 @@ void Placer::computeOverlaps()
 
     // Pass 2: Movable components and fillers — any density on top of
     // the clamped fixed baseline counts as real overflow.
-    for (auto item : db.getComponents())
+    for (const auto& item : db.getComponents())
         if (item.second->getStatus() != FIXED)
             grid.computeBinOverlaps(item.second);
 
@@ -239,32 +238,16 @@ float Placer::computeOverflow(bool clamp, std::vector<float>* out_density, bool 
     const float bin_w = grid.getBinWidth();
     const float bin_h = grid.getBinHeight();
     const float cap   = bin_w * bin_h * target_density;   // per-bin capacity
-    const float min_w = bin_w * (float)M_SQRT2;           // clamp each dim to >= sqrt(2)*bin
-    const float min_h = bin_h * (float)M_SQRT2;
-    const float grid_w = nx * bin_w;
-    const float grid_h = ny * bin_h;
 
     std::vector<float> density(nx * ny, 0.0f);            // area deposited per bin
 
-    // Deposit a node's area over its (optionally clamped) footprint, centered on the cell and
-    // shifted to stay in-die (kept in sync with Grid::computeBinOverlaps).
+    // Deposit a node's area over its footprint. The geometry (sqrt(2) clamp, area-conserving
+    // weight, in-die shift) comes from the shared computeNodeFootprint so this metric measures
+    // exactly the density field Grid::computeBinOverlaps builds for the solver.
     auto deposit = [&](Node* node_p, bool clamp_node) {
-        float w = node_p->getXsize(), h = node_p->getYsize();
-        float cw = clamp_node ? std::max(w, min_w) : w;
-        float ch = clamp_node ? std::max(h, min_h) : h;
-        float weight = (cw > 0.0f && ch > 0.0f) ? (w * h) / (cw * ch) : 0.0f; // conserve total area
-        float xl = node_p->getProbeX() + 0.5f * w - 0.5f * cw;
-        float yl = node_p->getProbeY() + 0.5f * h - 0.5f * ch;
-        // Movable/filler: shift to stay in-die (area-conserving edge deposit). FIXED terminals are
-        // geometrically clipped instead — IO pads outside the core-row die must not be piled onto
-        // the edge bins (false density moat). Kept in sync with Grid::computeBinOverlaps.
-        if (node_p->getStatus() != FIXED) {
-            if (xl + cw > grid_w) xl = grid_w - cw;
-            if (yl + ch > grid_h) yl = grid_h - ch;
-            if (xl < 0.0f) xl = 0.0f;
-            if (yl < 0.0f) yl = 0.0f;
-        }
-        float xh = xl + cw, yh = yl + ch;
+        NodeFootprint fp = computeNodeFootprint(node_p, grid.footprintConfig(clamp_node));
+        float xl = fp.xl, yl = fp.yl, xh = fp.xh, yh = fp.yh;
+        float weight = fp.weight;
         int col_lo = std::max(0, (int)(xl / bin_w));
         int col_hi = std::min(nx - 1, (int)(xh / bin_w));
         int row_lo = std::max(0, (int)(yl / bin_h));
@@ -281,13 +264,13 @@ float Placer::computeOverflow(bool clamp, std::vector<float>* out_density, bool 
     };
 
     // Fixed baseline at exact size, capped per bin (mirrors clampFixedDensity).
-    for (auto item : db.getComponents())
+    for (const auto& item : db.getComponents())
         if (item.second->getStatus() == FIXED) deposit(item.second, false);
     for (float& d : density) d = std::min(d, cap);
 
     // Movable real cells (clamped when requested). Fillers included only for the diagnostic
     // that mirrors XPlace's filler-inclusive GP stop signal (default: excluded).
-    for (auto item : db.getComponents())
+    for (const auto& item : db.getComponents())
         if (item.second->getStatus() != FIXED) deposit(item.second, clamp);
     if (include_fillers)
         for (auto filler_p : db.getFillers()) deposit(filler_p, clamp);

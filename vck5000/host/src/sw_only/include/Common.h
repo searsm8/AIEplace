@@ -18,8 +18,6 @@
 #include <math.h>
 #include <sys/time.h>
 #include <experimental/filesystem>
-#include <thread>
-#include <mutex>
 
 namespace fs = std::experimental::filesystem;
 
@@ -132,7 +130,5 @@ struct Term
 long getTime();
 double getInterval(long start_time, long end_time);
 
-std::size_t get_index(const std::thread::id id);
-
-AIEPLACE_NAMESPACE_END 
+AIEPLACE_NAMESPACE_END
 

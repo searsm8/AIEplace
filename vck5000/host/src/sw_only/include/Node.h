@@ -36,9 +36,9 @@ private:
     // Data members
     string m_name;
     string m_orient;
-    std::mutex m_mutex;
     PlacementStatus m_status = UNKNOWN;
     bool m_is_large = false; // True if the area of the node is at least 1/16th the area of a bin
+    bool m_is_movable_macro = false; // XPlace is_mov_macro rule; see Placer::tagMovableMacros
     std::vector<Net*> mv_nets; // List of all nets this node is on
     std::vector<BinOverlap> mv_bin_overlaps; // List of bins this node is currently overlapping
 
@@ -81,9 +81,6 @@ public:
 
     void translate(float move_x, float move_y) { next.node_pos.translate(move_x, move_y); }
     void translate(XY move) { next.node_pos.translate(move.x, move.y); }
-
-    void lock() {  m_mutex.lock(); }
-    void unlock() {  m_mutex.unlock();  }
 
     std::vector<Net*>& getNets() { return mv_nets; }
     std::vector<BinOverlap>& getBinOverlaps() { return mv_bin_overlaps; }
@@ -129,6 +126,11 @@ public:
 
     bool isLarge() { return m_is_large; }
     bool isPlaced() { return m_status == PLACED; }
+
+    // Movable-macro tag under XPlace's is_mov_macro rule (Placer::tagMovableMacros). Distinct from
+    // the coarser die-area heuristic behind Placer::num_movable_macros — see TODO #11.
+    void setMovableMacro(bool is_macro) { m_is_movable_macro = is_macro; }
+    bool isMovableMacro() { return m_is_movable_macro; }
 
     void setNodePos(Position pos) { next.node_pos = pos; }
     void initializeState(Position pos) { current.node_pos = pos; current.probe_pos = pos; 

@@ -8,15 +8,16 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-// TODO: These functions should be operating on the parameter passed by reference, not copying large data structures!
-std::vector< std::vector<float> > transpose   (std::vector< std::vector<float> > input);
+// Inputs are taken by const reference: at a 1024x1024 grid a by-value matrix parameter
+// copied ~4 MB per call, and compute_eField_DCT alone calls transpose 6x per iteration.
+std::vector< std::vector<float> > transpose   (const std::vector< std::vector<float> >& input);
 
-std::vector<float> DCT_naive   (std::vector<float> input);
-std::vector<float> IDCT_naive  (std::vector<float> input);
-std::vector<float> IDXST_naive (std::vector<float> input);
+std::vector<float> DCT_naive   (const std::vector<float>& input);
+std::vector<float> IDCT_naive  (const std::vector<float>& input);
+std::vector<float> IDXST_naive (const std::vector<float>& input);
 
-std::vector<float> DCT_fft     (std::vector<float> input, bool normalize = false);
-std::vector<float> IDCT_fft    (std::vector<float> input, bool normalize = false);
-std::vector<float> IDXST_fft   (std::vector<float> input, bool normalize = false);
+std::vector<float> DCT_fft     (const std::vector<float>& input, bool normalize = false);
+std::vector<float> IDCT_fft    (const std::vector<float>& input, bool normalize = false);
+std::vector<float> IDXST_fft   (const std::vector<float>& input, bool normalize = false);
 
 AIEPLACE_NAMESPACE_END
