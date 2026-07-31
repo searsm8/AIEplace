@@ -21,20 +21,29 @@ AIEPLACE_NAMESPACE_BEGIN
  * @brief Pick the OpenMP team size: every logical CPU but one, unless OMP_NUM_THREADS says
  *        otherwise.
  *
- * Filling *every* logical CPU is a performance cliff, not a maximum. libgomp's default wait
- * policy is a busy spin, so when the team size equals the CPU count the workers spinning
- * after a parallel region occupy all of them and the master is descheduled while it runs the
- * serial stretch to the next region. Measured on this 8-vCPU box with a loop of small parallel
- * regions separated by serial work: 1 thread 0.68 s, 4 threads 0.70 s, 7 threads 0.73 s,
- * 8 threads 5.89 s — an 8x cliff at exactly the CPU count, and the same effect cost the
- * placer 8.1 -> 13.4 s on adaptec1 before this was in place.
+ * Not a micro-optimization — it is insurance against sharing the machine, which on this box is
+ * the normal case (overnight DSE/A-B sweeps). libgomp's default wait policy is a busy spin, so
+ * the workers keep every CPU occupied through the serial stretches between parallel regions. A
+ * team that already fills every CPU therefore has nowhere to put a co-scheduled job, and the
+ * master ends up descheduled by its own idle workers. Measured with a loop of small parallel
+ * regions separated by serial work, on this 8-vCPU box:
  *
- * The alternative fix, OMP_WAIT_POLICY=passive, cannot be applied from here: libgomp reads its
- * environment in a library constructor, so a setenv() in main() is already too late (verified).
- * Reserving one CPU is settable at runtime and costs almost nothing.
+ *     threads      1      2      4      6      7      8
+ *     idle       0.68   0.68   0.69   0.71   0.72   0.73   s
+ *     one other
+ *     job running  -      -    0.70     -    0.73   5.89   s   <-- 8x
  *
- * An explicit OMP_NUM_THREADS always wins, so a concurrent sweep can still divide the box up:
- * 4 runs x 8 threads on 8 CPUs oversubscribes badly.
+ * Reserving one CPU costs nothing when the box is idle and avoids the collapse when it is not.
+ * The placer itself showed the same thing: 8.1 -> 13.4 s on adaptec1 with a sweep running,
+ * before this was in place.
+ *
+ * OMP_WAIT_POLICY=passive also avoids the collapse but is the wrong trade — it is ~20% SLOWER
+ * on an idle box (0.88 s vs 0.72 s above) — and it cannot be set from here anyway: libgomp
+ * reads its environment in a library constructor, so a setenv() in main() is already too late
+ * (verified directly). The thread count is settable at runtime; the wait policy is not.
+ *
+ * An explicit OMP_NUM_THREADS always wins, so a concurrent sweep can still divide the box up —
+ * and must: N runs x all-but-one-core each oversubscribes N-fold (tools/dse.py does this).
  */
 static void configureThreadPool()
 {
