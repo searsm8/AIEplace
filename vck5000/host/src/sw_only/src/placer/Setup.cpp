@@ -71,10 +71,11 @@ void Placer::setupDesign()
     configureThreadPool();
     bool bins_auto = resolveGridResolution();
     loadDesignDatabase();
+    tagMovableMacros();           // must precede createFillers: the filler math is std-cell-only
+    createFillers();              // may raise target_density; then builds the flat node index
     analyzeDesignArea(bins_auto);
     configurePreconditioner();
     applyMixedSizeStopPolicy();   // needs num_movable_macros from analyzeDesignArea
-    tagMovableMacros();
 }
 
 void Placer::setupGrid()
@@ -87,8 +88,9 @@ void Placer::setupGrid()
 }
 
 /**
- * @brief Tag movable macros with XPlace's is_mov_macro rule (database.py:621-632), used only by
- *        the TODO #11b experiment. A MOVABLE node is a macro iff all three hold:
+ * @brief Tag movable macros with XPlace's is_mov_macro rule (database.py:621-632). Consumed by
+ *        DataBase::addFillers (which works in the standard-cell frame) and the TODO #11b
+ *        experiment. A MOVABLE node is a macro iff all three hold:
  *          1. height > 2.01 * row_height          (taller than ~two standard-cell rows)
  *          2. area   > 10 * mean(area of the smallest 99.9% of movable nodes)
  *          3. both dimensions non-degenerate
@@ -152,7 +154,7 @@ bool Placer::resolveGridResolution()
     return bins_auto;
 }
 
-/// @brief Read the LEF/DEF design files, apply the benchmark's maximum_utilization if given, add fillers.
+/// @brief Read the LEF/DEF design files and apply the benchmark's maximum_utilization if given.
 void Placer::loadDesignDatabase()
 {
     db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
@@ -163,9 +165,19 @@ void Placer::loadDesignDatabase()
         Logger::log_info("Using benchmark maximum_utilization: " +
                         std::to_string(target_density));
     }
+}
 
+/**
+ * @brief Size and create the filler cells, then build the flat node index.
+ *
+ * Runs after tagMovableMacros because the filler math is standard-cell-only, and before
+ * analyzeDesignArea because addFillers may RAISE target_density (XPlace does the same when a
+ * design is denser than its target) and the grid formula reads it.
+ */
+void Placer::createFillers()
+{
     if (ConfigUtils::require<bool>(cfg, "params", "enable_filler"))
-        db.addFillers(target_density);
+        target_density = db.addFillers(target_density);
 
     // Every node now exists and every PlacementStatus is final, so the flat iteration index
     // the threaded loops walk can be built once here.

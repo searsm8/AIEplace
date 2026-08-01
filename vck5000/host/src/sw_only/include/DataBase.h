@@ -71,6 +71,10 @@ private:
     // origin (XPlace die_shift); m_die_shift is added back on DEF output.
     long m_row_xmin = 0, m_row_ymin = 0, m_row_xmax = 0, m_row_ymax = 0;
     int  m_row_count = 0;
+    // Standard-cell row height in DBU (XPlace site_height), 0 when the input supplied none.
+    // Bookshelf reads it from the .scl CoreRow; LEF/DEF from the CORE SITE, since a DEF ROW
+    // records only an origin. Sizes fillers -- see addFillers.
+    float m_row_height = 0.0f;
     Position m_die_shift; // (0,0) unless a bookshelf die_shift was applied
     string m_design_name;
     // DEF convention default (matches this repo's ispd2015 .def samples); set_def_unit()
@@ -132,7 +136,10 @@ public:
     // bool readVerilog();
     bool readBookshelf();
 
-    bool addFillers(float target_utilization);
+    /// @brief Create filler cells for the design's whitespace.
+    /// @return the EFFECTIVE target density -- raised when the design is denser than the
+    ///         request (see the definition). Callers must adopt the returned value.
+    float addFillers(float target_utilization);
 
     /// @brief (Re)build the flat node/net index. Call once after parsing and filler creation;
     ///        placement never adds a node or changes a PlacementStatus, so it stays valid.

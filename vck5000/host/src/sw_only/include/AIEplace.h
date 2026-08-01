@@ -44,11 +44,12 @@ private:
     void setupDesign();                    // timed: config parse + grid decision + DB read + fillers + area analysis
     void loadConfiguration();              // parse the config file into cfg and read all hyperparameters
     bool resolveGridResolution();          // explicit bins_per_row override, or defer to the ePlace formula
-    void loadDesignDatabase();             // read LEF/DEF, apply benchmark max_util, add fillers
+    void loadDesignDatabase();             // read LEF/DEF, apply benchmark max_util
+    void tagMovableMacros();               // XPlace is_mov_macro rule; must precede createFillers
+    void createFillers();                  // fillers (may raise target_density) + flat node index
     void analyzeDesignArea(bool bins_auto); // movable/fixed area stats, macro count, ePlace-formula grid size
     void configurePreconditioner();        // auto-enable decision from num_movable_macros
     void applyMixedSizeStopPolicy();       // XPlace include_macros phase: 2x stop overflow, no plateau kill
-    void tagMovableMacros();               // XPlace is_mov_macro rule (TODO #11b)
     void setupGrid();                      // build the Grid from bins_per_row, clamp density, set die_size
     void configureGammaSchedule();         // grid-independent base_gamma, gamma/inv_gamma, LUT init
     void initializeVisualization();        // no-op when CREATE_VISUALIZATION isn't defined

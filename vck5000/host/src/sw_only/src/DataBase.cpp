@@ -2,6 +2,7 @@
 #include "DataBase.h"
 #include "Logger.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <unistd.h>
 
@@ -37,6 +38,7 @@ void DataBase::readDesignFiles()
             MacroClass* macro = item.second;
             macro->setSize(macro->getXsize() * scale, macro->getYsize() * scale);
         }
+        m_row_height *= scale;   // lef_site_cbk recorded it in microns too
         Logger::log_detail("Scaled " + std::to_string(mm_macros.size()) +
                         " LEF macro sizes by " + std::to_string(m_units_per_micron) +
                         " (microns -> dbu)");
@@ -256,58 +258,89 @@ bool DataBase::readBookshelf()
 }
 
 
-/** @brief: Add fillers to design 
-* Computes the total area of all components in the design and adds enough filler cells
-* to bring the filled area to target utilization.
-*/
-bool DataBase::addFillers(float target_utilization)
+/**
+ * @brief Create filler cells to occupy the design's whitespace, and report the density target
+ *        that is actually achievable.
+ *
+ * Mirrors XPlace compute_filler_without_fence (database.py:662). Fillers stand in for whitespace
+ * so the real cells reach the density target without over-spreading; with none, overflow never
+ * falls to the stop threshold.
+ *
+ * Everything is computed in the STANDARD-CELL frame: movable macros leave the size sample, the
+ * placeable area, and the area to fill. A macro is neither shaped like a filler nor able to make
+ * room for one, so counting it does not describe the space fillers actually compete for.
+ * Requires Placer::tagMovableMacros() to have run.
+ *
+ * @param  target_utilization (expected 0 to 1) density the benchmark/config asks for.
+ * @return the EFFECTIVE target density — raised to the standard-cell utilization when the design
+ *         is denser than the request. The raise yields no fillers (at that density the whitespace
+ *         is zero by definition); what it does is stop the placer chasing a density the design
+ *         cannot reach. The caller must adopt the returned value.
+ */
+float DataBase::addFillers(float target_utilization)
 {
-    // Filler cells occupy whitespace so real cells don't have to over-spread to hit the
-    // density target — without them overflow can't fall to the stop threshold. Size a filler
-    // like a typical movable standard cell (XPlace compute_filler_without_fence): each
-    // dimension is the trimmed mean of the movable cells' sizes, dropping the smallest and
-    // largest 5% so macros and min-width cells don't skew it. (The previous code sized the
-    // filler from the smallest *macro*, which yields ~0 fillers on standard-cell designs.)
-    std::vector<float> widths, heights;
+    // Movable standard cells only. A macro is 100-1000x a standard cell in both dimensions and
+    // would drag the filler size with it (XPlace masks is_mov_macro out of the same sample).
+    std::vector<float> stdcell_widths, stdcell_heights;
+    float movable_macro_area = 0.0f;
     for (const auto& item : mm_components) {
         Component* comp_p = item.second;
         if (comp_p->getStatus() == FIXED) continue;
-        widths.push_back(comp_p->getXsize());
-        heights.push_back(comp_p->getYsize());
+        if (comp_p->isMovableMacro()) { movable_macro_area += comp_p->getArea(); continue; }
+        stdcell_widths.push_back(comp_p->getXsize());
+        stdcell_heights.push_back(comp_p->getYsize());
     }
-    if (widths.empty()) {
-        Logger::log_warning("No movable cells found — no fillers added.");
-        return false;
+    if (stdcell_widths.empty()) {
+        Logger::log_warning("No movable standard cells found — no fillers added.");
+        return target_utilization;
     }
 
-    std::sort(widths.begin(), widths.end());
-    std::sort(heights.begin(), heights.end());
-    auto trimmed_mean = [](const std::vector<float>& sorted) {
-        int n = (int)sorted.size();
+    // Drop the smallest and largest 5% so min-width cells don't set the size.
+    auto trimmed_mean = [](std::vector<float>& sizes) {
+        std::sort(sizes.begin(), sizes.end());
+        int n = (int)sizes.size();
         int lo = (int)(n * 0.05f), hi = (int)(n * 0.95f);
         if (hi <= lo) { lo = 0; hi = n; }  // too few cells to trim: use the whole range
         double sum = 0.0;
-        for (int i = lo; i < hi; i++) sum += sorted[i];
+        for (int i = lo; i < hi; i++) sum += sizes[i];
         return (float)(sum / (hi - lo));
     };
-    float filler_xsize = trimmed_mean(widths);
-    float filler_ysize = trimmed_mean(heights);  // std cells are ~1 row tall, so this ≈ row height
+
+    float filler_xsize = trimmed_mean(stdcell_widths);
+    // Height is the ROW height, not a statistic: a filler occupies whitespace inside the
+    // standard-cell rows, so it is exactly one row tall (XPlace uses site_height directly). On a
+    // design whose movable cells are all single-row the two agree exactly; they diverge on
+    // multi-row cells, which is why the mean is only a fallback for input that gave us no rows.
+    float filler_ysize = m_row_height;
+    if (filler_ysize <= 0.0f) {
+        filler_ysize = trimmed_mean(stdcell_heights);
+        Logger::log_warning("No row height in the input; sizing fillers from the mean cell height.");
+    }
+
+    // Whitespace budget. Movable macros consume placeable area without being standard-cell area,
+    // so they leave both terms. Keeping them in (as this did before) under-fills by
+    // movable_macro_area * (1 - target_density): zero at density 1.0, but on a macro-heavy design
+    // below it that term IS the filler population.
+    float stdcell_placeable_area = getDieArea().getArea() - m_total_fixed_area - movable_macro_area;
+    float stdcell_area           = m_total_movable_area - movable_macro_area;
+
+    float stdcell_utilization = stdcell_area / std::max(1.0f, stdcell_placeable_area);
+    if (stdcell_utilization > target_utilization) {
+        Logger::log_warning("Standard-cell utilization " + PREC(stdcell_utilization) +
+            " exceeds target density " + PREC(target_utilization) +
+            "; raising the target to match (XPlace database.py:679).");
+        target_utilization = stdcell_utilization;
+    }
+
+    float whitespace_area = std::max(0.0f,
+        target_utilization * stdcell_placeable_area - stdcell_area);
+    int fillers_needed = (int)std::lround(whitespace_area / (filler_xsize * filler_ysize));
+    if (fillers_needed == 0)
+        Logger::log_warning("No fillers added: no whitespace at target density " +
+            PREC(target_utilization) + ". Overflow will not reach the stop threshold.");
 
     MacroClass* filler_macro = new MacroClass("filler", filler_xsize, filler_ysize);
     mm_macros.emplace(std::make_pair("filler_macroclass", filler_macro));
-
-    Logger::log_detail("Adding filler cells to database...");
-    Logger::log_detail("Filler cell size: (" + PREC(filler_xsize) + ", " + PREC(filler_ysize) + ")");
-
-    // Fill the placeable whitespace up to the target utilization (XPlace: target_density *
-    // stdcell_placeable_area - mov_stdcell_area). With no movable macros this reduces to
-    // target_util * (die - fixed) - movable_area.
-    float available_area = getDieArea().getArea() - m_total_fixed_area;
-    float unfilled_area = available_area * target_utilization - m_total_movable_area;
-    Logger::log_detail("Available area (die - fixed): " + PREC(available_area));
-    Logger::log_detail("Total area to fill: " + PREC(unfilled_area));
-
-    int fillers_needed = std::max(0, (int)(unfilled_area / filler_macro->getArea()));
 
     for (int i = 0; i < fillers_needed; i++)
     {
@@ -317,8 +350,10 @@ bool DataBase::addFillers(float target_utilization)
         filler_p->setNodePos(Position(0.0f, 0.0f)); // position will be updated during placement
         mv_fillers.push_back(filler_p);
     }
-    Logger::log_detail("Total fillers added: " + stringify(fillers_needed));
-    return true;
+
+    Logger::log_info("Fillers: " + stringify(fillers_needed) + " at (" + PREC(filler_xsize) +
+        ", " + PREC(filler_ysize) + "), effective target density " + PREC(target_utilization));
+    return target_utilization;
 }
 
 /// @brief Build the flat, index-addressable views of the node/net maps — see DataBase.h.
@@ -403,7 +438,14 @@ float DataBase::computeTotalComponentArea()
         void DataBase::lef_via_cbk(LefParser::lefiVia const& ) {}
         void DataBase::lef_viarule_cbk(LefParser::lefiViaRule const& ) {}
         void DataBase::lef_spacing_cbk(LefParser::lefiSpacing const& ) {}
-        void DataBase::lef_site_cbk(LefParser::lefiSite const& s) {}
+        /// @brief record the standard-cell row height. A DEF ROW carries only an origin, so for
+        /// LEF/DEF input the height has to come from the CORE SITE it instantiates. Recorded in
+        /// microns; readDesignFiles scales it to DBU with the macro sizes.
+        void DataBase::lef_site_cbk(LefParser::lefiSite const& s) {
+            if (!s.hasSize()) return;
+            bool is_core = s.hasClass() && std::string(s.siteClass()) == "CORE";
+            if (is_core || m_row_height == 0.0f) m_row_height = s.sizeY();
+        }
         void DataBase::lef_macrobegin_cbk(std::string const& n) {
             // Create macro early so lef_pin_cbk (which fires before lef_macro_cbk) can add pin offsets
             MacroClass* new_macro = new MacroClass(n);
@@ -654,6 +696,7 @@ float DataBase::computeTotalComponentArea()
             if (m_row_count == 0) {
                 m_row_xmin = x0; m_row_xmax = x1;
                 m_row_ymin = y0; m_row_ymax = y1;
+                m_row_height = (float)row.height;  // uniform across CoreRows; sizes fillers
             } else {
                 m_row_xmin = std::min(m_row_xmin, x0);
                 m_row_xmax = std::max(m_row_xmax, x1);
