@@ -16,8 +16,15 @@ void Placer::run()
     while( true )
     {
         performIteration();
-        if (checkConvergence())
+        if (checkConvergence()) {
+            // On a mixed-size design the phase-1 stop is not the end of the run: it is XPlace's
+            // handoff to macro legalization plus a second standard-cell pass with the macros
+            // frozen (TODO #13). beginFixedMacroPhase() returns false whenever that handoff does
+            // not apply, which is what keeps every single-phase design bit-identical.
+            if (beginFixedMacroPhase())
+                continue;
             break;
+        }
         if (m_nan_detected) {
             m_stop_reason = StopReason::NAN_PARTIALS;
             break;
@@ -38,7 +45,9 @@ void Placer::performIteration()
 
     updatePrecondWeights();
 
-    if (iteration == 1)
+    // Phase-relative: phase 2 re-estimates its own initial step after the restart, exactly as
+    // phase 1 did (XPlace re-runs estimate_initial_learning_rate at the optimizer reset).
+    if (phaseIteration() == 1)
         estimateInitialStep();
 
     performNextStep(enable_backtracking);

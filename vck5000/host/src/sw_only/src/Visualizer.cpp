@@ -174,12 +174,12 @@ void Visualizer::drawPlacement(DataBase& db, fs::path dir, PlotInfo info)
     drawFillerCells(db);
     drawFixedComponents(db);
 
-    // Movable cells split by size: std cells blue, large movable macros red.
-    // Macro = movable component whose area exceeds a small fraction of the die (die-relative so it
-    // generalizes across benchmarks; ~0.02% of die area cleanly separates ISPD2005/MMS macros from std cells).
-    double macro_area_thresh = 0.0002 * (double) m_die_width * (double) m_die_height;
-    drawMovableStandardCells(db, macro_area_thresh);
-    drawMovableMacros(db, macro_area_thresh);
+    // Movable cells split by kind: std cells blue, movable macros red. Classification is
+    // Node::isMovableMacro() — the design's single macro definition (Placer::tagMovableMacros,
+    // XPlace is_mov_macro) — rather than a die-area threshold recomputed here, so the picture
+    // shows the same macro set the placer and the filler math act on.
+    drawMovableStandardCells(db);
+    drawMovableMacros(db);
 
     drawAllIOPads(db);
     drawFocusHighlights(db);
@@ -214,24 +214,24 @@ void Visualizer::drawFixedComponents(DataBase& db)
     cairo_stroke(m_cairo_ctx);
 }
 
-void Visualizer::drawMovableStandardCells(DataBase& db, double macro_area_thresh)
+void Visualizer::drawMovableStandardCells(DataBase& db)
 {
     for (const auto& item : db.getComponents()) {
        Component* c = item.second;
        if (c->getStatus() == FIXED) continue;
-       if ((double) c->getXsize() * c->getYsize() > macro_area_thresh) continue; // macros drawn red below
+       if (c->isMovableMacro()) continue;   // macros drawn red below
        drawComponent(c);
     }
     cairo_set_source_rgb (m_cairo_ctx, 0.0, 0.0, 1.0); // blue
     cairo_fill(m_cairo_ctx);
 }
 
-void Visualizer::drawMovableMacros(DataBase& db, double macro_area_thresh)
+void Visualizer::drawMovableMacros(DataBase& db)
 {
     for (const auto& item : db.getComponents()) {
        Component* c = item.second;
        if (c->getStatus() == FIXED) continue;
-       if ((double) c->getXsize() * c->getYsize() <= macro_area_thresh) continue;
+       if (!c->isMovableMacro()) continue;
        drawComponent(c);
     }
     cairo_set_source_rgb (m_cairo_ctx, 1.0, 0.0, 0.0); // red for movable macros

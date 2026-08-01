@@ -35,10 +35,18 @@ __pycache__/
 # Numbered workflow dirs (N_CAPSNAME: 0_TODO, 0_OVERNIGHT_WORK, 1_REVIEW, 2_ARTIFACTS, ...):
 # local async handoff / scratch between Mark & Claude, mostly not tracked.
 # Tracked exceptions: workflow history files (backed up in git for disaster recovery)
+#
+# ORDER MATTERS, twice over:
+#  1. The catch-all must match at ANY depth (no leading slash) -- these dirs live under vck5000/.
+#     The leading slash added by the MARK_TO_REVIEW -> REVIEW rename stopped it matching
+#     vck5000/1_REVIEW and vck5000/2_ARTIFACTS, which then sat untracked-but-NOT-ignored,
+#     including ~80 MB of GIFs that a `git add -A` would have swept in.
+#  2. It must come BEFORE the 0_TODO exceptions. git does not descend into an excluded
+#     DIRECTORY, so a re-include of a file inside one can never fire -- the negation has to
+#     win on the directory itself, which means appearing later in the file.
+[0-9]_*/
 !/vck5000/0_TODO/
 /vck5000/0_TODO/*
 !/vck5000/0_TODO/history.md
 !/vck5000/0_TODO/TODO.md
-/[0-9]_*/
-
 vck5000/host/benchmarks/mms/

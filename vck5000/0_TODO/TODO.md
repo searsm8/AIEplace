@@ -434,19 +434,78 @@ distinct from the operator-level optimizations in #6, worth a look independently
 > | D both | 632k | on | **4.003e8** | **+5.6%** | 0.394 | **converged** |
 > | XPlace | 632,490 | on | 3.792e8 | — | **0.1697** | phase-1 handoff |
 >
-> Fillers buy the **HPWL** (−9.2%); `macro_td_expand_ratio` buys the **convergence**; neither fixes
-> the physical spread (all arms 2–2.5× under-spread vs XPlace). Arm C reproduces the footprint A/B's
-> newblue5 figure exactly (+11.2%), confirming the setup matches the record.
+> Fillers buy the **HPWL** (−9.2%); `macro_td_expand_ratio` buys the **convergence**. Arm C
+> reproduces the footprint A/B's newblue5 figure exactly (+11.2%), confirming the setup matches the
+> record.
+>
+> ### ⚠️ CORRECTION 2026-08-01 — "2–2.5× under-spread vs XPlace" was WRONG (my error)
+> It compared **our macro-INCLUDED** overflow to **XPlace's macro-EXCLUDED** one.
+> `run_placement_nesterov.py:173` sets `ps.zero_macro_grad = True` **before** the Mixed-GP
+> `evaluate_placement` at line 182, and `evaluator.py:30` then drops `is_mov_macro`. **So the 0.1697
+> in `tools/benchmarks.py::_XPLACE_MMS_MIXED_GP` EXCLUDES movable macros** — this affects every MMS
+> overflow comparison, not just newblue5. Confirmed three ways: code order; arithmetic (newblue5's
+> macros alone contribute ≈0.257, so 0.1697 cannot include them); and XPlace's own
+> `--global_placement False` run, where `zero_macro_grad` is never set, reporting **0.4836**.
+>
+> Recomputed like-for-like from the DEFs (`/tmp/t8/overflow_variants.py`, validated against
+> sw_only's own `sharp/no-filler`): **A 0.0964 · B 0.1244 · D 0.0940 vs XPlace 0.1697.**
+> **sw_only's std-cell spreading matches or beats XPlace.** The whole "under-spread" signal was the
+> movable macros — exactly what phase 2 legalizes. Strengthens the case for **#13**.
+>
+> **Unresolved:** the filler axis. Code says XPlace's exact overflow also excludes fillers
+> (`get_mov_node_info` appends them after `mov_rhs`; `get_obj_overflow` slices `[mov_lhs:mov_rhs]`),
+> but the newblue2 calibration in `overflow-metric-grid-faithfulness` says included. Those
+> contradict — resolve before treating the numbers above as final.
+>
+> **Follow-up actions this creates (not done):**
+> - [ ] **Relabel the overflow column of `tools/benchmarks.py::_XPLACE_MMS_MIXED_GP`** (and its
+>       note in `BENCHMARKS.md`) as **macro-EXCLUDED**. As written it invites exactly the
+>       apples-to-oranges comparison made above. The HPWL column is unaffected (`get_obj_hpwl`
+>       has no such exclusion).
+> - [ ] **Re-read TODO #4's reframing in this light.** Its "XPlace's Mixed-GP ends at 0.10–0.18 on
+>       15 of 16 MMS designs" figures are macro-EXCLUDED, so they describe XPlace's *std-cell*
+>       spread. Ours on the same basis is ~0.09–0.12 — i.e. comparable or better, which changes
+>       what "we don't spread" means across the whole suite.
+> - [ ] **Add a macro-excluded variant to `computeOverflow`** so this is a first-class number
+>       rather than a post-hoc DEF script. This is the config-gated diagnostic originally scoped
+>       here — now justified by evidence rather than speculation.
 >
 > **`sharp/+filler` IS XPlace's "exact Overflow"** — verified in `src/evaluator.py`:
 > `get_obj_overflow` uses exact node size with `node_weight = ones` (no `expand_ratio`, no macro
 > fill) over `total_mov_area_without_filler`. So confining #11b to the clamp branch in `Grid.cpp` is
-> *faithful*, and the comparison holds in every arm. **Caveat:** #11b makes macros deposit at exactly
-> `target_density` in the *clamp* map, so they contribute zero to the **convergence** signal — arm D
-> declares `converged` at clamp 0.0676 while physically at sharp 0.394 (5.8× smoothing gap). #11b
-> removes the divergence partly by blinding the stop metric. Symptomatic fix; **do not flip the
-> default on this evidence.** The real fix is **TODO #13 phase 2** — newblue5 is the suite's
-> strongest case for it.
+> *faithful*, and the comparison holds in every arm.
+>
+> ### ⚠️ CORRECTION 2026-08-01 (Mark) — "#11b blinds the stop metric" was WRONG
+> I originally wrote that #11b makes macros "contribute zero to the convergence signal", framing it
+> as a symptomatic fix. **Wrong.** A macro depositing at exactly `target_density` fills a covered
+> bin to **exactly capacity** (`bin_area × td`), excess 0 — which is *correct*: a bin taken up
+> solely by one large macro is full at the target density, not overflowed. The macro has not
+> vanished; it has consumed the bin's entire budget, so **anything overlapping it overflows
+> immediately** (`density = cap + cell_area ⇒ excess = cell_area`). Macros generate overflow
+> exactly when other nodes overlap them — the desired behaviour.
+>
+> The real defect is the reverse: with #11b **off**, every movable macro emits `area × (1 − td)` of
+> overflow **permanently, whether or not anything overlaps it** — irreducible by any movement, on a
+> design where macros are 26.4% of the die. **#11b is a correctness fix, not a symptomatic one.**
+>
+> What survives: the headline `Final Overflow (exact, +fillers)` deposits macros at weight 1 (the
+> #11b branch is clamp-only), so it still carries that spurious term on mixed-size designs — arm D
+> reads sharp 0.394 vs clamp 0.0676. **The REPORTED number is the misleading one, not the
+> convergence signal.** XPlace avoids this by excluding macros from its phase-1 eval
+> (`zero_macro_grad`) — same conclusion as the macro-exclusion correction above, reached
+> independently.
+>
+> ### ✅ DECIDED (Mark, 2026-08-01): `macro_td_expand_ratio` → expected to be LOCKED `true`
+> Keep it a toggle **for now**, while testing continues; the expectation is that it becomes
+> unconditional and the legacy branch is deleted. It is XPlace-faithful *and* correct on the
+> density accounting. The only thing holding it back is the 16-design A/B's −5.2% mean HPWL — and
+> that A/B ran on **zero-filler arms**, so it must be redone after the filler change lands.
+> - [ ] Re-run the #11b A/B with correct fillers.
+> - [ ] Then remove the toggle + legacy branch (as #11a was), per TODO #2's retire-settled-toggles
+>       pattern.
+>
+> The real fix for the residual gap is **TODO #13 phase 2** — newblue5 is the suite's strongest
+> case for it.
 >
 > ⚠️ **Corrections to the record (see report §5):**
 > - `NEW_HANDOFF_filler_faithfulness_20260731.md` §4 is **wrong** that the memories
@@ -895,6 +954,63 @@ yet, just noted.
 ---
 
 ## #13 — Implement mixed-size PHASE 2: macro legalization + fixed-macro std-cell GP (opened 2026-07-31)
+
+> ### ✅ IMPLEMENTED 2026-08-01 — newblue5 CONVERGES. Report:
+> ### `1_REVIEW/NEW_REPORT_phase2_implemented_20260801.md`
+> Built in worktree `/home/msears/phd/AIEplace_t8` on `caa8f2b` **+ the uncommitted filler work**
+> (copied in; verified 632,490 fillers = XPlace exactly). **Mark's tree untouched.**
+>
+> | newblue5 (grid 1024, td 0.5, seed 42) | phase-1 only | **phase 2** | **+ LP legalization** | XPlace |
+> |---|---|---|---|---|
+> | iterations | 1070 | 1926 | 1912 | 2010 |
+> | HPWL | 4.891e8 | **3.984e8** | **3.987e8** | 3.833e8 |
+> | stop | `divergence_guard`, fallback | **`converged`**, primary | **`converged`**, primary | GP Stop |
+> | clamp/+filler | 0.350 | **0.0844** | **0.0842** | — |
+> | sharp/+filler | 0.429 | **0.229** | **0.229** | — |
+> | macro-excluded (XPlace-comparable) | 0.1257 | **0.0756** | **0.0756** | **0.0452** |
+>
+> **The divergence TODO #8 chased is gone** — `converged` with a *primary* best. −9.4% HPWL and
+> −35% exact overflow vs the original baseline; **+3.9% HPWL** from XPlace's final.
+>
+> **Hypothesis confirmed: freezing the macros, not legalizing them, is the mechanism.** Legalization
+> moved HPWL 0.08%. newblue5's phase 1 already leaves the macros nearly legal — **1 overlapping pair
+> of 91, displacement 8.85** (XPlace's own moves 2484). Stage 2 buys legality, not quality, which
+> vindicates doing stage 3 first.
+>
+> **Built:** P3 phase-relative counter (`phaseIteration()`, XPlace `init_iter`) · P2 macro-definition
+> unification · S3 `placer/Phase2.cpp` (freeze + rebuild fillers + re-seed + reset) ·
+> S2 `placer/MacroLegalize.cpp` (constraint graph + LP solved by the **bundled CBC**, longest-path
+> fallback). New keys `enable_phase2` / `macro_legalization` / `macro_lp_solver`;
+> `enable_phase2 = false` restores the old single-phase run exactly.
+> **P3 and P2 are verified NO-OPS** — adaptec1 *and* newblue5 bit-identical on `iterations.dat`
+> *and* the placement DEF.
+>
+> **Bugs caught in review before they produced a wrong number:** (1) frozen macros kept phase 1's
+> stale `probe_pos`, and `computeNodeFootprint` deposits at the PROBE position — every macro's
+> density would have landed where it no longer was; (2) the best-solution restore was unguarded
+> against a phase 1 that never recorded one. Plus one caught by the run: `legalizeMacros()` ran
+> before the freeze and saw an empty set.
+>
+> ### ✅ `convergence_max_iterations` 1200 -> 10000 (DECIDED, Mark 2026-08-01)
+> The first phase-2 run was **starved**: phase 1 ended at 1069, phase 2 got 131 iterations and
+> stopped at `max_iterations` with overflow 0.756 (completely unspread). Now set to **10000**,
+> matching XPlace's `args.inner_iter` default — which likewise spans both phases and never binds
+> (its observed MMS totals are 1344-2280).
+>
+> This **supersedes TODO #4's "leave at 1200, do NOT raise"** for the two-phase flow. That
+> decision remains correct about what it was actually reasoning over: a single-phase run that is
+> *stuck* does not benefit from more iterations, and newblue4's λ-runaway trajectory proved it.
+> What changed is that the cap must now cover BOTH phases to be the runaway backstop it is
+> documented as, rather than a de-facto schedule. The density-weight-runaway defect #4 identified
+> is unaffected and still open — a bigger cap makes bounding λ *more* important, not less.
+>
+> ### Not done
+> - **Longest-path refinement not ported** (the TNS/WNS edge-migration loop that repairs an
+>   infeasible direction assignment). We detect, warn, fall back. newblue5 never hit it.
+> - `macro_legalization_xy` / `_ilp` variants and the retry driver; **site/row alignment** after
+>   legalization.
+> - **Only newblue5 run.** The other 7 macro-heavy MMS designs are untested.
+> - Phase-1 numbers are logged (`[PHASE]` line) but not yet in run_summary / results.csv.
 
 **sw_only implements only phase 1 of XPlace's mixed-size flow.** XPlace runs three stages
 (`run_placement_nesterov.py:167-230`, log evidence in

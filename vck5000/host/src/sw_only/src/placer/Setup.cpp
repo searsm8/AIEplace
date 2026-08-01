@@ -263,6 +263,11 @@ void Placer::loadConfiguration()
     precond_coef_escalation = cfg["params"]["precond_coef_escalation"].value_or(precond_coef_escalation);
     enable_density_clamp = cfg["params"]["enable_density_clamp"].value_or(enable_density_clamp);
     macro_td_expand_ratio = cfg["params"]["macro_td_expand_ratio"].value_or(macro_td_expand_ratio);
+    // TODO #13 phase 2 (see Phase2.cpp). Only ever engages on a design with movable macros.
+    enable_phase2 = cfg["params"]["enable_phase2"].value_or(enable_phase2);
+    macro_legalization_enabled =
+        cfg["params"]["macro_legalization"].value_or(macro_legalization_enabled);
+    macro_lp_solver = cfg["params"]["macro_lp_solver"].value_or(std::string(""));
     dct_normalize = cfg["params"]["dct_normalize"].value_or(dct_normalize);
     g_deterministic = cfg["params"]["deterministic"].value_or(g_deterministic); // see Common.h
     convergence_window = ConfigUtils::require<int>(cfg, "params", "convergence_window");
@@ -288,14 +293,19 @@ void Placer::analyzeDesignArea(bool bins_auto)
     // (XPlace achieves this by normalizing all coordinates by site_width)
     int movable_count = 0, movable_stdcell_count = 0;
     float movable_height_sum = 0.0f, fixed_area = 0.0f, movable_stdcell_area = 0.0f;
-    // die-relative macro threshold, same 0.02% rule the Visualizer uses to color macros red
-    double macro_area_thresh = 0.0002 * db.getDieArea().getArea();
+    // Macro classification is Node::isMovableMacro() — the single definition, set by
+    // tagMovableMacros() from XPlace's is_mov_macro rule, which runs before this. This used to
+    // apply its own "area > 0.02% of the die" threshold, a second rule that disagreed with the
+    // tag on 7 of 16 MMS designs (worst newblue1, 64 vs 53). Unifying is behaviour-preserving
+    // in practice: every *functional* use of num_movable_macros below is a `> 0` test, both
+    // rules are non-zero on every design with macros, and the ePlace grid the two produce is
+    // identical on all 16 (the power-of-2 rounding absorbs the difference).
     for (auto& item : db.getComponents())
         if (item.second->getStatus() != FIXED) {
             movable_count++;
             movable_height_sum += item.second->getYsize();
             float node_area = (float)item.second->getXsize() * item.second->getYsize();
-            if ((double)node_area > macro_area_thresh) {
+            if (item.second->isMovableMacro()) {
                 num_movable_macros++;
             } else {
                 movable_stdcell_count++;
@@ -414,7 +424,6 @@ void Placer::initializePlacement()
     float gauss_sigma_x = grid.getDieWidth() * 0.001f;
     float gauss_sigma_y = grid.getDieHeight() * 0.001f;
 
-    float bin_area_16th = grid.getBinWidth() * grid.getBinHeight() / 16;
     int placed_count = 0, randomized_count = 0;
 
     for (const auto& item : db.getComponents()) {
@@ -430,8 +439,6 @@ void Placer::initializePlacement()
             comp_p->initializeState(init_pos);
             randomized_count++;
         }
-
-        comp_p->checkIfLarge(bin_area_16th);
     }
     Logger::log_detail("Initial placement: " + std::to_string(placed_count) +
                      " from benchmark, " + std::to_string(randomized_count) + " randomized");

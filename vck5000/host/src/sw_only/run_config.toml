@@ -85,8 +85,15 @@ backtrack_max_tries = 10
 backtrack_epsilon = 1.05
 
 # Convergence criteria (adaptive algorithm will stop early if met)
-convergence_min_iterations = 50
-convergence_max_iterations = 1200
+convergence_min_iterations = 50   # per PHASE (phaseIteration), not per run
+# Whole-run runaway backstop, NOT a schedule — it spans BOTH mixed-size phases, as XPlace's
+# args.inner_iter does (default 10000; its observed MMS totals are 1344-2280, so it never binds).
+# Raised 1200 -> 10000 on 2026-08-01 with TODO #13 phase 2: at 1200 a two-phase newblue5 spent
+# 1069 iterations in phase 1 and died at the cap 131 iterations into phase 2, overflow 0.756 and
+# completely unspread. TODO #4's "leave at 1200" was reasoned about a SINGLE-phase run and is
+# still right about that case — a design that is stuck does not benefit from more iterations —
+# but the cap must cover both phases to be the backstop it is documented as.
+convergence_max_iterations = 10000
 convergence_window = 5  # Number of iterations used to determine convergence.
 convergence_hpwl_improvement_threshold = 0.01 # If HPWL improvement over window is below this, HPWL convergence is met.
 convergence_overflow_threshold = 0.07 # Stop when smoothed overflow/movable-area < this. Matches XPlace --stop_overflow default 0.07 (apples-to-apples; do not override lower in sweeps).

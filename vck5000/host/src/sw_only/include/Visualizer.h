@@ -44,8 +44,8 @@ class Visualizer
     // drawPlacement()'s steps, broken out for readability
     void drawFillerCells(DataBase& db);
     void drawFixedComponents(DataBase& db);
-    void drawMovableStandardCells(DataBase& db, double macro_area_thresh);
-    void drawMovableMacros(DataBase& db, double macro_area_thresh);
+    void drawMovableStandardCells(DataBase& db);
+    void drawMovableMacros(DataBase& db);
     void drawAllIOPads(DataBase& db);
     void drawFocusHighlights(DataBase& db);
     void drawPlacementInfoOverlay(const PlotInfo& info);

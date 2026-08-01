@@ -37,7 +37,6 @@ private:
     string m_name;
     string m_orient;
     PlacementStatus m_status = UNKNOWN;
-    bool m_is_large = false; // True if the area of the node is at least 1/16th the area of a bin
     bool m_is_movable_macro = false; // XPlace is_mov_macro rule; see Placer::tagMovableMacros
     std::vector<Net*> mv_nets; // List of all nets this node is on
     std::vector<BinOverlap> mv_bin_overlaps; // List of bins this node is currently overlapping
@@ -118,13 +117,6 @@ public:
         mv_bin_overlaps.push_back(b);
     }
 
-    bool checkIfLarge(float threshold)
-    {
-        m_is_large = this->getArea() > threshold;
-        return m_is_large;
-    }
-
-    bool isLarge() { return m_is_large; }
     bool isPlaced() { return m_status == PLACED; }
 
     // Movable-macro tag under XPlace's is_mov_macro rule (Placer::tagMovableMacros). Distinct from

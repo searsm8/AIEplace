@@ -21,9 +21,11 @@ AIEPLACE_NAMESPACE_BEGIN
  */
 void Placer::updateSchedule()
 {
-    bool past_warmup      = (iteration >= 50);
+    // Phase-relative: XPlace gates all three on `self.iter - self.init_iter`
+    // (param_scheduler.py:285-288), so a new phase re-enters its own warmup.
+    bool past_warmup      = (phaseIteration() >= 50);
     bool forces_balanced  = (density_force_fraction > 0.5f && density_force_fraction < 0.95f);
-    bool every_third_iter = (iteration % 3 == 0);
+    bool every_third_iter = (phaseIteration() % 3 == 0);
 
     bool perform_update = every_third_iter || (past_warmup && !forces_balanced);
     if (perform_update) {
@@ -100,7 +102,9 @@ void Placer::updateDensityWeight()
     float worsening_hpwl_norm = cfg["params"]["density_weight_worsening_hpwl_norm"].value_or(-1.0f);
     float mu;
     if (delta_hpwl < 0.0f) {
-        mu = dw_max_step * std::max(std::pow(0.9999f, (float)iteration), 0.98f);
+        // Phase-relative decay (XPlace param_scheduler.py:307). Phase 2 restarts the ramp
+        // rather than inheriting phase 1's already-decayed mu.
+        mu = dw_max_step * std::max(std::pow(0.9999f, (float)phaseIteration()), 0.98f);
     } else if (worsening_hpwl_norm > 0.0f) {
         mu = dw_max_step * std::clamp(std::pow(dw_max_step, -delta_hpwl / worsening_hpwl_norm),
                                       dw_min_step, dw_max_step);
@@ -121,7 +125,9 @@ void Placer::updateDensityWeight()
     // repeatedly double lambda through a stall (a deliberate deviation from Xplace).
     int min_jolt_interval = cfg["params"]["density_jolt_interval"].value_or(1000);
 
-    bool past_warmup          = (iteration > plateau_window);
+    bool past_warmup          = (phaseIteration() > plateau_window);
+    // Cooldown stays on absolute `iteration`: it measures elapsed time since the last jolt,
+    // and last_density_jolt_iter is recorded in the same absolute frame.
     bool jolt_cooldown_expired = (iteration - last_density_jolt_iter >= min_jolt_interval);
     bool overflow_high        = (ovfw_history.back() > high_ovfw);
     bool is_plateaued         = checkOverflowPlateau(plateau_window, plateau_threshold);
@@ -144,7 +150,8 @@ void Placer::updateDensityWeight()
 
     bool should_escalate_precond = escalation_enabled && overflow_low && coef_below_cap;
     if (should_escalate_precond) {
-        if (iteration % 20 == 0) {
+        // Phase-relative (XPlace param_scheduler.py:365: `(self.iter - self.init_iter) % 20`).
+        if (phaseIteration() % 20 == 0) {
             precond_coef *= 2.0f;
             Logger::log_detail("Preconditioner escalation: precond_coef=" + PREC(precond_coef));
         }
@@ -284,8 +291,9 @@ void Placer::updatePrecondWeights()
  */
 bool Placer::checkConvergence()
 {
-    if (iteration < min_iterations)  return false;
-    if (reachedMaxIterations())      return true;
+    // Phase-relative floor: phase 2 must serve its own minimum, not inherit phase 1's count.
+    if (phaseIteration() < min_iterations)  return false;
+    if (reachedMaxIterations())      return true;   // absolute — whole-run runaway backstop
     if (hasNaNMetrics())             return true;
     if (hasCoarseDivergence())       return true;
     if (checkFineDivergenceGuard())  return true;
@@ -357,7 +365,8 @@ bool Placer::checkFineDivergenceGuard()
 {
     const BestSolution& best_ref = bestReference();
     float overflow = ovfw_history.back();
-    bool guard_armed = (iteration > 100 && best_ref.valid && overflow < 5.0f * overflow_threshold);
+    bool guard_armed = (phaseIteration() > 100 && best_ref.valid &&
+                        overflow < 5.0f * overflow_threshold);
     if (!guard_armed) return false;
 
     if (checkDivergence(3, 0.01f * overflow))

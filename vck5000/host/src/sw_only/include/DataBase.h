@@ -141,8 +141,19 @@ public:
     ///         request (see the definition). Callers must adopt the returned value.
     float addFillers(float target_utilization);
 
-    /// @brief (Re)build the flat node/net index. Call once after parsing and filler creation;
-    ///        placement never adds a node or changes a PlacementStatus, so it stays valid.
+    /// @brief Phase 2: freeze every movable macro at its current position, then rebuild the
+    ///        area split and the flat node index. @return how many were frozen.
+    int freezeMovableMacros();
+
+    /// @brief Phase 2: discard the phase-1 fillers and size a new set in the phase-2 frame
+    ///        (macros are fixed area by then). Run AFTER freezeMovableMacros().
+    /// @return the effective target density for phase 2 — callers must adopt it.
+    float rebuildFillers(float target_utilization);
+
+    /// @brief (Re)build the flat node/net index. Called after parsing and filler creation, and
+    ///        again at the phase-2 transition — the ONLY point where a PlacementStatus changes
+    ///        or the node set is resized (freezeMovableMacros / rebuildFillers). Outside that
+    ///        transition the index is stable for the life of the run.
     void buildNodeIndex();
 
     void iterationReset();

@@ -356,6 +356,71 @@ float DataBase::addFillers(float target_utilization)
     return target_utilization;
 }
 
+/**
+ * @brief Phase 2: freeze every movable macro where global placement left it.
+ *
+ * Mirrors XPlace's optimizer reset (run_placement_nesterov.py:171-200), which moves the macros
+ * out of the movable set so the second pass spreads standard cells against them as obstacles.
+ *
+ * Two pieces of derived state depend on PlacementStatus and MUST be rebuilt here — this is the
+ * one place in the codebase that violates buildNodeIndex()'s "no status ever changes" invariant:
+ *   - the cached area split (the macros' area moves movable -> fixed), and
+ *   - the flat node index every threaded loop iterates.
+ *
+ * The macros keep their is_movable_macro TAG (it still describes what they are, and is what the
+ * DEF writer and the visualizer use to identify them); every consumer tests FIXED first, so the
+ * tag is inert once frozen. A frozen macro deposits full density and is then capped per bin at
+ * target_density by the existing fixed-density clamp — which is exactly what macro_td_expand_ratio
+ * was doing for it by hand while it was movable.
+ *
+ * @return how many macros were frozen.
+ */
+int DataBase::freezeMovableMacros()
+{
+    int frozen = 0;
+    for (const auto& item : mm_components) {
+        Component* comp_p = item.second;
+        if (comp_p->getStatus() == FIXED || !comp_p->isMovableMacro()) continue;
+        comp_p->setPlacementStatus(PlacementStatus::FIXED);
+        // Collapse all four state fields onto the committed position. This is NOT bookkeeping:
+        // restoreBestPlacement() writes only next.node_pos, and once frozen these macros leave
+        // getMovableComponents() and are never stepped or re-initialised again — so probe_pos
+        // would keep phase 1's last lookahead value forever. computeNodeFootprint deposits at
+        // the PROBE position, so the macro's density would land somewhere it no longer is.
+        comp_p->initializeState(comp_p->next.node_pos);
+        frozen++;
+    }
+    computeAreaBreakdown();   // macro area is fixed area now
+    buildNodeIndex();         // mv_movable_* / mv_fixed_* / mv_movable_nodes all shift
+    return frozen;
+}
+
+/**
+ * @brief Phase 2: discard the phase-1 fillers and size a fresh set in the phase-2 frame.
+ *
+ * The filler population is not a property of the design, it is a property of the phase: once the
+ * macros are fixed their area leaves the standard-cell budget entirely (it is fixed area, not
+ * movable-macro area), so the whitespace the fillers must represent is different. XPlace does the
+ * same, recomputing __total_mov_area_without_filler__ across the restart.
+ *
+ * Must run AFTER freezeMovableMacros() so addFillers sees the phase-2 statuses.
+ *
+ * @return the effective target density for phase 2 (addFillers may raise it, as in phase 1).
+ */
+float DataBase::rebuildFillers(float target_utilization)
+{
+    for (Component* filler_p : mv_fillers) delete filler_p;
+    mv_fillers.clear();
+    // addFillers installs a fresh "filler" MacroClass; drop the phase-1 one first, since
+    // mm_macros::emplace would keep the stale entry and leak the new one.
+    auto stale = mm_macros.find("filler_macroclass");
+    if (stale != mm_macros.end()) { delete stale->second; mm_macros.erase(stale); }
+
+    float effective_density = addFillers(target_utilization);
+    buildNodeIndex();
+    return effective_density;
+}
+
 /// @brief Build the flat, index-addressable views of the node/net maps — see DataBase.h.
 void DataBase::buildNodeIndex()
 {

@@ -8,7 +8,8 @@ THIRD_PARTY = $(PROJECT_ROOT)/../third_party
 
 HOST_MAIN = main.cpp
 HOST_SRCS = placer/AIEplace.cpp placer/Setup.cpp placer/Schedule.cpp placer/Step.cpp \
-	    placer/Partials.cpp placer/Density.cpp placer/Output.cpp DataBase.cpp \
+	    placer/Partials.cpp placer/Density.cpp placer/Output.cpp \
+	    placer/Phase2.cpp placer/MacroLegalize.cpp DataBase.cpp \
 	    Grid.cpp Net.cpp DCT.cpp Logger.cpp \
 	    Common.cpp
 HOST_OBJS = $(addprefix $(BUILD_DIR_HOST)/obj/, $(HOST_MAIN:.cpp=.o) $(HOST_SRCS:.cpp=.o))

@@ -114,7 +114,16 @@ public:
     bool precond_explicitly_set = false;     // config named enable_preconditioning => honor it, skip auto
     int  num_movable_macros = 0;             // movable components with area > macro_area_frac * die area
     bool mixed_size_mode = false;            // macros + std cells placed together (XPlace include_macros);
-                                             // set by applyMixedSizeStopPolicy, loosens the stop rules
+                                             // set by applyMixedSizeStopPolicy, loosens the stop rules.
+                                             // Cleared at the phase-2 transition.
+    // TODO #13 phase 2. enable_phase2 gates the whole fixed-macro second pass; when it is off the
+    // run ends at the phase-1 stop exactly as it did before phase 2 existed.
+    // macro_legalization_enabled gates only STAGE 2 (overlap removal) within it — leaving it off
+    // freezes the macros where GP left them, which still exercises the mechanism that produces the
+    // overflow improvement and is the cheap way to test it.
+    bool enable_phase2 = true;
+    bool macro_legalization_enabled = true;
+    std::string macro_lp_solver;             // path to the CBC binary; empty = auto-detect
     int  formula_bins_per_row = 0;           // grid the ePlace auto-formula picks (recorded even when overridden)
     bool precond_coef_escalation = true; // double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef)
     bool enable_density_clamp = true;   // clamp sub-bin cells in the density solve (XPlace expand_ratio)
@@ -184,6 +193,20 @@ public:
 
     // Execution tracking
     int iteration = 0;
+    // Iteration at which the CURRENT phase began (XPlace ParamScheduler::init_iter,
+    // param_scheduler.py:162/176, reset at every phase transition). The split is load-bearing
+    // once phase 2 exists:
+    //   * every SCHEDULE decision (warmup, mu decay, precond escalation, guard arming,
+    //     min_iterations) reads phaseIteration(), so phase 2 gets its own warmup instead of
+    //     inheriting phase 1's — XPlace reads `self.iter - self.init_iter` at every one of
+    //     those sites (param_scheduler.py:285,286,300,307,351,365,393);
+    //   * every REPORTED number (logs, [STOP], iterations.dat, run_summary) keeps using
+    //     `iteration`, so the trace stays continuous and monotonic across the transition;
+    //   * max_iterations stays ABSOLUTE — XPlace's inner_iter spans both phases (TODO #4), so
+    //     it is a whole-run runaway backstop, not a per-phase budget.
+    // While there is only one phase this is 0, so phaseIteration() == iteration exactly.
+    int m_phase_start_iter = 0;
+    int phaseIteration() const { return iteration - m_phase_start_iter; }
     // Console verbosity, resolved in loadConfiguration(). quiet wins: errors only. Otherwise
     // interactive defaults to isatty(stdout) — a terminal gets the banner and the per-iteration
     // live-status table, a pipe gets the bare minimum. The run report is written either way.
@@ -200,6 +223,37 @@ public:
                             NAN_PARTIALS, DIVERGED_HPWL, DIVERGENCE_GUARD };
     StopReason m_stop_reason = StopReason::RUNNING;
     static const char* stopReasonName(StopReason reason);
+
+    // --- Mixed-size two-phase flow (TODO #13, XPlace run_placement_nesterov.py:167-230) -------
+    // Phase 1 places macros and standard cells together. Its durable output is the MACRO
+    // positions: phase 2 freezes those, throws the standard-cell placement away, and re-solves
+    // the standard cells against the macros as fixed obstacles. XPlace's own newblue5 goes
+    // 0.1697 -> 0.0452 overflow across this boundary.
+    enum class Phase { MIXED_SIZE, STDCELL_FIXED_MACRO };
+    Phase m_phase = Phase::MIXED_SIZE;
+    static const char* phaseName(Phase phase);
+
+    /// @brief Take the phase-1 -> phase-2 transition if this run warrants one.
+    /// @return true if phase 2 has begun and run() should keep iterating; false to end the run
+    ///         (not mixed-size, already in phase 2, or phase 1 ended in a way we must not
+    ///         restart from — see the body).
+    bool beginFixedMacroPhase();
+    void legalizeMacros();          ///< stage 2 entry point (honours macro_legalization_enabled)
+    void runMacroLegalization();    ///< stage 2 proper; see MacroLegalize.cpp
+    void reinitializeStdCells();    ///< XPlace randn_center: re-seed std cells, keep frozen macros
+    void resetSolverState();        ///< lambda / precond / Nesterov / best-trackers / countdowns
+    void reportPhaseSummary();      ///< short per-phase report emitted at each phase boundary
+
+    // Metrics captured at the end of phase 1, so the final report can show both phases.
+    struct PhaseSummary {
+        bool  valid = false;
+        int   iterations = 0;
+        float hpwl = 0.0f;
+        float overflow_smoothed = 0.0f;
+        float overflow_exact = 0.0f;
+        StopReason stop_reason = StopReason::RUNNING;
+    };
+    PhaseSummary m_phase1_summary;
 
     // Two-tier best solution tracking (XPlace-inspired):
     //   Primary: lowest HPWL among solutions with overflow < convergence threshold
