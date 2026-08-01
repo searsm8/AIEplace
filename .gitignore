@@ -32,7 +32,7 @@ __pycache__/
 /vck5000/aie/x86simulator_output/
 /vck5000/aie/golden_data/
 
-# Numbered workflow dirs (N_CAPSNAME: 0_TODO, 0_OVERNIGHT_WORK, 1_MARK_TO_REVIEW, 2_ARTIFACTS, ...):
+# Numbered workflow dirs (N_CAPSNAME: 0_TODO, 0_OVERNIGHT_WORK, 1_REVIEW, 2_ARTIFACTS, ...):
 # local async handoff / scratch between Mark & Claude, mostly not tracked.
 # Tracked exceptions: workflow history files (backed up in git for disaster recovery)
 !/vck5000/0_TODO/

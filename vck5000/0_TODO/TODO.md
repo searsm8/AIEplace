@@ -11,18 +11,18 @@ Fast iteration left breadcrumbs sprawling and we started tripping over them. Goa
 committed, self-consistent state. Checklist:
 
 **Already done 2026-07-25:** established the numbered workflow dirs (`0_TODO`, `0_OVERNIGHT_WORK`,
-`1_MARK_TO_REVIEW`, `2_ARTIFACTS`), all git-ignored local-only via one root pattern `[0-9]_*/` (see
-memory `workflow-dirs-convention`). Merged the root `AIEplace/MARK_TO_REVIEW` (incl. 160M `archive/`)
-into `1_MARK_TO_REVIEW`. Net effect: the review/handoff dirs are now OUTSIDE the tracked repo.
+`1_REVIEW`, `2_ARTIFACTS`), all git-ignored local-only via one root pattern `[0-9]_*/` (see
+memory `workflow-dirs-convention`). Merged the root `AIEplace/REVIEW` (incl. 160M `archive/`)
+into `1_REVIEW`. Net effect: the review/handoff dirs are now OUTSIDE the tracked repo.
 
 ### git working tree
-- [x] DONE 2026-07-27 (commit 2a1a561): committed the 8 `vck5000/MARK_TO_REVIEW/*` deletions +
-      the new `[0-9]_*/` .gitignore. Verified all 8 files preserved locally in `1_MARK_TO_REVIEW/`
+- [x] DONE 2026-07-27 (commit 2a1a561): committed the 8 `vck5000/REVIEW/*` deletions +
+      the new `[0-9]_*/` .gitignore. Verified all 8 files preserved locally in `1_REVIEW/`
       (2 renamed to `NEW_*` are byte-identical to the tracked versions) — nothing lost from history.
 - [~] `tools/eval_overflow_xplace.sh`: LEFT UNTRACKED per Mark (2026-07-27). No stray source
       deletions found. Revisit if it should be committed into `tools/`.
 
-### 1_MARK_TO_REVIEW/ reports (now local-only)
+### 1_REVIEW/ reports (now local-only)
 - [ ] Consolidate handoffs/reports; apply the `NEW_` convention consistently (un-prefix the ones
       Mark has read, keep `NEW_` on the rest).
 - [ ] Fold the still-relevant findings into TODO.md / memory so old reports can be archived.
@@ -63,7 +63,7 @@ into `1_MARK_TO_REVIEW`. Net effect: the review/handoff dirs are now OUTSIDE the
 
 ## #2 — Consolidate the preconditioner / field-faithful code (validated 2026-07-26)
 
-The full MMS A/B (`1_MARK_TO_REVIEW/NEW_mms_dct_ab_20260726.md`) definitively validated the
+The full MMS A/B (`1_REVIEW/NEW_mms_dct_ab_20260726.md`) definitively validated the
 faithful-field + preconditioner set (`dct_normalize_inverse=false`, `precond_raw_area=true`,
 `dff_force_ratio=true`): faithful beats legacy **16/16 on MMS, mean −9.6% HPWL**, confirming the
 preconditioner works as intended. Now clean up the experiment scaffolding it was developed behind:
@@ -99,6 +99,20 @@ preconditioner works as intended. Now clean up the experiment scaffolding it was
       so post-DP HPWL is the honest final number — and it *also* resolves the macro-heavy under-spread
       ambiguity from the MMS A/B. Reuse the 07-17 XPlace-legalizer flow (`def_to_bookshelf_pl.py` +
       `--global_placement False --given_solution`) and wire the result into the scorecard.
+- [ ] **`verify_swonly.sh` cannot be diffed the way its own docstring says.** It instructs you to
+      compare two runs with `diff -r A/artifacts B/artifacts`, but it collects
+      `function_statistics.md`, which contains **wall-clock timings** — so `diff -r` reports a
+      difference on every design, every run, regardless of correctness, and the equality test it
+      advertises silently never passes. Fix: drop the timing file from the artifact set, or have
+      the script do the comparison itself over `iterations.dat` + `RowBasedPlacement.def` only.
+      (Hit 2026-07-31 during the P1 filler verification; worked around by diffing those two
+      files directly.)
+- [ ] **`2_ARTIFACTS/gen_footprint_ab_configs.py` is partly STALE.** It still writes
+      `params["xplace_die_projection"]`, a key deleted in `caa8f2b` when #11a was adopted
+      unconditionally. toml++ ignores unknown keys, so its `base` and `proj` arms are now
+      **silently identical** — anyone reusing it for a sweep burns double the wall clock proving
+      that. Strip the #11a arm machinery, keep the useful part (per-design grid /
+      `maximum_utilization` / `random_seed` from `tools/benchmarks.py`).
 
 ---
 
@@ -255,16 +269,21 @@ too slowly to reach 0.182.
 > are unaffected and still right. Options: revert (b) until #13 lands (runs stop at the phase-1
 > exit, as before, and that becomes the transition trigger later), or keep it and accept wasted
 > iterations. NOT yet decided.
-- [ ] **Suspected filler-area faithfulness gap** (found while reading XPlace, NOT yet tested).
+- [x] **Filler-area faithfulness gap — CONFIRMED AND FIXED 2026-07-31.** It was not "fewer fillers
+      than XPlace"; on the macro-heavy low-td designs it was **ZERO fillers**.
       XPlace: `total_filler_area = target_density * stdcell_placeable_area - mov_stdcell_area`
       where BOTH terms exclude movable-macro area (`database.py` compute_filler_without_fence).
-      sw_only (`DataBase.cpp::addFillers`): `available*target_util - m_total_movable_area`, with
-      macro area included in both. The difference is `M*(1-td)` — so on macro-heavy low-td designs
-      we insert FEWER fillers than XPlace, possibly zero where XPlace has some. Lands exactly on
-      the designs that won't spread. Also: XPlace RAISES `target_density` to `stdcell_util` (with a
-      warning) when the design is denser than the target; we have no equivalent.
+      sw_only had `available*target_util - m_total_movable_area`, macro area in both terms — a
+      shortfall of exactly `M*(1-td)`. Measured: **adaptec5 0 → 310,073 fillers, newblue4 0 →
+      205,682, newblue1 100,375 → 181,724.** adaptec5 now matches XPlace's own log
+      (`#Fillers: 310073 Filler size: (1.0795e+01, 1.2000e+01)`) exactly on count and size.
+      Landed together with five other divergences in the same function (macro exclusion from the
+      size sample; filler height = ROW height, not a mean; the `target_density` raise to
+      `stdcell_util`; a warning when zero fillers result). ISPD2005 verified bit-identical.
+      **Quality impact UNMEASURED** — needs the MMS re-baseline. Full writeup + sweep instructions:
+      `1_REVIEW/NEW_HANDOFF_filler_faithfulness_20260731.md`.
 
-Measured 2026-07-26 (report `1_MARK_TO_REVIEW/NEW_mms_overflow_faithfulness_20260726.md`, data
+Measured 2026-07-26 (report `1_REVIEW/NEW_mms_overflow_faithfulness_20260726.md`, data
 `2_ARTIFACTS/mms_xplace_overflow.tsv`). **Root cause = FILLERS, not grid, not deposit formula.** sw_only's
 own `[OVFW-DIAG]` line (newblue2): `sharp/+filler=0.143` ≈ **XPlace 0.145** — the overflow formula is
 faithful; my earlier "gap" compared sw's *no-filler* (0.060) to XPlace's *with-filler* number. XPlace
@@ -283,7 +302,7 @@ XPlace does this too), so "converged" ≠ fully spread on the hardest designs.
 - [ ] **adaptec5 + newblue4 spreading** — they don't spread even running to ~950 iters; investigate (density
       force / precond / macro handling on these). Separate from the metric fix.
       **RULED OUT 2026-07-31: TODO #11b (macro deposit weight = target_density) is not the fix.**
-      The MMS A/B (`1_MARK_TO_REVIEW/NEW_REPORT_footprint_ab_20260731.md`) hit exactly these three
+      The MMS A/B (`1_REVIEW/NEW_REPORT_footprint_ab_20260731.md`) hit exactly these three
       designs — adaptec5, newblue4, and newblue5 below — as its three worst results (+17.9%,
       +6.1%, +11.2% HPWL). It does marginally improve physical spread on all three (letting
       macros deposit less density), but the wirelength cost is far too large to call it a fix.
@@ -380,6 +399,68 @@ distinct from the operator-level optimizations in #6, worth a look independently
 
 ## #8 — Investigate zero-area interior `terminal` nodes in newblue5 (opened 2026-07-29)
 
+> ### ✅ ANSWERED 2026-07-31 — the terminals are INERT. Report:
+> ### `1_MARK_TO_REVIEW/NEW_REPORT_newblue5_todo8_20260731.md`
+>
+> **The terminal-node theory is dead, structurally — not merely "no evidence found".** All 4790 are
+> 0×0, all FIXED, and the zero-area set and the `terminal` set **coincide exactly** (0 zero-area
+> movable nodes anywhere). Every terminal pin offset is exactly **(0,0)** — so the "scrubbed macro
+> left its pin geometry behind" theory is falsified (the 4 real movable macros, by contrast, carry
+> 795/796/413/413 pins spread across their full footprint). Decisively: newblue5's total fixed area
+> is **exactly 0.0** (confirmed by XPlace's own log, `FixArea: 0.000E+00`), so a terminal contributes
+> zero to the density map, zero to the overflow numerator and zero to the filler budget. **A
+> zero-area node cannot form a density hotspot**, so the planned per-region probe was unnecessary
+> and deliberately not built.
+>
+> **What is actually wrong (canonical config: grid 1024, td 0.5, seed 42):**
+> 1. **newblue5 places with ZERO fillers.** 51.4% of its movable area is movable macros (172.0M of
+>    334.3M; 26.4% of the die). HEAD's `addFillers` counts macro area in *both* terms, driving the
+>    budget to −9.2M. XPlace's std-cell frame gives **632,490** fillers — my independent arithmetic
+>    from the bookshelf files matched XPlace's log digit-for-digit (`#Fillers: 632490`, size
+>    `(1.0112e+01, 1.2000e+01)`).
+> 2. **There is no "explosion".** HPWL rises smoothly (ordinary spreading). The real failure is an
+>    overflow **floor** plus λ runaway: iterations 674→1044 move overflow 0.3544→0.3500 (flat) while
+>    λ goes 0.147→102.5 (**×700**) and HPWL inflates **+17%**. That is TODO #4's unowned
+>    "density-weight runaway"; newblue5 is a clean witness for it.
+> 3. **The floor is structural** and XPlace hits it too — its Mixed-GP ends at **0.1697**, above its
+>    own doubled 0.14 target, reaching 0.0452 only *after* macro legalization (phase 2).
+>
+> **2×2 measured** (both binaries verified bit-identical on adaptec1):
+> | arm | fillers | #11b | HPWL | vs XPlace | sharp/+filler | stop |
+> |---|---|---|---|---|---|---|
+> | A baseline | 0 | off | 4.399e8 | +16.0% | 0.350 | `divergence_guard`, fallback |
+> | B fillers | 632k | off | **3.994e8** | **+5.3%** | 0.429 | `divergence_guard`, fallback |
+> | C #11b | 0 | on | 4.892e8 | +29.0% | 0.338 | **converged** |
+> | D both | 632k | on | **4.003e8** | **+5.6%** | 0.394 | **converged** |
+> | XPlace | 632,490 | on | 3.792e8 | — | **0.1697** | phase-1 handoff |
+>
+> Fillers buy the **HPWL** (−9.2%); `macro_td_expand_ratio` buys the **convergence**; neither fixes
+> the physical spread (all arms 2–2.5× under-spread vs XPlace). Arm C reproduces the footprint A/B's
+> newblue5 figure exactly (+11.2%), confirming the setup matches the record.
+>
+> **`sharp/+filler` IS XPlace's "exact Overflow"** — verified in `src/evaluator.py`:
+> `get_obj_overflow` uses exact node size with `node_weight = ones` (no `expand_ratio`, no macro
+> fill) over `total_mov_area_without_filler`. So confining #11b to the clamp branch in `Grid.cpp` is
+> *faithful*, and the comparison holds in every arm. **Caveat:** #11b makes macros deposit at exactly
+> `target_density` in the *clamp* map, so they contribute zero to the **convergence** signal — arm D
+> declares `converged` at clamp 0.0676 while physically at sharp 0.394 (5.8× smoothing gap). #11b
+> removes the divergence partly by blinding the stop metric. Symptomatic fix; **do not flip the
+> default on this evidence.** The real fix is **TODO #13 phase 2** — newblue5 is the suite's
+> strongest case for it.
+>
+> ⚠️ **Corrections to the record (see report §5):**
+> - `NEW_HANDOFF_filler_faithfulness_20260731.md` §4 is **wrong** that the memories
+>   `mms-hard-spreading-three-diseases` / `overflow-metric-grid-faithfulness` were derived on a
+>   *zero-filler* newblue4/adaptec5. Those runs were at **td = 1.0**, where the macro term cancels:
+>   measured **adaptec5 1,509,741 · newblue4 1,104,300 · newblue5 2,602,944** fillers. (Mark caught
+>   this from the GIFs.) The memories stand; the handoff's inference about them does not.
+> - **Three newblue5 configurations are conflated across the notes** — td 1.0/auto (converged,
+>   3.246e8 @ 0.053), td 1.0/2048 + `convergence_include_fillers` (the GIF that opened this TODO),
+>   and canonical td 0.5/1024. **The GIF was not the canonical config.** State td and grid on any
+>   future newblue5 claim.
+> - **TODO #11b's rejection is confounded twice**, not once: with the stop criterion (already noted)
+>   *and* with zero fillers. #11b alone is +11.2% HPWL; #11b with correct fillers is −9.0%.
+
 Triggered by `2_ARTIFACTS/newblue5_placement.gif`: placement looks fine, then diverges/explodes
 starting around iter ~400. Visually there are large *movable* macros (correctly parsed — verified,
 not a fixed/movable bug, see below) plus a scatter of small dark-red squares in the die interior
@@ -422,21 +503,29 @@ that turned out to be the benchmark's zero-area `terminal` nodes, not misclassif
   characterization of newblue5 as a genuine λ-starved/under-damped-macro divergence, not a single
   discrete trigger event. Doesn't yet prove or rule out the terminal hub theory as a contributor.
 
-**Not yet done / next steps:**
-- No per-node or per-region density/gradient data was pulled — only the aggregate scalar trace.
-  Need to check whether cells are piling up abnormally around the high-degree terminal clusters
-  specifically (e.g. dump bin density or per-cell displacement near those (x,y) locations across
-  iterations, compare to a benign region) to see if it's a local hotspot feeding the global blowup.
-- Check whether `sw_only`'s HPWL/gradient code path has any implicit assumption that breaks down
-  for a *hub* node (one zero-area FIXED node touched by many small 2–3-pin nets) — e.g. WA-model
-  gradient terms, preconditioner area term (`precond_raw_area`) for a zero-area node, or anything
-  dividing by node width/height. Spot-checked `Partials.cpp`/`Density.cpp` for FIXED-status or
-  width/height-based branching and found none obviously relevant, but didn't trace the full
-  gradient/preconditioner formula against a degree-313 zero-area node by hand.
-- Would be good corroboration to check whether XPlace, run on newblue5 with the same terminal data,
-  shows a density/displacement spike at the same (x,y) hub locations even if its damping/
-  backtracking keeps it from diverging outright — would confirm "shared blind spot, we just lack
-  XPlace's damping" vs. "something sw_only-specific about how we handle this node".
+**Original next steps — ALL THREE RESOLVED 2026-07-31 (see the banner above):**
+- [x] ~~Per-node / per-region density data around the hub clusters.~~ **Not needed and deliberately
+      not built.** The terminals are 0×0 and newblue5's total fixed area is *exactly 0.0*, so they
+      deposit nothing — a zero-area node cannot produce a density hotspot. Building the probe would
+      have been speculative (CLAUDE.md rule 2).
+- [x] **Gradient/preconditioner path audited against a degree-313 zero-area node — clean.**
+      `addNet` is called once per *pin* (`DataBase.cpp:626`), so `getNets().size()` really is the pin
+      count and matches the per-pin gradient accumulation; `updatePrecondWeights` matches XPlace
+      exactly (`alpha_1 = mov_node_to_num_pins`, `param_scheduler.py:372`); the WA gradient's
+      max-shift is algebraically exact; nothing divides by node width/height. No hub-node or
+      zero-area assumption anywhere.
+      *Incidental (benign, unfixed):* `computeHpwlPartials` clears `probe_grad` only for movable +
+      IOPad nodes, but the accumulation loop writes it for **every** pin including FIXED components,
+      so a fixed node's `probe_grad` accrues across iterations. Never read for stepping (only
+      `getMovableNodes()` steps), magnitudes stay O(1e5) — wasted work, not a bug. Worth a one-line
+      skip if anyone is in there anyway.
+- [x] **XPlace corroboration done from existing logs — no new GPU run needed.**
+      `~/phd/Xplace/result/2026-07-17-23:11:24_newblue5` is the canonical Mixed-GP reference
+      (3.792e8 @ 0.1697 → macro legalization → phase 2 `GP Stop! #Iters 2010 … overflow: 0.0452`).
+      Confirmed newblue5's td=0.5 / grid=1024 originate in `utils/setup_dataset.py` (so
+      `args.target_density < 1.0` holds and **#11b is active in the reference**), and that XPlace
+      produces exactly 632,490 fillers. **Not a shared blind spot on the terminals** — the question
+      is moot, since neither tool deposits anything for a zero-area node.
 
 ---
 
@@ -599,7 +688,7 @@ when already editing the file in question. The equivalent sw_only items were fix
 > divergence rather than an oversight. Toggles NOT yet deleted (see cleanup steps below).
 >
 > **RESULT 2026-07-31 — A/B DONE (46/48 runs). Report:
-> `1_MARK_TO_REVIEW/NEW_REPORT_footprint_ab_20260731.md`.**
+> `1_REVIEW/NEW_REPORT_footprint_ab_20260731.md`.**
 > **#11a ADOPT** — exactly neutral (mean +0.0% HPWL / 15 designs, worst 0.7%); take it for
 > faithfulness + deleting the deposit-time-shift branch. **#11b REJECT** — mean +5.2% HPWL worse
 > / 7 designs, and worst (+17.9%, +11.2%, +6.1%) on adaptec5/newblue5/newblue4, the exact designs
@@ -680,7 +769,7 @@ same population as the known MMS under-spreading problem (#4, and auto-memories
 sw_only was single-threaded: one placement run used one core of the 8-core box, so interactive
 turnaround on a big MMS design stayed at tens of minutes no matter what. Now threaded with OpenMP.
 Commits: `e2f039c` (profile + DCT tables), `372861d` (threading). Report:
-`1_MARK_TO_REVIEW/NEW_multithread_swonly_20260731.md`.
+`1_REVIEW/NEW_multithread_swonly_20260731.md`.
 
 ### Step 0 — profile: the premise of this task was WRONG, and that changed the plan
 
@@ -867,10 +956,14 @@ phase-1 fix. Three reasons, all measured today:
 1. **Phase 1 is not where fillers matter.** Phase 2 re-randomizes std cells and rebuilds the filler
    set from `__total_mov_area_without_filler__` (macro area excluded) — so the filler population
    the convergence signal should count is the *phase-2* one, and it is a different population.
-2. **It is a NO-OP on exactly the designs we care about.** newblue4 reads
-   `clamp/no-filler = clamp/+filler = 0.289` — at td=0.5 it has essentially **no fillers**, because
-   `target_density*placeable - movable_area <= 0`. Same for adaptec5/newblue5. So flipping the flag
-   cannot move the macro-heavy under-spreaders at all.
+2. ~~**It is a NO-OP on exactly the designs we care about.**~~ **INVALIDATED 2026-07-31 — this
+   premise was a BUG, now fixed.** newblue4 read `clamp/no-filler = clamp/+filler = 0.289` because
+   at td=0.5 it had **literally zero fillers** — not a property of the design, but the filler-area
+   gap in `addFillers` (see #4, now fixed). newblue4 now has 205,682 fillers and adaptec5 310,073,
+   so the filler-inclusive convergence signal is no longer degenerate on them. **Re-evaluate
+   whether `convergence_include_fillers` still belongs in phase 2 rather than phase 1** once the
+   MMS re-baseline lands — this reason for deferring it is gone, and reasons 1 and 3 below should
+   be re-read in that light.
 3. **Where it DOES bite, the stop target also changes.** adaptec4 stopped on
    `clamp/no-filler = 0.046` while `clamp/+filler = 0.244` — a signal reading 5x low. But in phase 2
    `include_macros = False`, so `stop_overflow` returns to 0.07 (no doubling) and the plateau kill
@@ -880,6 +973,33 @@ phase-1 fix. Three reasons, all measured today:
 - [ ] Set `convergence_include_fillers = true` as part of the phase-2 landing, and re-verify the
       filler count per design first (`clamp/no-filler` vs `clamp/+filler` in `[OVFW-DIAG]`) before
       attributing any result to it.
+
+### Prerequisites (agreed 2026-07-31: land these BEFORE stage 3)
+Three faithfulness/structure gaps that phase 2 would otherwise inherit. Ordered by blast radius.
+
+- [x] **P1 — filler sizing in the standard-cell frame. DONE 2026-07-31 (code), sweep pending.**
+      Six divergences from `compute_filler_without_fence` fixed in one landing; adaptec5 went from
+      0 to 310,073 fillers, matching XPlace exactly. Details in #4 above and in
+      `1_REVIEW/NEW_HANDOFF_filler_faithfulness_20260731.md`. **MMS re-baseline still owed
+      — the quality effect is unmeasured.** Divergence D (overlapping fixed macros double-counted
+      in placeable area) deliberately NOT implemented: no test design exercises it.
+- [ ] **P2 — unify the two macro definitions.** `num_movable_macros` (die-area 0.02% heuristic,
+      `Setup.cpp::analyzeDesignArea`, drives the auto-preconditioner + `mixed_size_mode` + the grid
+      divisor) vs `Node::m_is_movable_macro` (XPlace `is_mov_macro` rule,
+      `Setup.cpp::tagMovableMacros`). Phase 2 forces the choice: the set that gets legalized and
+      fixed must be XPlace's. P1 already moved `tagMovableMacros()` ahead of the filler math, so
+      the tag exists early; what remains is pointing `analyzeDesignArea` at it, which **changes
+      grid sizing** and needs its own re-baseline. Measure where the two rules disagree first —
+      if the answer is "nowhere", this is free.
+- [ ] **P3 — phase-relative iteration counter.** XPlace's `set_init_param` resets
+      `init_iter = iter`, and every schedule term is `iter - init_iter`: skip_update (`%3`, `<50`),
+      the μ decay `0.9999^(iter-init_iter)`, precond escalation (`%20`), `need_to_early_stop`'s
+      `<100` arming, `check_plateau`. sw_only uses raw `iteration` in the six equivalents
+      (`Schedule.cpp` warmup/`%3`, μ decay, jolt warmup, precond `%20`, guard arming;
+      `Output.cpp` `BEST_SOL_MIN_ITER`). Add a `phaseIteration()` offset. `reachedMaxIterations`
+      stays ABSOLUTE — XPlace's `args.inner_iter` spans both phases. **Provably a no-op while
+      there is one phase**, so it is verifiable with `tools/verify_swonly.sh` before phase 2
+      exists — do it first.
 
 ### Scope / how hard
 - **Stage 3 is nearly free**: it is the GP loop we already have, with macros treated as fixed and
@@ -894,7 +1014,12 @@ phase-1 fix. Three reasons, all measured today:
   with a different fixed/movable partition. Stage 2 is an LP solve, i.e. host/CPU work, not PL.
   So this grows the host control flow, not the accelerator scope.
 
-- [ ] Decide the stage-2 approach (port LP vs. simpler legalizer vs. external XPlace call).
+- [x] **Stage-2 approach DECIDED 2026-07-31 (Mark): port XPlace's LP formulation and link an LP
+      solver.** i.e. option (a) — constraint-graph construction + longest-path refinement + the
+      min-total-displacement LP, per `Xplace/src/core/macro_legalization.py`. Rejected: the
+      simpler bespoke legalizer (b) and the permanent external XPlace call (c). Note XPlace's own
+      file warns the LP gets slow above ~500 macros (newblue7 has 959) and that pulp/CBC is the
+      bottleneck, so a C++ port is expected to help rather than merely match.
 - [ ] Implement stage 3 (the fixed-macro restart) — likely worth doing FIRST behind an external
       or stub legalizer, since it is the cheap half and unblocks an end-to-end phase-1+2 number.
 - [ ] Report post-phase-2 HPWL/overflow as the headline MMS result once both land.
