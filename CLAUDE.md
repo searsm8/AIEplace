@@ -14,6 +14,11 @@ wsl -e bash -c "cd /home/msears/phd/AIEplace && <your command>"
 Use real WSL/Linux paths (`/home/msears/…`) *inside* the wrapper, not the Windows UNC path.
 Anything touching the repo build, the toolchain, or Linux tools must go through `wsl -e bash -c`.
 
+## 📋 Always read vck5000/0_TODO/TODO.md for context
+Before starting work, read `vck5000/0_TODO/TODO.md` to understand current priorities, blockers,
+and in-progress tasks. This file is the source of truth for project state and helps avoid
+re-doing work or working on stale branches.
+
 ## What this is
 AIEplace ports the ePlace analytical placement algorithm onto the AMD Versal VCK5000
 (Programmable Logic + AI Engines) for acceleration. Design variants live under
