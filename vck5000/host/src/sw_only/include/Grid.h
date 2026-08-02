@@ -27,7 +27,7 @@ struct FootprintConfig
     float bin_w = 1.0f,  bin_h = 1.0f;
     float grid_w = 1.0f, grid_h = 1.0f;
     bool  clamp = true;         // sqrt(2) density smoothing (config enable_density_clamp)
-    bool  macro_target_density_weight = false; // TODO #11b experiment; see below
+    bool  macro_deposits_target_density = false; // TODO #11b experiment; see below
     float target_density = 1.0f;
 };
 
@@ -63,7 +63,7 @@ private:
     int m_bins_per_col;
     float m_bin_width, m_bin_height;
     bool m_clamp_density = true; // clamp sub-bin cells to >= sqrt(2) bins (area-conserving)
-    bool m_macro_target_density_weight = false; // see FootprintConfig::macro_target_density_weight
+    bool m_macro_deposits_target_density = false; // see FootprintConfig::macro_deposits_target_density
     float m_target_density = 1.0f;              // only used by the above experiment
     std::vector<std::vector<Bin> > m_bins; // 2D grid of bins to compute eField
 
@@ -88,7 +88,7 @@ public:
     float getBinWidth() { return m_bin_width; }
     float getBinHeight() { return m_bin_height; }
     void setClampDensity(bool clamp) { m_clamp_density = clamp; }
-    void setMacroTargetDensityWeight(bool on) { m_macro_target_density_weight = on; }
+    void setMacroDepositsTargetDensity(bool on) { m_macro_deposits_target_density = on; }
     void setTargetDensity(float target_density) { m_target_density = target_density; }
 
     /// @brief Footprint geometry + policy for this grid. @p clamp is passed explicitly because
@@ -100,7 +100,7 @@ public:
         cfg.grid_w = m_bins_per_row * m_bin_width;
         cfg.grid_h = m_bins_per_col * m_bin_height;
         cfg.clamp  = clamp;
-        cfg.macro_target_density_weight = m_macro_target_density_weight;
+        cfg.macro_deposits_target_density = m_macro_deposits_target_density;
         cfg.target_density = m_target_density;
         return cfg;
     }

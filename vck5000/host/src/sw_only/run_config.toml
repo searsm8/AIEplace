@@ -34,18 +34,21 @@ auto_enable_preconditioning = true
 precond_coef_escalation = true  # double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef); false = diagnostic (fixed precond_coef)
 enable_density_clamp = true     # clamp sub-bin cells to ~bin size in the density solve (XPlace expand_ratio); smooths the force
 
-# --- TODO #11b: a DELIBERATE, documented divergence from XPlace, kept as a runtime toggle. ---
-# XPlace does overwrite the area-conserving expand_ratio with target_density for movable macros
-# (database.py:921-923), so true is the FAITHFUL branch. We default it off on results: the MMS A/B
-# (1_MARK_TO_REVIEW/NEW_REPORT_footprint_ab_20260731.md) measured mean +5.2% HPWL worse over 7
-# designs, worst on the macro-heavy ones it was meant to help. That verdict is CONFOUNDED with the
-# stop criterion -- every true arm halted 25-65 iterations early because macros deposit less mass
-# into the smoothed overflow that drives convergence -- so re-test once TODO #4 lands.
-# (#11a xplace_die_projection was adopted unconditionally 2026-07-31; its toggle and the legacy
-#  deposit-time-shift branch are gone.)
-macro_td_expand_ratio = false   # true = movable macros deposit at weight = target_density instead
-                                 # of the area-conserving real/clamped ratio. No effect when
-                                 # maximum_utilization == 1.0 (ISPD2005); only bites on MMS/ISPD2015.
+# --- TODO #11b (renamed 2026-08-01 from `macro_td_expand_ratio`, which named XPlace's internal
+#     `expand_ratio` field rather than the behaviour). ---
+# A movable macro deposits density equal to target_density instead of its area-conserving
+# real/clamped ratio, so every bin it fully covers sits at EXACTLY the bin capacity: full at the
+# target density, not overflowing. That is the correct accounting for an incompressible object --
+# and it is not "hiding" the macro, since the bin's whole budget is then spent and anything
+# overlapping it overflows immediately. With this off, a movable macro instead emits
+# area * (1 - target_density) of overflow permanently, whether or not anything overlaps it,
+# which no amount of moving can clear.
+# XPlace does this unconditionally (database.py:921-923), so true is the FAITHFUL branch.
+# Still default-off pending ONE piece of evidence: the MMS A/B measured mean +5.2% HPWL worse,
+# but it ran on ZERO-FILLER arms (see the filler fix, commit 7a0d030) and is confounded with the
+# stop criterion. Re-run that A/B, then expect this to be locked true and the branch deleted.
+# No effect when maximum_utilization == 1.0 (ISPD2005); only bites on MMS/ISPD2015.
+macro_deposits_target_density = false
 deterministic = true            # reduction policy for the threaded iteration (see Common.h).
                                  # true  = additions happen in the same order the single-threaded
                                  #         code used, so results are bit-identical to the serial

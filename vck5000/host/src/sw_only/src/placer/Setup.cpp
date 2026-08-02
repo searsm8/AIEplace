@@ -82,7 +82,7 @@ void Placer::setupGrid()
 {
     grid = Grid(db.getDieArea(), bins_per_row, bins_per_row);
     grid.setClampDensity(enable_density_clamp);
-    grid.setMacroTargetDensityWeight(macro_td_expand_ratio);   // TODO #11b
+    grid.setMacroDepositsTargetDensity(macro_deposits_target_density);   // TODO #11b
     grid.setTargetDensity(target_density);
     die_size = min(grid.getDieWidth(), grid.getDieHeight());
 }
@@ -262,7 +262,7 @@ void Placer::loadConfiguration()
     auto_enable_preconditioning = cfg["params"]["auto_enable_preconditioning"].value_or(auto_enable_preconditioning);
     precond_coef_escalation = cfg["params"]["precond_coef_escalation"].value_or(precond_coef_escalation);
     enable_density_clamp = cfg["params"]["enable_density_clamp"].value_or(enable_density_clamp);
-    macro_td_expand_ratio = cfg["params"]["macro_td_expand_ratio"].value_or(macro_td_expand_ratio);
+    macro_deposits_target_density = cfg["params"]["macro_deposits_target_density"].value_or(macro_deposits_target_density);
     // TODO #13 phase 2 (see Phase2.cpp). Only ever engages on a design with movable macros.
     enable_phase2 = cfg["params"]["enable_phase2"].value_or(enable_phase2);
     macro_legalization_enabled =

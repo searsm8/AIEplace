@@ -370,7 +370,7 @@ float DataBase::addFillers(float target_utilization)
  * The macros keep their is_movable_macro TAG (it still describes what they are, and is what the
  * DEF writer and the visualizer use to identify them); every consumer tests FIXED first, so the
  * tag is inert once frozen. A frozen macro deposits full density and is then capped per bin at
- * target_density by the existing fixed-density clamp — which is exactly what macro_td_expand_ratio
+ * target_density by the existing fixed-density clamp — which is exactly what macro_deposits_target_density
  * was doing for it by hand while it was movable.
  *
  * @return how many macros were frozen.

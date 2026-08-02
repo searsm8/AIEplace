@@ -27,7 +27,7 @@ NodeFootprint computeNodeFootprint(Node* node_p, const FootprintConfig& cfg)
         // computeOverflow(clamp=false) is a sw_only-only diagnostic meant to be the *physical*
         // density — letting macros deposit 0.8x their real area there would deflate the metric and
         // make the A/B arms incomparable on the one number that is supposed to be ground truth.
-        if (cfg.macro_target_density_weight && cfg.target_density < 1.0f && node_p->isMovableMacro())
+        if (cfg.macro_deposits_target_density && cfg.target_density < 1.0f && node_p->isMovableMacro())
             weight = cfg.target_density;
     }
 

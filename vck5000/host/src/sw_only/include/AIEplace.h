@@ -134,7 +134,7 @@ public:
     // meant to help. That verdict is CONFOUNDED with the stop criterion — every `true` arm halted
     // 25-65 iterations early because macros deposit less mass into the smoothed overflow that
     // drives convergence — so re-test it once the stop criterion is fixed (TODO #4).
-    bool macro_td_expand_ratio = false; // true = movable macros deposit at weight = target_density
+    bool macro_deposits_target_density = false; // true = movable macros deposit at weight = target_density
                                         // instead of the area-conserving real/clamped ratio
     bool dct_normalize = true;   // apply 1/N per forward DCT (bounds a_uv intermediates; global scale absorbed by lambda)
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
