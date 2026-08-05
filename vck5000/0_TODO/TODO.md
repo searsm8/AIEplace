@@ -79,40 +79,89 @@ preconditioner works as intended. Now clean up the experiment scaffolding it was
       run_config.json fully committed (the `enable_pin_offsets` breadcrumb is gone with the key).
 - [x] `updatePrecondWeights` simplified (dead ternaries + dff if/else removed). Kept `precond_a1_norm`/
       `precond_a2_norm` (still used by the trace) and the auto-enable/escalation logic (unchanged — not cruft).
-- [ ] STILL TODO: mirror the faithful-only simplification into pl_algo (`Placement.hpp`/`Driver.cpp`).
-      pl_algo already hardcodes the faithful path (avg_area=1 ⇒ raw-area, dff_force_ratio form), but its
-      COMMENTS still name the retired sw_only flags — tidy for parity. Low urgency (pl_algo is stub-stage).
+- [x] DONE 2026-08-02: mirrored the faithful-only simplification into pl_algo. No retired flag *names*
+      survived in pl_algo source (they were only in `CHECKPOINT.md`, now archived — see #10); the real
+      residue was the `avg_area` normalization still threaded through the preconditioner. Removed it:
+      `Placement.hpp::updatePrecondWeights` now takes raw area (`w = max(1, pins + pcoef*λ*area)`,
+      matching sw_only `Schedule.cpp` / XPlace `alpha_2`), and the dead `avg_area` parameter is gone
+      from `runPlacement` (`Driver.hpp`/`Driver.cpp`) and from `main.cpp`, which no longer computes it.
+      **Behavior-identical** — the only call site already passed a hardcoded `1.0f`. Verified by
+      `g++ -fsyntax-only` on `Driver.cpp` + `main.cpp` (no full build: another session held the CPU).
 
 ---
 
 ## #3 — Tooling & evaluation workflow
 
-- [ ] **Build resumability into `dse.py`** — the overnight MMS runner proved the pattern: skip any run
-      already recorded (keyed by label/config) so an interrupted sweep *resumes* instead of restarting.
-      Generalize it (auto-detect completed rows in `results.csv`, or a `--resume <DSE_dir>` flag) so every
-      long sweep gets it for free. Reference implementation: `2_ARTIFACTS/run_mms_ab.sh` (`grep`-on-TSV
-      skip guard + phased concurrency).
-- [ ] **Formalize full-pipeline evaluation (GP → LG → DP)** — make legalization + detailed placement a
-      standard step on our GP results and report **post-DP HPWL** (+ XPlace-metric overflow) as the
-      headline quality metric, not GP-only. GP-vs-GP is fair but incomplete: legalization normally raises
-      HPWL (XPlace adaptec1 GP 6.238e7 → Legal 6.814e7, **+9.2%**), and an under-spread GP blows up in LG,
-      so post-DP HPWL is the honest final number — and it *also* resolves the macro-heavy under-spread
-      ambiguity from the MMS A/B. Reuse the 07-17 XPlace-legalizer flow (`def_to_bookshelf_pl.py` +
-      `--global_placement False --given_solution`) and wire the result into the scorecard.
-- [ ] **`verify_swonly.sh` cannot be diffed the way its own docstring says.** It instructs you to
-      compare two runs with `diff -r A/artifacts B/artifacts`, but it collects
-      `function_statistics.md`, which contains **wall-clock timings** — so `diff -r` reports a
-      difference on every design, every run, regardless of correctness, and the equality test it
-      advertises silently never passes. Fix: drop the timing file from the artifact set, or have
-      the script do the comparison itself over `iterations.dat` + `RowBasedPlacement.def` only.
-      (Hit 2026-07-31 during the P1 filler verification; worked around by diffing those two
-      files directly.)
-- [ ] **`2_ARTIFACTS/gen_footprint_ab_configs.py` is partly STALE.** It still writes
-      `params["xplace_die_projection"]`, a key deleted in `caa8f2b` when #11a was adopted
-      unconditionally. toml++ ignores unknown keys, so its `base` and `proj` arms are now
-      **silently identical** — anyone reusing it for a sweep burns double the wall clock proving
-      that. Strip the #11a arm machinery, keep the useful part (per-design grid /
-      `maximum_utilization` / `random_seed` from `tools/benchmarks.py`).
+- [x] **DONE 2026-08-04: resumability in `dse.py`.** `python3 tools/dse.py --resume results/DSE_<ts>`
+      re-enters an existing sweep dir and runs only what is missing from its `results.csv`. A run's
+      identity is design + the value it gave every swept column — the same tuple `write_run_config`
+      already emits into `DSE_info`, which is where those CSV columns come from, so no new bookkeeping
+      file. `_norm()` compares numbers numerically (the exe round-trips `0.5` out as `0.500000`).
+      Config filenames continue past the highest existing `run_NNN.toml` instead of restarting at 1,
+      which would have overwritten the original sweep's configs with different content.
+      **Caveat, documented in the docstring:** runs are matched on parameter *values*, so editing
+      `dse_sweep` between the original launch and the resume silently re-runs whatever no longer matches.
+- [x] **DONE 2026-08-04 (first full pass): full-pipeline evaluation (GP → LG → DP).**
+      Report: `1_REVIEW/reports/NEW_REPORT_lgdp_suite_20260804.md`. Harness:
+      `2_ARTIFACTS/gen_lgdp_inputs.py` → `run_lgdp_suite.sh` → `analyze_lgdp_suite.py`, raw data
+      `2_ARTIFACTS/lgdp_suite_results.tsv`. **Stock XPlace needs no source change** — the
+      `--global_placement False --given_solution` path is `run_placement_nesterov.py:15-25` and it
+      feeds the same `detail_placement_main` a full run uses. (`tools/legalize_swonly_mms.sh`'s
+      header claim that this "requires the XPlace skip-GP + mixed_size macro-LG branch" is stale.)
+      **Result: post-DP HPWL mean +1.17% vs XPlace over 14 clean designs**, and our phase-2 macro
+      placement passes XPlace's own macro-legalization check on all 16 (15 at zero displacement).
+      ⚠ **HPWL is UNMASKED on both sides, and this is a second `GP Stop!`-style trap.** XPlace has
+      two HPWL functions: `fast_evaluator` → `masked_scale_hpwl` produces the per-iteration
+      `masked_hpwl:` lines *including the one inside `GP Stop!`*, while `get_obj_hpwl` → `get_hpwl`
+      calls `hpwl_cuda.hpwl` with **no `net_mask`** and produces `exact HPWL` / `After DP, HPWL`.
+      Compare those against sw_only's **"Final HPWL (exact, all nets)"** (`final_hpwl_exact`,
+      `Output.cpp:511`), NOT "Final HPWL" (masked at `ignore_net_degree = 100`). 0.06% apart on
+      adaptec1. An earlier version of this entry asserted the opposite.
+      Still open, in priority order:
+      - [x] **DONE 2026-08-04: post-DP density measured** — `tools/post_dp_density.py`, run over both
+            tools' own written `placement_<design>_dp.pl` by one implementation so the §4 overflow
+            gap cannot contaminate it (`analyze_lgdp_suite.py --density`). **7 of 8 target_density<1
+            designs match or beat XPlace; the one exception is adaptec5, which buys its −7.4% HPWL
+            with +14.0% overflow** — the suspicion is now measured, and adaptec5 is excluded from
+            the headline. newblue1 is the best case: −23.9% overflow for +1.03% HPWL. `max_util` is
+            1.000 on both sides everywhere = the legality check passing.
+            **Two structural limits, recorded so nobody re-derives them:** post-DP overflow is
+            **identically zero at target_density = 1.0** (legalization caps occupancy at 1.0 and the
+            capacity *is* 1.0), so it says nothing on 8 of 16 designs — there legalization answers
+            the density question and HPWL is the whole story. And a **"top 5% bin utilisation"
+            proxy was tried and dropped**: it reads exactly 1.000 for both tools on every design at
+            both the GP grid and a coarse 64×64 grid, because the busiest bins are movable-macro
+            interiors. It measures macro presence, not quality.
+      - [ ] **Reconcile the overflow XPlace reports on our given solution** (`gp_ovfl_in` in the TSV)
+            with our own `computeOverflow`. XPlace reads adaptec1 0.0484 / adaptec3 0.0190 where we
+            report macro-excluded 0.109 / 0.071 on the same placement and the same 1024 grid — a
+            consistent ~2-4x, direction unexplained. Until this is closed, treat that column as a
+            diagnostic, not a metric. (HPWL round-trips exactly, so the input transfer itself is fine.)
+- [x] **`verify_swonly.sh` diff bug — ALREADY FIXED, TODO was stale.** `function_statistics.md` goes
+      to `timings/`, not `artifacts/`, and the script header documents exactly why. Verified 2026-08-04.
+- [x] **`gen_footprint_ab_configs.py` staleness — ALREADY FIXED, TODO was stale.** Its header records
+      the 2026-08-01 update that removed the `xplace_die_projection` arm. Verified 2026-08-04.
+
+### New, opened 2026-08-04 by the LG/DP suite
+
+- [ ] **adaptec3 segfaults inside XPlace's `gpudp.greedyLegalization`** on our placement —
+      reproducible 3/3, the only failure in 15. `bash /tmp/lgdp/run_one.sh adaptec3 /tmp/lgdp/pl/adaptec3.pl`
+      (see `2_ARTIFACTS/run_lgdp_suite.sh` for the invocation). Crash is in XPlace's compiled CUDA op,
+      after `Check Pass in Macro Legalization`, at `Start running Greedy Legalization`.
+      **Ruled out:** the ragged-core hypothesis below — clamping all 315 out-of-row cells into their
+      row spans still segfaults, same place. **Untested leads:** adaptec3 is the only MMS design with
+      **zero fixed nodes** (`#Fix = 0`), and in skip-GP mode XPlace creates fillers (1.81M here) but
+      never places them, so they enter LG stacked. Discriminator worth running: feed XPlace its *own*
+      07-17 phase-2 output back through the same skip-GP path — if that also crashes, the bug is in
+      the skip-GP path and not in our placement.
+- [ ] **sw_only has no per-row site model; `enforceDieBoundaries` clamps to the die *rectangle* only.**
+      11 of 16 MMS designs have a ragged (staircase) core — each `CoreRow` carries its own
+      `SubrowOrigin`/`NumSites` — so "inside the die bbox" is weaker than "inside a row". Measured with
+      the new `tools/check_row_spans.py`: adaptec3 315 cells outside their row's span (worst overhang
+      4122), newblue4 25, adaptec5 23, newblue3 10, bigblue2 2, bigblue3 1, the rest 0. Harmless so far
+      (every one of those designs legalized), and **NOT** the adaptec3 crash — but it is an unmodelled
+      constraint that a downstream legalizer has to absorb, and XPlace's GP has the same rectangular
+      assumption, so check what XPlace's own output does here before treating it as a divergence.
 
 ---
 
@@ -246,10 +295,40 @@ too slowly to reach 0.182.
       0.289 while `density_weight` runs away 60,000x (0.55 -> 3.3e4), `step_length` 6e2 -> 3.6e5,
       and HPWL inflates 45% (2.42e8 -> 3.52e8). More iterations = more waste. (The reported
       2.447e8 survives only because best-solution tracking restores an earlier placement.)
-- [ ] **Density-weight runaway** — separate defect exposed by the above: `updateDensityWeight` has
-      no upper clamp, so when overflow stops responding lambda ramps without bound and destroys
-      HPWL. XPlace's mu is bounded the same way ours is, but XPlace exits phase 1 long before this
-      matters. Worth its own look independent of #13.
+- [x] **Density-weight runaway — INVESTIGATED AND CLOSED 2026-08-04. It was a SYMPTOM of #11b,
+      and it is already gone; no clamp was added.**
+      Confirmed first that the runaway was real and that it mattered. On the pre-#11b adaptec5,
+      iterations 592 -> 1163 held overflow pinned at 0.423 while lambda went 0.0504 -> 2.84e+04
+      (**x564,000**) and HPWL doubled 3.02e8 -> 6.07e8. That tripped the coarse "HPWL > 2x best"
+      test, whose stop reason `diverged_hpwl` is one `Phase2.cpp`'s eligibility gate REFUSES — so
+      the runaway is precisely why adaptec5 was the only design denied a phase 2, and why it
+      carried the suite's only bad post-DP density (+14.0% vs XPlace, see #3).
+      Decisive comparison: newblue4's phase-1 best was 2 iterations before its stop (overflow
+      0.435); adaptec5's was **571** before its stop (overflow 0.4275) — the same state, but only
+      newblue4 tripped an *eligible* guard, got its phase 2, and landed +1.8% HPWL at equal density.
+      **Root cause is not the missing clamp.** Making the movable-macro deposit unconditional
+      (#11b, landed 2026-08-02) removes the overflow floor that starved lambda's feedback loop.
+      Measured on the current tree: adaptec5's phase 1 now **converges at iteration 649** and
+      enters phase 2, versus `diverged_hpwl` at 1163 before. TODO #8 already recorded that "#11b
+      buys the convergence" — the suite simply was never re-run after it landed.
+      **Two things were built, measured, and deliberately NOT kept** (both documented in
+      `Schedule.cpp` so they are not re-derived):
+      - *A lambda freeze while overflow is flat.* It is a trap: freezing lambda on a plateau is
+        self-reinforcing, because lambda is what ends the plateau. adaptec5 deadlocked and exited
+        phase 1 at iteration 401 with exact overflow **0.89**, completely unspread. Do not re-add
+        without an escape mechanism; the 2x jolt is the sanctioned one and is confined to the
+        high-overflow band on purpose.
+      - *A `stuck_plateau_window` phase-1 exit* for runs stuck above the guard's arming band. The
+        window was sized against real trajectories (400 = 1.38x the 289-iteration longest flat
+        stretch any healthy MMS design shows, and it fired on adaptec5 and nothing else in 16).
+        Removed anyway: with #11b in, adaptec5 converges and the mechanism never fires, so it
+        would have been unexercised code altering a stop criterion. Re-add from this note if the
+        re-baseline turns up a genuinely stuck design.
+      **Real finding this exposed:** `checkFineDivergenceGuard` gates BOTH its checks on
+      `overflow < 5*overflow_threshold`, but XPlace gates only the plateau kill that way — its
+      `check_divergence` life-drain has no band (`param_scheduler.py:459-474`). An accidental
+      divergence, currently near-inert (the drain also needs a converged `best_primary`, which a
+      stuck run does not have). Left alone rather than changed blind; worth its own item.
 
 > ### ⚠️ CORRECTION 2026-07-31 — the guard firing in phase 1 is XPlace's PHASE TRANSITION
 > `run_placement_nesterov.py:167-172`: `need_to_early_stop()` sets `terminate_signal`, and when
@@ -299,22 +378,44 @@ XPlace does this too), so "converged" ≠ fully spread on the hardest designs.
 - [→] **MOVED TO #13 (2026-07-31): adopt `convergence_include_fillers=true`.** Still the right
       change, but it is a *phase-2* change, not a phase-1 one — see "Convergence metric" under
       TODO #13. Do not do it standalone.
-- [ ] **adaptec5 + newblue4 spreading** — they don't spread even running to ~950 iters; investigate (density
-      force / precond / macro handling on these). Separate from the metric fix.
-      **RULED OUT 2026-07-31: TODO #11b (macro deposit weight = target_density) is not the fix.**
-      The MMS A/B (`1_REVIEW/NEW_REPORT_footprint_ab_20260731.md`) hit exactly these three
-      designs — adaptec5, newblue4, and newblue5 below — as its three worst results (+17.9%,
-      +6.1%, +11.2% HPWL). It does marginally improve physical spread on all three (letting
-      macros deposit less density), but the wirelength cost is far too large to call it a fix.
-      Rejected; `macro_td_expand_ratio` defaults false. Next attempt should look elsewhere
-      (density force / precond / macro handling, as originally scoped).
-- [ ] **newblue5 divergence** under the stricter metric (sharp/+filler 0.61) — own investigation.
-      Same ruled-out note as above applies.
+- [x] **newblue4 spreading — RESOLVED (verified 2026-08-04).** Phase 2 (#13) is the fix: it now
+      exits phase 1 on the eligible guard at 645, takes its phase 2, and lands **post-DP HPWL +1.80%
+      vs XPlace at IDENTICAL post-DP density** (overflow 0.3332 both sides, `tools/post_dp_density.py`).
+      Nothing further owed on this design.
+- [~] **adaptec5 spreading — root cause found 2026-08-04, confirmation pending the re-baseline.**
+      Two compounding causes, both now addressed by changes that already landed: the #11b macro
+      deposit (removes the overflow floor -> phase 1 converges at 649 instead of diverging at 1163)
+      and phase 2 (which the old `diverged_hpwl` stop denied it). Its known bad number — the suite's
+      only poor post-DP density, +14.0% vs XPlace — was measured on the pre-#11b placement.
+      **Re-measure from the running re-baseline (`/tmp/rebase`) before closing.**
+- [x] **adaptec5 + newblue4 spreading (original scope)** — superseded by the two entries above.
+      > ### ⚠️ The "#11b RULED OUT" verdict that used to live here was WRONG and is retracted
+      > It read: *"RULED OUT 2026-07-31: TODO #11b is not the fix — the MMS A/B hit exactly these
+      > three designs as its three worst results (+17.9%, +6.1%, +11.2% HPWL) ... the wirelength
+      > cost is far too large to call it a fix. Rejected; defaults false."*
+      >
+      > That A/B ran on **zero-filler arms** (the `addFillers` bug, fixed 2026-07-31), which is
+      > recorded under #8 as a double confound. Re-run with correct fillers on 2026-08-02
+      > (`NEW_REPORT_footprint_ab_20260802.md`): **mean +0.61% HPWL over 8 macro-heavy designs,
+      > −0.38% excluding adaptec5**, and `on` converts a phase-1 divergence into a clean converged
+      > run. The toggle was deleted the same day and the XPlace-faithful branch made unconditional.
+      > #11b is now understood to be a large part of the actual fix for adaptec5 (2026-08-04):
+      > it removes the overflow floor that starved λ's feedback loop.
+      >
+      > Kept verbatim because this verdict was cited for four days and someone will meet it again.
+- [x] **newblue5 divergence — RESOLVED (verified 2026-08-04).** Phase 2 fixed it; re-run today on
+      the current tree **converges at 1486 iterations**, post-DP HPWL **+1.44%** vs XPlace at
+      **+0.3%** post-DP density. The old "sharp/+filler 0.61" reading came from a diverged
+      single-phase run and no longer occurs. See also memories `phase2-implemented-newblue5-converges`
+      and `newblue5-config-confound` (state td and grid on any newblue5 claim).
 - [→] **MOVED TO #13: always include fillers in the CONVERGENCE signal.** (The *reporting* half of
       this is done — see Step 1.) Verified XPlace counts fillers in its GP-stop metric `overflow_fn`.
 - [x] **Report the EXACT (sharp) + filler overflow as the headline number** — DONE in Step 1.
-- [ ] **Rename `clamp` → `smooth`** in `computeOverflow` (signature `bool clamp` + call sites + comments).
-      "smoothed" is the intuitive term (clamp=true = the √2·bin footprint smoothing).
+- [x] **DONE 2026-08-04: renamed `clamp` → `smooth`** in `computeOverflow` (declaration, definition,
+      doc comment, and the `dumpBinDensity` loop variable). Pure rename, no behavior change. Left
+      `clamp` alone where it means the *footprint* clamp and not the metric — `clamp_node`,
+      `clampFixedDensity`, "√2 clamp" — those are a different concept and renaming them would be
+      the wrong edit.
 - [ ] (No grid or deposit-formula change needed — both already match XPlace.)
 
 ---
@@ -324,8 +425,14 @@ XPlace does this too), so "converged" ≠ fully spread on the hardest designs.
 **Status:** sw_only logging refactor completed and verified. See `history.md` for full details.
 
 **Remaining open follow-ups:**
-- [ ] `host/src/pl_algo/{src/Logger.cpp,include/Logger.h}` still has the OLD singleton/tabulate
-      Logger. The two copies have now diverged; fold this rewrite in when the hosts merge (#9).
+- [x] **DONE 2026-08-04 via #9 step 1**, exactly as planned: pl_algo's old singleton Logger was
+      deleted rather than ported, and both hosts now build the one rewritten `Logger` from
+      `host/src/common/`. pl_algo's own sources never touched the Logger (only the shared parser
+      did), so there were no call sites to update. Two behavior notes for pl_algo: it does not call
+      `setup_logging`, so the console threshold is the `INFO` default (`db.printInfo()` still
+      prints; the parser's `DETAIL` chatter no longer does), and it never calls `openReport`, so
+      report lines accumulate in `report_backlog` instead of a file — bounded here, since pl_algo
+      only logs during the parse.
 - [ ] The two summary tables still render with a **double border** (`| +---+---+ |`) because the
       callers nest a `Table` inside a title-only outer `Table` (`DataBase::printInfo`,
       `Placer::exportSummaryReports`). Caller-side tabulate idiom, not the Logger. Flattening to one
@@ -356,12 +463,26 @@ PyTorch/autograd setting (see conversation on 2026-07-29 for the paper summary):
       both the electrostatic-system objective and the overflow-ratio metric, computing it once.
       Check `Density.cpp` (`compute_eField_DCT`) and the overflow computation (`Output.cpp`,
       `computeOverflow`) for duplicate density-map builds; share one if found.
-- [ ] **Operator reduction** — Xplace's version of this is "skip PyTorch autograd, hand-derive
+- [~] **Operator reduction** — Xplace's version of this is "skip PyTorch autograd, hand-derive
       gradients" — not directly portable since sw_only has no autograd layer. The analogous risk in
-      our setting is redundant kernel launches / synchronization in `pl_algo`'s dataflow modules
-      (`vck5000/pl/src/pl_algo/src/modules/*.hpp`) — worth a pass once those modules are filled in
-      (post Gate 1) to check for avoidable per-iteration launch/sync overhead, but low priority until
-      the modules exist.
+      our setting is redundant kernel launches / synchronization in `pl_algo`'s dataflow modules.
+      **MEASURED BY INSPECTION 2026-08-02** (`Driver.cpp::runPlacement`, steady-state iteration):
+      | per iteration | count | note |
+      |---|---|---|
+      | `top()` kernel launches | **12** | 1 HPWL_GRAD + 1 DENSITY_BIN + 8 field passes + 1 FORCE_GATHER + 1 ITERATION_UPDATE |
+      | AIE graph `run`/`wait` pairs | 6 | the 6 DCT_TRANSPOSE field passes (the 2 SPECTRAL passes are pure PL) |
+      | host↔device matrix DMA | **~76 MB** | 8 field passes × (4 MB up + 4 MB down) + 4 MB rho down + 8 MB E-field up, at GRID=1024 |
+      Iteration 1 additionally pays a full second gradient evaluation + 1 ITERATION_UPDATE for the
+      XPlace initial-step estimate (one time, by design).
+      **Finding: launch count is NOT the bottleneck — the host round-trip is.** ~12 launches × ~75 µs
+      ≈ 0.9 ms/iter of launch overhead, against ~76 MB/iter of DMA ≈ 7.6 ms at ~10 GB/s — roughly
+      **8× more time in DMA than in launches**, and every byte of it is intermediate field data that
+      never needed to leave device DDR (`field_pass` stages each 4 MB matrix through host memory,
+      "scratch crosses via host, like runField"). So the payoff is keeping the matrices device-side,
+      not shaving launches. That is exactly what Stage 5's unified datapath + the device-resident
+      loop do ⇒ **no separate work item; fold this measurement into the Stage 5 justification.**
+      NB `DATAFLOW.md` says "~8 XRT kernel-launches/iter" — the real count is 12, and the sentence
+      credits the resident loop with saving launch overhead when the bigger win is the DMA.
 - [ ] **Operator skipping** — Xplace skips the density-gradient operator most iterations early in
       placement, when `|density_grad|/|wirelength_grad| < 0.01` and `iteration < 100`. Check whether
       sw_only's early iterations already have a near-zero density term (γ/λ schedule) and would
@@ -458,10 +579,10 @@ distinct from the operator-level optimizations in #6, worth a look independently
 > contradict — resolve before treating the numbers above as final.
 >
 > **Follow-up actions this creates (not done):**
-> - [ ] **Relabel the overflow column of `tools/benchmarks.py::_XPLACE_MMS_MIXED_GP`** (and its
->       note in `BENCHMARKS.md`) as **macro-EXCLUDED**. As written it invites exactly the
->       apples-to-oranges comparison made above. The HPWL column is unaffected (`get_obj_hpwl`
->       has no such exclusion).
+> - [x] **DONE (verified 2026-08-04): the overflow column of `tools/benchmarks.py::_XPLACE_MMS_MIXED_GP`
+>       is labelled macro-EXCLUDED** — the comment above the table spells out both the filler and the
+>       macro exclusion and names the sw_only number to compare against, and `BENCHMARKS.md` carries
+>       the same note. The HPWL column is unaffected (`get_obj_hpwl` has no such exclusion).
 > - [ ] **Re-read TODO #4's reframing in this light.** Its "XPlace's Mixed-GP ends at 0.10–0.18 on
 >       15 of 16 MMS designs" figures are macro-EXCLUDED, so they describe XPlace's *std-cell*
 >       spread. Ours on the same basis is ~0.09–0.12 — i.e. comparable or better, which changes
@@ -500,9 +621,12 @@ distinct from the operator-level optimizations in #6, worth a look independently
 > unconditional and the legacy branch is deleted. It is XPlace-faithful *and* correct on the
 > density accounting. The only thing holding it back is the 16-design A/B's −5.2% mean HPWL — and
 > that A/B ran on **zero-filler arms**, so it must be redone after the filler change lands.
-> - [ ] Re-run the #11b A/B with correct fillers.
-> - [ ] Then remove the toggle + legacy branch (as #11a was), per TODO #2's retire-settled-toggles
->       pattern.
+> - [x] DONE 2026-08-02: re-ran the #11b A/B with correct fillers, mean +0.61% HPWL over 8
+>       macro-heavy designs (−0.38% excluding adaptec5), where `on` also fixes a phase-1
+>       divergence into a clean converged run. `1_REVIEW/NEW_REPORT_footprint_ab_20260802.md`.
+> - [x] DONE 2026-08-02: toggle + legacy branch removed (as #11a was), per TODO #2's
+>       retire-settled-toggles pattern. `macro_deposits_target_density` is no longer a config key;
+>       the XPlace-faithful branch is unconditional in `Grid.cpp::computeNodeFootprint`.
 >
 > The real fix for the residual gap is **TODO #13 phase 2** — newblue5 is the suite's strongest
 > case for it.
@@ -590,14 +714,68 @@ that turned out to be the benchmark's zero-area `terminal` nodes, not misclassif
 
 ## #9 — User Friendliness (opened 2026-07-30)
 
-- [ ] **Merge the `sw_only` / `pl_algo` host forks into one host** (deferred until pl_algo is fully
-      brought up — Mark, 2026-07-30). Target: a single host that runs the placement iteration on the
-      CPU, or offloads to the VCK5000 when a card/xclbin is available. Keeping them separate is a
-      deliberate choice *for now* so pl_algo bring-up can move without destabilizing the tuned golden.
+- [x] **STEP 1 DONE 2026-08-04 — the silent fork is gone: `host/src/common/` extracted.** All 15
+      shared files now exist ONCE. sw_only's versions were promoted (they were strictly newer —
+      pl_algo's copies were a 2026-06-15/07-10 snapshot) and pl_algo's were deleted; `lib/*.a` moved
+      with them, so pl_algo no longer reaches into `sw_only/`. `pl_algo/include/` is now empty and
+      gone. See `host/src/common/README.md` for the boundary rule (nothing in `common/` may include
+      `AIEplace.h`, `Visualizer.h`, or anything from `pl/` — verified, and it holds today).
 
-      **Why it needs doing:** the two trees are a silent fork, not a shared base. 15 files exist in
-      both `host/src/sw_only/` and `host/src/pl_algo/` under the same class names and namespace, with
-      the diffs already large:
+      **Build wiring:** `common.mk` gains `HOST_COMMON_DIR`; `host/Makefile` gains a second pattern
+      rule for `$(HOST_COMMON_DIR)/src`; each `makeflags.mk` lists the shared files in `COMMON_SRCS`.
+      There is deliberately **no library target** — the variants need different flags (sw_only
+      `-O2 -fopenmp`, pl_algo `-O0` + the mixed `_GLIBCXX_USE_CXX11_ABI` for the XRT TU), so each
+      compiles the shared sources into its own `obj/`. The OpenMP pragmas are inert without
+      `-fopenmp` and nothing calls the OpenMP runtime API, so pl_algo just runs them serially.
+
+      **Dead markv1 residue deleted with pl_algo's copies** (none of it was reachable from pl_algo's
+      own sources — checked by grep before deleting): the AIE `Packet`/`PacketIndex` structs,
+      `initializePacketContents` / `prepareNetGroup` / `storeNetGroup`, `sortPositionsMaxMinX/Y`,
+      `Net::tally`, `Node::m_mutex`/`lock`/`unlock`, `Node::m_is_large`/`checkIfLarge`/`isLarge`,
+      `get_index(thread::id)`, and the `VEC_SIZE`/`LCM_BUFFSIZE`/`PARTIALS_GRAPH_COUNT`/
+      `BINS_PER_ROW` constants. (`DATAFLOW.md`'s open-formats list still says "mirror sw_only
+      `prepareNetGroup`" — that function no longer exists anywhere; the AIE HPWL packet grouping
+      has to be specified from scratch.)
+
+      **Two pl_algo call sites had to change**, both because pl_algo was frozen against an older API:
+      `Packer.cpp` `pin.node` → `pin.node_p`, and `DensityVerify.cpp`
+      `Grid::computeBinOverlaps(n)` → `computeNodeOverlaps(n, false)` + `depositNodeOverlaps(n)`
+      (the deterministic split; it does not depend on whether the host was built with OpenMP).
+
+      **⚠ THE MERGE EXPOSED A LIVE BUG — `make run-density` has been checking against a stale
+      golden.** pl_algo's frozen `Grid.cpp` had **no √2 density clamp**; the PL gained it
+      2026-07-05 (`node_footprint.hpp`, commit `0237e57`). So every `--density` sw_emu run since
+      then compared a *clamped* device rho against an *unclamped* software rho. **Any PASS recorded
+      in that window is void — re-run `make run-density`.** This is exactly the failure mode this
+      TODO predicted, and it had already happened.
+
+      **Verified (no build available — another session held the CPU):**
+      - `g++ -fsyntax-only` clean on all 17 sw_only TUs (incl. `-DCREATE_VISUALIZATION`) and all
+        12 pl_algo TUs (incl. `-DUSE_XILINX_XRT`, and `Driver.cpp` under the new ABI).
+      - `make -B -n` for `HOST=sw_only`, `HOST=pl_algo`, and `HOST=pl_algo BUILD_XRT=1`: every
+        source resolves through the right pattern rule, and the pl_algo link line picks up
+        `-L .../host/src/common/lib`.
+      - **NOT verified: linking, running, or any numerical result.** Do a `make host` on both
+        variants and one `verify_swonly.sh` before trusting anything.
+
+- [ ] **STEP 1b — re-run `make run-density`** and record the number. See the ⚠ above. While there:
+      the software `computeNodeFootprint` and the PL `node_footprint` still differ on **one** thing —
+      the PL shifts an overhanging footprint back on-grid, the software golden does not (it relies on
+      `Placer::enforceDieBoundaries`, which does not run in the verify harness). Affects only cells
+      within ~√2 bins of the die edge. Decide whether the golden should shift too, or whether the
+      harness should project first; do not change synthesizable HLS to chase it blind.
+
+- [ ] **STEP 2 — collapse the two hosts into ONE binary** (the original target: one host that runs
+      the iteration on the CPU, or offloads to the VCK5000 when a card/xclbin is available). Now
+      unblocked, and deliberately NOT attempted 2026-08-04: it means merging `Placer` with
+      `Driver`/`Placement.hpp` and collapsing the compute-method dispatch (`partials_method` /
+      `density_method`) into a CPU-vs-accelerated selector — an 18-site refactor of hardware-driving
+      code (see #10's `KernelSession` item) that cannot be signed off without a real build + an
+      sw_emu re-verify. Step 1 was the part that was safe to do by inspection.
+
+      **Historical context — why it needed doing.** The two trees were a silent fork, not a shared
+      base. 15 files existed in both `host/src/sw_only/` and `host/src/pl_algo/` under the same class
+      names and namespace, with the diffs already large:
       | file | diff lines |
       |---|---|
       | `src/DataBase.cpp` | 886 |
@@ -606,15 +784,106 @@ that turned out to be the benchmark's zero-area `terminal` nodes, not misclassif
       | `include/Logger.h` / `include/Net.h` / `include/Common.h` | 44 / 41 / 40 |
       | `include/Node.h` / `include/MacroClass.h` / `include/Grid.h` / `include/IOPad.h` / `include/Component.h` | 33 / 19 / 17 / 15 / 13 |
       | `src/Common.cpp` | 8 |
-      A parser or geometry fix landed in one tree does not exist in the other, and nothing catches it.
-      Every cleanup applied to sw_only (see the 2026-07-30 review) has to be re-applied by hand to
-      pl_algo, or the divergence grows.
+      A parser or geometry fix landed in one tree did not exist in the other, and nothing caught it
+      — the density-clamp bug above is the proof.
 
-      **Shape of the merge:** extract `host/src/common/` (DataBase, Grid, Node/Component/IOPad, Net,
-      Bin, Logger, Common, MacroClass) and leave the variant dirs holding only what actually differs
-      — the Placer/Driver and their backends. Reconcile `DataBase.cpp` first; it carries most of the
-      drift. Then collapse the compute-method dispatch (`partials_method` / `density_method`) into the
-      CPU-vs-accelerated selector the merged host needs anyway.
+- [x] **DONE 2026-08-05 (Mark's call) — Limbo is a REAL git submodule; zero `.a` tracked anywhere.**
+      Mark: *"They should be added to the github project as a gitmodule... not have multiple copies
+      of a library in our github."* The state was worse than "multiple copies":
+      - `.gitmodules` **already declared** `third_party/Limbo` a submodule pointing at
+        `https://github.com/limbo018/Limbo.git`. It had been de-submodularized at some point —
+        commit `1d23609 "Rename Limbot to Limbo"` looks like a plain `mv` + `git add` over the
+        top of `3682a4b "Add third_party/Limbo submodule"`, which turned the gitlink into 4195
+        ordinary files. `git submodule status` listed only `Vitis_Libraries`; `.git/config` had
+        no submodule sections at all.
+      - **76.4 MB of a 103 MB repo (74%) was that one vendored dependency**, including
+        **three** duplicate sets of the same static libraries: `Limbo/build/**/*.a` (25),
+        `Limbo/lib/*.a` (25), and the 5 the host actually linked.
+
+      **Which upstream commit we were on — determined, not guessed.** Cloned upstream and diffed
+      our tree against every candidate ref: tag **3.5.2 (`81b64433`)** is the match, with exactly
+      one source difference — `limbo/parsers/gdsii/gdsdb/GdsObjectHelpers.h` gains `std::round`
+      in the SREF rotate/magnify helpers. Upstream has the semantically identical fix in
+      `0ce68951` but on a divergent gdsdb lineage (11 files apart from us), and `git log -S` finds
+      that exact code nowhere, so it is a **local patch**. Preserved (tracked, with the reasoning)
+      at `third_party/patches/limbo-3.5.2-gdsdb-round.patch`; deliberately NOT re-applied — see
+      that directory's README. It cannot affect AIEplace: we link only
+      lefparseradapt / defparseradapt / bookshelfparser / gzstream, and include only
+      `gdsii/stream/GdsWriter.h`, never gdsdb.
+
+      **What landed:** `git rm -r --cached third_party/Limbo` → real `git submodule add` pinned
+      to 3.5.2; `git rm -f` the 5 `common/lib/*.a`; both `makeflags.mk` take headers from the
+      submodule (`-I third_party/Limbo`) and libs from an **out-of-tree** build
+      (`-L third_party/limbo_install/lib`). Out-of-tree on purpose: building *inside* the
+      submodule works (Limbo's own `.gitignore` covers `build/`/`lib/`/`include/`/`bin/`) but
+      leaves `?? share/` dirty, and a submodule that is ever dirty will eventually be committed
+      dirty. `*.a` is now in `.gitignore` alongside `*.o` so this cannot recur silently.
+      New: `tools/bootstrap_third_party.sh` (+ a rewritten `host/README.md` explaining what a
+      submodule is and why a fresh clone needs the step).
+
+      **Verified by running, not inspection:**
+      - Limbo builds from a clean submodule checkout; all 25 libs install; the submodule is
+        `git status`-clean afterwards (0 entries) — asserted by the script itself.
+      - Clean `make host HOST=sw_only` against the submodule: links.
+      - Same config/seed on mgc_pci_bridge32_a **before vs after** the swap: `converged` at
+        iteration **617**, Final HPWL **3.368e+08**, exact **3.376e+08**, smoothed overflow
+        **6.170e-02**, exact+filler **1.978e-01** — identical in every digit. The freshly built
+        parsers are behaviourally indistinguishable from the retired `.a`.
+      - **`-DBoost_NO_BOOST_CMAKE=ON` is REQUIRED on this box**, not cosmetic: a stray
+        `/usr/local/lib/cmake/Boost-1.80.0/BoostConfig.cmake` advertises Boost 1.80 while the
+        real system Boost is 1.71, so CMake's config mode dies on
+        `Could not find a configuration file for package "boost_graph" ... version "1.80.0"`.
+        Both the script and the README say so.
+      - `bootstrap_third_party.sh --clean` run end to end from a wiped build: all 25 libs
+        produced, submodule still 0 dirty entries, host relinks against the result.
+
+      ⚠ **This does NOT shrink the existing clone.** Untracking removes the 76 MB from HEAD, not
+      from history — every past commit still references those blobs, so the pack stays ~103 MB.
+      Only a `git filter-repo`/`filter-branch` rewrite would reclaim it, and that **rewrites every
+      commit hash**, breaking every existing clone and any pushed branch. Mark's call, separate
+      job, not started.
+
+- [x] **DONE 2026-08-05 — the rest of `third_party/`, per Mark: "I want the clone to pull third
+      party repos as submodules."**
+      - **`tabulate` is now a submodule too** (`p-ranav/tabulate`, pinned `3a58301`). Identified
+        the same way as Limbo: diffed our copy against every candidate ref — `3a58301` matches
+        **byte-for-byte, no local patch**, so this is behaviour-identical. Header-only, so no
+        build step; the include path `third_party/tabulate/include` is unchanged. FYI upstream
+        master is 2 commits ahead and carries a locale-restoration fix in `table_internal.hpp`
+        (`3fba623`) that we do not have — taking it is a deliberate choice, not done blind.
+      - **`CImg-3.2.6` deleted** (Mark: *"Yes remove CImg. That was a possible alternative"* —
+        to cairo). 14.6 MB / 72 files, referenced by nothing.
+      - **`third_party/cairo` LEFT ALONE, but it is dead too** — 15 headers copied out of
+        `/usr/include/cairo`, referenced by no makefile (the visualizer uses the *system* cairo
+        via `-lcairo` and `<cairo/cairo.h>`). 0.2 MB. Not removed because it was not asked for;
+        say the word.
+      - Bootstrap names its submodules instead of `--init --recursive`, so it cannot drag in
+        `vck5000/aie/lib/Vitis_Libraries` (gigabytes, AIE builds only, still uninitialized).
+
+- [x] **DONE 2026-08-05 — Boost reconciled (Mark: "I've had plenty of trouble with boost versions
+      in the past").** There are **two** Boosts on this box and three different version claims
+      were in play. Measured, not assumed:
+      | | version | state |
+      |---|---|---|
+      | `/usr/include` | 1.71 (apt) | complete — headers + every `.so` |
+      | `/usr/local/include` | 1.80 (source build) | headers complete, **only some `.so`** (no `graph`, no `regex`) |
+      | `$HOME/local/boost_1_82_0` | "1.82" | **does not exist** |
+
+      gcc searches `/usr/local/include` first, so **everything here actually compiles against
+      1.80** — while `sw_only/makeflags.mk` carried `-I${HOME}/local/boost_1_82_0/` (a
+      nonexistent path implying 1.82) and Limbo's CMake reported 1.71. Worse, with
+      `-DBoost_NO_BOOST_CMAKE=ON` CMake pairs **1.80 headers with the 1.71 `libboost_graph.so`**
+      — a real ABI bug.
+      - The dead `-I` is **deleted**, replaced by a comment explaining why there must be no `-I`
+        at all (gcc de-duplicates `-I` against its own system dirs, so it could never reorder
+        `/usr/local/include` ahead of `/usr/include` anyway — it could only misdescribe reality).
+      - **Why the header/lib split is harmless here, now asserted rather than believed:** Boost
+        is header-only across everything we link. `bootstrap_third_party.sh` checks on every run
+        that (a) the host's Boost version, (b) the version Limbo was configured with, and (c) the
+        count of undefined `boost::` symbols in the four archives we link (must be 0) all agree.
+        Currently: `host 1_80 / Limbo 1_80 / 0 symbols`. If it ever fires, the fix is a decision
+        about this machine — complete the 1.80 install or remove it so 1.71 wins — not a repo flag.
+      - Full writeup in `host/README.md` under "Boost — read this before debugging a Boost problem".
 
 - [ ] **Dependencies** — `vck5000/requirements.txt` was just added (JSON→TOML config migration
       session) covering `tomlkit`, `numpy`, `matplotlib`, `SALib`, `Pillow`, `pyunpack`, `patool`.
@@ -626,69 +895,66 @@ that turned out to be the benchmark's zero-area `terminal` nodes, not misclassif
 
 ---
 
-## #10 — pl_algo cleanup & clarity (opened 2026-07-30, deferred)
+## #10 — pl_algo cleanup & clarity (opened 2026-07-30) — **MOSTLY DONE 2026-08-02**
 
-From the 2026-07-30 fresh-eyes codebase review. **Deliberately deferred** — pl_algo is mid-bring-up
-and these are clarity/hygiene items, not blockers. Do them when pl_algo settles, or opportunistically
-when already editing the file in question. The equivalent sw_only items were fixed 2026-07-30.
+From the 2026-07-30 fresh-eyes codebase review. Clarity/hygiene, not blockers. Worked 2026-08-02
+under a no-CPU constraint (another session held the box for sweeps), so everything below was
+verified by inspection / `g++ -fsyntax-only` / `make -n` — **no build, no synthesis, no emulation**.
+Report: `2_ARTIFACTS/NEW_pl_algo_cleanup_20260802.md`.
 
-### Stale docs that actively mislead (cheapest, highest value)
-- [ ] **`pl/src/pl_algo/README.md` Status is wrong.** Says "module internals are stubs" and "the host
-      `pl_algo` variant, the AIE `pl_algo` variant (FFT pool + HPWL graph), and IDXST are not yet
-      written." All of those exist and are verified; `DATAFLOW.md` (which IS current) says Stage 5c is
-      built and C-synthesizing. The Layout list also names modules that don't exist — `hpwl_manager`
-      (the real file is `src/modules/hpwl_gradient.hpp`) and `density_manager` (a dead stub, below).
-- [ ] **Root `CLAUDE.md` "pl_algo current state (2026-06)" is stale** in the same way: "Module
-      internals are stubs" and "Next step = Gate 1: synthesize". Gate 1 passed. Refresh from
-      `DATAFLOW.md`, and consider pointing CLAUDE.md *at* `DATAFLOW.md` rather than restating it, so
-      there is one place to keep current.
-- [ ] **`host/src/pl_algo/src/Driver.cpp` file header documents an obsolete kernel signature**
-      (5 args, `float* result` as arg 3). `top()` has taken ~25 args for a long time. Either update it
-      or delete it and point at `top.cpp` / `host_interface.hpp`.
-- [ ] **`pl/src/pl_algo/CHECKPOINT.md` is misplaced and describes reverted code.** Its content is
-      entirely sw_only numerics history (BB clamp, λ magnitude, DCT normalization), yet it lives in
-      the pl_algo source dir where it reads as current guidance. Two of its headline items no longer
-      exist in any source file: the `precond_weight_mean` BB clamp (removed — `Step.cpp:56` now says
-      "No magnitude clamp — mirrors XPlace") and the `dct_normalize_inverse` flag (gone; the inverse
-      is unconditionally unnormalized). **Keep the history** — it explains *why* the current defaults
-      are what they are — but move it to an archive location with a "HISTORICAL — see
-      `placer/Step.cpp` and `placer/Density.cpp` for current behavior" banner at the top.
+### Stale docs that actively mislead (cheapest, highest value) — ALL DONE
+- [x] DONE **`pl/src/pl_algo/README.md` rewritten.** Status now reflects Gate-1-passed + verified
+      datapath; Layout lists the modules that actually exist, split into datapath / control
+      (built-not-wired) / PL-only alternates; adds `model/`, `host_interface.hpp`, the `run-*` target
+      list, and a line naming `DATAFLOW.md` as authoritative where the two disagree.
+- [x] DONE **Root `CLAUDE.md` "pl_algo current state" refreshed and re-pointed.** It now defers to
+      `DATAFLOW.md` explicitly ("update it, not this section") and keeps only the stable summary.
+      Also fixed the Verification-references paths — the golden functions moved to `src/placer/`.
+- [x] DONE **`Driver.cpp` file header** replaced: describes the real one-kernel/`mode` contract and
+      points at `host_interface.hpp` `top_mode` + `top.cpp` as the authorities.
+- [x] DONE **`CHECKPOINT.md` archived** → `docs/archive/pl_algo_CHECKPOINT_history.md` (via `git mv`,
+      history preserved) with a HISTORICAL banner that names the 4 known-stale headline claims
+      (BB clamp, `dct_normalize_inverse`, the other retired flags, "GP only") and points at the
+      current sources. Nothing but TODO.md referenced the old path.
 
-### Dead / unwired code
-- [ ] **Delete `src/modules/density_manager.hpp`.** 54 lines that TODO-stub the whole density solve and
-      just zero their outputs. Its job was split across `density_bin` + `dct_transpose` + `spectral` +
-      `force_gather`. Nothing includes it (only a comment in `density_bin.hpp` and the `model/`
-      programs mention the name), but the README lists it as a real module — so a reader opens it
-      first and concludes nothing is implemented.
-- [ ] **Document that `bb_reduce.hpp` + `param_scheduler.hpp` are built-but-not-wired.** 320 lines,
-      verified against the golden, C-synthesizing via `model/synth_check.tcl`, but not included by
-      `top.cpp`. This is the correct in-progress state; it just needs one line in `DATAFLOW.md`'s
-      Status so nobody re-derives them. (`DATAFLOW.md` half-says this already — make it explicit.)
+### Dead / unwired code — ALL DONE
+- [x] DONE **`src/modules/density_manager.hpp` deleted** (`git rm`). The three prose references to
+      it (`density_bin.hpp`, `host_interface.hpp`, the two `model/*.cpp` headers) were retargeted to
+      "the density solve" so nobody hunts for the file.
+- [x] DONE **`bb_reduce` + `param_scheduler` built-but-not-wired is now explicit** — a blockquote in
+      `DATAFLOW.md` Status saying it is deliberate, what *does* exercise them (`synth_check.tcl`,
+      `sched_verify.cpp`), and "do not re-derive these". Echoed in README + CLAUDE.md.
+      Also un-staled `DATAFLOW.md`'s open-decisions list: IDXST is implemented, not deferred.
 
 ### Structural
-- [ ] **Port aliasing in `top.cpp` is a silent-wrong-answer risk.** 11 modes reinterpret the same 12
-      `m_axi` ports per mode — `g_density` arrives on `dct_in`, `alpha` on `inv_lut_step`, `die_ymax`
-      on `target_density`. Defensible for bring-up (one xclbin, many tests) and it *is* documented,
-      but only in a 40-line prose block in `host_interface.hpp` that has to be cross-referenced by
-      hand; host/kernel drift produces wrong numbers, not a compile error. Stage 5's unified datapath
-      is meant to retire this — until then, consider a per-mode `struct` of named references, or at
-      minimum `static_assert`-able aliases so the mapping lives in code rather than a comment.
+- [x] DONE **`run-*` targets folded.** `STAGE4_RUN` → `EMU_RUN` (gained an optional `$(2)` for
+      trailing args), and all 16 `run-*` targets now go through it; ~90 lines of copy-paste gone.
+      **Verified:** `make -n` before/after for all 16 targets — every emitted shell command is
+      byte-identical modulo line-continuation joining. (The review said "20+ / ~14 duplicates";
+      the real count was 9 duplicates + 7 already on the define.)
+- [~] PARTIAL **Port aliasing in `top.cpp`.** Added a compact **PORT-ALIAS TABLE** above `top_mode`
+      in `host_interface.hpp` — one scannable grid of mode × gmem port, plus the scalar aliases, so
+      the mapping no longer has to be reconstructed from 40 lines of prose. The *code-level* fix
+      (per-mode struct of named references / `static_assert`-able aliases) was NOT attempted: it
+      changes a synthesizable kernel and cannot be honestly signed off without HLS C-synthesis, which
+      the CPU constraint ruled out. Stage 5's unified datapath still supersedes this.
 - [ ] **`Driver.cpp` is 18× the same XRT boilerplate** (~1188 lines): open device → load xclbin →
       alloc bo per arg → memcpy → sync-to-device → run → sync-back, once per `run*()`. A small
       `KernelSession` helper (device/uuid/kernel + a `bind(idx, ptr, bytes)`) would cut it hard and
-      make the port-aliasing above visible in one place.
-- [ ] **20+ copy-pasted `run-*` targets in `vck5000/Makefile`.** Each is the same 6 lines of
-      `emconfigutil` + `LD_LIBRARY_PATH` + `$(HOST_EXE) --flag`. A `STAGE4_RUN` define already exists
-      and is used by 6 of them; ~14 others are verbatim duplicates. Fold them all into the define.
+      make the port-aliasing above visible in one place. **Not attempted 2026-08-02** — an 18-site
+      refactor of hardware-driving code needs a real build + an sw_emu re-verify, not a syntax check.
 
 ### Repo hygiene (pl_algo-scoped)
-- [ ] **Build artifacts are tracked in git.** `git ls-files` shows `pl/src/pl_algo/_x/` (v++ logs,
-      guidance HTML, `.pb3`) and the compiled ELFs `pl/src/pl_algo/model/density_model` and
-      `model/density_bin_model`. Untrack and extend `.gitignore` (`_x/`, and the `model/` binaries —
-      `model/.gitignore` exists but isn't catching them).
+- [x] DONE **Build artifacts untracked.** `git rm --cached` on `pl/src/pl_algo/_x/` (9 files) and the
+      two model ELFs; `_x/` added to `pl/src/pl_algo/.gitignore` and all five `model/` binary names to
+      `model/.gitignore` (verified with `git check-ignore -v`). **Staged, NOT committed** — the
+      working tree also holds another session's unrelated edits, so the commit is Mark's call.
 - [ ] **`common.mk` defaults point at the dead variant:** `AIE ?= markv1`, `PL ?= markv1`. A bare
       `make` builds the legacy partial-offload design, not `pl_algo`. Flip once pl_algo is the
       primary target (`HOST ?= sw_only` should probably stay until the #9 merge lands).
+      **Left alone 2026-08-02 on purpose** — "is pl_algo the primary target now" is Mark's call, not a
+      cleanup; note that flipping it also means updating the `CLAUDE.md` "What this is" line that
+      documents the current defaults.
 
 ---
 
@@ -1005,12 +1271,20 @@ yet, just noted.
 > is unaffected and still open — a bigger cap makes bounding λ *more* important, not less.
 >
 > ### Not done
-> - **Longest-path refinement not ported** (the TNS/WNS edge-migration loop that repairs an
->   infeasible direction assignment). We detect, warn, fall back. newblue5 never hit it.
+> - [x] DONE 2026-08-02: **longest-path refinement ported** (`MacroLegalize.cpp`'s
+>       `runLongestPathRefinement`/`markEdgeToMove`/L-R node slack). Fired for real on adaptec2
+>       (total negative slack -3.53e3 -> 0, then 42/42 overlaps resolved) — the other 14 designs
+>       tested didn't need it, matching newblue5. `1_REVIEW/NEW_REPORT_phase2_mms_suite_20260802.md`.
 > - `macro_legalization_xy` / `_ilp` variants and the retry driver; **site/row alignment** after
->   legalization.
-> - **Only newblue5 run.** The other 7 macro-heavy MMS designs are untested.
-> - Phase-1 numbers are logged (`[PHASE]` line) but not yet in run_summary / results.csv.
+>   legalization. Still not ported.
+> - [x] DONE 2026-08-02: **all 16 MMS designs now run** (15 more +
+>       `1_REVIEW/NEW_REPORT_phase2_mms_suite_20260802.md`). Correction to this section's own
+>       framing: MMS's td=1.0 designs are NOT macro-free (62-959 movable macros measured) — 14 of
+>       15 entered phase 2; only adaptec5 stayed in phase 1 (genuine `diverged_hpwl`, correctly
+>       excluded by the eligibility gate, not a regression).
+> - [x] DONE 2026-08-02: **phase-1 numbers now in run_summary.md and results.csv** (`Phase 1
+>       Iterations/HPWL/Overflow.../Stop reason` rows; `Phase1 Iters/HPWL/OVFW.../Stop Reason`
+>       columns).
 
 **sw_only implements only phase 1 of XPlace's mixed-size flow.** XPlace runs three stages
 (`run_placement_nesterov.py:167-230`, log evidence in
@@ -1086,9 +1360,12 @@ phase-1 fix. Three reasons, all measured today:
    re-enables. Flipping fillers on under phase-1 rules changes both the signal AND which rules apply.
    Evaluating it before phase 2 exists would measure a configuration we will never ship.
 
-- [ ] Set `convergence_include_fillers = true` as part of the phase-2 landing, and re-verify the
-      filler count per design first (`clamp/no-filler` vs `clamp/+filler` in `[OVFW-DIAG]`) before
-      attributing any result to it.
+- [x] DONE 2026-08-02: `convergence_include_fillers` is now unconditionally true in phase 2
+      (`Placer::convergenceIncludesFillers`, `Output.cpp`) — the two reasons blocking it as a
+      phase-1 fix (filler population belongs to phase 2; phase-1's doubled-threshold/plateau-kill
+      rules) don't apply once macros are frozen and `mixed_size_mode` reverts to false. Phase 1's
+      own default is unchanged (config-controlled, still false) pending the per-design
+      `clamp/no-filler` vs `clamp/+filler` split — not yet measured.
 
 ### Prerequisites (agreed 2026-07-31: land these BEFORE stage 3)
 Three faithfulness/structure gaps that phase 2 would otherwise inherit. Ordered by blast radius.
@@ -1136,9 +1413,21 @@ Three faithfulness/structure gaps that phase 2 would otherwise inherit. Ordered 
       simpler bespoke legalizer (b) and the permanent external XPlace call (c). Note XPlace's own
       file warns the LP gets slow above ~500 macros (newblue7 has 959) and that pulp/CBC is the
       bottleneck, so a C++ port is expected to help rather than merely match.
-- [ ] Implement stage 3 (the fixed-macro restart) — likely worth doing FIRST behind an external
-      or stub legalizer, since it is the cheap half and unblocks an end-to-end phase-1+2 number.
-- [ ] Report post-phase-2 HPWL/overflow as the headline MMS result once both land.
+- [x] DONE 2026-08-01 (`placer/Phase2.cpp`, see the IMPLEMENTED banner at the top of this section).
+- [x] DONE 2026-08-02 for 16 of 16 MMS designs: `1_REVIEW/NEW_REPORT_phase2_mms_suite_20260802.md`
+      (15 designs) + `NEW_REPORT_phase2_implemented_20260801.md` (newblue5).
+- [x] **CORRECTED 2026-08-04 — the XPlace phase-2 reference DID already exist for all 16.**
+      That report's §5 ("no local XPlace phase-2 `GP Stop!` reference exists for these 15 designs
+      ... needs 15 more XPlace runs") is **wrong**. The `2026-07-17-23:0x_*` batch in
+      `~/phd/Xplace/result/` is `--dataset mms --mixed_size True --seed 42` and every log carries the
+      whole flow: Mixed-GP → macro legalization → phase-2 `GP Stop!` → LG → DP. Now recorded as
+      `_XPLACE_MMS_FINAL` in `tools/benchmarks.py` (post-GP HPWL + exact overflow, post-LG HPWL,
+      post-DP HPWL) and surfaced in `BENCHMARKS.md`. **Zero new GPU runs were needed.**
+- [x] **Also corrected 2026-08-04: `GP Stop!`'s overflow is the MASKED (smoothed) number**, not the
+      exact one. XPlace's exact figure is the next line, `After GP, best solution eval, exact HPWL:
+      ... exact Overflow: ...`, and reads 0.106-0.184 where `GP Stop!` prints 0.042-0.094. Any
+      "XPlace ends at ~0.045, we end at 0.07-0.18" comparison in the notes above made that
+      substitution and so overstates the gap by 2-3x.
 
 ---
 
@@ -1154,15 +1443,163 @@ layout. sw_only sized fillers from a trimmed mean of cell heights rather than th
 exactly that reason. A zoomed view would make the row structure, the filler distribution, and the
 macro edges visible, which is the kind of thing that produces insight rather than another metric.
 
-- [ ] Add a configurable zoom window to `host/src/sw_only/include/Visualizer.h` — a
-      centre + span (or a bounding box) in die coordinates, rendered at full canvas resolution.
-      Config keys alongside the existing `output.visualize` / `iterations_per_export`.
-- [ ] Decide what to draw at zoom that the full view can't afford: per-cell outlines, fillers
-      vs. real cells in distinct colours, bin boundaries, row lines.
-- [ ] Works with the existing GIF export path (`tools/make_viz_gifs.py`, `gif_builder.py`) so a
-      zoomed region can be animated over the run the way the full-die GIFs already are.
+- [x] **DONE 2026-08-04 — configurable zoom window.** `Visualizer` now renders a `ViewWindow`
+      (a rectangle in die coordinates) instead of hard-coding the die, through four helpers
+      `mapX/mapY/mapW/mapH`. The full-die view is the same window with `xl=yl=0`, so it computes
+      the pre-zoom expression exactly — deliberately anchored at the ORIGIN rather than at the die
+      box's lower-left, because that is what every coordinate map here always did. (One caveat:
+      `drawIOPad` used to divide-then-multiply where everything else multiplied-then-divided;
+      routing it through the same helper normalizes that, so IO-pad rectangles can shift by up to
+      1 ULP of a double — far below a pixel, but it is not literally byte-identical.)
+      Config: `output.zoom` / `zoom_center_x` / `zoom_center_y` / `zoom_span`, next to
+      `visualize` / `iterations_per_export`. Centre and span are **fractions of the die** (span
+      of the *shorter* dimension) rather than absolute coordinates, so one setting means the same
+      magnification on every benchmark — MMS die sizes span two orders of magnitude. The window
+      is not clamped to the die: seeing the die edge is one of the things worth looking at.
+- [x] **DONE 2026-08-04 — the detail layers, all four, and all zoom-only.** Row pitch (from the
+      new `DataBase::getRowHeight()`) and density-bin boundaries under the cells; per-cell
+      outlines and grey-vs-blue filler/cell separation over them. A layer denser than
+      `MAX_DETAIL_LINES` (256) is dropped rather than drawn as a solid wash. Geometry is clipped
+      to the window **only when zoomed** — in the full-die view, FIXED terminals legitimately sit
+      in the margin outside the core-row die (TODO #4) and clipping would silently hide them.
+      Row lines assume a uniform pitch from the origin: that is the row grid sw_only implicitly
+      targets, and 11 of 16 MMS designs actually have a ragged core (TODO #3) — so this drawing
+      is the *placer's* view of the rows, and a design where the real rows disagree is itself
+      worth seeing.
+- [x] **DONE 2026-08-04 — GIF path.** Zoom frames go to `placement_zoom/` with the same
+      `iter_<N>.png` naming, so `gif_builder.py` needs no change; `Output.cpp` builds
+      `zoom_placement.gif` next to `full_placement.gif`. `tools/make_viz_gifs.py --zoom`
+      (optionally `--zoom CX,CY,SPAN`) turns it on. The one-off `best_solution` frame shares the
+      run directory and takes a `_zoom` filename suffix instead.
 
-Not urgent, not on the #13 critical path. Cheap to try and the payoff is diagnostic.
+- [x] **DONE 2026-08-05 (Mark's call) — the y axis is no longer mirrored.** Cairo's user-space y
+      grows DOWNWARD while die y grows upward, so every frame this renderer has ever produced was
+      vertically flipped. Fixed in `mapY` (plus `scaleY` for the E-field overlay) rather than with
+      a `cairo_scale(1,-1)` transform, because a transform would mirror the overlay TEXT as well.
+      Two consequences that are easy to get wrong and are handled explicitly:
+      - `cairo_rectangle` grows downward from its anchor, so a die-space box must now be anchored
+        at its **top** edge: `mapRectTop(die_y, die_ysize)`. Used by `drawComponent`,
+        `drawIOPad`, and the focus-net bounding box.
+      - `drawElectricField`'s arrows take `-y_mag`, so a field pushing cells toward larger die y
+        draws as an arrow pointing UP the image.
+      ⚠ **Every PNG/GIF produced before this is mirrored relative to every one produced after.**
+      That includes `2_ARTIFACTS/newblue5_placement.gif` and the whole `GIFS_*` pile. Do not
+      compare an old frame against a new one and conclude the placement moved.
+
+**Verified by rendering** on `mgc_pci_bridge32_a` (converged, 617 iters): zoom + full-die frames
+and both GIFs produced, caption fits, y-up confirmed against the DEF/LEF to within 6 px on all
+four fixed macros. **Not** yet run on a full MMS design —
+`python3 tools/make_viz_gifs.py --designs newblue1 --zoom --every 50` is the next check. Watch
+for whether `MIN_SIZE` (0.001 of canvas) still floors anything at zoom, where it should not.
+
+### Follow-ups opened 2026-08-05 (Mark)
+
+- [ ] **Zoom window locked to a NODE, not a fixed region.** Give the window a target — a node
+      name, or "the node with the largest movement this iteration", or a macro — and re-centre it
+      every frame so the animation tracks that cell through the run instead of watching cells
+      drift through a static box. This is the version that answers "what is the optimizer *doing*
+      to this cell", which a fixed window cannot. Needs the window to be recomputed per frame,
+      so it lands naturally in the new offline tool (below), not in the host.
+- [ ] **Multiple zoom levels / regions per run.** Today `output.zoom*` is a single window fixed
+      at setup, and changing it means re-running the placement. Same conclusion: this belongs in
+      an offline tool.
+- [→] **MOVED TO THE VIZ REWORK (below):** both of the above, plus the existing zoom config keys.
+      Handoff: `1_REVIEW/handoffs/NEW_HANDOFF_viz_offline_tool_20260805.md`.
+
+---
+
+## #16 — Move visualization OUT of the placer into an offline tool (opened 2026-08-05)
+
+**Full plan: `1_REVIEW/handoffs/NEW_HANDOFF_viz_offline_tool_20260805.md`. Build in a new session.**
+
+Mark, 2026-08-05: *"we should rethink how visualizations are made... I might want to generate
+multiple gifs of different zoom levels, or perhaps locked to a particular node. So let's move all
+of the visualization creation to a separate tool, which can be run repeatedly without rerunning
+the full placement."*
+
+Shape of it:
+- The host stops rendering. `output.visualize` becomes **`output.export_iterations`** (an
+  interval, 0 = off): every N iterations it dumps node positions. Every other `output.*` viz key
+  (`zoom*`, `focus_nets`, `rand_*`) moves to the new tool.
+- A new tool reads that dump and produces images/GIFs — any window, any zoom, any node-locked
+  view, re-runnable in seconds against a placement that took an hour.
+- `Visualizer.cpp` / `Visualizer.h` and the cairo dependency leave the host build.
+
+---
+
+## #15 — Net-local coordinate frames for the wirelength gradient (opened 2026-08-03)
+
+**Motivation is PL, not sw_only:** a net whose pins are tightly clustered but sit at large absolute
+coordinates (top-right of the die) burns precision for nothing. Store each net's pin coordinates
+**relative to that net's own min** — so every net has a pin at x=0 and a pin at y=0 — and the
+absolute die offset never enters the gradient arithmetic at all. Smaller data types then become
+viable on PL, which is the real payoff.
+
+### The enabling fact: the WA gradient is translation-invariant
+Shift by any per-net constant `k` (`u_i = x_i − k`, `C' = C − k·B`) and the `k/γ` terms cancel
+exactly:
+```
+(1 + u_i/γ)·B₊ − C'₊/γ  =  (1 + x_i/γ − k/γ)·B₊ − C₊/γ + k·B₊/γ  =  (1 + x_i/γ)·B₊ − C₊/γ
+```
+Same on the minus side with `k = x_min`. So this is a **reframing, not an approximation** — the
+computed gradient is the same function, and because a gradient is already frame-independent the
+result needs no un-shifting before it accumulates onto the node.
+
+### What today's code actually does
+`Partials.cpp:243-246` shifts **only the exponent** (`exp((p.x - max_x) * inv_gamma)`), purely to
+stop `exp()` overflowing. The `x_i` in `C` (`Partials.cpp:258-261`) and in the `(1 ± x_i/γ)` factor
+(`Partials.cpp:288-296`) stay **absolute**. So the bracket subtracts two O(`x_max/γ`·B) quantities
+to produce an O(B) result — a cancellation of exactly `x_max/γ`. XPlace does the same thing
+(`wa_wirelength_hpwl_cuda_kernel.cu`: it forms `s_x = C₊/B₊` first, but then computes
+`grad_const + x_coeff*cur_x`, re-incurring the identical cancellation), so adopting this is a
+**deliberate divergence** and must be documented as one per the root CLAUDE.md rule.
+
+### Measured (float32 vs float64 reference on *identical* float32-rounded inputs)
+Harness: `2_ARTIFACTS/net_local_frame_precision_test.cpp` (`g++ -O2`, self-contained, ~1 s).
+Error is normalized by the net's largest |partial|. Gammas are the real schedule endpoints
+(`base_gamma` 167 adaptec1 / 433 bigblue3, late `γ = 0.1·base`).
+
+| case | `x_max/γ` | current | net-local | gain |
+|---|---|---|---|---|
+| adaptec1 early (γ=10·base) | 7 | 6.3e-08 | 2.5e-08 | 3× |
+| adaptec1 late (γ=0.1·base) | 694 | 7.3e-07 | 2.4e-09 | **301×** |
+| adaptec1 late, tight nets | 311 | 4.4e-06 | 2.0e-08 | 218× |
+| bigblue3 late | 641 | 7.5e-07 | 2.6e-09 | 283× |
+| offset frame (origin 1e6) | 60574 | 1.1e-04 | 2.4e-09 | **44536×** |
+
+The current form's error tracks `x_max/γ` linearly; the net-local form sits at machine epsilon
+**independent of coordinate magnitude**. Note the real MMS frames are only mildly offset
+(`newblue4.scl SubrowOrigin 7728 / NumSites 10239`, `newblue3 7839 / 30757`) — same order as the
+span, so ~1.75× amplification, *not* the 1e6 row. That row is illustrative, not representative.
+
+### ⚠️ The trap: `C` and the `(1 ± x_i/γ)` factor must move TOGETHER
+Shifting `C` alone leaves a residue of `(x_max/γ)·(a_i₊/B₊)` — measured mean error **62× the
+signal**, max **6.94e+02** = exactly `x_max/γ`. It does not NaN; it silently points the gradient the
+wrong way. Any implementation needs a test that would catch a half-applied shift.
+
+### Why this matters on PL specifically
+- Bookshelf coords are **integers** — do the per-net min-subtract in integer (exact), then convert
+  the small offset to a narrow float/fixed. Precision is never lost in the first place.
+- Offsets are bounded by the net bbox span, and pins with `|u| ≫ γ` underflow `exp()` to 0 anyway,
+  so the range can be **hard-clamped** (e.g. `u/γ < −20 ⇒ a_i = 0`). Bounding the dynamic range is
+  exactly what makes a narrow `ap_fixed` feasible — today you'd need the range to span `x_max/γ`
+  ≈ 60k *above* an O(1) result.
+- The streaming datapath already wants per-net pin arrays, so the layout may be close to free there.
+
+### Open questions before implementing
+- [ ] **Layout cost.** A node sits on many nets, so a per-net frame means per-net-pin duplication of
+      coordinates rather than one position per node. Check what `pl_algo`'s pin streaming already
+      materializes — this may cost nothing, or it may be the whole expense.
+- [ ] **Scope boundary.** Only the *wirelength* gradient is translation-invariant. The density/field
+      path needs absolute die coordinates for bin indexing. Define exactly where the frame converts
+      back, and make sure nothing downstream of `probe_grad` assumes a shared frame.
+- [ ] **Does sw_only change too?** On the CPU the current error is ~1e-6 relative — well below what
+      BB / the line search reacts to, so expect **no HPWL movement**; do not sell this as a quality
+      fix for sw_only. Changing it there is only worth it to keep the golden aligned with the PL
+      datapath. If PL shifts and sw_only does not, the sw_emu partials tolerance must not be set
+      tighter than ~1e-6 or it will chase a phantom.
+
+Parked at Mark's request 2026-08-03 — analysis done, no implementation.
 
 ---
 
@@ -1184,6 +1621,15 @@ Not urgent, not on the #13 critical path. Cheap to try and the payoff is diagnos
 # Improvements
 
 Algorithmic ideas (beyond faithfulness cleanup) — hypotheses to try, not yet scoped.
+
+- [ ] **Data type precision sweep (float vs double).** Placement algorithms are numerically intensive
+      (transcendentals in DCT, accumulating gradients and forces over thousands of nets and bins),
+      and single-precision vs double-precision could have effects on convergence speed, overflow
+      accuracy, and final HPWL. Current codebase uses a mix (e.g., `float` for density grids to save
+      bandwidth, `double` elsewhere). Sweep sw_only systematically: measure wall-clock time, HPWL,
+      and convergence trajectory under `float` only, `double` only, and the current hybrid on a
+      representative MMS subset (e.g., adaptec1, newblue3, newblue5). Priority: understand whether
+      precision limits solution quality or merely the speed to solution.
 
 - [ ] **Smoothing schedule (density footprint √2 inflation ramped down over the run).** The convergence
       metric is smoothed (each cell's footprint inflated to ≥√2·bin), which lets GP stop at smoothed

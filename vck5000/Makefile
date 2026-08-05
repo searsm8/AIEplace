@@ -116,152 +116,72 @@ run:
 #perf record #use this for perf profiler
 	time -p $(HOST_EXE) $(HOST_RUN_CONFIG)
 
-# --- TEMPORARY: build + run the PL HPWL-gradient sw_emu verify on a benchmark ---
-# One-shot convenience. Source the toolchain env first:
+# =============================================================================
+#  pl_algo module verifies: build + run one bring-up mode under emulation.
+# =============================================================================
+# Every one of these is the same recipe with a different host --flag, so they all go
+# through EMU_RUN. Source the toolchain env first:
 #   source /tools/Xilinx/Vitis/2022.2/settings64.sh
 #   source /opt/xilinx/xrt/setup.sh
 #   export PLATFORM_REPO_PATHS=$$HOME/xilinx_local/opt/xilinx/platforms
-# Usage (BENCH overridable):
-#   make run-hpwl-grad AIE=none PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1
-BENCH ?= $(PROJECT_ROOT)/host/benchmarks/ispd2015/mgc_pci_bridge32_b
-.PHONY: run-hpwl-grad
-run-hpwl-grad: $(XCLBIN) $(HOST_EXE)
+# The AIE-using targets all reuse the SAME xclbin -- rebuild it once, then swap the target
+# (skip the build/sw_emu rm between them if only the host changed).
+#
+#   $(1) = host args before the xclbin (the --flag, plus $(BENCH) where the mode takes one)
+#   $(2) = host args after the xclbin (only run-place, which takes an iteration count)
+define EMU_RUN
 	mkdir -p $(BUILD_DIR)/$(TARGET)/run
 	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
 	cd $(BUILD_DIR)/$(TARGET)/run && \
 	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
 	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
-	$(HOST_EXE) --hpwl-grad $(BENCH) $(XCLBIN)
-
-# --- build + run the PL bin-density sw_emu verify on a benchmark ---
-# Same toolchain env as run-hpwl-grad. Usage (BENCH overridable):
-#   make run-density AIE=none PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1
-.PHONY: run-density
-run-density: $(XCLBIN) $(HOST_EXE)
-	mkdir -p $(BUILD_DIR)/$(TARGET)/run
-	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
-	cd $(BUILD_DIR)/$(TARGET)/run && \
-	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
-	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
-	$(HOST_EXE) --density $(BENCH) $(XCLBIN)
-
-# --- build + run the first AIE-using mode: 1D DCT via the AIE FFT (sw_emu) ---
-# AIE-using build (AIE=pl_algo): the libadf is linked into the xsa/xclbin and the
-# PL<->AIE stream_connect is emitted (generate_link_cfg.py --aie pl_algo). Usage:
-#   make run-dct AIE=pl_algo PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1
-.PHONY: run-dct
-run-dct: $(XCLBIN) $(HOST_EXE)
-	mkdir -p $(BUILD_DIR)/$(TARGET)/run
-	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
-	cd $(BUILD_DIR)/$(TARGET)/run && \
-	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
-	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
-	$(HOST_EXE) --dct $(XCLBIN)
-
-# --- build + run the Stage 3a 8-lane row-DCT pass (sw_emu) ---
-# Needs the 8-lane FFT pool, so build with AIE_DENSITY_INSTANCES=8. Usage:
-#   make run-dct-rowpass AIE=pl_algo PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1 AIE_DENSITY_INSTANCES=8
-.PHONY: run-dct-rowpass
-run-dct-rowpass: $(XCLBIN) $(HOST_EXE)
-	mkdir -p $(BUILD_DIR)/$(TARGET)/run
-	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
-	cd $(BUILD_DIR)/$(TARGET)/run && \
-	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
-	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
-	$(HOST_EXE) --dct-rowpass $(XCLBIN)
-
-# --- build + run the Stage 3b matrix transpose (naive + tiled), sw_emu ---
-# Pure-PL modes, but shares the mode-flag top (AIE ports present), so build the
-# AIE-using xclbin. Usage:
-#   make run-transpose AIE=pl_algo PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1 AIE_DENSITY_INSTANCES=8
-.PHONY: run-transpose
-run-transpose: $(XCLBIN) $(HOST_EXE)
-	mkdir -p $(BUILD_DIR)/$(TARGET)/run
-	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
-	cd $(BUILD_DIR)/$(TARGET)/run && \
-	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
-	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
-	$(HOST_EXE) --transpose $(XCLBIN)
-
-# --- build + run the Stage 3c FUSED DCT+transpose pass, sw_emu ---
-# AIE-using (FFT pool + PL<->AIE streams). Usage:
-#   make run-dct-transpose AIE=pl_algo PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1 AIE_DENSITY_INSTANCES=8
-.PHONY: run-dct-transpose
-run-dct-transpose: $(XCLBIN) $(HOST_EXE)
-	mkdir -p $(BUILD_DIR)/$(TARGET)/run
-	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
-	cd $(BUILD_DIR)/$(TARGET)/run && \
-	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
-	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
-	$(HOST_EXE) --dct-transpose $(XCLBIN)
-
-# --- build + run the Stage 3c forward 2D DCT (a_uv = two fused passes), sw_emu ---
-#   make run-auv AIE=pl_algo PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1 AIE_DENSITY_INSTANCES=8
-.PHONY: run-auv
-run-auv: $(XCLBIN) $(HOST_EXE)
-	mkdir -p $(BUILD_DIR)/$(TARGET)/run
-	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
-	cd $(BUILD_DIR)/$(TARGET)/run && \
-	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
-	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
-	$(HOST_EXE) --auv $(XCLBIN)
-
-# --- build + run the Stage 4 inverse field solve, sw_emu ---
-# AIE-using (FFT pool + PL<->AIE streams). Each target reuses the same xclbin -- rebuild it
-# once, then swap the --flag (skip the build/sw_emu rm between them if only the host changed).
-#   make run-<idct-transpose|idxst-transpose|spectral|field> AIE=pl_algo PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1 AIE_DENSITY_INSTANCES=8
-define STAGE4_RUN
-	mkdir -p $(BUILD_DIR)/$(TARGET)/run
-	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
-	cd $(BUILD_DIR)/$(TARGET)/run && \
-	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
-	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
-	$(HOST_EXE) $(1) $(XCLBIN)
+	$(HOST_EXE) $(1) $(XCLBIN) $(2)
 endef
 
-.PHONY: run-idct-transpose run-idxst-transpose run-spectral run-field run-force-gather
-run-idct-transpose: $(XCLBIN) $(HOST_EXE)
-	$(call STAGE4_RUN,--idct-transpose)
-run-idxst-transpose: $(XCLBIN) $(HOST_EXE)
-	$(call STAGE4_RUN,--idxst-transpose)
-run-spectral: $(XCLBIN) $(HOST_EXE)
-	$(call STAGE4_RUN,--spectral)
-run-field: $(XCLBIN) $(HOST_EXE)
-	$(call STAGE4_RUN,--field)
-# Stage 5a: force gather (PL-only, but rides the AIE=pl_algo xclbin via the mode flag).
-run-force-gather: $(XCLBIN) $(HOST_EXE)
-	$(call STAGE4_RUN,--force-gather)
-# Stage 5b: full density gradient end-to-end (density_bin -> field -> force_gather).
-.PHONY: run-density-grad
-run-density-grad: $(XCLBIN) $(HOST_EXE)
-	$(call STAGE4_RUN,--density-grad)
-
-# Stage 5c.1/5c.2: one Nesterov step (iteration_update -> memory_writer), synthetic (PL-only).
-.PHONY: run-iter-update
-run-iter-update: $(XCLBIN) $(HOST_EXE)
-	$(call STAGE4_RUN,--iter-update)
-
-# Stage 5c.4: metrics reduce (HPWL on a benchmark, overflow on synthetic rho). PL-only.
-.PHONY: run-metrics
-run-metrics: $(XCLBIN) $(HOST_EXE)
-	mkdir -p $(BUILD_DIR)/$(TARGET)/run
-	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
-	cd $(BUILD_DIR)/$(TARGET)/run && \
-	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
-	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
-	$(HOST_EXE) --metrics $(BENCH) $(XCLBIN)
-
-# Stage 5c.5/5c.6: full placement loop for a few iterations on a benchmark. AIE-using.
-# Override iteration count with PLACE_ITERS. Needs the AIE=pl_algo xclbin.
+BENCH ?= $(PROJECT_ROOT)/host/benchmarks/ispd2015/mgc_pci_bridge32_b
 PLACE_ITERS ?= 2
-.PHONY: run-place
-run-place: $(XCLBIN) $(HOST_EXE)
-	mkdir -p $(BUILD_DIR)/$(TARGET)/run
-	emconfigutil --platform $(PLATFORM) --nd 1 --od $(BUILD_DIR)/$(TARGET)/run
-	cd $(BUILD_DIR)/$(TARGET)/run && \
-	XCL_EMULATION_MODE=$(TARGET) EMCONFIG_PATH=$(BUILD_DIR)/$(TARGET)/run \
-	LD_LIBRARY_PATH=$(XILINX_VITIS)/lib/lnx64.o:$(XILINX_VITIS)/aietools/lib/lnx64.o:$(XILINX_XRT)/lib:$$LD_LIBRARY_PATH \
-	$(HOST_EXE) --place $(BENCH) $(XCLBIN) $(PLACE_ITERS)
+
+# --- PL-only modes (AIE ports are present in the top, but unused) ---
+#   make run-hpwl-grad AIE=none PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1
+.PHONY: run-hpwl-grad run-density
+run-hpwl-grad: $(XCLBIN) $(HOST_EXE)          # HPWL gradient vs the CPU golden
+	$(call EMU_RUN,--hpwl-grad $(BENCH))
+run-density: $(XCLBIN) $(HOST_EXE)            # Stage 1: bin density rho
+	$(call EMU_RUN,--density $(BENCH))
+
+# --- AIE-using modes: need the FFT pool, so build with AIE_DENSITY_INSTANCES=8 ---
+#   make run-<target> AIE=pl_algo PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1 AIE_DENSITY_INSTANCES=8
+.PHONY: run-dct run-dct-rowpass run-transpose run-dct-transpose run-auv \
+        run-idct-transpose run-idxst-transpose run-spectral run-field \
+        run-force-gather run-density-grad run-iter-update run-metrics run-place
+run-dct: $(XCLBIN) $(HOST_EXE)                # Stage 2: 1D DCT via the AIE FFT (first AIE mode)
+	$(call EMU_RUN,--dct)
+run-dct-rowpass: $(XCLBIN) $(HOST_EXE)        # Stage 3a: 8-lane row-DCT pass
+	$(call EMU_RUN,--dct-rowpass)
+run-transpose: $(XCLBIN) $(HOST_EXE)          # Stage 3b: N x N transpose (naive + tiled), pure PL
+	$(call EMU_RUN,--transpose)
+run-dct-transpose: $(XCLBIN) $(HOST_EXE)      # Stage 3c: FUSED DCT + transpose pass
+	$(call EMU_RUN,--dct-transpose)
+run-auv: $(XCLBIN) $(HOST_EXE)                # Stage 3c: forward 2D DCT (a_uv = two fused passes)
+	$(call EMU_RUN,--auv)
+run-idct-transpose: $(XCLBIN) $(HOST_EXE)     # Stage 4: inverse field solve
+	$(call EMU_RUN,--idct-transpose)
+run-idxst-transpose: $(XCLBIN) $(HOST_EXE)
+	$(call EMU_RUN,--idxst-transpose)
+run-spectral: $(XCLBIN) $(HOST_EXE)
+	$(call EMU_RUN,--spectral)
+run-field: $(XCLBIN) $(HOST_EXE)
+	$(call EMU_RUN,--field)
+run-force-gather: $(XCLBIN) $(HOST_EXE)       # Stage 5a: force gather (PL-only, rides the AIE xclbin)
+	$(call EMU_RUN,--force-gather)
+run-density-grad: $(XCLBIN) $(HOST_EXE)       # Stage 5b: density gradient end-to-end
+	$(call EMU_RUN,--density-grad)
+run-iter-update: $(XCLBIN) $(HOST_EXE)        # Stage 5c.1/5c.2: one Nesterov step, synthetic
+	$(call EMU_RUN,--iter-update)
+run-metrics: $(XCLBIN) $(HOST_EXE)            # Stage 5c.4: metrics reduce (HPWL + overflow)
+	$(call EMU_RUN,--metrics $(BENCH))
+run-place: $(XCLBIN) $(HOST_EXE)              # Stage 5c.5/5c.6: full placement loop, PLACE_ITERS iters
+	$(call EMU_RUN,--place $(BENCH),$(PLACE_ITERS))
 
 
 # make dse

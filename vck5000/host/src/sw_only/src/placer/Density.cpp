@@ -254,13 +254,13 @@ void Placer::computeOverlaps()
 }
 
 /**
- * @brief Overflow metric with fillers excluded. clamp=true gives the *smoothed* overflow
+ * @brief Overflow metric with fillers excluded. smooth=true gives the *smoothed* overflow
  * (the global-placement convergence signal; equivalent to XPlace's expand_ratio-inflated
- * density field); clamp=false gives the *exact* physical overflow.
+ * density field); smooth=false gives the *exact* physical overflow.
  *
  * Same formula as Grid::computeTotalOverflow (sum of per-bin excess over target*bin_area,
  * normalized by movable area), evaluated on an independently-built density map so the two
- * variants can be reported side by side. When clamp=true each movable cell's footprint is
+ * variants can be reported side by side. When smooth=true each movable cell's footprint is
  * inflated to at least sqrt(2) bins per dimension with an area-conserving weight
  * (real_area/clamped_area) and shifted to stay in-die — matching Grid::computeBinOverlaps —
  * so sub-bin cells are smeared to grid resolution rather than spiking a single bin. Fixed
@@ -271,7 +271,8 @@ void Placer::computeOverlaps()
  * with sharp footprints, whose sub-bin quantization spikes leave it floored above threshold
  * even for a well-spread placement (the sw_only "can't reach 0.07" effect).
  */
-float Placer::computeOverflow(bool clamp, std::vector<float>* out_density, bool include_fillers)
+float Placer::computeOverflow(bool smooth, std::vector<float>* out_density, bool include_fillers,
+                              bool exclude_macros)
 {
     TIME_FUNCTION();
     const int nx = grid.getBinsPerRow();
@@ -312,9 +313,12 @@ float Placer::computeOverflow(bool clamp, std::vector<float>* out_density, bool 
     // Unlike computeOverlaps this scatter has no per-node list to replay, and it is a metric
     // rather than the solver's field, so the deterministic path simply stays serial. It is a
     // few percent of the iteration and the whole function is memory-bound either way.
-    auto deposit_pass = [&](const auto& node_vec, bool clamp_node) {
+    auto deposit_pass = [&](const auto& node_vec, bool clamp_node, bool skip_macros = false) {
         #pragma omp parallel for schedule(dynamic, 512) if(!g_deterministic)
-        for (int i = 0; i < (int)node_vec.size(); i++) deposit(node_vec[i], clamp_node);
+        for (int i = 0; i < (int)node_vec.size(); i++) {
+            if (skip_macros && node_vec[i]->isMovableMacro()) continue;
+            deposit(node_vec[i], clamp_node);
+        }
     };
 
     // Fixed baseline at exact size, capped per bin (mirrors clampFixedDensity). The passes are
@@ -324,9 +328,11 @@ float Placer::computeOverflow(bool clamp, std::vector<float>* out_density, bool 
     for (int i = 0; i < (int)density.size(); i++) density[i] = std::min(density[i], cap);
 
     // Movable real cells (clamped when requested). Fillers included only for the diagnostic
-    // that mirrors XPlace's filler-inclusive GP stop signal (default: excluded).
-    deposit_pass(db.getMovableComponents(), clamp);
-    if (include_fillers) deposit_pass(db.getFillers(), clamp);
+    // that mirrors XPlace's filler-inclusive GP stop signal (default: excluded). exclude_macros
+    // mirrors XPlace's zero_macro_grad (evaluator.py::get_obj_overflow) -- movable macros dropped
+    // from the deposit entirely, denominator (getTotalMovableArea()) unchanged.
+    deposit_pass(db.getMovableComponents(), smooth, exclude_macros);
+    if (include_fillers) deposit_pass(db.getFillers(), smooth);
 
     // A linear scan of a contiguous array: already memory-bound, so it stays serial rather than
     // buying a fraction of a millisecond at the cost of an ordering caveat.
@@ -354,18 +360,18 @@ void Placer::dumpBinDensity(const std::string& path_prefix)
     const int ny = grid.getBinsPerCol();
     const float bin_area = grid.getBinWidth() * grid.getBinHeight();
 
-    for (bool clamp : {true, false}) {
+    for (bool smooth : {true, false}) {
         std::vector<float> density;
-        computeOverflow(clamp, &density); // fills density[col*ny + row] (area per bin)
+        computeOverflow(smooth, &density); // fills density[col*ny + row] (area per bin)
 
-        std::string fname = path_prefix + (clamp ? "_rho_smoothed.csv" : "_rho_exact.csv");
+        std::string fname = path_prefix + (smooth ? "_rho_smoothed.csv" : "_rho_exact.csv");
         std::ofstream out(fname);
         for (int r = 0; r < ny; r++) {
             for (int c = 0; c < nx; c++)
                 out << (c ? "," : "") << (density[c * ny + r] / bin_area);
             out << "\n";
         }
-        Logger::log_info("Dumped " + std::string(clamp ? "smoothed" : "exact") +
+        Logger::log_info("Dumped " + std::string(smooth ? "smoothed" : "exact") +
                          " bin-density map (" + std::to_string(nx) + "x" +
                          std::to_string(ny) + ") -> " + fname);
     }

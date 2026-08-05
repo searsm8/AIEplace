@@ -43,26 +43,31 @@ The master list of designs we work on: present in the XPlace dataset, tuned in X
 
 ## Tier 3 — MMS (mixed-size / movable macros; separate regime, preconditioner matters)
 
-XPlace reference is the **Mixed-GP** endpoint (phase 1, macros movable) — the phase sw_only implements — NOT the post-macro-legalization `GP Stop!` number. Overflow includes fillers. See `_XPLACE_MMS_MIXED_GP` in `tools/benchmarks.py`.
+Two XPlace reference points, both from the same 2026-07-17 local runs:
 
-| design | suite | XPlace grid | target density | XPlace Mixed-GP HPWL | XPlace Mixed-GP overflow |
-|---|---|---|---|---|---|
-| adaptec1 | mms | 512 | 1 | 6.238e+07 | 0.1306 |
-| adaptec2 | mms | 1024 | 1 | 7.129e+07 | 0.0963 |
-| adaptec3 | mms | 1024 | 1 | 1.535e+08 | 0.1247 |
-| adaptec4 | mms | 1024 | 1 | 1.363e+08 | 0.1352 |
-| adaptec5 | mms | 1024 | 0.5 | 3.035e+08 | 0.1485 |
-| bigblue1 | mms | 512 | 1 | 8.295e+07 | 0.1741 |
-| bigblue2 | mms | 1024 | 1 | 1.212e+08 | 0.1052 |
-| bigblue3 | mms | 2048 | 1 | 2.706e+08 | 0.1235 |
-| bigblue4 | mms | 2048 | 1 | 6.241e+08 | 0.1295 |
-| newblue1 | mms | 512 | 0.8 | 5.946e+07 | 0.1361 |
-| newblue2 | mms | 1024 | 0.9 | 1.516e+08 | 0.1426 |
-| newblue3 | mms | 2048 | 0.8 | 2.828e+08 | 0.0400 |
-| newblue4 | mms | 1024 | 0.5 | 2.238e+08 | 0.1818 |
-| newblue5 | mms | 1024 | 0.5 | 3.792e+08 | 0.1697 |
-| newblue6 | mms | 2048 | 0.8 | 4.029e+08 | 0.1419 |
-| newblue7 | mms | 2048 | 0.8 | 8.638e+08 | 0.1517 |
+- **Mixed-GP** = phase 1, macros movable — NOT the `GP Stop!` line. Its overflow EXCLUDES both fillers and movable macros (XPlace's zero_macro_grad at this checkpoint); compare against sw_only's macro-excluded overflow, not "Final Overflow (exact, +fillers)". See `_XPLACE_MMS_MIXED_GP`.
+- **post-GP / post-LG / post-DP** = the end of the flow (phase 2, then legalization, then detailed placement). **post-DP HPWL is the headline quality metric** — legalization costs 1-8% HPWL and an under-spread GP pays more of it, so a GP-vs-GP comparison flatters whichever placer spread less. See `_XPLACE_MMS_FINAL`.
+
+Both HPWL columns are **unmasked (all nets)** — XPlace's `get_obj_hpwl` calls `hpwl_cuda.hpwl` with no `net_mask`; only the per-iteration `masked_hpwl:` line (including the one inside `GP Stop!`) is masked. Compare against sw_only's "Final HPWL (exact, all nets)", not "Final HPWL".
+
+| design | suite | XPlace grid | target density | XPlace Mixed-GP HPWL | XPlace Mixed-GP overflow | XPlace post-GP HPWL | XPlace post-LG HPWL | XPlace post-DP HPWL |
+|---|---|---|---|---|---|---|---|---|
+| adaptec1 | mms | 512 | 1 | 6.238e+07 | 0.1306 | 6.457e+07 | 7.013e+07 | 6.814e+07 |
+| adaptec2 | mms | 1024 | 1 | 7.129e+07 | 0.0963 | 7.270e+07 | 7.774e+07 | 7.618e+07 |
+| adaptec3 | mms | 1024 | 1 | 1.535e+08 | 0.1247 | 1.544e+08 | 1.614e+08 | 1.591e+08 |
+| adaptec4 | mms | 1024 | 1 | 1.363e+08 | 0.1352 | 1.370e+08 | 1.437e+08 | 1.414e+08 |
+| adaptec5 | mms | 1024 | 0.5 | 3.035e+08 | 0.1485 | 3.098e+08 | 3.147e+08 | 3.131e+08 |
+| bigblue1 | mms | 512 | 1 | 8.295e+07 | 0.1741 | 8.333e+07 | 8.651e+07 | 8.567e+07 |
+| bigblue2 | mms | 1024 | 1 | 1.212e+08 | 0.1052 | 1.217e+08 | 1.270e+08 | 1.257e+08 |
+| bigblue3 | mms | 2048 | 1 | 2.706e+08 | 0.1235 | 2.628e+08 | 2.830e+08 | 2.767e+08 |
+| bigblue4 | mms | 2048 | 1 | 6.241e+08 | 0.1295 | 6.271e+08 | 6.536e+08 | 6.464e+08 |
+| newblue1 | mms | 512 | 0.8 | 5.946e+07 | 0.1361 | 5.837e+07 | 6.089e+07 | 6.005e+07 |
+| newblue2 | mms | 1024 | 0.9 | 1.516e+08 | 0.1426 | 1.487e+08 | 1.538e+08 | 1.524e+08 |
+| newblue3 | mms | 2048 | 0.8 | 2.828e+08 | 0.0400 | 2.692e+08 | 2.736e+08 | 2.727e+08 |
+| newblue4 | mms | 1024 | 0.5 | 2.238e+08 | 0.1818 | 2.299e+08 | 2.322e+08 | 2.298e+08 |
+| newblue5 | mms | 1024 | 0.5 | 3.792e+08 | 0.1697 | 3.846e+08 | 3.923e+08 | 3.899e+08 |
+| newblue6 | mms | 2048 | 0.8 | 4.029e+08 | 0.1419 | 4.032e+08 | 4.107e+08 | 4.083e+08 |
+| newblue7 | mms | 2048 | 0.8 | 8.638e+08 | 0.1517 | 8.657e+08 | 8.856e+08 | 8.803e+08 |
 
 **Tier 1 + Tier 2 = 28 designs = the XPlace-paper suite (= dse.py `_full_suite`).**  Tier 3 = 16 mixed-size designs.
 

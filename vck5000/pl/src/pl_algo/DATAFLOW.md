@@ -69,8 +69,17 @@ bb_reduce + param_scheduler core C-synthesizes (`model/synth_check.{cpp,tcl}`). 
 the datapath (stages 1-3) + control into one resident `top` loop with the AIE FFT streaming per
 iteration, then sw_emu-verify the trajectory vs the golden (needs the Vitis/AIE env).
 
+> **`bb_reduce.hpp` and `param_scheduler.hpp` are BUILT AND VERIFIED BUT NOT WIRED INTO `top.cpp`.**
+> This is the correct in-progress state, not an oversight -- they are the *device-resident* control
+> path, and nothing consumes them until the resident loop above is composed. They are exercised
+> today only through `model/synth_check.tcl` (HLS C-synthesis: 0 errors, Fmax 411 MHz, bb_loop II=1)
+> and `model/sched_verify.cpp` (offline bit-for-bit replay vs the sw_only golden trace). Meanwhile
+> `top.cpp` still runs the host-owned loop above, with the equivalent policy math on the host in
+> `host/src/pl_algo/src/Placement.hpp`. Do not re-derive these modules -- they exist and they match.
+
 ## Open format decisions (to finalize as modules are implemented)
 - AoS vs SoA and 1-vs-2 nodes per beat for the coord/gradient buffers.
 - Exact net packet grouping for the AIE HPWL graph (mirror sw_only `prepareNetGroup`).
 - Final AIE PLIO port names for the FFT pool and HPWL graph (with `aie/src/pl_algo`).
-- IDXST path (Ey) -- deferred; a tweak on the IDCT flow.
+- ~~IDXST path (Ey)~~ -- DONE (Stage 4): same FFT + twiddle ROM as IDCT, plus an input reversal
+  and an odd-output sign flip. `modules/dct_transpose.hpp`, `TF_IDXST`.

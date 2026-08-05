@@ -22,6 +22,32 @@ struct PlotInfo {
     float density_weight;
     std::string benchmark_name;
     std::string filename_override; // if set, use this instead of "iter_<N>"
+    // Two-phase runs (TODO #13): without these the GIF shows the standard cells scattering back
+    // to the die centre mid-animation with nothing to say it was the deliberate phase-2 re-seed.
+    std::string phase_name;        // empty on single-phase runs -> phase row is omitted
+    int phase_iteration = 0;       // iteration counted from the current phase's start
+    // Density grid, for the zoom view's bin overlay. 0 => no bin grid (the full-die view never
+    // draws one: at 512-2048 bins across a 2048 px canvas it is a solid wash).
+    int bins_per_row = 0;
+    int bins_per_col = 0;
+};
+
+/**
+ * @brief The rectangle of the die a Visualizer renders, in die coordinates.
+ *
+ * The default (@p zoomed false, the whole die) reproduces the historical full-die frame exactly:
+ * the coordinate map is `DIE_START + (v - xl) * DIE_SCALE / span`, which with xl = 0 and
+ * span = the die size is the expression that was there before the window existed.
+ *
+ * A zoom view is the SAME drawing code over a smaller window (TODO #14). At MMS scale the full
+ * die is 200k-1M cells in ~2000 px, so everything below the macro scale is a grey wash and the
+ * row structure the placement is actually targeting is invisible. @p zoomed additionally enables
+ * the detail layers -- row pitch, bin boundaries, per-cell outlines -- which are only legible
+ * once a window is small enough to resolve individual cells.
+ */
+struct ViewWindow {
+    float xl = 0.0f, yl = 0.0f, xh = 0.0f, yh = 0.0f;
+    bool  zoomed = false;
 };
 
 class Visualizer
@@ -33,31 +59,67 @@ class Visualizer
     float m_die_width, m_die_height;
     float m_canvas_width, m_canvas_height;
 
+    ViewWindow m_view;                    // the rendered region; whole die unless zoomed
+    float m_view_width, m_view_height;    // m_view's span, the coordinate map's denominator
+
     const int MAX_CANVAS_PX = 2048; // longest dimension in pixels
-    int m_canvas_px_w, m_canvas_px_h; // computed from die aspect ratio in init()
-    const float DIE_SCALE = 0.80; // die occupies 80% of canvas
+    int m_canvas_px_w, m_canvas_px_h; // computed from view aspect ratio in init()
+    const float DIE_SCALE = 0.80; // view occupies 80% of canvas
     const float DIE_START = (1 - DIE_SCALE) / 2; // 10% margin on all sides
     const float MIN_SIZE = 0.001; // Minimum size to be visible
+    // A detail layer denser than this is a solid wash, so it is dropped rather than drawn --
+    // the zoom window can be set to any span, including one too wide for rows or bins.
+    const int MAX_DETAIL_LINES = 256;
     cairo_surface_t *m_surface;
     cairo_t *m_cairo_ctx;
 
+    // Die coordinates -> canvas unit square, through the current view window.
+    double mapX(double die_x) const { return DIE_START + (die_x - m_view.xl) * DIE_SCALE / m_view_width; }
+    double mapW(double die_w) const { return die_w * DIE_SCALE / m_view_width; }
+    double mapH(double die_h) const { return die_h * DIE_SCALE / m_view_height; }
+
+    /**
+     * @brief Die y -> canvas y, INVERTED: cairo's user-space y grows downward while die y grows
+     *        upward. Without the inversion every frame is vertically mirrored, which it was until
+     *        2026-08-05 — harmless at full-die scale, actively misleading at zoom, where a region
+     *        has to be matched against a DEF or a row index.
+     *
+     * The flip lives in the arithmetic, not in a cairo transform, on purpose: `cairo_scale(1,-1)`
+     * would mirror the overlay TEXT and every glyph with it. Everything drawn from canvas
+     * coordinates (the overlay, the reticle, the view border) is therefore untouched.
+     */
+    double mapY(double die_y) const
+    { return DIE_START + DIE_SCALE - (die_y - m_view.yl) * DIE_SCALE / m_view_height; }
+
+    /// @brief Canvas y of the TOP edge of a die-space box. cairo_rectangle() grows downward from
+    ///        its anchor, so after the y flip a box must be anchored at its top, not its bottom.
+    double mapRectTop(double die_y, double die_ysize) const { return mapY(die_y + die_ysize); }
+
     // drawPlacement()'s steps, broken out for readability
+    void drawRowLines(DataBase& db);
+    void drawBinGrid(const PlotInfo& info);
     void drawFillerCells(DataBase& db);
     void drawFixedComponents(DataBase& db);
+    void drawFrozenMacros(DataBase& db);
     void drawMovableStandardCells(DataBase& db);
     void drawMovableMacros(DataBase& db);
     void drawAllIOPads(DataBase& db);
     void drawFocusHighlights(DataBase& db);
     void drawPlacementInfoOverlay(const PlotInfo& info);
     void exportPlacementPNG(fs::path dir, const PlotInfo& info);
+    /// @brief Thin black outline over the path just filled — zoom only, where individual cells
+    ///        are big enough that an outline separates neighbours instead of blackening them.
+    void outlineIfZoomed();
 
     public:
 
     // Constructor
     Visualizer() {};
 
-    void init(Box die_area);
-    float scale(float f);
+    void init(Box die_area);                        // full-die view (the historical behaviour)
+    void init(Box die_area, ViewWindow view);       // arbitrary window; see ViewWindow
+    float scale(float f);   // normalized die fraction -> canvas, x axis
+    float scaleY(float f);  // ... y axis, with the same inversion as mapY
     void drawComponent(Component* c);
     void drawIOPad(IOPad* p);
     void highlightNet(Net* net_p);

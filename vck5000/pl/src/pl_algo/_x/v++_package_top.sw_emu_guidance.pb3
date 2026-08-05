@@ -1,3 +1,0 @@
-
-¿
-v++_package_top.sw_emu$95f3d8b1-18f5-45d3-a3a3-c6545bfc6a97"þ/tools/Xilinx/Vitis/2022.2/bin/unwrapped/lnx64.o/v++  --vivado.prop "run.__KERNEL__.{STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS}={-directive sdx_optimization_effort_high}" --advanced.misc "report=type report_timing_summary name impl_report_timing_summary_route_design_summary steps {route_design} runs {impl_1} options {-max_paths 10}" --advanced.misc "report=type report_timing_summary name impl_report_timing_summary_post_route_phys_opt_design_summary steps {post_route_phys_opt_design} runs {impl_1} options {-max_paths 10}" -p -t sw_emu --platform xilinx_vck5000_gen4x8_qdma_2_202220_1 build_v0/top.sw_emu.xsa -o build_v0/top.sw_emu.xclbin 

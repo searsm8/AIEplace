@@ -1,0 +1,23 @@
+--- /tmp/limbo_upstream/limbo/parsers/gdsii/gdsdb/GdsObjectHelpers.h	2026-08-04 22:21:24.872426890 -0400
++++ third_party/Limbo/limbo/parsers/gdsii/gdsdb/GdsObjectHelpers.h	2025-03-26 16:13:33.000000000 -0400
+@@ -307,8 +307,8 @@
+ 	void operator()(GdsCellReference::point_type& p) const 
+ 	{
+ 		p = gtl::construct<GdsCellReference::point_type>(
+-				p.x()*cosAngle - p.y()*sinAngle, 
+-				p.x()*sinAngle + p.y()*cosAngle
++				std::round(p.x()*cosAngle - p.y()*sinAngle), 
++				std::round(p.x()*sinAngle + p.y()*cosAngle)
+ 				);
+ 	}
+ };
+@@ -327,7 +327,8 @@
+     /// @param p given position and perform operation on the position 
+ 	void operator()(GdsCellReference::point_type& p) const 
+ 	{
+-		p = gtl::construct<GdsCellReference::point_type>(p.x()*scaleX, p.y()*scaleY);
++		p = gtl::construct<GdsCellReference::point_type>(std::round(p.x()*scaleX),
++                                                     std::round(p.y()*scaleY));
+ 	}
+ };
+ /// @brief X reflection 

@@ -4,3 +4,6 @@
 [submodule "vck5000/aie/lib/Vitis_Libraries"]
 	path = vck5000/aie/lib/Vitis_Libraries
 	url = https://github.com/Xilinx/Vitis_Libraries.git
+[submodule "third_party/tabulate"]
+	path = third_party/tabulate
+	url = https://github.com/p-ranav/tabulate.git

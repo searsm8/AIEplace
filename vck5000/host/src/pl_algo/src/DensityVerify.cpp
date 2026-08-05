@@ -1,8 +1,18 @@
 // DensityVerify.cpp -- see DensityVerify.hpp.
 //
-// Old-ABI TU (like HpwlGradVerify): builds the golden with the sw_only parser /
+// Old-ABI TU (like HpwlGradVerify): builds the golden with the shared parser /
 // Grid, and crosses into the new-ABI XRT Driver only through runDensityBin's
 // POD + const char* boundary (PackedDesign is std::vector-only).
+//
+// ⚠ The golden MOVED when the host fork was merged (TODO #9, 2026-08-04). pl_algo used to
+// carry its own frozen copy of Grid.cpp with NO sqrt(2) density clamp, while the PL gained
+// the clamp on 2026-07-05 (node_footprint.hpp, commit 0237e57). Every `--density` run
+// between those dates compared a clamped device result against an UNCLAMPED golden -- any
+// recorded PASS from that window is void. The shared Grid clamps, so the two now agree on
+// the smoothing. One known divergence is left, and it is NOT fixed here: the PL shifts a
+// footprint that overhangs the grid back inside, the software golden does not (it relies on
+// Placer::enforceDieBoundaries, which does not run in this harness). It affects only cells
+// within ~sqrt(2) bins of the die edge -- see TODO #9.
 
 #include "DensityVerify.hpp"
 #include "Driver.hpp"
@@ -27,19 +37,28 @@ int runDensityVerify(AIEplace::DataBase& db, const PackedDesign& pk, const char*
     const float bin_w = (float)die.getXsize() / G;
     const float bin_h = (float)die.getYsize() / G;
 
-    // ---- golden: sw_only Grid path. Sync probe = pos (computeBinOverlaps reads the
+    // ---- golden: shared Grid path (host/src/common). Sync probe = pos (the footprint reads the
     // probe position), then two-pass fixed + clamp + movable, fillers EXCLUDED.
+    //
     AIEplace::Grid grid(die);   // 1024 x 1024
+
+    // Geometry + deposit, split so the shared add is replayed in node order -- the deterministic
+    // path, and the one that does not depend on whether this host was built with OpenMP.
+    auto deposit = [&](AIEplace::Node* node_p) {
+        grid.computeNodeOverlaps(node_p, /*deposit_atomically=*/false);
+        grid.depositNodeOverlaps(node_p);
+    };
+
     for (const auto& kv : db.getComponents()) kv.second->initializeState(kv.second->getPos());
     for (const auto& kv : db.getIOPads())     kv.second->initializeState(kv.second->getPos());
 
     for (const auto& kv : db.getComponents())               // PASS 1: fixed components
-        if (kv.second->getStatus() == AIEplace::FIXED) grid.computeBinOverlaps(kv.second);
+        if (kv.second->getStatus() == AIEplace::FIXED) deposit(kv.second);
     for (const auto& kv : db.getIOPads())                   // ... and IOPads (fixed)
-        grid.computeBinOverlaps(kv.second);
+        deposit(kv.second);
     grid.clampFixedDensity(TARGET_DENSITY);                 // CLAMP
     for (const auto& kv : db.getComponents())               // PASS 2: movable components
-        if (kv.second->getStatus() != AIEplace::FIXED) grid.computeBinOverlaps(kv.second);
+        if (kv.second->getStatus() != AIEplace::FIXED) deposit(kv.second);
 
     std::vector<std::vector<float>> rho = grid.getBinDensities();   // rho[x][y]
 

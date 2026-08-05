@@ -1,4 +1,4 @@
-// density_model.cpp -- pl_algo density_manager Stage 0 software math model.
+// density_model.cpp -- pl_algo density-solve Stage 0 software math model.
 //
 // Purpose: prove, in pure host C++ (no HLS, no AIE), that the Makhoul
 // "shuffle + forward-FFT + twiddle" recipe ported from the markv1 AIE kernels

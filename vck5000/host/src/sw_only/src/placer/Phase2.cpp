@@ -79,6 +79,13 @@ bool Placer::beginFixedMacroPhase()
     int frozen = db.freezeMovableMacros();
     legalizeMacros();
 
+    // Frame the legalization on its own, before the re-seed wipes the phase-1 cell placement:
+    // this is the only picture in the run where the LP's macro displacement is visible.
+    #ifdef CREATE_VISUALIZATION
+        exportPhaseBoundaryVisualization("a_legalized", "end of mixed_size — macros legalized + frozen",
+                                         m_phase1_summary.overflow_exact);
+    #endif
+
     target_density = db.rebuildFillers(target_density);
     grid.setTargetDensity(target_density);   // filler sizing may have raised it
 
@@ -106,6 +113,12 @@ bool Placer::beginFixedMacroPhase()
     computeHpwlPartials();
     computeElectricFields();
     initializeDensityWeight();
+
+    // ...and the re-seeded starting state, so the GIF shows what phase 2 actually begins from.
+    #ifdef CREATE_VISUALIZATION
+        exportPhaseBoundaryVisualization("b_reseeded", "start of stdcell_fixed_macro — cells re-seeded",
+                                         computeOverflow(false, nullptr, true));
+    #endif
     return true;
 }
 

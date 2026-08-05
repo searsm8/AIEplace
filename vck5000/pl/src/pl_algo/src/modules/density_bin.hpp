@@ -1,7 +1,7 @@
 #ifndef PL_ALGO_DENSITY_BIN_HPP
 #define PL_ALGO_DENSITY_BIN_HPP
 
-// density_bin -- Stage 1 of the density_manager: scatter node areas into the
+// density_bin -- Stage 1 of the density solve: scatter node areas into the
 // GRID x GRID bin-density grid rho (the ePlace charge density).
 //
 // Grid-strip tiled along x: a STRIP x GRID accumulator (256 KB) lives on-chip and

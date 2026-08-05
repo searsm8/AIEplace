@@ -1,2 +1,0 @@
-/usr/bin/ar qc libGeoBoostPolygonApi.a  CMakeFiles/GeoBoostPolygonApi.dir/api/GeoBoostPolygonApi.cpp.o
-/usr/bin/ranlib libGeoBoostPolygonApi.a

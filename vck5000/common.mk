@@ -71,6 +71,10 @@ BUILD_DIR_XCLBIN = $(BUILD_DIR)/$(TARGET)/xclbin/$(LINK_CONFIG)
 XCLBIN = $(BUILD_DIR_XCLBIN)/aieplace_$(EXEC_CONFIG).xclbin
 
 HOST_DIR = $(PROJECT_ROOT)/host/src/$(HOST)
+# Parser + data model shared by every host variant (TODO #9). Compiled per-variant, because
+# the variants build it with different flags (sw_only -O2/-fopenmp, pl_algo -O0), so the
+# objects land in each variant's own $(BUILD_DIR_HOST)/obj.
+HOST_COMMON_DIR = $(PROJECT_ROOT)/host/src/common
 BUILD_DIR_HOST = $(BUILD_DIR)/$(TARGET)/host/$(HOST)
 HOST_EXE = $(BUILD_DIR_HOST)/aieplace_$(HOST).exe
 HOST_RUN_CONFIG ?= $(HOST_DIR)/run_config.toml

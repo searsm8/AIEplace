@@ -1,4 +1,8 @@
 *.o
+# Static libraries are BUILD OUTPUT and must not be committed: this repo used to carry 22 MB of
+# Limbo .a across three duplicate locations. Limbo is a submodule now (third_party/Limbo), built
+# by vck5000/tools/bootstrap_third_party.sh.
+*.a
 *.out
 python/AIEmath
 python/results
@@ -26,6 +30,12 @@ __pycache__/
 /vck5000/.claude/
 # stray host build output (the real output goes to build/)
 /vck5000/host/src/objs/
+
+# Limbo (third_party/Limbo) is a SUBMODULE and is built OUT OF TREE, so the checkout itself
+# stays pristine and can never show a spurious diff. These two are that build's output; both are
+# produced by vck5000/tools/bootstrap_third_party.sh and neither belongs in git.
+/third_party/limbo_build/
+/third_party/limbo_install/
 
 # AIE compiler workdirs and simulator/golden output
 /vck5000/aie/Work/

@@ -145,7 +145,7 @@ int runPlacement(const PlacementConfig& cfg,
                  const coord_t* node_pos_init, const NodeBox* node_box_init,
                  const int* net_ptr, const NodePin* pins, const NodePin* npins,
                  const float* exp_lut, int lut_size,
-                 const int* degree, const float* area, float avg_area,
+                 const int* degree, const float* area,
                  float* out_hpwl_hist, float* out_ovfl_hist, coord_t* out_final_pos,
                  const char* xclbin_path);
 

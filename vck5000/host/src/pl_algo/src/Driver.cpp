@@ -1,12 +1,13 @@
-// Driver.cpp -- native XRT host driver for the v0 HPWL kernel. See Driver.hpp.
+// Driver.cpp -- native XRT host driver for the pl_algo PL kernel. See Driver.hpp.
 //
-// The kernel signature (pl/src/pl_algo/src/top.cpp) is:
-//     void top(const coord_t* node_pos,   // arg 0
-//              const int*     net_ptr,    // arg 1
-//              const NodePin* pins,     // arg 2
-//              float*         result,     // arg 3
-//              int            num_nets)   // arg 4 (scalar)
-// Buffer args 0..3 each live in a device memory bank selected by group_id(i).
+// One kernel serves every bring-up module; the trailing `mode` arg picks which
+// (`plalgo::top_mode`). The argument list is therefore FIXED across all modes -- 12 m_axi
+// buffers (group_id 0..11) then the scalars -- and each mode REINTERPRETS the ports it needs
+// (e.g. MODE_ITERATION_UPDATE reads g_density on `dct_in` and passes `lambda` on `inv_gamma`).
+// The authoritative per-mode port/scalar mapping is the `top_mode` enum in
+// pl/src/pl_algo/src/host_interface.hpp; `top()` in pl/src/pl_algo/src/top.cpp is the code.
+// Both must be kept in step with the run*() functions below -- a mismatch is a wrong answer,
+// not a compile error.
 
 #include "Driver.hpp"
 #include "host_interface.hpp"
@@ -898,7 +899,7 @@ int runPlacement(const PlacementConfig& cfg,
                  const coord_t* node_pos_init, const NodeBox* node_box_init,
                  const int* net_ptr, const NodePin* pins, const NodePin* npins,
                  const float* exp_lut, int lut_size,
-                 const int* degree, const float* area, float avg_area,
+                 const int* degree, const float* area,
                  float* out_hpwl_hist, float* out_ovfl_hist, coord_t* out_final_pos,
                  const char* xclbin_path) {
     const int    N   = num_nodes, M = num_movable, NBINS = DENSITY_NBINS;
@@ -1111,13 +1112,13 @@ int runPlacement(const PlacementConfig& cfg,
             gtot[n].x = g_hpwl[n].x - lambda * g_density[n].x;
             gtot[n].y = g_hpwl[n].y - lambda * g_density[n].y;
         }
-        // Preconditioner weights for this iteration: w = max(1, degree + precond_coef*lambda*area)
-        // (raw area => avg_area=1). iteration_update divides the combined gradient by w. Essential for
-        // movable-macro (MMS) convergence; the schedule's dff comes from the gradient L1 norms, not
-        // precond mass, so leaving precond=1 when OFF is a clean no-op.
+        // Preconditioner weights for this iteration: w = max(1, degree + precond_coef*lambda*area).
+        // iteration_update divides the combined gradient by w. Essential for movable-macro (MMS)
+        // convergence; the schedule's dff comes from the gradient L1 norms, not precond mass, so
+        // leaving precond=1 when OFF is a clean no-op.
         // Set before the step-length estimate: the iteration-1 trial step is preconditioned too.
         if (precond_on)
-            updatePrecondWeights(precond.data(), degree, area, M, /*avg_area=*/1.0f, precond_coef, lambda);
+            updatePrecondWeights(precond.data(), degree, area, M, precond_coef, lambda);
         // Step length: BB from the previous probe/gradient pair once we have one; on iteration 1
         // calibrate it with the XPlace-style initial estimate (one extra trial gradient evaluation).
         float alpha = have_prev

@@ -113,6 +113,22 @@ void Placer::updateDensityWeight()
         mu = dw_max_step * std::clamp(std::pow(dw_max_step, -rel_worsening * 100.0f),
                                       dw_min_step, dw_max_step);
     }
+    // NO UPPER CLAMP ON lambda, and that is now a deliberate decision rather than an oversight
+    // (TODO #4 "density-weight runaway", investigated 2026-08-04). XPlace has none either
+    // (step_density_weight, param_scheduler.py:299-310).
+    //
+    // The runaway was real: on the pre-#11b adaptec5, iterations 592 -> 1163 held overflow pinned
+    // at 0.423 while lambda went 0.0504 -> 2.84e4 (x564,000) and HPWL doubled, which tripped the
+    // 2x-best divergence test and cost the run its phase 2. But it was a SYMPTOM. Making the
+    // movable-macro deposit unconditional (TODO #11b, landed 2026-08-02) removes the overflow floor
+    // that starved the feedback loop, and adaptec5's phase 1 now CONVERGES at iteration 649
+    // instead. No design in the suite exhibits the runaway once that is in.
+    //
+    // A freeze-while-overflow-is-flat rule was built and measured before that was understood. It is
+    // a trap and must not be re-added without an escape mechanism: freezing lambda on a plateau is
+    // self-reinforcing, because lambda is exactly what ends the plateau. adaptec5 deadlocked and
+    // exited phase 1 at iteration 401 with exact overflow 0.89, completely unspread. The 2x jolt
+    // below IS the sanctioned escape, and it is confined to the high-overflow band on purpose.
     density_weight *= mu;
 
     // Emergency 2x jolt: if overflow has plateaued at a high value, double density_weight
@@ -365,6 +381,7 @@ bool Placer::checkFineDivergenceGuard()
 {
     const BestSolution& best_ref = bestReference();
     float overflow = ovfw_history.back();
+
     bool guard_armed = (phaseIteration() > 100 && best_ref.valid &&
                         overflow < 5.0f * overflow_threshold);
     if (!guard_armed) return false;

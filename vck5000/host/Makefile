@@ -31,7 +31,16 @@ $(HOST_EXE): ${HOST_OBJS}
 # Recipes to retrigger .o rebuilds upon changes in depencies (ie. .h files)
 -include $(HOST_DEPS)
 
-$(BUILD_DIR_HOST)/obj/%.o: $(HOST_DIR)/src/%.cpp $(HOST_DIR)/include/*.h
+# Two source roots: the variant's own src/, and the shared parser/data model in
+# host/src/common/src (TODO #9). The basenames are disjoint, so make picks the rule whose
+# prerequisite .cpp actually exists. The header prerequisites are `wildcard`ed because a
+# variant need not have an include/ of its own (pl_algo does not).
+$(BUILD_DIR_HOST)/obj/%.o: $(HOST_DIR)/src/%.cpp $(wildcard $(HOST_DIR)/include/*.h) $(wildcard $(HOST_COMMON_DIR)/include/*.h)
+	$(dir_guard)
+	$(info MAKE INFO: Compile object file "$@")
+	${CXX} $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD_DIR_HOST)/obj/%.o: $(HOST_COMMON_DIR)/src/%.cpp $(wildcard $(HOST_COMMON_DIR)/include/*.h)
 	$(dir_guard)
 	$(info MAKE INFO: Compile object file "$@")
 	${CXX} $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@

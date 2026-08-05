@@ -84,19 +84,27 @@ _ROWS = [
 
 # XPlace MMS reference, design -> (mixed_gp_hpwl, mixed_gp_overflow).
 #
-# READ THIS BEFORE COMPARING. XPlace's mixed-size flow has TWO GP phases, and sw_only
-# implements only the first:
+# READ THIS BEFORE COMPARING. XPlace's mixed-size flow has TWO GP phases:
 #   1. Mixed-GP           — macros movable, ends at "After Mixed-GP, best solution eval"
 #   2. Macro Legalization — LP/cbc solve placing the macros, then `Reset optimizer` and a
 #                           SECOND full GP pass with the macros held fixed
-# The familiar "GP Stop!" masked_hpwl line is the end of phase 2. Comparing our single-phase
-# result against it compares different algorithms — use the phase-1 numbers below instead.
+# The familiar "GP Stop!" masked_hpwl line is the end of phase 2. This table is the PHASE-1
+# (Mixed-GP) reference. sw_only's own two-phase run (TODO #13, landed 2026-08-01) is the
+# comparable *result*, but that table's numbers below are still phase-1-only.
 # Two consequences that have burned us before:
 #   - Mixed-GP ends at 0.10-0.18 exact overflow on nearly every MMS design (newblue3 is the
 #     lone outlier at 0.040). It does NOT reach the 0.07 stop threshold. Us not reaching it
 #     with macros movable is not by itself a defect.
-#   - These overflows INCLUDE filler density (XPlace's convention). Compare them against
-#     sw_only's "Final Overflow (exact, +fillers)", not the filler-excluded variant.
+#   - This overflow is BOTH filler-EXCLUDED and macro-EXCLUDED, not "+fillers" as an earlier
+#     version of this comment claimed. XPlace's evaluate_placement() call at this checkpoint
+#     (run_placement_nesterov.py:173/180-181) runs under ps.zero_macro_grad=True (drops
+#     is_mov_macro nodes, evaluator.py:26-45) and reassembles node_pos as
+#     mov_node_pos[mov_lhs:mov_rhs] + data.node_pos[mov_rhs:] -- the filler positions appended
+#     past mov_rhs by get_mov_node_info() are sliced off. Compare against sw_only's
+#     "macro-excluded" number (Placer::computeOverflow(clamp=false, include_fillers=false,
+#     exclude_macros=true); logged as [OVFW-DIAG] macro-excluded=, or the "Macro-Excluded
+#     Overflow (exact, no fillers)" summary row on mixed-size runs), NOT "Final Overflow
+#     (exact, +fillers)" -- that one is both filler- and macro-INCLUDED.
 #
 # Source: local XPlace runs 2026-07-17, `--dataset mms --mixed_size True --seed 42`,
 # ~/phd/Xplace/result/<ts>_<design>/log/test.log. Same seed as our sweeps.
@@ -111,6 +119,47 @@ _XPLACE_MMS_MIXED_GP = {
     "newblue6": (4.028956e8, 0.1419), "newblue7": (8.638253e8, 0.1517),
 }
 
+# XPlace MMS reference, PHASE 2 AND BEYOND -- the end of the flow whose phase 1 is the table
+# above. Same 16 local runs, same logs, same seed: these numbers were always in those files;
+# NEW_REPORT_phase2_mms_suite_20260802.md's "no local XPlace phase-2 reference exists, getting
+# one needs 15 more XPlace runs" is WRONG and this table is the correction.
+#
+# Per design: (post_gp_hpwl, post_gp_overflow, post_lg_hpwl, post_dp_hpwl), from the log lines
+#   "After GP, best solution eval, exact HPWL: ... exact Overflow: ..."   <- end of phase 2
+#   "***** Finish Legalization, HPWL: ... *****"                          <- greedy+abacus LG
+#   "After DP, HPWL: ..."                                                 <- the headline number
+# These HPWLs are UNMASKED -- all nets. XPlace has two different HPWL functions and only one of
+# them masks: fast_evaluator() uses masked_scale_hpwl(..., data.net_mask, ...) and produces the
+# per-iteration "masked_hpwl:" lines including the one in "GP Stop!", whereas get_obj_hpwl() ->
+# get_hpwl() calls hpwl_cuda.hpwl() with NO mask and produces every number in this table.
+# So compare against sw_only's "Final HPWL (exact, all nets)" (final_hpwl_exact, Output.cpp:511,
+# threshold 1e9), NOT "Final HPWL" (final_hpwl, masked at ignore_net_degree = 100). On MMS
+# adaptec1 the two differ by 0.06% -- small, but it is 2 nets of 221142 and it is free to get right.
+#
+# Use post_dp_hpwl as the quality metric, NOT post_gp_hpwl: legalization costs 1-8% HPWL and an
+# under-spread GP pays more of it, so GP-vs-GP flatters whichever placer spread less (TODO #3).
+# post_gp_overflow here is XPlace's EXACT overflow and is NOT the "GP Stop!" number -- that line
+# prints the *masked* (smoothed) overflow, typically ~0.045 where the exact value is ~0.11-0.18.
+# Comparing our exact overflow against that masked figure makes us look 2-3x worse than we are.
+_XPLACE_MMS_FINAL = {
+    "adaptec1": (6.457148e7, 0.1146, 7.012652e7, 6.813568e7),
+    "adaptec2": (7.269954e7, 0.1314, 7.773626e7, 7.617702e7),
+    "adaptec3": (1.544092e8, 0.1232, 1.613617e8, 1.590915e8),
+    "adaptec4": (1.369644e8, 0.1172, 1.436678e8, 1.413627e8),
+    "adaptec5": (3.097642e8, 0.1504, 3.146759e8, 3.130691e8),
+    "bigblue1": (8.333430e7, 0.1178, 8.651378e7, 8.567288e7),
+    "bigblue2": (1.216634e8, 0.1105, 1.269926e8, 1.256618e8),
+    "bigblue3": (2.627814e8, 0.1061, 2.830117e8, 2.767256e8),
+    "bigblue4": (6.271247e8, 0.1134, 6.535862e8, 6.464361e8),
+    "newblue1": (5.836766e7, 0.1264, 6.089079e7, 6.004748e7),
+    "newblue2": (1.486573e8, 0.1113, 1.538110e8, 1.523920e8),
+    "newblue3": (2.691846e8, 0.1180, 2.736333e8, 2.726504e8),
+    "newblue4": (2.299293e8, 0.1840, 2.322094e8, 2.298460e8),
+    "newblue5": (3.845861e8, 0.1504, 3.922818e8, 3.898915e8),
+    "newblue6": (4.032442e8, 0.1078, 4.107340e8, 4.083356e8),
+    "newblue7": (8.657061e8, 0.1283, 8.855537e8, 8.803187e8),
+}
+
 # Canonical path is "suite/design" (matches host/benchmarks/<suite>/<design> and
 # the dse.py benchmark-override format).
 BENCHMARKS = {
@@ -118,7 +167,12 @@ BENCHMARKS = {
                             grid=grid, target_density=dens,
                             # phase-comparable XPlace reference; None outside the MMS tier
                             xplace_gp_hpwl=_XPLACE_MMS_MIXED_GP[name][0] if suite == "mms" else None,
-                            xplace_gp_overflow=_XPLACE_MMS_MIXED_GP[name][1] if suite == "mms" else None)
+                            xplace_gp_overflow=_XPLACE_MMS_MIXED_GP[name][1] if suite == "mms" else None,
+                            # end-of-flow reference: phase 2, then legalization, then DP
+                            xplace_final_hpwl=_XPLACE_MMS_FINAL[name][0] if suite == "mms" else None,
+                            xplace_final_overflow=_XPLACE_MMS_FINAL[name][1] if suite == "mms" else None,
+                            xplace_lg_hpwl=_XPLACE_MMS_FINAL[name][2] if suite == "mms" else None,
+                            xplace_dp_hpwl=_XPLACE_MMS_FINAL[name][3] if suite == "mms" else None)
     for (name, suite, tier, grid, dens) in _ROWS
 }
 
@@ -180,18 +234,36 @@ def to_markdown():
         ref = tier == 3   # only the MMS tier carries a phase-comparable XPlace reference
         head = "| design | suite | XPlace grid | target density |"
         if ref:
-            head += " XPlace Mixed-GP HPWL | XPlace Mixed-GP overflow |"
+            head += (" XPlace Mixed-GP HPWL | XPlace Mixed-GP overflow |"
+                     " XPlace post-GP HPWL | XPlace post-LG HPWL | XPlace post-DP HPWL |")
         lines += [f"## {tier_desc[tier]}", ""]
         if ref:
-            lines += ["XPlace reference is the **Mixed-GP** endpoint (phase 1, macros movable) — the "
-                      "phase sw_only implements — NOT the post-macro-legalization `GP Stop!` number. "
-                      "Overflow includes fillers. See `_XPLACE_MMS_MIXED_GP` in `tools/benchmarks.py`.",
+            lines += ["Two XPlace reference points, both from the same 2026-07-17 local runs:",
+                      "",
+                      "- **Mixed-GP** = phase 1, macros movable — NOT the `GP Stop!` line. Its "
+                      "overflow EXCLUDES both fillers and movable macros (XPlace's "
+                      "zero_macro_grad at this checkpoint); compare against sw_only's "
+                      "macro-excluded overflow, not \"Final Overflow (exact, +fillers)\". "
+                      "See `_XPLACE_MMS_MIXED_GP`.",
+                      "- **post-GP / post-LG / post-DP** = the end of the flow (phase 2, then "
+                      "legalization, then detailed placement). **post-DP HPWL is the headline "
+                      "quality metric** — legalization costs 1-8% HPWL and an under-spread GP "
+                      "pays more of it, so a GP-vs-GP comparison flatters whichever placer "
+                      "spread less. See `_XPLACE_MMS_FINAL`.",
+                      "",
+                      "Both HPWL columns are **unmasked (all nets)** — XPlace's `get_obj_hpwl` "
+                      "calls `hpwl_cuda.hpwl` with no `net_mask`; only the per-iteration "
+                      "`masked_hpwl:` line (including the one inside `GP Stop!`) is masked. "
+                      "Compare against sw_only's \"Final HPWL (exact, all nets)\", not "
+                      "\"Final HPWL\".",
                       ""]
-        lines += [head, "|---|---|---|---|" + ("---|---|" if ref else "")]
+        lines += [head, "|---|---|---|---|" + ("---|---|---|---|---|" if ref else "")]
         for m in rows:
             row = f"| {m['name']} | {m['suite']} | {m['grid']} | {m['target_density']:g} |"
             if ref:
-                row += f" {m['xplace_gp_hpwl']:.3e} | {m['xplace_gp_overflow']:.4f} |"
+                row += (f" {m['xplace_gp_hpwl']:.3e} | {m['xplace_gp_overflow']:.4f} |"
+                        f" {m['xplace_final_hpwl']:.3e} | {m['xplace_lg_hpwl']:.3e} |"
+                        f" {m['xplace_dp_hpwl']:.3e} |")
             lines.append(row)
         lines.append("")
     lines += [

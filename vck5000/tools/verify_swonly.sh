@@ -9,10 +9,13 @@
 #        OMP_NUM_THREADS=N    -> passed through to the placer
 #        EXE=<path>           -> run a different binary (e.g. a saved pre-change reference)
 #
-# Collected per design: iterations.dat (the per-iteration HPWL/overflow/step trace),
-# RowBasedPlacement.def (every final cell position), function_statistics.md (timing).
-# The iteration is chaotic, so a single-ULP divergence at iteration 1 is visible in
+# Collected per design, into artifacts/ (the diffable, deterministic set): iterations.dat
+# (the per-iteration HPWL/overflow/step trace), RowBasedPlacement.def (every final cell
+# position). The iteration is chaotic, so a single-ULP divergence at iteration 1 is visible in
 # iterations.dat by iteration ~10 -- it is a sharper equality test than it looks.
+# function_statistics.md (timing) is collected separately into timings/, NOT artifacts/ -- it
+# carries wall-clock numbers that differ every run regardless of correctness, so `diff -r
+# A/artifacts B/artifacts` would never pass with it in there (hit 2026-07-31, TODO #3).
 set -u
 
 OUT=${1:-/tmp/mt12/verify}
@@ -63,12 +66,14 @@ for entry in $DESIGNS; do
     end=$(date +%s.%N)
 
     run=$(ls -d "$OUT/runs/$label"/*/*/ 2>/dev/null | tail -1)
-    mkdir -p "$OUT/artifacts/$label"
-    for f in iterations.dat RowBasedPlacement.def function_statistics.md; do
+    mkdir -p "$OUT/artifacts/$label" "$OUT/timings/$label"
+    for f in iterations.dat RowBasedPlacement.def; do
         [ -f "$run/$f" ] && cp "$run/$f" "$OUT/artifacts/$label/"
     done
+    [ -f "$run/function_statistics.md" ] && cp "$run/function_statistics.md" "$OUT/timings/$label/"
     printf 'wall %6.2f s   final: %s\n' "$(echo "$end - $start" | bc)" \
            "$(tail -1 "$OUT/artifacts/$label/iterations.dat" 2>/dev/null)"
 done
 
 echo "artifacts -> $OUT/artifacts   (compare two runs with: diff -r A/artifacts B/artifacts)"
+echo "timings    -> $OUT/timings    (wall-clock only, not part of the equality test)"

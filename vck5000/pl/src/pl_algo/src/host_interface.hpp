@@ -150,7 +150,7 @@ constexpr float AIE_INV_GAMMA  = 0.25f; // 1/gamma baked into the AIE kernel (==
 // ===========================================================================
 //  DENSITY EXTENSION  (Stage 1 -- bin density on the PL)
 // ===========================================================================
-// The density_manager scatters node areas into the GRID x GRID bin-density grid
+// The density solve scatters node areas into the GRID x GRID bin-density grid
 // rho (the ePlace charge density), as step 1 of the electrostatic-field solve.
 // Stage 1 implements only the binning + readback; the DCT/FFT field solve follows
 // in later stages. Reference: sw_only Grid::computeBinOverlaps + clampFixedDensity
@@ -176,6 +176,35 @@ enum transform_mode_host { TFH_DCT = 1, TFH_IDCT = 2, TFH_IDXST = 3 };
 // ---- top() mode selector ---------------------------------------------------
 // One PL kernel serves multiple modules during bring-up; `mode` selects which.
 // (Stage 5 replaces this with the unified per-iteration datapath.)
+//
+// PORT-ALIAS TABLE -- READ THIS BEFORE CHANGING EITHER SIDE.
+// top()'s argument list is FIXED for every mode (12 m_axi buffers on group_id 0..11, then the
+// scalars); each mode REINTERPRETS the ports it needs. A host/kernel mismatch is a wrong answer,
+// not a compile error, so this table, `top()` in top.cpp, and the run*() functions in
+// host/src/pl_algo/src/Driver.cpp must be changed together. Blank = unused by that mode.
+//
+// mode / declared port      | gmem0    | gmem4   | gmem7     | gmem8      | gmem9    | gmem10    | gmem11
+//                           | node_pos | exp_lut | node_grad | node_box   | bin_dens | dct_in    | dct_out
+// --------------------------+----------+---------+-----------+------------+----------+-----------+----------
+//  0 HPWL_GRAD              | node_pos | exp_lut | OUT g_wl  |            |          |           |
+//    (+ net_ptr/pins/npins on gmem1/2/3; gmem5/6 = bb/sums, kernel-internal DDR scratch)
+//  1 DENSITY_BIN            |          |         |           | node_box   | OUT rho  |           |
+//  2 DCT_1D                 |          |         |           |            |          | rows      | OUT dct
+//  3 DCT_ROWPASS            |          |         |           |            |          | rows      | OUT dct
+//  4 TRANSPOSE              |          |         |           |            |          | matrix    | OUT matrix^T
+//  5 DCT_TRANSPOSE          |          |         |           |            |          | matrix    | OUT xform^T
+//  6 SPECTRAL               |          |         |           |            |          | a_uv      | OUT field
+//  7 FORCE_GATHER           |          |         | OUT g_den | node_box   | Ex       | Ey        |
+//  8 ITERATION_UPDATE       | u_k      | precond | g_wl      | {v_k,size} | OUT v_k+1| g_density | OUT u_k+1
+//  9 METRICS                | node_pos |         |           |            | rho      |           | OUT 2 floats
+//    (+ net_ptr/pins on gmem1/2; the two output floats are [0]=hpwl, [1]=overflow_sum)
+// 10 FIELD_SOLVE_PL         |          |         |           |            | OUT Ey   | rho       | OUT Ex
+//
+// Scalar aliases (the scalar args are reused the same way):
+//   MODE_ITERATION_UPDATE: lambda=inv_gamma, alpha=inv_lut_step, coeff=bin_w,
+//                          die_xmax=bin_h, die_ymax=target_density.
+//   MODE_TRANSPOSE / _DCT_TRANSPOSE / _SPECTRAL: dct_stage carries the variant/transform/axis.
+// Per-mode detail follows on each enumerator.
 enum top_mode { MODE_HPWL_GRAD = 0, MODE_DENSITY_BIN = 1, MODE_DCT_1D = 2,
                 MODE_DCT_ROWPASS = 3,    // Stage 3a: DCT all rows via the 8-lane pool
                 MODE_TRANSPOSE = 4,      // Stage 3b: N x N matrix transpose (pure PL).

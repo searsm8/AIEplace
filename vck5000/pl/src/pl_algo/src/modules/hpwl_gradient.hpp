@@ -40,7 +40,7 @@ namespace plalgo {
 
 constexpr int HPWL_CU_LUT_MAX = 1024;  // max LUT entries cached on-chip
 
-// exp(-d/gamma) via the cached LUT (d >= 0). Beyond the table -> ~0 (underflow).
+// compute exp(-d/gamma) via the cached LUT (d >= 0). Beyond the table -> ~0 (underflow).
 // Force-inline (the sweeps call it 4x/iteration): left as a shared instance HLS
 // serializes the 4 calls (14-cyc latency each); inlined they pipeline independently.
 static inline float hpwl_lut_exp(const float lut_BRAM[HPWL_CU_LUT_MAX], int lut_size,
@@ -113,7 +113,7 @@ sweep_bbox:
 sweep_sums:
     for (int p = 0; p < num_pins; p++) {
 #pragma HLS PIPELINE
-        const NodePin r = pins_DDR[p];
+        const NodePin r = pins_DDR[p]; // Read pin data (one big data block, burstable)
         if (r.net < 0) continue;
         if (r.net != bc_net) {                      // net boundary -> flush previous
             if (bc_net >= 0) {
@@ -125,7 +125,7 @@ sweep_sums:
             b = bb_DDR[r.net];                       // this net's final bbox (once/net)
             Bpx = Bmx = Cpx = Cmx = Bpy = Bmy = Cpy = Cmy = 0.0f;
         }
-        const coord_t c = node_pos_DDR[r.node_idx];
+        const coord_t c = node_pos_DDR[r.node_idx]; // Random access, slow but read-only -> II=1
         const float x = c.x + r.off_x;
         const float y = c.y + r.off_y;
         const float apx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, b.mxx - x);

@@ -1,6 +1,0 @@
-add_subdirectory(algorithms)
-add_subdirectory(geometry)
-add_subdirectory(parsers)
-add_subdirectory(programoptions)
-add_subdirectory(solvers)
-add_subdirectory(string)

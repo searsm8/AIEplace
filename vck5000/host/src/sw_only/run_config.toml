@@ -34,21 +34,13 @@ auto_enable_preconditioning = true
 precond_coef_escalation = true  # double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef); false = diagnostic (fixed precond_coef)
 enable_density_clamp = true     # clamp sub-bin cells to ~bin size in the density solve (XPlace expand_ratio); smooths the force
 
-# --- TODO #11b (renamed 2026-08-01 from `macro_td_expand_ratio`, which named XPlace's internal
-#     `expand_ratio` field rather than the behaviour). ---
-# A movable macro deposits density equal to target_density instead of its area-conserving
-# real/clamped ratio, so every bin it fully covers sits at EXACTLY the bin capacity: full at the
-# target density, not overflowing. That is the correct accounting for an incompressible object --
-# and it is not "hiding" the macro, since the bin's whole budget is then spent and anything
-# overlapping it overflows immediately. With this off, a movable macro instead emits
-# area * (1 - target_density) of overflow permanently, whether or not anything overlaps it,
-# which no amount of moving can clear.
-# XPlace does this unconditionally (database.py:921-923), so true is the FAITHFUL branch.
-# Still default-off pending ONE piece of evidence: the MMS A/B measured mean +5.2% HPWL worse,
-# but it ran on ZERO-FILLER arms (see the filler fix, commit 7a0d030) and is confounded with the
-# stop criterion. Re-run that A/B, then expect this to be locked true and the branch deleted.
-# No effect when maximum_utilization == 1.0 (ISPD2005); only bites on MMS/ISPD2015.
-macro_deposits_target_density = false
+# TODO #11b (renamed 2026-08-01 from `macro_td_expand_ratio`): a movable macro deposits density
+# equal to target_density instead of its area-conserving real/clamped ratio, so every bin it fully
+# covers sits at EXACTLY the bin capacity -- full at the target density, not overflowing. XPlace
+# does this unconditionally (database.py:921-923); locked unconditional here too as of 2026-08-02
+# (re-run A/B against correct fillers: mean +0.6% HPWL over 8 macro-heavy designs, -0.4% excluding
+# adaptec5, which the flag also fixes from a phase-1 divergence to a clean converged phase-2 run --
+# see 1_REVIEW/NEW_REPORT_footprint_ab_20260802.md). No config toggle any more.
 deterministic = true            # reduction policy for the threaded iteration (see Common.h).
                                  # true  = additions happen in the same order the single-threaded
                                  #         code used, so results are bit-identical to the serial
@@ -115,6 +107,19 @@ results_dir = "results/single_runs" # overridden by DSE
 # Visualization options
 visualize = false # if true, will export visualization images
 iterations_per_export = 10
+
+# Zoom view (TODO #14): a second, magnified render of ONE region of the die, exported to
+# placement_zoom/ alongside the full-die frames and animated into zoom_placement.gif. At MMS
+# scale the full-die frame is 200k-1M cells in ~2000 px, so everything below the macro scale is
+# a grey wash; the zoom is where the standard-cell rows, the filler distribution and the macro
+# edges become visible. Only drawn at zoom: row pitch, density-bin boundaries, per-cell outlines.
+# Requires visualize = true.
+zoom = false
+zoom_center_x = 0.5 # window centre, as a fraction of die WIDTH  (0 = left edge, 1 = right edge)
+zoom_center_y = 0.5 # window centre, as a fraction of die HEIGHT
+# Window side, as a fraction of the SHORTER die dimension -- so the window is square in die units
+# and one setting means the same magnification on any benchmark. 0.05 = 1/400th of the die area.
+zoom_span = 0.05
 focus_nets = [] # focus nets are highlighted in visualization exports.
 rand_focus_IO = 0 # not yet implemented
 rand_focus_nets = 0

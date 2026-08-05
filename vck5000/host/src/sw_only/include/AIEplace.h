@@ -127,15 +127,6 @@ public:
     int  formula_bins_per_row = 0;           // grid the ePlace auto-formula picks (recorded even when overridden)
     bool precond_coef_escalation = true; // double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef)
     bool enable_density_clamp = true;   // clamp sub-bin cells in the density solve (XPlace expand_ratio)
-    // TODO #11b — a documented, DELIBERATE divergence from XPlace, kept as a runtime toggle.
-    // XPlace really does overwrite the area-conserving expand_ratio with target_density for
-    // movable macros (database.py:921-923), so `true` is the faithful branch; we default it OFF
-    // because the MMS A/B measured mean +5.2% HPWL worse, worst on the macro-heavy designs it was
-    // meant to help. That verdict is CONFOUNDED with the stop criterion — every `true` arm halted
-    // 25-65 iterations early because macros deposit less mass into the smoothed overflow that
-    // drives convergence — so re-test it once the stop criterion is fixed (TODO #4).
-    bool macro_deposits_target_density = false; // true = movable macros deposit at weight = target_density
-                                        // instead of the area-conserving real/clamped ratio
     bool dct_normalize = true;   // apply 1/N per forward DCT (bounds a_uv intermediates; global scale absorbed by lambda)
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
     float avg_node_size = 1.0f; // average movable cell area; grid-sizing divisor for the no-macros case
@@ -281,7 +272,9 @@ public:
     std::vector<float> step_length_history;
 
 #ifdef CREATE_VISUALIZATION
-    Visualizer viz;
+    Visualizer viz;        // the whole die
+    Visualizer viz_zoom;   // one magnified window of it (config output.zoom); TODO #14
+    bool zoom_view_enabled = false;
 #endif
     // Constructor
     Placer(std::string);
@@ -311,12 +304,15 @@ public:
     void compute_eField_DCT();
 
     void computeOverlaps();
-    float computeOverflow(bool clamp, std::vector<float>* out_density = nullptr,
-                          bool include_fillers = false);
-                                        // overflow metric; clamp=true = smoothed (GP convergence,
-                                        // XPlace expand_ratio field), clamp=false = exact (physical).
+    float computeOverflow(bool smooth, std::vector<float>* out_density = nullptr,
+                          bool include_fillers = false, bool exclude_macros = false);
+                                        // overflow metric; smooth=true = smoothed (GP convergence,
+                                        // XPlace expand_ratio field), smooth=false = exact (physical).
                                         // include_fillers=true mirrors XPlace's filler-inclusive GP
                                         // stop signal (diagnostic only; default excludes fillers).
+                                        // exclude_macros=true mirrors XPlace's zero_macro_grad (the
+                                        // Mixed-GP phase-1 reference number): movable macros are
+                                        // dropped from the deposit, denominator unchanged.
                                         // out_density (optional): area deposited per bin (col*ny+row).
     void dumpBinDensity(const std::string& path_prefix); // ρ maps (smoothed+exact) for XPlace compare
 
@@ -363,6 +359,13 @@ public:
     void printIterationSummaryTable(float hpwl, float overflow);
     void exportIterationVisualization(float overflow);    // no-op build without CREATE_VISUALIZATION
     void appendIterationLog(float hpwl, float overflow);  // iterations.dat
+#ifdef CREATE_VISUALIZATION
+    std::string phaseLabelForPlot() const;                // "" when the run cannot have a phase 2
+    void exportPhaseBoundaryVisualization(const std::string& tag, const std::string& caption,
+                                          float overflow);
+    void initializeZoomView();                            // config output.zoom*; TODO #14
+    void drawPlacementViews(const fs::path& dir, const fs::path& zoom_dir, PlotInfo info);
+#endif
 
     // initializeFocus's steps, broken out for readability
     void addNamedFocusNets();               // config output.focus_nets
@@ -375,6 +378,9 @@ public:
     struct FinalMetrics {
         float final_hpwl, final_hpwl_exact;
         float final_overflow, final_smoothed_overflow;
+        float final_overflow_macro_excluded;  // sharp/no-filler, movable macros dropped from the
+                                               // deposit; the number comparable to XPlace's
+                                               // Mixed-GP reference (_XPLACE_MMS_MIXED_GP).
         float total_runtime, iteration_avg;
         float hpwl_improvement;
         bool has_improvement;

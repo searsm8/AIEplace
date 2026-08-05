@@ -126,13 +126,14 @@ static inline float momentumCoeff(float& nesterov_ak, int enable_momentum) {
     return coeff;
 }
 
-// ---- sw_only updatePrecondWeights: w = max(1, num_pins + precond_coef*λ*(area/avg_area)) ----
+// ---- sw_only updatePrecondWeights: w = max(1, num_pins + precond_coef*λ*area) ----
+// RAW node area, matching XPlace alpha_2 = pcoef*λ*mov_node_area: both run in the same raw-DBU
+// frame, so the area term needs no normalization (sw_only Schedule.cpp).
 static inline void updatePrecondWeights(float* precond, const int32_t* degree, const float* area,
-                                        int M, float avg_area, float precond_coef, float lambda) {
+                                        int M, float precond_coef, float lambda) {
     const float lambda_area_coef = precond_coef * lambda;
     for (int n = 0; n < M; n++) {
-        const float norm_area = area[n] / avg_area;
-        float w = (float)degree[n] + lambda_area_coef * norm_area;
+        float w = (float)degree[n] + lambda_area_coef * area[n];
         precond[n] = w > 1.0f ? w : 1.0f;
     }
 }

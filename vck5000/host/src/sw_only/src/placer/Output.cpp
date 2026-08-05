@@ -135,11 +135,72 @@ void Placer::exportIterationVisualization(float overflow)
         if (!cfg["output"]["visualize"].value_or(false)) return;
         if (iteration > 1 && iteration % cfg["output"]["iterations_per_export"].value_or(10) != 0) return;
 
-        PlotInfo info = {iteration, hpwl_history.back(), overflow, step_length, density_weight, db.getBenchmarkName()};
-        viz.drawPlacement(db, output_dir / "placement", info);
+        PlotInfo info = {iteration, hpwl_history.back(), overflow, step_length, density_weight,
+                         db.getBenchmarkName(), "", phaseLabelForPlot(), phaseIteration(),
+                         bins_per_row, bins_per_row};
+        drawPlacementViews(output_dir / "placement", output_dir / "placement_zoom", info);
         //viz.drawElectricField(grid, output_dir / "efield", iteration);
     #endif
 }
+
+#ifdef CREATE_VISUALIZATION
+/// @brief Phase name for the visualization overlay, empty on runs that cannot have a phase 2 so
+///        their frames stay exactly as they were before two-phase placement existed.
+std::string Placer::phaseLabelForPlot() const
+{
+    if (!enable_phase2 || num_movable_macros == 0) return "";
+    return phaseName(m_phase);
+}
+
+/// @brief Render one frame at the phase-1 -> phase-2 boundary, regardless of the export cadence.
+///
+/// The two things phase 2 does to the picture — the LP's macro legalization jump and the
+/// standard-cell re-seed — both happen inside a single transition, and the regular cadence can
+/// miss them by up to iterations_per_export frames on either side. Called twice by
+/// beginFixedMacroPhase(): once with the macros legalized but the cells still in their phase-1
+/// positions, once after the re-seed.
+///
+/// `caption` replaces the usual phase name because m_phase is a poor description mid-transition:
+/// at the first call the macros are already frozen (drawn purple) while m_phase still reads
+/// mixed_size, which looks like a contradiction on the frame.
+void Placer::exportPhaseBoundaryVisualization(const std::string& tag, const std::string& caption,
+                                              float overflow)
+{
+    if (!cfg["output"]["visualize"].value_or(false)) return;
+
+    // Recomputed rather than read from hpwl_history: the re-seed has just moved every standard
+    // cell, so the last recorded HPWL belongs to a placement that no longer exists.
+    float hpwl = db.computeTotalWirelength(
+        ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"),
+        cfg["params"]["ignore_net_degree"].value_or(100));
+
+    // Sorts between iter_<N> and iter_<N+1> in gif_builder.py's natural ordering, so the boundary
+    // frames land in trajectory order rather than at the head of the GIF.
+    std::string name = "iter_" + std::to_string(iteration) + "_" + tag;
+    PlotInfo info = {iteration, hpwl, overflow, step_length, density_weight,
+                     db.getBenchmarkName(), name, caption, phaseIteration(),
+                     bins_per_row, bins_per_row};
+    drawPlacementViews(output_dir / "placement", output_dir / "placement_zoom", info);
+}
+
+/**
+ * @brief Render one frame in every configured view: the full die, and the zoom window if
+ *        output.zoom is set (TODO #14).
+ *
+ * Zoom frames go to their own directory so `gif_builder.py` — which turns a directory of PNGs
+ * into a GIF — animates them with no extra plumbing. The one exception is the final
+ * best_solution frame, which is written into the run directory itself; there the zoom copy
+ * shares the directory and takes a `_zoom` filename suffix so it cannot overwrite the full-die one.
+ */
+void Placer::drawPlacementViews(const fs::path& dir, const fs::path& zoom_dir, PlotInfo info)
+{
+    viz.drawPlacement(db, dir, info);
+    if (!zoom_view_enabled) return;
+    if (zoom_dir == dir && !info.filename_override.empty())
+        info.filename_override += "_zoom";
+    viz_zoom.drawPlacement(db, zoom_dir, info);
+}
+#endif
 
 /// @brief Append this iteration's HPWL/overflow/step stats to iterations.dat, with a header on the first write.
 void Placer::appendIterationLog(float hpwl, float overflow)
@@ -310,6 +371,14 @@ void Placer::writeResultsCSVHeader(std::ofstream& out_file,
     out_file << "Net Count,";
     out_file << "Node Count,";
     out_file << "Final HPWL Exact,";   // final HPWL over ALL nets (no net-degree mask)
+    // Phase 1 endpoint (TODO #13 two-phase runs only; N/A on a single-phase run) -- otherwise
+    // a two-phase sweep shows only the phase-2 endpoint and the macro-placement quality phase 1
+    // is responsible for is invisible.
+    out_file << "Phase1 Iters,";
+    out_file << "Phase1 HPWL,";
+    out_file << "Phase1 OVFW Smoothed,";
+    out_file << "Phase1 OVFW Exact,";
+    out_file << "Phase1 Stop Reason,";
     out_file << "Total Runtime (sec),";
     out_file << "DB IO Time (sec),";
     out_file << "Algorithm Time (sec),";
@@ -358,6 +427,15 @@ void Placer::writeResultsCSVRow(std::ofstream& out_file, float final_hpwl_exact,
     out_file << db.getNetsVector().size() << ",";
     out_file << db.getComponents().size() << ",";
     out_file << std::scientific << SCI(final_hpwl_exact) << ",";   // Final HPWL Exact (all nets)
+    if (m_phase1_summary.valid) {
+        out_file << m_phase1_summary.iterations << ","
+                 << std::scientific << SCI(m_phase1_summary.hpwl) << ","
+                 << std::scientific << PREC(m_phase1_summary.overflow_smoothed) << ","
+                 << std::scientific << PREC(m_phase1_summary.overflow_exact) << ","
+                 << stopReasonName(m_phase1_summary.stop_reason) << ",";
+    } else {
+        out_file << "N/A,N/A,N/A,N/A,N/A,";
+    }
     out_file << std::fixed << std::setprecision(3);
     out_file << total_runtime << ",";
     out_file << Logger::getFunctionTime("setupDesign") / 1.0e6 << ",";
@@ -458,6 +536,10 @@ Placer::FinalMetrics Placer::computeFinalMetrics()
     // The smoothed overflow the run actually converged on — same filler policy as the
     // convergence signal (recordIterationResults), so the report explains why it stopped.
     m.final_smoothed_overflow = computeOverflow(true, nullptr, convergenceIncludesFillers());
+    // Macro-excluded, sharp, no filler: the number comparable to XPlace's Mixed-GP reference
+    // (see logOverflowDiagnostics). Zero-cost on non-mixed-size designs (no movable macros to
+    // exclude), so always computed rather than gated on mixed_size_mode.
+    m.final_overflow_macro_excluded = computeOverflow(false, nullptr, false, true);
 
     m.total_runtime = getInterval(pgrm_start_time, getTime());
     m.iteration_avg = (iteration > 0) ? m.total_runtime / iteration : 0.0f;
@@ -472,9 +554,24 @@ Placer::FinalMetrics Placer::computeFinalMetrics()
     return m;
 }
 
-/// @brief Whether the GP-stop signal counts filler density, as XPlace's overflow_fn does.
+/**
+ * @brief Whether the GP-stop signal counts filler density, as XPlace's overflow_fn does.
+ *
+ * TODO #13 re-decision (2026-08-01): unconditionally true in phase 2. The two things that
+ * blocked it as a standalone phase-1 fix are specific to phase 1 and do not apply once macros
+ * are frozen: phase 2 rebuilds the filler set in its own frame (so "phase 1 counts phase 2's
+ * fillers" is moot), and phase 2 already runs under the un-doubled stop_overflow with the
+ * plateau kill enabled (mixed_size_mode=false, Phase2.cpp:90/95) -- the same rules a
+ * filler-inclusive signal was always going to need. XPlace's own std-cell-fixed-macro GP has no
+ * toggle for this; it always counts fillers.
+ *
+ * Phase 1 keeps the config-controlled default (false) -- deciding it needs the per-design
+ * clamp/no-filler vs clamp/+filler split across the full MMS suite (TODO #13 breadth item 1),
+ * not yet measured.
+ */
 bool Placer::convergenceIncludesFillers()
 {
+    if (m_phase == Phase::STDCELL_FIXED_MACRO) return true;
     return cfg["params"]["convergence_include_fillers"].value_or(false);
 }
 
@@ -484,6 +581,15 @@ bool Placer::convergenceIncludesFillers()
  *        GP STOP signal is clamp+filler (overflow_fn on mov+filler density) and its reported
  *        overflow is sharp+filler. Self-contained (does not reuse FinalMetrics) so the labels
  *        stay truthful whatever filler policy the headline metrics use.
+ *
+ *        macro-excluded is the fifth, mixed-size-only number: sharp/no-filler with movable
+ *        macros dropped from the deposit. This is the one directly comparable to
+ *        tools/benchmarks.py::_XPLACE_MMS_MIXED_GP, which is evaluated after XPlace sets
+ *        ps.zero_macro_grad=True (run_placement_nesterov.py:173, evaluator.py:26-45) and whose
+ *        node_pos is reassembled from mov_node_pos[mov_lhs:mov_rhs] + data.node_pos[mov_rhs:]
+ *        (run_placement_nesterov.py:180-181) -- i.e. filler-EXCLUDED too, not the "includes
+ *        filler density" the old benchmarks.py comment claimed. On non-mixed-size designs
+ *        (no movable macros) this is identical to sharp/no-filler and adds nothing.
  */
 void Placer::logOverflowDiagnostics()
 {
@@ -491,7 +597,9 @@ void Placer::logOverflowDiagnostics()
         + "  sharp/no-filler=" + PREC(computeOverflow(false, nullptr, false))
         + "  clamp/+filler="   + PREC(computeOverflow(true,  nullptr, true))
         + "  sharp/+filler="   + PREC(computeOverflow(false, nullptr, true))
-        + "  (XPlace GP stop = clamp/+filler, XPlace report = sharp/+filler)");
+        + "  macro-excluded="  + PREC(computeOverflow(false, nullptr, false, true))
+        + "  (XPlace GP stop = clamp/+filler, XPlace report = sharp/+filler, "
+        + "XPlace Mixed-GP reference = macro-excluded)");
 }
 
 /// @brief Optional: dump the restored-best bin-density map (smoothed + exact) for offline
@@ -513,6 +621,15 @@ void Placer::exportSummaryReports(const BestSolution& chosen, const FinalMetrics
     Table results;
     results.add_row({"Benchmark name", db.getBenchmarkName()});
     results.add_row(RowStream{} << "Iterations" << iteration);
+    if (m_phase1_summary.valid) {
+        // TODO #13 two-phase run: without this, only the phase-2 endpoint shows and the
+        // macro-placement quality phase 1 is responsible for is invisible.
+        results.add_row(RowStream{} << "Phase 1 Iterations" << m_phase1_summary.iterations);
+        results.add_row(RowStream{} << "Phase 1 HPWL" << std::scientific << std::setprecision(3) << m_phase1_summary.hpwl);
+        results.add_row(RowStream{} << "Phase 1 Overflow (smoothed)" << std::scientific << std::setprecision(3) << m_phase1_summary.overflow_smoothed);
+        results.add_row(RowStream{} << "Phase 1 Overflow (exact, +fillers)" << std::scientific << std::setprecision(3) << m_phase1_summary.overflow_exact);
+        results.add_row({"Phase 1 Stop reason", stopReasonName(m_phase1_summary.stop_reason)});
+    }
     results.add_row(RowStream{} << "Total runtime (s)" << std::fixed << std::setprecision(3) << metrics.total_runtime);
     results.add_row(RowStream{} << "Database I/O time (s)" << std::fixed << std::setprecision(3) << Logger::getFunctionTime("setupDesign") / 1.0e6);
     results.add_row(RowStream{} << "Algorithm time (s)" << std::fixed << std::setprecision(3) << algo_time);
@@ -527,6 +644,16 @@ void Placer::exportSummaryReports(const BestSolution& chosen, const FinalMetrics
                                                                  : "Final Overflow (smoothed, no fillers)")
                                 << std::scientific << std::setprecision(3) << metrics.final_smoothed_overflow);
     results.add_row(RowStream{} << "Final Overflow (exact, +fillers)" << std::scientific << std::setprecision(3) << metrics.final_overflow);
+    if (num_movable_macros > 0) {
+        // Gate on num_movable_macros, not mixed_size_mode -- the latter is set false at the
+        // phase-2 transition (Phase2.cpp:90), which would otherwise silently drop this row on
+        // every run that actually reached phase 2.
+        // Deliberately NOT prefixed "Final Overflow (exact" -- that substring is what
+        // tools/{run_footprint_ab,run_mms_ab}.sh grep for the row above; a second match would
+        // silently steal it (grep | tail -1 in run_footprint_ab.sh's num()).
+        results.add_row(RowStream{} << "Macro-Excluded Overflow (exact, no fillers)" << std::scientific
+                                    << std::setprecision(3) << metrics.final_overflow_macro_excluded);
+    }
     results.add_row({"Stop reason", stopReasonName(m_stop_reason)});
     if (chosen.valid) {
         std::string type = (&chosen == &best_primary) ? "primary" : "fallback";
@@ -573,18 +700,26 @@ void Placer::exportVisualizationArtifacts(const BestSolution& chosen, const Fina
         PlotInfo info;
         if (chosen.valid) {
             info = {chosen.iteration, chosen.hpwl, chosen.overflow, 0, 0,
-                    db.getBenchmarkName(), "best_solution"};
+                    db.getBenchmarkName(), "best_solution", phaseLabelForPlot(), phaseIteration(),
+                    bins_per_row, bins_per_row};
         } else {
             info = {iteration, metrics.final_hpwl, metrics.final_overflow, step_length, density_weight,
-                    db.getBenchmarkName(), "best_solution"};
+                    db.getBenchmarkName(), "best_solution", phaseLabelForPlot(), phaseIteration(),
+                    bins_per_row, bins_per_row};
         }
-        viz.drawPlacement(db, run_output_dir, info);
+        drawPlacementViews(run_output_dir, run_output_dir, info);
 
         // use python script to create gif from generated pngs in run directory
         std::string quiet_flag = quiet ? " --quiet" : "";
-        std::string gif_command = "python3 tools/gif_builder.py " + run_output_dir + "/placement" + " -d 100 -o " + run_output_dir + "/full_placement.gif" + quiet_flag;
-        if (system(gif_command.c_str()) != 0)
-            Logger::log_warning("gif_builder.py failed (non-fatal): " + gif_command);
+        auto build_gif = [&](const std::string& png_dir, const std::string& gif_name) {
+            std::string gif_command = "python3 tools/gif_builder.py " + png_dir + " -d 100 -o "
+                                    + run_output_dir + "/" + gif_name + quiet_flag;
+            if (system(gif_command.c_str()) != 0)
+                Logger::log_warning("gif_builder.py failed (non-fatal): " + gif_command);
+        };
+        build_gif(run_output_dir + "/placement", "full_placement.gif");
+        if (zoom_view_enabled)
+            build_gif(run_output_dir + "/placement_zoom", "zoom_placement.gif");
     #endif
 }
 

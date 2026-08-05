@@ -1,4 +1,4 @@
-// density_bin_model.cpp -- pl_algo density_manager Stage 1 binning algorithm model.
+// density_bin_model.cpp -- pl_algo density-solve Stage 1 binning algorithm model.
 //
 // Proves, in pure host C++ (no HLS), that the STRIP-TILED two-pass binning the PL
 // kernel will use reproduces a naive full-grid scatter: same exact rect-intersection

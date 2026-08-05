@@ -14,6 +14,14 @@ wsl -e bash -c "cd /home/msears/phd/AIEplace && <your command>"
 Use real WSL/Linux paths (`/home/msears/…`) *inside* the wrapper, not the Windows UNC path.
 Anything touching the repo build, the toolchain, or Linux tools must go through `wsl -e bash -c`.
 
+## 🔧 A fresh clone must bootstrap third_party first
+`bash vck5000/tools/bootstrap_third_party.sh` — fetches the **Limbo submodule**
+(`third_party/Limbo`, pinned to upstream tag 3.5.2) and builds it out of tree into
+`third_party/limbo_{build,install}` (both gitignored). Without it `third_party/Limbo/` is empty
+and the host build fails on missing `limbo/parsers/...` headers. **No `.a` is tracked in this
+repo** — if you find yourself wanting to commit one, that is the bug. Details + the
+`-DBoost_NO_BOOST_CMAKE=ON` gotcha: `vck5000/host/README.md`.
+
 ## 📋 Always read vck5000/0_TODO/TODO.md for context
 Before starting work, read `vck5000/0_TODO/TODO.md` to understand current priorities, blockers,
 and in-progress tasks. This file is the source of truth for project state and helps avoid
@@ -32,6 +40,12 @@ AIEplace ports the ePlace analytical placement algorithm onto the AMD Versal VCK
 - **`pl_algo`** — the new PL-centric design (git branch `pl_algo`): the entire placement
   iteration runs on the PL; the AIE does only the FFT and the HPWL gradient graph.
 
+**`vck5000/host/src/common/` is NOT a variant** — it is the parser + data model (DataBase, Grid,
+Node/Component/IOPad, Net, Bin, Logger, Common) that both host variants build into themselves,
+plus the prebuilt Limbo parser libs in `common/lib/`. Landed 2026-08-04 (TODO #9) to end the
+silent fork between the two hosts. Fix a parser or geometry bug **there**, once. Nothing in
+`common/` may include `AIEplace.h`, `Visualizer.h`, or anything from `pl/`; see its README.
+
 ## Algorithm goal: mimic XPlace as closely as possible
 sw_only's placement algorithm should track the XPlace reference (`~/phd/Xplace/src/`) as
 faithfully as possible. Prefer matching XPlace's formulation over ad-hoc heuristics or
@@ -40,16 +54,20 @@ backtracking line search alone and applies **no magnitude clamp**, so sw_only do
 (the fixed `[0.0001, 4000]` step clamp was removed). When sw_only diverges from XPlace, that
 divergence should be deliberate and documented, not an accidental workaround.
 
-## pl_algo current state (2026-06)
-- Written under `vck5000/pl/src/pl_algo/`: `src/top.cpp` (top-level kernel that just wires the
-  modules per iteration), `src/formats.hpp` (the data-flow format contract), `src/modules/*.hpp`
-  (memory_writer, hpwl_manager, density_manager, iteration_update, metrics), `DATAFLOW.md`, and
-  build glue (`makeflags.mk`, `design.cfg`, `generate_link_cfg.py`).
-- **Module internals are stubs** — each module is defined by its I/O contract only (see
-  `DATAFLOW.md` and `formats.hpp`).
-- **Next step = Gate 1:** synthesize the top kernel with
-  `cd vck5000/pl && make PL=pl_algo TARGET=hw` (HLS C-synthesis; needs no emulation). Then fill
-  modules one at a time, each verified against the sw_only CPU reference.
+## pl_algo current state
+**`vck5000/pl/src/pl_algo/DATAFLOW.md` is the single authoritative source** — read it before
+touching pl_algo, and update it (not this section) when the state changes. `README.md` next to it
+is the orientation/entry point. Only the stable summary lives here:
+
+- Gate 1 (HLS C-synthesis, `cd vck5000/pl && make PL=pl_algo TARGET=hw`) **passed**. The datapath
+  modules are written and sw_emu-verified against the sw_only CPU golden, one at a time.
+- `top.cpp` is still a **bring-up scaffold**: one kernel, one xclbin, a `mode` arg selecting which
+  module runs (`host_interface.hpp` `top_mode`). Stage 5 replaces the mode switch with the unified
+  per-iteration datapath.
+- The device-resident control modules (`bb_reduce`, `param_scheduler`) are **built and verified but
+  not yet wired into `top.cpp`** — that is the correct in-progress state, not an oversight. Until
+  the resident loop lands, the host (`host/src/pl_algo/src/{Driver.cpp,Placement.hpp}`) owns the
+  γ/λ schedule and convergence test, one round-trip per iteration.
 
 ## Key design decisions
 - Hardware grid is **1024×1024** (sw_only used 64). Matrices (bin density, Ex, Ey) are
@@ -75,8 +93,9 @@ divergence should be deliberate and documented, not an accidental workaround.
   `LD_LIBRARY_PATH`.
 
 ## Verification references
-- sw_only CPU golden functions: `computeHpwlPartials_CPU` (`Partials.cpp`),
-  `compute_eField_DCT` (`Density.cpp`), `computeOverlaps`.
+- sw_only CPU golden functions (all under `vck5000/host/src/sw_only/src/placer/`):
+  `computeHpwlPartials_CPU` (`Partials.cpp`), `compute_eField_DCT` (`Density.cpp`),
+  `computeOverlaps` (`Density.cpp`).
 - Toy bring-up templates (outside this repo, both build + emulate cleanly):
   `~/phd/toy_design` (pure-PL vadd) and `~/phd/toy_aie` (minimal AIE + PL). See auto-memory
   `toy_reference_designs`.

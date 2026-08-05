@@ -3,7 +3,9 @@
 A VLSI global placer implementing the ePlace/RePlAce electrostatics formulation. **This variant
 runs entirely on the CPU** and is the golden reference every hardware block is verified against.
 Hardware offload (AIE + PL) lives in the `pl_algo` variant; `AIE=markv1`/`PL=markv1` hold the older
-partial-offload kernels. See TODO #9 — the two hosts merge once pl_algo bring-up completes.
+partial-offload kernels. The parser and data model are **shared** with `pl_algo` — they live in
+`host/src/common/`, not here (TODO #9, 2026-08-04). What remains in this directory is what is
+genuinely sw_only: the CPU optimizer, the DCT, and the visualizer.
 
 The algorithm tracks XPlace (`~/phd/Xplace/src/`) as faithfully as possible; where it deliberately
 diverges, the comment at that line says so and why.
@@ -16,20 +18,25 @@ make host HOST=sw_only
 ## Where to start reading
 
 `src/placer/AIEplace.cpp` is ~110 lines and holds the whole loop skeleton — read it first, then
-`include/Node.h` for the per-node state the loop acts on.
+`../common/include/Node.h` for the per-node state the loop acts on.
 
-## Core classes
+## Core classes — this variant
 
 | | |
 |---|---|
-| **Placer** (`AIEplace.h`, `src/placer/`) | The optimizer. Owns every hyperparameter and all iteration state. Split across `AIEplace.cpp` (loop skeleton), `Setup.cpp` (bring-up + initial placement), `Partials.cpp` (∇wirelength), `Density.cpp` (∇density), `Step.cpp` (BB/Nesterov step), `Schedule.cpp` (γ/λ policy + convergence), `Output.cpp` (reporting). |
+| **Placer** (`AIEplace.h`, `src/placer/`) | The optimizer. Owns every hyperparameter and all iteration state. Split across `AIEplace.cpp` (loop skeleton), `Setup.cpp` (bring-up + initial placement), `Partials.cpp` (∇wirelength), `Density.cpp` (∇density), `Step.cpp` (BB/Nesterov step), `Schedule.cpp` (γ/λ policy + convergence), `Output.cpp` (reporting), `Phase2.cpp`/`MacroLegalize.cpp` (mixed-size phase 2). |
+| **Visualizer** (`Visualizer.h/.cpp`) | Cairo placement rendering and convergence plots. Built only under `BUILD_VIZ` / `CREATE_VISUALIZATION`. |
+| **DCT** (`DCT.h/.cpp`) | 1D DCT / IDCT / IDXST — a naive O(N²) reference *and* an O(N log N) FFT (Makhoul) implementation, verified equal. |
+
+## Core classes — shared (`../common/`, also built into `pl_algo`)
+
+| | |
+|---|---|
 | **DataBase** (`DataBase.h/.cpp`) | The parsed design — macros, components, IO pads, nets — read from LEF/DEF or Bookshelf via the Limbo parsers. Also generates filler cells. |
 | **Grid** (`Grid.h/.cpp`) | The die partitioned into `bins_per_row × bins_per_col` bins. Scatters cell area into bins (ρ), holds per-bin `a_uv` and E-field, computes the overflow metric. `computeNodeFootprint` here is the single definition of density footprint geometry. |
 | **Node** (abstract) → **Component**, **IOPad** | A placeable object. Holds `current`/`next` iteration state (`node_pos` u, `probe_pos` v, `probe_grad` ∇f(v)), net memberships, and bin overlaps. `Node::step()` is the Nesterov update. |
 | **Net** (`Net.h/.cpp`) | A net and its pins; HPWL computation. |
-| **Logger** (`Logger.h/.cpp`) | Singleton logger with key-based filtering, `tabulate` tables, and `TIME_FUNCTION()` scope profiling. |
-| **Visualizer** (`Visualizer.h/.cpp`) | Cairo placement rendering and convergence plots. Built only under `BUILD_VIZ` / `CREATE_VISUALIZATION`. |
-| **DCT** (`DCT.h/.cpp`) | 1D DCT / IDCT / IDXST — a naive O(N²) reference *and* an O(N log N) FFT (Makhoul) implementation, verified equal. |
+| **Logger** (`Logger.h/.cpp`) | Static logger with an ordered severity scale, `tabulate` tables, and `TIME_FUNCTION()` scope profiling. |
 
 ## Algorithm flow
 

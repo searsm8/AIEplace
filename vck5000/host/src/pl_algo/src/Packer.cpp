@@ -47,7 +47,7 @@ PackedDesign packDesign(AIEplace::DataBase& db) {
     for (Net* net : nets) {
         const int32_t beg = (int32_t)pk.pins.size();
         for (const NetPin& pin : net->getPins()) {
-            auto it = idx.find(pin.node);
+            auto it = idx.find(pin.node_p);
             if (it == idx.end()) { ++unresolved; continue; } // not in v0 index space
             pk.pins.push_back(NodePin{ it->second, pin.offset.x, pin.offset.y, net_id });
         }

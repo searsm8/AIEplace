@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <numeric>
 #include <sstream>
 #include <unistd.h>
 
@@ -112,18 +113,20 @@ inline double edgeWeight(const MacroBox& a, const MacroBox& b, EdgeAxis axis)
  * This is the ASAP/arrival-time sweep of static timing analysis. A node's earliest position is
  * the max over its predecessors of (their earliest + the required separation) — max, not min,
  * because the binding constraint in a chain is the worst one. Fixed macros pin to their actual
- * position. Returns false if the graph has a cycle (should not happen: edges follow position
- * order) or if a chain runs past the die edge, i.e. the direction assignment is infeasible.
+ * position. Mirrors XPlace's implicit source node (a virtual predecessor with edge weight =
+ * half the macro's own size) by seeding every node at its own half-extent before relaxing.
+ * Returns false if the graph has a cycle (should not happen: edges follow position order at
+ * construction, and every repair move is chosen to preserve the DAG property).
  */
-bool longestPathEarliest(const std::vector<MacroBox>& macros, const std::vector<EdgeAxis>& edge,
-                         EdgeAxis axis, double die_extent, std::vector<double>& earliest)
+bool computeEarliest(const std::vector<MacroBox>& macros, const std::vector<EdgeAxis>& edge,
+                     EdgeAxis axis, std::vector<double>& L)
 {
     const int n = (int)macros.size();
-    earliest.assign(n, 0.0);
+    L.assign(n, 0.0);
     for (int i = 0; i < n; i++) {
         const MacroBox& m = macros[i];
         double half = (axis == EdgeAxis::X) ? m.w / 2 : m.h / 2;
-        earliest[i] = m.fixed ? ((axis == EdgeAxis::X) ? m.cx : m.cy) : half;
+        L[i] = m.fixed ? ((axis == EdgeAxis::X) ? m.cx : m.cy) : half;
     }
 
     // Kahn topological order over this axis' edges.
@@ -139,18 +142,216 @@ bool longestPathEarliest(const std::vector<MacroBox>& macros, const std::vector<
         int u = order[k];
         for (int v = 0; v < n; v++) {
             if (edge[u * n + v] != axis) continue;
-            double need = earliest[u] + edgeWeight(macros[u], macros[v], axis);
-            if (!macros[v].fixed) earliest[v] = std::max(earliest[v], need);
+            double need = L[u] + edgeWeight(macros[u], macros[v], axis);
+            if (!macros[v].fixed) L[v] = std::max(L[v], need);
             if (--indeg[v] == 0) order.push_back(v);
         }
     }
-    if ((int)order.size() != n) return false;   // cycle
+    return (int)order.size() == n;   // false = cycle
+}
 
+/**
+ * @brief Symmetric sweep from the high-die-edge "sink": the latest feasible centre for every
+ *        macro (STA required-time / ALAP). Reverse Kahn order: a node resolves once every
+ *        successor on this axis already has its latest value, mirroring XPlace's implicit sink
+ *        node (weight = half the macro's own size) via the die_extent-half seed.
+ */
+bool computeLatest(const std::vector<MacroBox>& macros, const std::vector<EdgeAxis>& edge,
+                   EdgeAxis axis, double die_extent, std::vector<double>& R)
+{
+    const int n = (int)macros.size();
+    R.assign(n, 0.0);
     for (int i = 0; i < n; i++) {
-        double half = (axis == EdgeAxis::X) ? macros[i].w / 2 : macros[i].h / 2;
-        if (earliest[i] > die_extent - half + 1e-6) return false;   // chain wider than the die
+        const MacroBox& m = macros[i];
+        double half = (axis == EdgeAxis::X) ? m.w / 2 : m.h / 2;
+        R[i] = m.fixed ? ((axis == EdgeAxis::X) ? m.cx : m.cy) : (die_extent - half);
     }
-    return true;
+
+    std::vector<int> outdeg(n, 0);
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < n; j++)
+            if (edge[i * n + j] == axis) outdeg[i]++;
+
+    std::vector<int> order;
+    order.reserve(n);
+    for (int i = 0; i < n; i++) if (outdeg[i] == 0) order.push_back(i);
+    for (size_t k = 0; k < order.size(); k++) {
+        int v = order[k];
+        for (int u = 0; u < n; u++) {
+            if (edge[u * n + v] != axis) continue;
+            double allowed = R[v] - edgeWeight(macros[u], macros[v], axis);
+            if (!macros[u].fixed) R[u] = std::min(R[u], allowed);
+            if (--outdeg[u] == 0) order.push_back(u);
+        }
+    }
+    return (int)order.size() == n;   // false = cycle
+}
+
+/// L and R for both axes, and the node-slack helpers built on top of them (XPlace's L/R/slack_v).
+struct LRState {
+    std::vector<double> Lx, Rx, Ly, Ry;
+};
+
+/// Full recompute of L and R on both axes over the current @p edge graph. sw_only's macro counts
+/// (tens to low hundreds) make XPlace's incremental affected-node BFS unnecessary — a full O(n +
+/// E) sweep per call is already cheap, and there are at most 5 trials x n macros of these.
+bool computeLR(const std::vector<MacroBox>& macros, const std::vector<EdgeAxis>& edge,
+               double die_w, double die_h, LRState& s)
+{
+    bool ok = true;
+    ok &= computeEarliest(macros, edge, EdgeAxis::X, s.Lx);
+    ok &= computeLatest(macros, edge, EdgeAxis::X, die_w, s.Rx);
+    ok &= computeEarliest(macros, edge, EdgeAxis::Y, s.Ly);
+    ok &= computeLatest(macros, edge, EdgeAxis::Y, die_h, s.Ry);
+    return ok;
+}
+
+/// XPlace's TNS (total negative slack): sum over every node and axis of min(slack, 0). Zero (up
+/// to floating tolerance) means every node's [L, R] window is non-empty on both axes — a
+/// feasible direction assignment provably exists.
+double totalNegativeSlack(const LRState& s)
+{
+    double total = 0.0;
+    for (size_t i = 0; i < s.Lx.size(); i++) {
+        total += std::min(0.0, s.Rx[i] - s.Lx[i]);
+        total += std::min(0.0, s.Ry[i] - s.Ly[i]);
+    }
+    return total;
+}
+
+/// One constraint-graph edge migration: delete (u_del -> v_del) from G_{axis_del}, add
+/// (u_add -> v_add) to G_{axis_add}.
+struct EdgeMove {
+    EdgeAxis axis_del; int u_del, v_del;
+    EdgeAxis axis_add; int u_add, v_add;
+};
+
+/**
+ * @brief Port of XPlace's mark_edge_to_move (macro_legalization.py:287). For a macro @p i whose
+ *        slack is negative on exactly one axis, find every predecessor j whose edge into i is
+ *        BINDING on that axis (L[i] == L[j] + weight(j,i)) and check whether re-routing j->i
+ *        onto the other axis is feasible without breaking any of j's (or i's) existing edges on
+ *        that axis. This is XPlace's "quick estimate" — it checks one hop of fanout rather than
+ *        re-running full propagation, which is why the caller re-derives L/R from scratch after
+ *        applying whatever this returns instead of trusting the estimate as final.
+ *
+ *        Ported literally, including one XPlace quirk: inside the j->i (edge_ji) candidate's
+ *        fanout check, a failure clears `edge_ij` rather than `edge_ji` (macro_legalization.py
+ *        :330-333 vs :312-320 has the same pattern but the assignment targets don't mirror it).
+ *        Left as-is rather than silently correcting the reference algorithm — the outer trial
+ *        loop always re-verifies feasibility from a full L/R recompute, so a wrongly-accepted
+ *        candidate here is caught, not trusted.
+ */
+std::vector<EdgeMove> markEdgeToMove(const std::vector<MacroBox>& macros,
+                                     const std::vector<EdgeAxis>& edge, int i, const LRState& s)
+{
+    const int n = (int)macros.size();
+    std::vector<EdgeMove> moves;
+    const double eps = 1e-9;
+
+    double x_slack = s.Rx[i] - s.Lx[i];
+    double y_slack = s.Ry[i] - s.Ly[i];
+    if ((x_slack >= 0 && y_slack >= 0) || (x_slack < 0 && y_slack < 0)) return moves;
+    EdgeAxis axis   = (x_slack >= 0 && y_slack < 0) ? EdgeAxis::Y : EdgeAxis::X;
+    EdgeAxis o_axis = (axis == EdgeAxis::X) ? EdgeAxis::Y : EdgeAxis::X;
+    const std::vector<double>& L_axis = (axis == EdgeAxis::X) ? s.Lx : s.Ly;
+    const std::vector<double>& L_o    = (axis == EdgeAxis::X) ? s.Ly : s.Lx;
+    const std::vector<double>& R_o    = (axis == EdgeAxis::X) ? s.Ry : s.Rx;
+
+    for (int j = 0; j < n; j++) {
+        if (i == j || edge[j * n + i] != axis) continue;               // j -> i on axis?
+        double w_ji = edgeWeight(macros[j], macros[i], axis);
+        if (std::fabs(L_axis[i] - (L_axis[j] + w_ji)) > eps) continue;  // not the binding pred
+
+        bool edge_ij = false, edge_ji = false;
+        double w_ij_o = edgeWeight(macros[i], macros[j], o_axis);
+
+        // Candidate: i -> j on o_axis. Check j's existing o_axis successors k stay feasible.
+        if (L_o[i] + w_ij_o <= R_o[j] + eps) {
+            edge_ij = true;
+            for (int k = 0; k < n && edge_ij; k++) {
+                if (edge[j * n + k] != o_axis || k == j) continue;
+                double w_jk = edgeWeight(macros[j], macros[k], o_axis);
+                if (L_o[i] + w_ij_o + w_jk > R_o[k] + eps) edge_ij = false;
+                else if (L_o[j] + w_jk > R_o[k] + eps) edge_ij = false;
+            }
+        }
+        // Candidate: j -> i on o_axis. Check i's existing o_axis successors k stay feasible.
+        if (L_o[j] + w_ij_o <= R_o[i] + eps) {
+            edge_ji = true;
+            for (int k = 0; k < n && edge_ji; k++) {
+                if (edge[i * n + k] != o_axis || k == i) continue;
+                double w_ik = edgeWeight(macros[i], macros[k], o_axis);
+                // XPlace quirk (see docstring): both failure branches clear edge_ij here.
+                if (L_o[j] + w_ij_o + w_ik > R_o[k] + eps) edge_ij = false;
+                else if (L_o[i] + w_ik > R_o[k] + eps) edge_ij = false;
+            }
+        }
+
+        if (edge_ij && edge_ji) {
+            // Both directions feasible: orient by current position order (keeps displacement
+            // small), same convention as buildConstraintGraph.
+            bool i_first = (o_axis == EdgeAxis::X) ? (macros[i].cx <= macros[j].cx)
+                                                    : (macros[i].cy <= macros[j].cy);
+            moves.push_back({axis, j, i, o_axis, i_first ? i : j, i_first ? j : i});
+        } else if (edge_ij) {
+            moves.push_back({axis, j, i, o_axis, i, j});
+        } else if (edge_ji) {
+            moves.push_back({axis, j, i, o_axis, j, i});
+        } else {
+            moves.clear();   // XPlace: a single infeasible candidate voids this macro's round
+        }
+    }
+    return moves;
+}
+
+/**
+ * @brief Step 2 — repair the constraint graph so every node's [L, R] window is non-empty on
+ *        both axes. Port of XPlace's longest_path_refinement repair loop
+ *        (macro_legalization.py:353): while total negative slack is negative and fewer than 5
+ *        trials have run, visit macros smallest-area-first (ties broken by slack, then position,
+ *        then index — XPlace's exact tiebreak) and migrate any binding edge mark_edge_to_move
+ *        finds onto the axis with room. Mutates @p edge and @p state in place.
+ */
+void runLongestPathRefinement(const std::vector<MacroBox>& macros, std::vector<EdgeAxis>& edge,
+                              double die_w, double die_h, LRState& state)
+{
+    const int n = (int)macros.size();
+    int trials = 0;
+    while (totalNegativeSlack(state) < -1e-9 && trials < 5) {
+        trials++;
+        std::vector<int> order(n);
+        std::iota(order.begin(), order.end(), 0);
+        std::sort(order.begin(), order.end(), [&](int a, int b) {
+            double area_a = macros[a].w * macros[a].h, area_b = macros[b].w * macros[b].h;
+            if (area_a != area_b) return area_a < area_b;               // smallest area first
+            double slack_a = (state.Rx[a] - state.Lx[a]) + (state.Ry[a] - state.Ly[a]);
+            double slack_b = (state.Rx[b] - state.Lx[b]) + (state.Ry[b] - state.Ly[b]);
+            if (slack_a != slack_b) return slack_a > slack_b;           // XPlace sorts by -sum_slack
+                                                                          // ascending == largest slack first
+            if (macros[a].cx != macros[b].cx) return macros[a].cx < macros[b].cx;
+            if (macros[a].cy != macros[b].cy) return macros[a].cy < macros[b].cy;
+            return a < b;
+        });
+
+        for (int i : order) {
+            std::vector<EdgeMove> moves = markEdgeToMove(macros, edge, i, state);
+            if (moves.empty()) continue;
+            for (const EdgeMove& mv : moves) {
+                edge[mv.u_del * n + mv.v_del] = EdgeAxis::NONE;
+                edge[mv.u_add * n + mv.v_add] = mv.axis_add;
+            }
+            if (!computeLR(macros, edge, die_w, die_h, state)) {
+                Logger::log_warning("Macro legalization: longest-path refinement produced a "
+                                    "cycle; stopping repair with the best graph found so far");
+                return;
+            }
+        }
+    }
+    if (totalNegativeSlack(state) < -1e-9)
+        Logger::log_warning("Macro legalization: longest-path refinement did not reach feasibility "
+                            "after 5 trials (total negative slack " + PREC(totalNegativeSlack(state)) +
+                            "); a chain of macros is genuinely wider than the die on some axis");
 }
 
 /// Exact overlap area between two boxes at their current centres (0 if disjoint).
@@ -338,39 +539,40 @@ void Placer::runMacroLegalization()
     const double die_w = (double)grid.getDieWidth();
     const double die_h = (double)grid.getDieHeight();
 
-    // Steps 1-2: choose separation directions, then verify each axis' longest path fits the die.
-    // A failure here means the direction assignment is infeasible; XPlace repairs it by moving
-    // edges between the graphs, we currently report and fall through to the LP, which will then
-    // be infeasible and leave the macros untouched. (Refinement is the next thing to port.)
+    // Step 1: choose separation directions. Step 2: repair the guess (longest-path refinement,
+    // XPlace macro_legalization.py:353) -- migrate edges between G_x/G_y until every macro's
+    // [L, R] window is non-empty on both axes, i.e. a feasible direction assignment exists.
     std::vector<EdgeAxis> edge = buildConstraintGraph(macros);
-    std::vector<double> earliest_x, earliest_y;
-    bool feasible_x = longestPathEarliest(macros, edge, EdgeAxis::X, die_w, earliest_x);
-    bool feasible_y = longestPathEarliest(macros, edge, EdgeAxis::Y, die_h, earliest_y);
-    if (!feasible_x || !feasible_y)
-        Logger::log_warning(std::string("Macro legalization: constraint graph infeasible on the ") +
-                            (!feasible_x ? "x" : "y") + " axis (a chain of macros is wider than "
-                            "the die). Longest-path refinement is not ported yet.");
+    LRState state;
+    computeLR(macros, edge, die_w, die_h, state);
+    double slack_before = totalNegativeSlack(state);
+    if (slack_before < -1e-9) runLongestPathRefinement(macros, edge, die_w, die_h, state);
+    bool feasible = totalNegativeSlack(state) > -1e-9;
+    if (slack_before < -1e-9)
+        Logger::log_detail("Macro legalization: longest-path refinement total negative slack " +
+                           PREC(slack_before) + " -> " + PREC(totalNegativeSlack(state)) +
+                           (feasible ? "  (repaired)" : "  (still infeasible)"));
 
     std::string cbc = findCbc(macro_lp_solver);
     double displacement = 0.0;
     bool solved = false;
-    if (!cbc.empty() && feasible_x && feasible_y) {
+    if (!cbc.empty()) {
         solved = solveDisplacementLP(macros, edge, die_w, die_h, cbc, output_dir, &displacement);
         if (!solved) Logger::log_warning("Macro legalization: CBC did not return an optimal "
                                          "solution; falling back to the longest-path placement");
-    } else if (cbc.empty()) {
+    } else {
         Logger::log_warning("Macro legalization: no CBC binary found (set params.macro_lp_solver); "
                             "falling back to the longest-path placement");
     }
 
-    if (!solved && feasible_x && feasible_y) {
-        // Fallback: the longest-path earliest positions satisfy every constraint by construction,
-        // so they are legal — just not minimum-displacement.
+    if (!solved && feasible) {
+        // Fallback: the (now-repaired) longest-path earliest positions satisfy every constraint
+        // by construction, so they are legal — just not minimum-displacement.
         for (size_t i = 0; i < macros.size(); i++) {
-            displacement += std::fabs(earliest_x[i] - macros[i].cx) +
-                            std::fabs(earliest_y[i] - macros[i].cy);
-            macros[i].cx = earliest_x[i];
-            macros[i].cy = earliest_y[i];
+            displacement += std::fabs(state.Lx[i] - macros[i].cx) +
+                            std::fabs(state.Ly[i] - macros[i].cy);
+            macros[i].cx = state.Lx[i];
+            macros[i].cy = state.Ly[i];
         }
         solved = true;
     }
@@ -392,7 +594,10 @@ void Placer::runMacroLegalization()
     if (overlaps_after > 0)
         Logger::log_warning("Macro legalization: " + std::to_string(overlaps_after) +
                             " overlapping pairs remain (worst " + SCI(worst_after) +
-                            " area). Needs the longest-path refinement pass.");
+                            " area) even after longest-path refinement" +
+                            (feasible ? "" : " (still infeasible after 5 repair trials)") +
+                            ". Not yet ported: macro_legalization_xy variant, site/row alignment, "
+                            "retry-with-longer-CBC-time-limit.");
 }
 
 AIEPLACE_NAMESPACE_END

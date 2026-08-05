@@ -250,9 +250,7 @@ int main(int argc, char** argv) {
         std::vector<int32_t> degree(M, 0);
         for (const auto& r : pk.pins) if (r.node_idx >= 0 && r.node_idx < M) degree[r.node_idx]++;
         std::vector<float> area(M);
-        float total_mov = 0.0f;
-        for (int n = 0; n < M; n++) { area[n] = pk.node_box[n].w * pk.node_box[n].h; total_mov += area[n]; }
-        const float avg_area = total_mov / std::max(1, M);
+        for (int n = 0; n < M; n++) area[n] = pk.node_box[n].w * pk.node_box[n].h;
 
         // target_density from the benchmark's placement.constraints (maximum_utilization); ISPD2005
         // has no constraints file -> default 1.0 (matches sw_only and XPlace ispd2005).
@@ -277,7 +275,7 @@ int main(int argc, char** argv) {
         std::vector<plalgo::coord_t> final_pos(M);
         const int ran = plalgo::runPlacement(cfg, N, M, num_nets, num_pins, num_npins,
             pk.node_pos.data(), pk.node_box.data(), pk.net_ptr.data(), pk.pins.data(),
-            pk.npins.data(), lut.data(), lut_size, degree.data(), area.data(), avg_area,
+            pk.npins.data(), lut.data(), lut_size, degree.data(), area.data(),
             hpwl_hist.data(), ovfl_hist.data(), final_pos.data(), argv[3]);
 
         // Sanity: loop ran, final positions finite and inside the die (proves the loop closes

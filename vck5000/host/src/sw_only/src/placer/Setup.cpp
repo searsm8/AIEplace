@@ -82,15 +82,15 @@ void Placer::setupGrid()
 {
     grid = Grid(db.getDieArea(), bins_per_row, bins_per_row);
     grid.setClampDensity(enable_density_clamp);
-    grid.setMacroDepositsTargetDensity(macro_deposits_target_density);   // TODO #11b
     grid.setTargetDensity(target_density);
     die_size = min(grid.getDieWidth(), grid.getDieHeight());
 }
 
 /**
  * @brief Tag movable macros with XPlace's is_mov_macro rule (database.py:621-632). Consumed by
- *        DataBase::addFillers (which works in the standard-cell frame) and the TODO #11b
- *        experiment. A MOVABLE node is a macro iff all three hold:
+ *        DataBase::addFillers (which works in the standard-cell frame), the macro deposit weight
+ *        in computeNodeFootprint (TODO #11b), and the macro legalizer. A MOVABLE node is a macro
+ *        iff all three hold:
  *          1. height > 2.01 * row_height          (taller than ~two standard-cell rows)
  *          2. area   > 10 * mean(area of the smallest 99.9% of movable nodes)
  *          3. both dimensions non-degenerate
@@ -262,7 +262,6 @@ void Placer::loadConfiguration()
     auto_enable_preconditioning = cfg["params"]["auto_enable_preconditioning"].value_or(auto_enable_preconditioning);
     precond_coef_escalation = cfg["params"]["precond_coef_escalation"].value_or(precond_coef_escalation);
     enable_density_clamp = cfg["params"]["enable_density_clamp"].value_or(enable_density_clamp);
-    macro_deposits_target_density = cfg["params"]["macro_deposits_target_density"].value_or(macro_deposits_target_density);
     // TODO #13 phase 2 (see Phase2.cpp). Only ever engages on a design with movable macros.
     enable_phase2 = cfg["params"]["enable_phase2"].value_or(enable_phase2);
     macro_legalization_enabled =
@@ -400,9 +399,46 @@ void Placer::initializeVisualization()
         if (cfg["output"]["visualize"].value_or(false)) {
             initializeFocus();
             viz.init(db.getDieArea());
+            initializeZoomView();
         }
     #endif
 }
+
+#ifdef CREATE_VISUALIZATION
+/**
+ * @brief Set up the optional zoom view — a second, magnified render of one region (TODO #14).
+ *
+ * The window is configured as a CENTRE + SPAN in fractions of the die rather than in absolute
+ * die coordinates, so one config means the same thing on every benchmark (MMS die sizes span
+ * two orders of magnitude). The span is a fraction of the SHORTER die dimension, which makes the
+ * window square in die units and therefore the magnification isotropic.
+ *
+ * A window that runs off the die is left alone: seeing the die edge, and the filler/row structure
+ * against it, is one of the things worth looking at.
+ */
+void Placer::initializeZoomView()
+{
+    zoom_view_enabled = cfg["output"]["zoom"].value_or(false);
+    if (!zoom_view_enabled) return;
+
+    Box die = db.getDieArea();
+    const float die_w = die.getXsize(), die_h = die.getYsize();
+    const float span_fraction = std::clamp((float)cfg["output"]["zoom_span"].value_or(0.05), 1e-4f, 1.0f);
+    const float span = span_fraction * std::min(die_w, die_h);
+    const float center_x = (float)cfg["output"]["zoom_center_x"].value_or(0.5) * die_w;
+    const float center_y = (float)cfg["output"]["zoom_center_y"].value_or(0.5) * die_h;
+
+    ViewWindow view;
+    view.xl = center_x - 0.5f * span;  view.xh = center_x + 0.5f * span;
+    view.yl = center_y - 0.5f * span;  view.yh = center_y + 0.5f * span;
+    view.zoomed = true;
+    viz_zoom.init(die, view);
+
+    Logger::log_info("Zoom view: " + PREC(span) + " x " + PREC(span) + " window at ("
+        + PREC(center_x) + ", " + PREC(center_y) + ") = " + PREC(100.0f * span_fraction)
+        + "% of the shorter die dimension; frames in placement_zoom/");
+}
+#endif
 
 /**
  * @brief Initialize placement of all movable nodes: a tight Gaussian cluster at the die center

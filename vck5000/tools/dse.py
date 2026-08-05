@@ -500,13 +500,69 @@ def write_markdown_summary(sweep_dir, rows, dse_cols):
 # DSE Main Loop
 # =============================================================================
 
-def dse():
+def _norm(value) -> str:
+    """Normalize a config value and a results.csv cell to one comparable string.
+
+    The exe round-trips values through TOML and back out as CSV text, so the same
+    setting can read `0.5` on one side and `0.500000` on the other. Compare numbers
+    numerically and everything else as a case-folded string.
+    """
+    text = str(value).strip()
+    try:
+        return repr(float(text))
+    except ValueError:
+        return text.casefold()
+
+
+def completed_run_keys(sweep_dir: str, columns: list, has_labels: bool) -> set:
+    """Keys of the runs already recorded in a sweep's results.csv.
+
+    A run's identity is its design plus the value it gave every swept column — the
+    same tuple write_run_config() emits into DSE_info, which is where those CSV
+    columns come from. Rows with no Design (a truncated final line from an
+    interrupted sweep) are ignored, so the run they came from is redone.
+    """
+    csv_path = os.path.join(sweep_dir, "results.csv")
+    if not os.path.exists(csv_path):
+        return set()
+    import csv
+    keys = set()
+    with open(csv_path) as f:
+        for row in csv.DictReader(f):
+            design = (row.get("Design") or "").strip()
+            if not design:
+                continue
+            key = [_norm(design)]
+            if has_labels:
+                key.append(_norm(row.get("run", "")))
+            key += [_norm(row.get(p, "")) for p in columns if p != "benchmark"]
+            keys.add(tuple(key))
+    return keys
+
+
+def run_key(overrides: dict, label, columns: list, has_labels: bool, section_for) -> tuple:
+    """The completed_run_keys() key for a run that has not happened yet."""
+    bench = str(overrides.get("benchmark", "")).rsplit("/", 1)[-1]
+    key = [_norm(bench)]
+    if has_labels:
+        key.append(_norm(label or ""))
+    key += [_norm(overrides.get(p, "")) for p in columns if p != "benchmark"]
+    return tuple(key)
+
+
+def dse(resume: str = None):
     """
     Design Space Exploration — exhaustive sweep over all parameter combinations.
 
     Computes the Cartesian product of all value lists in dse_sweep and runs
     AIEplace once for each configuration. Runs up to MAX_PARALLEL processes
     concurrently, each with its own config file copy and log file.
+
+    `resume` reuses an existing results/DSE_* directory and skips every run already
+    recorded in its results.csv, so an interrupted sweep continues instead of
+    restarting. The sweep definition must be the same one the directory was created
+    with — a run is matched on its parameter values, so editing dse_sweep between the
+    original launch and the resume silently re-runs whatever no longer matches.
     """
     # Load the single base config file
     base_config = load_config(CONFIG_PATH)
@@ -558,13 +614,29 @@ def dse():
     print(f"DSE: {len(param_names)} swept param(s) -> {n_product} product run(s) "
           f"+ {len(explicit_runs)} explicit run(s) = {total_runs} total")
 
+    # Give every DSE sweep its own subdirectory so runs never collide — unless we are
+    # resuming, in which case we re-enter the original one and append to its results.csv.
+    if resume:
+        sweep_dir = resume.rstrip("/")
+        if not os.path.isdir(sweep_dir):
+            raise SystemExit(f"DSE: --resume {sweep_dir} is not a directory")
+        done = completed_run_keys(sweep_dir, columns, has_labels)
+        runs = [(o, l) for (o, l) in runs
+                if run_key(o, l, columns, has_labels, section_for) not in done]
+        skipped = total_runs - len(runs)
+        total_runs = len(runs)
+        print(f"DSE: resuming {sweep_dir} — {skipped} run(s) already recorded, "
+              f"{total_runs} remaining")
+        if total_runs == 0:
+            print("DSE: nothing left to run.")
+            return
+    else:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        sweep_dir = f"results/DSE_{timestamp}"
+
     parallel = min(MAX_PARALLEL, total_runs)
     print(f"DSE: Running with {parallel} parallel worker(s), "
           f"OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS', '(placer default)')} each")
-
-    # Give every DSE sweep its own subdirectory so runs never collide
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    sweep_dir = f"results/DSE_{timestamp}"
 
     # Prepare per-run config files and ParallelRun objects
     pending = []
@@ -578,9 +650,16 @@ def dse():
     base_config["output"]["results_dir"] = sweep_dir
     base_config.setdefault("output", {}).setdefault("DSE_info", "")
 
+    # A resumed sweep must not reuse config filenames — run numbering restarts at 1, so
+    # writing run_001.toml again would overwrite a different run's config and destroy the
+    # record of what actually ran. Start past the highest number already in configs/.
+    existing = [f for f in os.listdir(config_dir) if f.startswith("run_") and f.endswith(".toml")]
+    first_run_num = 1 + max((int(f[4:-5]) for f in existing if f[4:-5].isdigit()), default=0)
+
     print(f"DSE: Preparing {total_runs} config files...")
     benchmark_path = "host/benchmarks/"
-    for run_num, (overrides, label) in enumerate(runs, 1):
+    for progress, (overrides, label) in enumerate(runs, 1):
+        run_num = first_run_num + progress - 1
         # Deep-copy the base config for this run
         config = copy.deepcopy(base_config)
 
@@ -594,7 +673,7 @@ def dse():
 
         # Write this run's TOML config
         run_config_path = os.path.join(config_dir, f"run_{run_num:03d}.toml")
-        write_run_config(config, run_config_path, run_num, total_runs, columns,
+        write_run_config(config, run_config_path, progress, total_runs, columns,
                          section_for, label=(label or "") if has_labels else None)
 
         combo_str = "  ".join(f"{p}={v}" for p, v in overrides.items())
@@ -713,7 +792,13 @@ def dse():
 
 
 def main():
-    dse()
+    import argparse
+    ap = argparse.ArgumentParser(description="AIEplace design-space exploration sweep")
+    ap.add_argument("--resume", metavar="DSE_DIR",
+                    help="re-enter an existing results/DSE_* directory and run only the "
+                         "configurations missing from its results.csv")
+    args = ap.parse_args()
+    dse(resume=args.resume)
 
 if __name__ == "__main__":
     main()
