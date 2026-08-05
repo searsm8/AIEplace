@@ -74,8 +74,12 @@ int main(int argc, char** argv) {
     p.base_gamma = rows[0].base_gamma;
     p.min_step = 0.95f; p.max_step = 1.05f; p.init_multiplier = 8e-5f;
     p.dff_coef = (float)c_med; p.enable_momentum = 1; p.gamma_schedule = 1;
-    // convergence config: the trace was produced with stop 0.04; the rest are sw_only defaults.
-    p.overflow_threshold = 0.04f; p.min_iters = 50; p.max_iters = 1200;
+    // Convergence config MUST match the config_used.json of the run that produced the trace --
+    // the stop check compares against where the golden actually stopped, so a mismatched
+    // threshold fails convergence while the schedule scalars still verify bit-exact. These are
+    // the values from fixtures/schedule_trace_adaptec1.csv's run; pass a different trace and
+    // they must be updated to match it.
+    p.overflow_threshold = 0.07f; p.min_iters = 50; p.max_iters = 1200;
     p.conv_iters = 30; p.max_life = 30;
 
     SchedState st; sched_state_init(st, p);

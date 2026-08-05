@@ -65,15 +65,16 @@ stop reason, iters). Precond stays OFF (precond[n]=1), so no per-node preconditi
 uses the closed form `sched_dff`.
 
 **Status:** control modules (param_scheduler, bb_reduce, metrics, iteration_update) built; the
-bb_reduce + param_scheduler core C-synthesizes (`model/synth_check.{cpp,tcl}`). Remaining = compose
+bb_reduce + param_scheduler core C-synthesizes (`vck5000/test/synth_check.{cpp,tcl}`). Remaining = compose
 the datapath (stages 1-3) + control into one resident `top` loop with the AIE FFT streaming per
 iteration, then sw_emu-verify the trajectory vs the golden (needs the Vitis/AIE env).
 
 > **`bb_reduce.hpp` and `param_scheduler.hpp` are BUILT AND VERIFIED BUT NOT WIRED INTO `top.cpp`.**
 > This is the correct in-progress state, not an oversight -- they are the *device-resident* control
 > path, and nothing consumes them until the resident loop above is composed. They are exercised
-> today only through `model/synth_check.tcl` (HLS C-synthesis: 0 errors, Fmax 411 MHz, bb_loop II=1)
-> and `model/sched_verify.cpp` (offline bit-for-bit replay vs the sw_only golden trace). Meanwhile
+> today only through `vck5000/test/synth_check.tcl` (HLS C-synthesis: 0 errors, Fmax 411 MHz, bb_loop II=1)
+> and `vck5000/test/sched_verify.cpp` (offline bit-for-bit replay vs the sw_only golden trace -- runs in
+> `make test` against the committed `vck5000/test/fixtures/schedule_trace_adaptec1.csv`). Meanwhile
 > `top.cpp` still runs the host-owned loop above, with the equivalent policy math on the host in
 > `host/src/pl_algo/src/Placement.hpp`. Do not re-derive these modules -- they exist and they match.
 

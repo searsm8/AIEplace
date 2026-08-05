@@ -59,6 +59,25 @@ into `1_REVIEW`. Net effect: the review/handoff dirs are now OUTSIDE the tracked
            just the preconditioning); `precond_a1_norm`/`precond_a2_norm` instrumentation.
       Decide: commit these into XPlace (they're real infra + a genuine bug fix) or keep local-only.
 
+### vck5000/ top level — DONE 2026-08-05
+Three directories assessed for removal; only one was actually disposable.
+- [x] **`vck5000/bin/` deleted.** 15 MB, zero tracked files, already gitignored, holding an
+      `AIEplace.exe` from April 3 — output from a build layout that no longer exists (current
+      builds land in `build/$(TARGET)/host/$(HOST)/`). Regenerable by `make host`.
+- [x] **`vck5000/build_reports/` removed, content preserved.** Despite the name it was not build
+      output: it held one *tracked* file, `stage5c.md`, the record of Stage 5c completing. Moved to
+      `docs/archive/pl_algo_stage5c.md`. **Note for future cleanups:** it could NOT go into
+      `1_REVIEW/` — `.gitignore` has `[0-9]_*/`, so filing a tracked doc there silently drops it
+      from version control.
+- [x] **`vck5000/configs/` removed; `INPUT_FILE=mkcfg` no longer exists.** The whole mechanism
+      (a dir, an `ifdef`, an `include`, one config file) existed to avoid typing two variable
+      assignments, and nothing else in the repo referenced it. Replaced by a named target:
+      **`make pl-algo`** = `make pl PL=pl_algo HOST=pl_algo`, `TARGET` passes through. Shows up in
+      `make help`. If muscle memory reaches for `INPUT_FILE=mkcfg`, that is why it stopped working.
+- [x] **Verification harnesses moved to `vck5000/test/`** (from `pl/src/pl_algo/model/`) so tests
+      are visible at the top level, with `make test` wired up. See `vck5000/test/README.md` and
+      `AIEplace/CLAUDE.md` § *Verification Loop*; the sw_only gap is **#17**.
+
 ---
 
 ## #2 — Consolidate the preconditioner / field-faithful code (validated 2026-07-26)
@@ -1615,6 +1634,60 @@ Parked at Mark's request 2026-08-03 — analysis done, no implementation.
       against the sw_only golden.
 - [ ] **(optional) init_step_seed narrow-range Morris** — [0.005, 0.05] screen to positively
       confirm μ* collapses; mechanism already understood, so low priority.
+
+---
+
+## #17 — sw_only has no automated tests (opened 2026-08-05)
+
+**Not built. This is the plan, not a description of something that exists.**
+
+`make test` landed 2026-08-05 (tier-1 offline suite, `vck5000/test/Makefile`, ~4 s, pure
+g++). It covers **pl_algo only**. sw_only — the most-tuned code in the repo, and the golden that
+every pl_algo module is verified against — has **no tripwire at all**. `make run` exercises it end
+to end but nothing asserts, so a silent quality regression is invisible until someone eyeballs a
+sweep. Note the asymmetry: a broken sw_only quietly invalidates every pl_algo verification too.
+
+Context on how the tiers work and why tier 1 must stay fast: `AIEplace/CLAUDE.md` § *Verification
+Loop*. **Do not put a slow sw_only run inside `make test`** — that suite's whole value is that it
+is cheap enough to run after every edit. This wants its own target (`make test-regress` or
+similar).
+
+### Why this is cheap to do well
+`params.deterministic` (default true) makes sw_only **bit-identical** — verified against the
+pre-threading serial binary on all 211447 adaptec1 positions at `OMP_NUM_THREADS` = 1, 3, 8
+(see #12 *Reproducibility*). So the test can assert **exact** equality against a recorded
+baseline, not a hand-tuned tolerance. No flakiness, no threshold to argue about, and it catches
+sub-percent drift that an eyeball A/B would sail straight past.
+
+### Shape
+- Run one small benchmark for a fixed iteration count with a **pinned `random_seed`**
+  (`run_config.toml` omits it and defaults to a time-based seed — see auto-memory
+  `pin-random-seed-in-manual-ab`; `deterministic = true` alone is not enough).
+- Assert final HPWL, final overflow, and iteration count against a committed baseline file.
+- Commit the baseline next to the test, with the config that produced it — same rule as
+  `vck5000/test/fixtures/`: a test cannot depend on anything under `results/`, which is
+  gitignored.
+- Make regenerating the baseline a deliberate, single documented command, so "the test failed so
+  I refreshed the baseline" cannot happen by reflex. A baseline updated without reading the diff
+  is the failure mode that turns this from a tripwire back into decoration.
+
+### Open decisions — resolve before building
+- [ ] **Which benchmark.** Smallest on disk is `ispd2019/ispd19_test1` (2.3 MB), then
+      `ispd19_test3` (3.9 MB); everything in ispd2015 is 11 MB+. pl_algo bring-up uses
+      `ispd2015/mgc_pci_bridge32_b`. **Unverified whether sw_only handles the ispd2019 format** —
+      check before assuming. Pick on measured wall-clock, not file size.
+- [ ] **How many iterations.** Long enough that the λ schedule and BB step have actually engaged
+      (a handful of iterations only tests parsing and init), short enough to run on demand.
+      Target well under a minute.
+- [ ] **What to assert.** HPWL + overflow + iteration count is the cheap version. Hashing all
+      final positions is stricter and nearly free given bit-identical determinism — decide whether
+      the extra strictness is worth a baseline that changes on every legitimate algorithm change.
+- [ ] **MMS caveat if an MMS design is chosen:** Bookshelf suites carry no `placement.constraints`,
+      so a template-derived config silently sits at `td=1.0`. Must set `maximum_utilization` and
+      `bins_per_row` explicitly (auto-memory `mms-needs-explicit-target-density`).
+
+**Until this exists:** changes to sw_only need manual A/B against a known-good run. Treat "the
+tests passed" as saying *nothing whatsoever* about sw_only.
 
 ---
 

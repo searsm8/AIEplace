@@ -29,9 +29,11 @@ disagree, `DATAFLOW.md` wins.
     `param_scheduler` (see Status).
   - *PL-only alternates*: `fft_pl` + `field_solve_pl` -- the whole density solve with no
     AIE, for the small-grid (`-DPL_GRID`) build.
-- `model/` -- offline C++ models and verification harnesses (`density_model`,
-  `density_bin_model`, `fft_pl_test`, `field_solve_test`, `sched_verify`) plus
-  `synth_check.{cpp,tcl}` (the HLS C-synthesis gate for the control core).
+- The offline models and verification harnesses that cover these modules live in
+  **`vck5000/test/`** (moved out of here 2026-08-05 so tests are visible at the top level):
+  `density_model`, `density_bin_model`, `fft_pl_test`, `field_solve_test`, `sched_verify`,
+  plus `synth_check.{cpp,tcl}` (the HLS C-synthesis gate for the control core).
+  Run them with `cd vck5000 && make test` -- seconds, pure g++, no Vitis needed.
 - `design.cfg` -- static compile-time PL config (fixed interfaces; authored by hand).
 - `generate_link_cfg.py` -- emits the static PL<->AIE connectivity at link time.
 - `DATAFLOW.md` -- per-iteration data flow, stage formats, and current status.

@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstdio>
 #include <random>
+#include <algorithm>
 
 using cd = std::complex<double>;
 static const double PI = 3.14159265358979323846;
@@ -192,6 +193,7 @@ int main() {
 
     // ---- 1D tests (N=1024 HW size, and N=64 sw_only BINS_PER_ROW) ----
     printf("1D transforms (rel_rms = ||makhoul - naive|| / ||naive||):\n");
+    double worst = 0.0;
     for (int N : {64, 1024}) {
         std::vector<double> x(N);
         for (auto& xi : x) xi = uni(rng);
@@ -199,6 +201,7 @@ int main() {
         double d_idct = rel_rms(IDCT_makhoul(x), IDCT_naive(x));
         double d_idxs = rel_rms(IDXST_makhoul(x),IDXST_naive(x));
         printf("  N=%-5d  DCT=%.3e  IDCT=%.3e  IDXST=%.3e\n", N, d_dct, d_idct, d_idxs);
+        worst = std::max(worst, std::max(d_dct, std::max(d_idct, d_idxs)));
     }
 
     // ---- 2D field pipeline (N=64, matches sw_only BINS_PER_ROW) ----
@@ -213,10 +216,15 @@ int main() {
     spectral(auv_g, ExG, EyG); inverse_fields(ExG, EyG, IDCT_naive,  IDXST_naive);
     spectral(auv_m, ExM, EyM); inverse_fields(ExM, EyM, IDCT_makhoul,IDXST_makhoul);
 
+    double d_auv = rel_rms(auv_m, auv_g), d_ex = rel_rms(ExM, ExG), d_ey = rel_rms(EyM, EyG);
     printf("\n2D pipeline (N=%d, rel_rms makhoul vs naive golden):\n", N);
-    printf("  a_uv=%.3e   Ex=%.3e   Ey=%.3e\n",
-           rel_rms(auv_m, auv_g), rel_rms(ExM, ExG), rel_rms(EyM, EyG));
+    printf("  a_uv=%.3e   Ex=%.3e   Ey=%.3e\n", d_auv, d_ex, d_ey);
+    worst = std::max(worst, std::max(d_auv, std::max(d_ex, d_ey)));
 
-    printf("\nPASS if all rel_rms ~ 1e-12 or below (double-precision mapping is exact).\n");
-    return 0;
+    // The Makhoul mapping is algebraically exact, so both sides are double-precision
+    // evaluations of the same transform: the only gap is rounding. Observed worst ~6.4e-14.
+    const double TOL = 1e-12;
+    bool ok = worst < TOL;
+    printf("\n%s  (worst rel_rms=%.3e, tol %.0e)\n", ok ? "PASS" : "FAIL", worst, TOL);
+    return ok ? 0 : 1;
 }

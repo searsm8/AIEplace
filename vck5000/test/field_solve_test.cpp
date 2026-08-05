@@ -28,7 +28,15 @@ int main(){
     plalgo::field_solve_pl(rf.data(),Ex.data(),Ey.data(),tA.data(),tB.data());
     double ex_e=0,ex_n=0,ey_e=0,ey_n=0;
     for(int i=0;i<N;i++)for(int j=0;j<N;j++){double dx=Ex[i*N+j]-ExG[i][j];ex_e+=dx*dx;ex_n+=ExG[i][j]*ExG[i][j];double dy=Ey[i*N+j]-EyG[i][j];ey_e+=dy*dy;ey_n+=EyG[i][j]*EyG[i][j];}
-    printf("N=%d  Ex rel_rms=%.3e  Ey rel_rms=%.3e\n",N,sqrt(ex_e/(ex_n+1e-30)),sqrt(ey_e/(ey_n+1e-30)));
-    printf("PASS if ~1e-6 (float PL field solve vs double naive golden).\n");
-    return 0;
+    double ex_rel=sqrt(ex_e/(ex_n+1e-30)), ey_rel=sqrt(ey_e/(ey_n+1e-30));
+    printf("N=%d  Ex rel_rms=%.3e  Ey rel_rms=%.3e\n",N,ex_rel,ey_rel);
+
+    // float PL field solve vs double naive golden. Observed ~9.8e-07, which sits at 0.98x a
+    // 1e-6 bound -- too tight to be stable, so the bound is 2e-6. A regression here is orders
+    // of magnitude, not a few percent; tightening this would only buy flakiness.
+    const double TOL = 2e-6;
+    double worst = fmax(ex_rel, ey_rel);
+    bool ok = worst < TOL;
+    printf("%s  (worst rel_rms=%.3e, tol %.0e)\n", ok ? "PASS" : "FAIL", worst, TOL);
+    return ok ? 0 : 1;
 }

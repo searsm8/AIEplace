@@ -35,8 +35,15 @@ int main() {
     plalgo::dct_1d_pl(xf, dct);
     plalgo::idct_1d_pl(xf, idct);
     plalgo::idxst_1d_pl(xf, idxst);
-    printf("N=%d  DCT rel_rms=%.3e  IDCT=%.3e  IDXST=%.3e\n",
-           N, rel_rms(dct, DCT_naive(xd)), rel_rms(idct, IDCT_naive(xd)), rel_rms(idxst, IDXST_naive(xd)));
-    printf("PASS if ~1e-6 (float radix-2 FFT vs double naive).\n");
-    return 0;
+    double e_dct = rel_rms(dct, DCT_naive(xd));
+    double e_idct = rel_rms(idct, IDCT_naive(xd));
+    double e_idxst = rel_rms(idxst, IDXST_naive(xd));
+    printf("N=%d  DCT rel_rms=%.3e  IDCT=%.3e  IDXST=%.3e\n", N, e_dct, e_idct, e_idxst);
+
+    // float radix-2 FFT vs double naive; observed worst ~3.9e-07 (IDXST).
+    const double TOL = 1e-6;
+    double worst = std::fmax(e_dct, std::fmax(e_idct, e_idxst));
+    bool ok = worst < TOL;
+    printf("%s  (worst rel_rms=%.3e, tol %.0e)\n", ok ? "PASS" : "FAIL", worst, TOL);
+    return ok ? 0 : 1;
 }

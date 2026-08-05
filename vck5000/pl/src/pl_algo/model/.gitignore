@@ -1,9 +1,0 @@
-synth_check_prj/
-vitis_hls.log
-*.log
-# compiled model binaries (built from the .cpp next to them; were tracked, untracked 2026-08-02)
-density_model
-density_bin_model
-fft_pl_test
-field_solve_test
-sched_verify

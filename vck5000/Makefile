@@ -2,11 +2,6 @@
 
 PROJECT_ROOT := $(CURDIR)
 
-# Custom config files, to avoid having to put too many varialbes on the cli
-ifdef INPUT_FILE
-include configs/$(INPUT_FILE)
-endif
-
 include $(PROJECT_ROOT)/common.mk
 include $(PL_DIR)/makeflags.mk
 
@@ -30,12 +25,25 @@ help:
 	@echo -e '\tmake xclbin:\t Package XSA for use on VCK5000.'
 	@echo -e '\tmake host:\t Builds the host code which runs on a host x86 machine.'
 	@echo -e '\tmake all:\t Builds the the entire application (xclbin and host).'
+	@echo -e '\tmake pl-algo:\t Shorthand for: make pl PL=pl_algo HOST=pl_algo (HLS C-synth of top.xo).'
+	@echo ""
+	@echo 'Run and verify:'
+	@echo -e '\tmake run:\t Build (if needed) and run HOST=$(HOST) with its default run_config.toml.'
+	@echo -e '\tmake test:\t Tier-1 offline verification suite. Seconds, pure g++, no Vitis/XRT needed.'
 	@echo ""
 
 .PHONY: all xclbin xsa aie pl host
 all: xclbin host
 xclbin: $(XCLBIN)
 xsa: $(XSA)
+
+# Build the PL-centric pl_algo design without setting PL/HOST by hand. TARGET passes through,
+# so bare `make pl-algo` is the HLS C-synthesis of top.xo (TARGET defaults to hw in common.mk).
+# Replaces the old `INPUT_FILE=mkcfg` config-include mechanism, removed 2026-08-05: it was a
+# directory plus an include to avoid typing two variable assignments, with one config file.
+.PHONY: pl-algo
+pl-algo:
+	$(MAKE) pl PL=pl_algo HOST=pl_algo TARGET=$(TARGET)
 
 host:
 	$(MAKE) -C host PROJECT_ROOT=$(PROJECT_ROOT) HOST=$(HOST)
@@ -109,12 +117,26 @@ clean_all:
 #BENCHMARK = ispd2015/mgc_superblue12
 #BENCHMARK = ispd2015/mgc_superblue16_a
 
-run:
+run: $(HOST_EXE)
 	@unset XCL_EMULATION_MODE
 	@clear
 	@echo "make run"
 #perf record #use this for perf profiler
 	time -p $(HOST_EXE) $(HOST_RUN_CONFIG)
+
+# =============================================================================
+#  make test -- tier-1 verification suite (see test/Makefile)
+# =============================================================================
+# Pure g++: no Vitis, no XRT, no device, no xclbin, and no toolchain env to source. Runs in
+# seconds and exits non-zero if any module has drifted from its golden -- so it is safe and
+# cheap to run after every edit. The slower tiers are separate on purpose:
+#   tier 2  HLS C-synthesis   test/synth_check.tcl   (needs Vitis)
+#   tier 3  sw_emu modes      the run-* targets below   (needs a built xclbin)
+TEST_DIR ?= $(PROJECT_ROOT)/test
+
+.PHONY: test
+test:
+	$(MAKE) -C $(TEST_DIR) test
 
 # =============================================================================
 #  pl_algo module verifies: build + run one bring-up mode under emulation.
