@@ -66,6 +66,7 @@ void Placer::printIterationResults()
 
     printIterationSummaryTable(hpwl, overflow);
     exportIterationVisualization(overflow);
+    dumpIterationPositions();   // TODO #16: same call site as the renderer, so both see the same state
     appendIterationLog(hpwl, overflow);
 }
 
@@ -224,31 +225,68 @@ void Placer::appendIterationLog(float hpwl, float overflow)
     hpwl_file.close();
 }
 
+#ifdef CREATE_VISUALIZATION
+/// @brief Parse the density_weight column back out of iterations.dat (field 5 of "Iter, HPWL,
+///        OVFW, step_len, density_weight, BkSteps"). density_weight has no in-memory history
+///        vector -- iterations.dat already carries it once per iteration, written in the same
+///        call as hpwl_history/ovfw_history/step_length_history's push_back
+///        (recordIterationResults -> printIterationResults -> appendIterationLog, every
+///        iteration, unconditionally), so this reads the existing log instead of adding a
+///        fourth push_back to the hot loop.
+static std::vector<float> readDensityWeightHistory(const fs::path& iterations_dat)
+{
+    std::vector<float> history;
+    std::ifstream file(iterations_dat);
+    std::string line;
+    std::getline(file, line); // header
+    while (std::getline(file, line)) {
+        std::istringstream ss(line);
+        std::string field;
+        for (int col = 0; col <= 4 && std::getline(ss, field, ','); ++col)
+            if (col == 4) history.push_back(std::stof(field));
+    }
+    return history;
+}
+#endif
+
 void Placer::plotHistories() {
 #ifdef CREATE_VISUALIZATION
     fs::path graph_dir = output_dir / "graphs";
     if (!fs::exists(graph_dir))
         fs::create_directories(graph_dir);
 
-    // Create individual plots
+    std::vector<float> density_weight_history = readDensityWeightHistory(output_dir / "iterations.dat");
+
+    // Categorical colors (TODO #18): blue/orange/aqua are the dataviz palette's first three
+    // fixed-order slots; density weight takes violet (slot 7) rather than the 4th slot (yellow),
+    // whose contrast against this chart's white background is too low for a 2px line.
+    using Series = CairoPlotter::Series;
+    Series hpwl_series{&hpwl_history,           "HPWL Convergence",    "HPWL",           0.165, 0.471, 0.839, false};
+    Series ovfw_series{&ovfw_history,           "Overflow",            "Overflow",       0.922, 0.408, 0.204, false};
+    Series step_series{&step_length_history,    "Step Length History", "Step Length",    0.106, 0.686, 0.478, false};
+    Series dens_series{&density_weight_history, "Density Weight",      "Density Weight", 0.290, 0.227, 0.655, true};
+
     CairoPlotter hpwl_plotter(800, 600);
-    hpwl_plotter.plotHistory(hpwl_history, "HPWL Convergence", "HPWL Value", 0.0, 0.5, 1.0);
+    hpwl_plotter.plotHistory(hpwl_series);
     hpwl_plotter.savePNG(graph_dir / "hpwl_history.png");
 
     CairoPlotter ovfw_plotter(800, 600);
-    ovfw_plotter.plotHistory(ovfw_history, "Overflow", "OVFW Value", 0.0, 0.5, 1.0);
+    ovfw_plotter.plotHistory(ovfw_series);
     ovfw_plotter.savePNG(graph_dir / "ovfw_history.png");
 
-    CairoPlotter coeff_plotter(800, 600);
-    coeff_plotter.plotHistory(step_length_history, "Step Length History", "Step Length", 1.0, 0.2, 0.2);
-    coeff_plotter.savePNG(graph_dir / "step_length_history.png");
+    CairoPlotter step_plotter(800, 600);
+    step_plotter.plotHistory(step_series);
+    step_plotter.savePNG(graph_dir / "step_length_history.png");
 
-    // Create combined plot
-    CairoPlotter dual_plotter(800, 600);
-    dual_plotter.plotDualHistory(hpwl_history, ovfw_history,
-                                "HPWL and Overflow History",
-                                "HPWL (normalized)", "Overflow (normalized)");
-    dual_plotter.savePNG(graph_dir / "combined_history.png");
+    CairoPlotter dens_plotter(800, 600);
+    dens_plotter.plotHistory(dens_series);
+    dens_plotter.savePNG(graph_dir / "density_weight_history.png");
+
+    // Stacked overview: all four, sharing one x-axis, in place of the old normalized dual-axis
+    // combined_history.png (dropped -- overlaying differently-scaled series risked manufacturing
+    // a correlation that wasn't really there).
+    CairoPlotter::plotStacked({hpwl_series, ovfw_series, step_series, dens_series},
+                               "Placement Convergence Overview", graph_dir / "overview.png");
 #endif
 }
 
@@ -486,8 +524,14 @@ void Placer::printFinalResults()
     writeResultsCSV(metrics.final_hpwl, metrics.final_hpwl_exact, metrics.final_overflow,
                     metrics.total_runtime, metrics.iteration_avg, metrics.hpwl_improvement, run_id);
 
+    // The restored best placement, tagged so the offline tool can render the same picture the
+    // cairo renderer writes as best_solution.png. That shared final frame is what step 2's
+    // C++-vs-Python comparison is anchored on (handoff §6).
+    dumpIterationPositions("best_solution");
+
     exportVisualizationArtifacts(chosen, metrics, run_output_dir);
     writeFinalDesignArtifacts(run_output_dir);
+    finalizePositionDump();
 
     Logger::log_info("All outputs saved to: " + run_output_dir);
 }

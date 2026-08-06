@@ -28,13 +28,61 @@ into `1_REVIEW`. Net effect: the review/handoff dirs are now OUTSIDE the tracked
 - [ ] Fold the still-relevant findings into TODO.md / memory so old reports can be archived.
 
 ### results/ + scratch
-- [ ] Prune the `results/DSE_*` and `results/morris_*` pile. KEEP the ones reports cite:
-      baseline `morris_20260723_173411`, new-code `morris_20260725_104908` (+ its
-      `morris_20260725_104513` analysis). Delete stale/aborted sweeps.
-- [~] `~/aieplace_tmp/` (1.1 G scratch): rescued the one authoritative artifact —
-      `xplace_mms_reference.md` (16-design XPlace golden HPWL) → committed to `docs/` (fc89bcb).
-      The rest (`swonly_*.pl` placements, A/B jsons/logs, run scripts, BEFORE/AFTER/viz dirs) is
-      reproducible scratch — safe for Mark to nuke the whole dir whenever.
+- [x] **DONE 2026-08-05: freed 67 G.** `/` went 96% → 89% (40 G → 107 G free); `vck5000/results`
+      87 G → 21 G. Machine was verified idle (no `AIEplace_exe`/`dse.py`/`morris.py`) first.
+      Helper installed: **`tools/prune_run_artifacts.sh`** (dry-run by default, `--go` to delete,
+      `--viz-only` mode; refuses to run while a sweep is live).
+
+      **Key insight — this was not keep-or-delete.** Each sweep's analysis-relevant metadata
+      (`results.csv`, `results.md`, `scorecard.md`, `configs/`) is only 23 K–5.6 M; the 72 G was
+      per-run payload (output `.def` placements + `placement/iter_N.png` frames). Reports cite only
+      `results.csv`/`results.md`, and `analyze_morris.py <DSE_dir> <morris_dir>` reads **only
+      `results.csv`**. So 16 sweeps were *slimmed* (per-run benchmark subdirs dropped, all
+      top-level files + `configs/` + `analysis/` kept) rather than deleted — every published number
+      and a full morris re-analysis still work. Verified by re-running `analyze_morris.py` on both
+      morris pairs post-prune: 360 result rows loaded, identical factor rankings.
+
+      - **Slimmed (11 sweeps):** `DSE_20260724_005636` (6.9 G), `_20260724_145322` (6.8 G),
+        `_20260724_205144` (5.1 G), `_20260724_100610` (1.7 G), `_20260723_200407` (1.5 G),
+        `_20260725_104908` (1.5 G), `_20260714_181404` / `_20260716_161321` / `_20260717_005948` /
+        `_20260715_233808` (1.4 G each), `_20260723_173423` (713 M).
+      - **Slimmed (5 of 6 VIZ archives):** `DSE_min_iters_VIZ` (11 G), `DSE_init_spread_VIZ`
+        (8.4 G), `DSE_init_spread_small_VIZ` (6.8 G), `DSE_lamba_max_step_VIZ` (5.5 G),
+        `DSE_backtracking_TF_VIZ` (4.1 G). Mark's call 2026-08-05.
+      - **Deleted whole (stale/aborted, 1.5 G):** `DSE_20260722_223824` (aborted, 169/170 rows,
+        superseded by `_20260723_173423`), `DSE_20260716_214056` (partial, 10 rows),
+        `DSE_20260724_142441` (8-row adaptec1 smoke).
+      - **KEPT IN FULL, deliberately:** `DSE_Good_Visualizations_March21` (5.9 G) — explicitly
+        curated by Mark, per-iteration GIF frames preserved. **All 7 `morris_*` dirs** (3.6 M
+        total — deleting them frees nothing and they hold the sensitivity designs + analyses).
+      - Out of scope, untouched: `2_ARTIFACTS` (1.8 G) and the non-`DSE_`/`morris_` results dirs
+        (`single_runs` 6.1 G, `gridsweep` 1.9 G, `mms_suite_precondON` 1.7 G, `VIZ` 752 M, …
+        ≈ 15 G total). **These are the obvious next target if more space is needed.**
+
+- [x] ⚠️ **CORRECTION to this checklist's own keep-list.** `morris_20260725_104908` **does not
+      exist** — that name conflated a morris dir with its sweep dir. Resolved by swept-column
+      signature (run labels are generic `run_NNN`, so a label-join matches every sweep of equal
+      size — it cannot disambiguate). True pairings:
+      - baseline `morris_20260723_173411` (mgc_fft_a, `init_step_length`) ↔ **`DSE_20260723_200407`**
+      - new-code `morris_20260725_104513` (mgc_fft_a, **`init_step_seed`** — unique) ↔
+        **`DSE_20260725_104908`**
+
+      **Trap:** pairing the baseline by *timestamp proximity* picks `DSE_20260723_173423`, which is
+      wrong — that one has 170 rows and belongs to the 16-var pilot `morris_20260722_223818`.
+      Anyone pruning by timestamp would have destroyed the baseline's actual data.
+
+- [x] **DONE 2026-08-05: `~/aieplace_tmp/` (1.1 G) removed.** Re-verified before deleting:
+      `xplace_mms_reference.md` is **byte-identical** to the committed `docs/` copy (fc89bcb,
+      working tree clean), and `mms_mod.zip` (331 M) was already extracted into
+      `vck5000/host/benchmarks/mms/` (2.6 G, 19 entries).
+
+- [ ] **TODO #16 `<run_dir>/viz/` is covered by the same policy.** The new per-run node-position
+      dumps (~96 MB per adaptec1 run, ~480 MB per bigblue4 run) are **reproducible output** — treat
+      them exactly like the `.def`s and `iter_N.png` frames: never the thing worth keeping, first
+      thing to drop. `results/*/*/viz` is already swept up by the default slim (it lives inside the
+      per-run dirs), and `tools/prune_run_artifacts.sh --viz-only` drops *just* the viz dumps when
+      the placements are still wanted. Given the per-run size, consider making viz output opt-in
+      rather than default for sweeps.
 
 ### code / comments audit
 - [x] DONE 2026-07-27 (commit bb7904b): fixed the misleading `AIEplace.h` defaults AND the root cause.
@@ -1538,11 +1586,152 @@ the full placement."*
 
 Shape of it:
 - The host stops rendering. `output.visualize` becomes **`output.export_iterations`** (an
-  interval, 0 = off): every N iterations it dumps node positions. Every other `output.*` viz key
-  (`zoom*`, `focus_nets`, `rand_*`) moves to the new tool.
+  interval, 0 = off): every N iterations it dumps node positions. The `zoom*` keys move to the new
+  tool; `focus_nets` / `rand_*` are deleted outright.
 - A new tool reads that dump and produces images/GIFs — any window, any zoom, any node-locked
   view, re-runnable in seconds against a placement that took an hour.
 - `Visualizer.cpp` / `Visualizer.h` and the cairo dependency leave the host build.
+
+**Defaults decided 2026-08-05 (Mark)** — handoff §7 is now RESOLVED, do not re-litigate:
+1. Frame cadence **20** in `make_viz_gifs.py --every`; `run_config.toml` ships
+   `export_iterations = 0` so DSE runs never dump.
+2. **Fillers stay exported**, paid for by **uint16 quantization** of positions instead of by an
+   `export_fillers` opt-out — making fillers opt-in would reintroduce the re-run cost this TODO
+   exists to remove. Encoding is over a 2×-inflated die box with a per-frame clamp count, so a
+   cell that escapes the die is still visible rather than silently pinned to the edge (handoff §4.5).
+3. Dump lives **inside the run dir** (`<run_dir>/viz/`). Bulk prune glob `results/*/*/viz` →
+   hand to **#1**.
+4. **`--focus-net` dropped.** The tool then has no netlist dependency at all and never parses a
+   benchmark. `rand_focus_IO` / `rand_focus_nodes` were already dead keys ("not yet implemented").
+
+**Sizing context measured 2026-08-05:** `vck5000/results` is **87 G**, disk at **96 % / 40 G free**.
+Decisions 1+2 together put adaptec1 at ~96 MB and bigblue4 at ~480 MB per run.
+
+### Step 1 — DONE 2026-08-05 (host export path; cairo renderer untouched)
+
+New `host/src/sw_only/src/placer/PositionDump.cpp` writes `<run_dir>/viz/{manifest.json,
+nodes_gen<N>.bin, frames_gen<N>.bin}`. Hooked into `printIterationResults` (cadence),
+`printFinalResults` (a `best_solution`-tagged frame taken from the same restored placement the DEF
+is written from), and both phase-2 boundaries. Deliberately **outside** `CREATE_VISUALIZATION` —
+this path is what survives when cairo is deleted in step 5.
+
+Config as built (Mark's call, differs from the handoff's §3 sketch — a bool gate, not interval-0):
+```toml
+dump_positions      = false   # master gate; nothing large is written unless toggled on
+iterations_per_dump = 20      # cadence, SEPARATE from the renderer's iterations_per_export
+```
+`dse.py` pins `dump_positions = False` alongside its existing `visualize = False`.
+
+**Gate PASSED on both a single-phase and a two-phase design** —
+`2_ARTIFACTS/check_position_dump.py <run_dir>` compares the last frame against the output DEF:
+
+| design | frames | gens | nodes | max marginal err | LSB |
+|---|---|---|---|---|---|
+| `ispd2015/mgc_pci_bridge32_a` (no movable macros) | 33 | 1 | 29 521 | 6.61 | 12.21 |
+| `mms/adaptec1` (**phase 2**, 62 movable macros) | 73 | 3 | 211 447 | 0.213 | 0.326 |
+
+Both at half an LSB with no systematic offset. The MMS run also proves the generation split:
+gen 0 `mixed_size` → gen 1 (single `legalized` frame, 371033 → 370971 nodes as 62 macros freeze)
+→ gen 2 `stdcell_fixed_macro`. `clamped` = 0 throughout.
+
+**One real format gap this shook out** (the other three findings were checker bugs — see the
+handoff): **`die_shift` was missing from the manifest and is NOT zero on MMS.** Bookshelf inputs
+are translated so the die lower-left sits at the origin, and the DEF adds the shift back — 459
+units on both axes for `mms/adaptec1`. `die.x0/y0` reads 0 on that path, so it is `die_shift`,
+not `die.x0/y0`, that carries the offset. Added `DataBase::getDieShift()` (one getter in
+`common/include/DataBase.h`) and `manifest.die_shift`. Also worth knowing: the quantization LSB
+is **per-axis** — dies are not square, and a square test die hides the bug completely.
+
+### Step 2 — DONE 2026-08-05 (`tools/generate_viz.py`, full-die view)
+
+Mark named it `generate_viz.py`; the handoff's `place_viz.py` does not exist. Python + numpy +
+Pillow, no new dependencies.
+
+```bash
+python3 tools/generate_viz.py <run_dir> [--iters A:B:S] [--out DIR] [--canvas N] [--gif]
+```
+
+Geometry, layer order and colours are ported from `Visualizer.cpp`; output is named `iter_<N>.png`
+to match it. Rasterization is vectorized (cells ≤8 px painted by broadcasting, macros by slicing):
+**~0.4 s per 371k-node MMS frame** vs ~4 s/frame for cairo inside the placement loop.
+
+**Gate PASSED** — `2_ARTIFACTS/compare_viz_frames.py <run_dir>` compares per-column/row ink
+profiles against the cairo frames of the same run:
+
+| run | frames | worst corr | worst emd |
+|---|---|---|---|
+| `mgc_pci_bridge32_a` (focus nets ON in cairo) | 32 | 0.9945 | 0.00125 |
+| `mms/adaptec1` (**phase 2**, focus off) | 70 | 0.9973 | 0.00052 |
+
+Thresholds 0.99 / 0.002. `check_viz_orientation.py` pointed at the *port's* output independently
+confirms y-up: 5 px worst corner error vs DEF/LEF ground truth (tolerance 20 px).
+
+**The trap: cairo centres a stroke on its path.** Filling the die-boundary rectangle inward
+instead offset that saturated 8 px line by half its width and — because the comparison crop began
+exactly on it — dragged frame correlation to **0.93**. Fixed both ends: strokes now straddle the
+path, and the comparison insets 1% past the die edge so boundary decoration cannot dominate a
+metric about where the cells are.
+
+Deliberate differences from cairo: no focus-net overlay (decision 4), phase banner gated on
+generation count rather than `enable_phase2`, and boundary frames named `iter_N_legalized` vs
+cairo's `iter_N_a_legalized` (so the comparison skips rather than pairs them).
+
+### Step 3 — DONE 2026-08-05 (zoom view + detail layers)
+
+```bash
+python3 tools/generate_viz.py <run_dir> --view zoom --center 0.5,0.5 --span 0.05
+```
+
+`--center`/`--span` mirror `output.zoom_center_*` / `zoom_span`. Adds clipping (zoom only), row
+pitch, bin grid, per-cell outlines, the zoom overlay line, and the `MAX_DETAIL_LINES = 256` drop
+rule — verified at its boundary on MMS (span 0.3 = 267 rows/154 bins drops rows, keeps bins;
+span 0.6 drops both).
+
+**Gate PASSED** on every frame available: mgc zoom 32/32 (worst corr 0.9956), mgc full 32/32
+(0.9995), MMS zoom 1/1, MMS full 1/1.
+
+**⚠ The cairo zoom renderer is impractical at MMS scale.** On `mms/adaptec1`, **one cairo zoom
+frame took 23 min 58 s** (file mtimes, cleanly isolated — nothing between the two writes but that
+render); the port does the same window in **3.6 s/frame**. Two causes, and only one is cairo's:
+`Visualizer.cpp` never pre-filters by window (it hands cairo all 371k rectangles and lets the clip
+sort it out, which does not avoid tessellation — the port drops 99.75% of the design first), and
+`outlineIfZoomed()` *strokes* that whole path, which is far dearer than filling. So the honest
+framing is that the **C++ zoom implementation is unoptimized**, not that cairo is unusable — a
+window pre-filter would close most of the gap. Doesn't change the conclusion: moving rendering
+offline removes the cost from the placement loop rather than tuning it.
+**Do NOT quote a cairo full-die per-frame number** — an earlier draft said 9 s, but that gap also
+contained nine placement iterations, so the full-die render was never isolated. Known instead: run
+135926 did 1398 iterations + 141 full-die renders in 454 s, so the full-die path is not the problem.
+A 140-frame MMS zoom GIF would be ~56 hours in cairo — which is why TODO #14's zoom was only
+ever shown on the 29.5k-cell mgc design. It is **slow, not broken**: a 1-iteration MMS run with
+zoom under `/usr/bin/time -v` gives exit status 0, 0 signals, 482 MB peak RSS — pure CPU time in
+path tessellation, no memory problem. **Consequence: the MMS zoom has exactly one cairo reference
+frame** (salvaged from a run abandoned mid-render); the 32-frame mgc zoom gate is what proves the
+window arithmetic. Do not plan on more — they cost a day each. This is also the strongest argument
+yet for the whole TODO.
+
+**Antialiasing added** (`--supersample`, default 2 full / 4 zoom): rasterize at N× and
+box-downsample, which *is* the coverage fraction cairo antialiases with. Lifted the step-2
+full-die numbers 0.9945 → 0.9995. Zoom needs the higher factor because it is the only view with
+per-cell outlines: at 2× two neighbouring cell edges merge onto one raster pixel and the frame
+loses 4–6% of its ink.
+
+**Three cairo stroke conventions found by the gate, all fixed:** strokes are *centred* on the path;
+grid-line widths must stay *fractional* (rounding width onto a rounded centre quantizes upward —
+a 1.638 px row line became 1.75 px, 7% too much ink, identified because the residual
+autocorrelated at lag 164 px = exactly the row pitch); rectangle outlines had the same bug.
+
+**Gate metric changed:** `emd` → `lag` + `ink`. emd normalizes each profile, so the zoom's
+uniformly spaced grid-line ink reads as a translation; on mgc iter_220 it showed 0.0033 with corr
+0.999 and zero real displacement, and converged to 0.0019 purely by raising supersampling 4×→8×.
+`lag` (cross-correlation offset in px) measures translation directly. Also added a `flat`-frame
+guard: a centred zoom window on iteration 1 is solid cells, and correlating two constants reads
+0.24 while the frames are in fact identical.
+
+Next action: handoff step 4 (node-lock, multi-view), then 5 (delete the cairo renderer).
+`check_viz_orientation.py` still wants promoting to `tools/` and generalizing off its hardcoded
+ISPD2015 paths — handoff §5.4. Minor: the 3-line header (benchmark+phase+zoom) overlaps the die
+box top edge at y=0.11 — faithful to cairo, worth fixing in step 4.
 
 ---
 
@@ -1688,6 +1877,103 @@ sub-percent drift that an eyeball A/B would sail straight past.
 
 **Until this exists:** changes to sw_only need manual A/B against a known-good run. Treat "the
 tests passed" as saying *nothing whatsoever* about sw_only.
+
+---
+
+## #18 — Overhaul the per-run `graphs/` output (opened 2026-08-05, DONE 2026-08-05)
+
+Mark, on a live Chart.js mockup built blind (without reading this code): *"I like your decisions.
+Colors look clear and vibrant. Stacking them and sharing the X-axis is efficient and clear. The
+current ones just seemed too plain. No axis data. Boring colors and font."* Also wants a
+**density_weight graph added** — currently absent entirely.
+
+**Shipped, per Mark's decisions** (4 individual PNGs + 1 stacked `overview.png`; combined_history
+dropped; log scale reworked): `CairoPlotter` in `Visualizer.h` was rewritten around a `Series`
+struct (data pointer, title, y-label, color, `log_scale` flag) with two entry points —
+`plotHistory(Series)` for one full-canvas chart, and static `plotStacked(vector<Series>, title,
+filename)` for N vertically-stacked panels sharing one x-axis, builds/saves its own surface.
+`density_weight_history` reads back the existing `density_weight` column of `iterations.dat`
+(`readDensityWeightHistory`, `Output.cpp`) rather than adding a 4th `push_back` to the hot loop —
+`appendIterationLog` already writes it every iteration in lockstep with the other three history
+vectors, so the parsed vector is guaranteed the same length/order for the shared x-axis. Colors:
+dataviz-skill categorical palette, first three fixed-order slots (blue/orange/aqua) plus violet
+(slot 7) for density weight in place of slot 4 (yellow), whose contrast against a white PNG
+background was measured too low (~2.1:1) for a legible line. Font swapped `"Arial"` →
+`"DejaVu Sans"` — confirmed a one-line family-name swap (no FreeType/file loading needed): cairo
+on this box links the fontconfig backend (`cairo-fc`), which resolves the family name the same
+way `tools/generate_viz.py`'s `load_font()` fallback chain does. Log scale: mapping and 10%
+padding both done in log10 space (padding in linear space would pad the wrong end), ticks snap to
+whole decades (`1e-9`, `1e-7`, …) rather than fractional-decade values. Y-axis label overlap fixed
+by measuring actual tick-label width (`cairo_text_extents`) and sizing the left margin from that,
+instead of a fixed 15px offset. X-axis now labels 1-based iteration number (array index + 1)
+instead of the raw index. Verified by building (`make host`, clean, no warnings) and running a
+real 400-iteration adaptec1 placement end-to-end — all 5 PNGs inspected visually, log scale/ticks/
+colors/shared-x-axis alignment all correct. Scratch verification run discarded after inspection.
+
+**Not matplotlib** (the initial guess was wrong) — `graphs/` is hand-drawn C++ via Cairo's C API:
+class `CairoPlotter`, header-only, `host/src/sw_only/include/Visualizer.h:134-427`. Driven by
+`Placer::plotHistories()` (`Output.cpp:228-254`), called once unconditionally at end-of-run from
+`main.cpp:16`, compiled in whenever `BUILD_VIZ=1` (default) — independent of the per-iteration
+`output.visualize`/`dump_positions` toggles. **Distinct from #16's `viz/` pipeline** — that one
+renders cell layouts (positions → PNG/GIF), this one renders scalar-metric line charts
+(HPWL/overflow/step_length → PNG). Don't conflate the two when picking this up.
+
+### Confirmed problems (verified against the code and the actual PNGs, not just taste) — ALL FIXED
+- [x] **No density_weight graph, and no history to plot it from.** Fixed by reading it back from
+      `iterations.dat` at end-of-run (`readDensityWeightHistory`) instead of adding a 4th
+      in-memory history vector — Mark's call, see the DONE note above.
+- [x] **`combined_history.png` has no tick labels on either axis.** Moot: `plotDualHistory` /
+      `combined_history.png` were deleted outright (Mark's decision — see below), not patched.
+- [x] **Y-axis label overlaps the bottom tick value.** Fixed properly, not nudged: the left
+      margin is now sized from the actually-measured tick-label width
+      (`cairo_text_extents`) instead of a fixed 15px offset.
+- [x] **Colors are two hardcoded literals reused everywhere.** Fixed: each metric has a fixed
+      identity color from the dataviz-skill categorical palette (see DONE note).
+- [x] **Font is Cairo's "toy" API guessing `"Arial"`.** Fixed: swapped to `"DejaVu Sans"`,
+      confirmed a one-line family-name swap since cairo here links the fontconfig backend — no
+      FreeType/file-path loading needed, resolving the open question below.
+- [x] **No log-scale support anywhere in `CairoPlotter`.** Fixed: log10-space mapping + padding +
+      whole-decade ticks, used by the density_weight panel.
+- [x] **Four separate 800×600 files, no shared x-axis.** Fixed: kept the 4 individual PNGs
+      (Mark's call) AND added `overview.png`, 4 panels stacked on one shared x-axis.
+      `combined_history.png`'s normalize-and-overlay approach is gone, not patched.
+
+### Direction discussed with Claude — not yet decided, needs Mark's sign-off before implementing
+A live mockup (Chart.js, deliberately built without reading the code above, fed real data pulled
+from a run's `iterations.dat`) proposed **stacked single-axis panels sharing one x-axis** (HPWL /
+density_weight-log / overflow) in place of the normalize-and-overlay approach, on the grounds that
+overlaying differently-scaled series (dual-axis or normalized) can visually manufacture a
+correlation that isn't really there — a bad property for a chart used to debug the algorithm.
+Mark's reaction was positive on the direction (panel layout, real per-metric colors, actual axis
+data). **This means matching the mockup's information design in Cairo, not switching plotting
+stacks** — Cairo can do everything the mockup did (log scale is a coordinate-mapping change,
+stacked panels are one taller surface with sub-plot rects, better colors are just better literals).
+Structurally this is a **new `CairoPlotter` method** (`plotStackedHistories` or similar) — the
+existing class draws exactly one full-surface chart per instance; there's no code path today that
+splits one surface into multiple axis regions.
+
+### Open decisions — ALL RESOLVED 2026-08-05 (Mark)
+- [x] **Keep 4 separate PNGs, or consolidate?** Both: kept all 4 individual PNGs (now including
+      `density_weight_history.png`) AND added `overview.png` stacking all 4 (HPWL, Overflow, Step
+      Length, Density Weight) on one shared x-axis. `step_length_history` joins as the 4th panel.
+- [x] **Does `combined_history.png` survive?** No — deleted outright (Mark: "Remove combined
+      history (tried to place 2 y-axis on same graph -- confusing)"). `plotDualHistory` removed
+      from `CairoPlotter` entirely, not left dead.
+- [x] **Font file + fallback list** — resolved without needing PIL's file-path chain: cairo links
+      the fontconfig backend here, so `"DejaVu Sans"` as a *family name* (toy API, no
+      `cairo_ft_font_face`/FreeType) resolves the same font `generate_viz.py` uses.
+- [x] **Color assignment** — fixed per-metric identity color, dataviz-skill categorical palette
+      (Mark: "best judgment... distinct and easy to see" — see DONE note for the exact hexes and
+      why density_weight departs from the fixed slot order).
+- [x] **Log-scale mapping** — padding and the min/max search both now happen in log10 space.
+- [x] **X-axis ticks are array index, not iteration number** — now labeled index+1 (1-based
+      iteration count since run start). Deliberately NOT `iterations.dat`'s own `Iter` field,
+      which is phase-relative and would go non-monotonic across a phase-2 restart; the history
+      vectors are appended once per call across the whole run regardless of phase, so index+1
+      stays monotonic and correct as "iterations since run start."
+
+Verified: `make host` builds clean, and a real 400-iteration adaptec1 run produced all 5 PNGs
+with correct log-scale ticks, per-panel colors, aligned shared x-axis, and no label overlap.
 
 ---
 
