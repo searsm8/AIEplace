@@ -1864,7 +1864,7 @@ Parked at Mark's request 2026-08-03 — analysis done, no implementation.
 entry records only the decisions and what is still open.
 
 ```bash
-cd vck5000 && make test-regress          # 2 ISPD-2015 designs, ~15 s
+cd vck5000 && make test-regress          # 2 ISPD-2015 designs, ~12 s
 cd vck5000 && make test-regress-slow     # + mms/adaptec1 (phase 2 + LP legalization), ~3 min
 ```
 
@@ -1904,13 +1904,48 @@ printed significant figures.
   final-position hash across repeat runs and `OMP_NUM_THREADS` = 1, 4, unset, on both fast designs.
 - **Baseline regeneration requires `--reason`**, which is written into the baseline header so it
   lands in the git diff beside the numbers it explains.
+- **Measured sensitivity:** `init_gamma` 4 → 4.000001 (**2.5e-7 relative**) moves the printed
+  trajectory at iteration **65** and changes the position hash. The failure paths were exercised,
+  not assumed — perturbed input, corrupted hash with intact trajectory, missing `--reason`,
+  unknown design, missing executable.
+- **First real result, unplanned:** TODO #16 (commit 77d16ea, renderer moved out of the placer)
+  is **behaviour-preserving for sw_only** — all three designs give identical trajectories and
+  identical position hashes on the pre- and post-rebuild binaries. The frozen configs were then
+  regenerated from the rewritten `run_config.toml` and every baseline still passed, which also
+  confirms the deleted renderer keys (`visualize`, `zoom*`, `rand_focus_*`) were genuinely inert.
 - **A slow tier exists because no ISPD-2015 design has movable macros** (all four candidates
   measured `num_movable_macros = 0`), so the fast tier cannot reach phase 2. `mms/adaptec1` has
-  62 movable macros, 1374 iterations across both phases, ~161 s.
+  62 movable macros, 1373 iterations across both phases, ~150 s.
 
 ### Still open
 - [ ] **Nothing checks quality, only stability.** A reproducibly *wrong* sw_only passes. Guarding
       the XPlace ratio would need committed reference numbers and a tolerance — a separate job.
+*(A side finding from building this — `init_step_seed`'s second-order behaviour — is recorded
+below rather than left open, since it answers itself.)*
+
+### Side finding: `estimateInitialStep()` is second-order in `init_step_seed` (measured)
+Noticed while probing the test's sensitivity, then pinned down. Perturbing `init_step_seed` on
+`mgc_pci_bridge32_b` (all vs the committed baseline):
+
+| relative change | result |
+|---|---|
+| 1e-5 | **bit-identical** |
+| 1e-4 | **bit-identical** |
+| 1e-3 | differs from iteration 2 |
+| 1e-2 | differs from iteration 2 |
+| 2× (0.02) | differs from iteration 1 |
+| 0.1× (0.001) | differs; **2135 iterations** instead of 668 |
+
+The seed cancels to *first* order in α = ‖Δpos‖/‖Δgrad‖ (Δpos ∝ seed), so a relative
+perturbation `r` moves α by ~`r²`. That vanishes into float32 rounding until `r² > eps ≈ 1.2e-7`,
+i.e. `r > 3.5e-4` — which is exactly where the measured threshold sits, between 1e-4 and 1e-3.
+
+So this **validates** the self-calibrating initial-step refactor: the seed genuinely stops
+mattering once it is anywhere near right, and only bites when it is off by orders of magnitude
+(the 0.001 row). It is not dead config (`Setup.cpp:239`, read as `float`). Relevant to auto-memory
+`init_step_seed_sa_payoff`, whose predicted Morris μ*/σ collapse did not happen: a screen over a
+*narrow* range would see nothing at all here, which is consistent with that finding being
+interaction-driven over a wide seed range.
 - [ ] **`readDEF()`'s `floorplan.def` hardcoding is a latent bug**, not just an ISPD-2019
       inconvenience: a benchmark dir with `.def` files but none named `floorplan.def` fails with
       an empty path in the error message rather than saying what it wanted. Noticed here, not

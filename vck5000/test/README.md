@@ -22,6 +22,18 @@ than print — is in `AIEplace/CLAUDE.md` § *Verification Loop*. Read that befo
 | `sched_verify` | `param_scheduler.hpp` | recorded sw_only trace | bit-exact |
 | `synth_check.{cpp,tcl}` | control core synthesizes | — | 0 errors, II=1 |
 
+`regress/` is the **sw_only** regression tripwire — a different animal from the table above: it
+runs the real placer on a frozen config and asserts the trajectory and final positions are
+bit-identical to a committed baseline. It costs tens of seconds, so it is its own target rather
+than part of `make test`:
+
+```bash
+cd vck5000 && make test-regress          # fast designs, ~12 s
+cd vck5000 && make test-regress-slow     # + mixed-size phase 2, ~3 min
+```
+
+See `regress/README.md` before regenerating a baseline.
+
 `synth_check` is **tier 2** — it needs Vitis and is not part of `make test`:
 
 ```bash
@@ -39,7 +51,6 @@ other, so both are checked.
   `vck5000/results/`, which is gitignored: an automated test cannot depend on a file that isn't
   in the repo. See `fixtures/README.md` before swapping one.
 - Binaries build into `build/` (gitignored).
-- Everything here currently covers **pl_algo**. sw_only has no automated tests yet — that gap,
-  and the plan for closing it, is **TODO #17**.
+- The tier-1 harnesses cover **pl_algo**; `regress/` covers **sw_only** (TODO #17).
 
 Moved here from `pl/src/pl_algo/model/` on 2026-08-05 so the tests are visible at the top level.

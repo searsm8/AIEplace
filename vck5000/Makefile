@@ -30,6 +30,8 @@ help:
 	@echo 'Run and verify:'
 	@echo -e '\tmake run:\t Build (if needed) and run HOST=$(HOST) with its default run_config.toml.'
 	@echo -e '\tmake test:\t Tier-1 offline verification suite. Seconds, pure g++, no Vitis/XRT needed.'
+	@echo -e '\tmake test-regress:\t sw_only regression vs committed baselines (~12 s).'
+	@echo -e '\tmake test-regress-slow:\t ...plus the mixed-size phase-2 design (~3 min).'
 	@echo ""
 
 .PHONY: all xclbin xsa aie pl host
@@ -137,6 +139,27 @@ TEST_DIR ?= $(PROJECT_ROOT)/test
 .PHONY: test
 test:
 	$(MAKE) -C $(TEST_DIR) test
+
+# =============================================================================
+#  make test-regress -- sw_only regression tripwire (see test/regress/README.md)
+# =============================================================================
+# Runs sw_only on frozen configs and asserts the per-iteration trajectory and the final cell
+# positions are BIT-IDENTICAL to committed baselines (deterministic = true makes that exact,
+# not a tolerance). Deliberately NOT part of `make test`: this costs tens of seconds, and
+# `make test` earns its keep by being cheap enough to run after every edit.
+#   make test-regress        the fast designs (~12 s)
+#   make test-regress-slow   also the mixed-size design: phase 2 + macro legalization (~3 min)
+SW_ONLY_EXE = $(BUILD_DIR)/$(TARGET)/host/sw_only/aieplace_sw_only.exe
+REGRESS = AIEPLACE_EXE=$(SW_ONLY_EXE) $(TEST_DIR)/regress/run_regress.sh
+
+.PHONY: test-regress test-regress-slow
+test-regress:
+	$(MAKE) host HOST=sw_only
+	$(REGRESS)
+
+test-regress-slow:
+	$(MAKE) host HOST=sw_only
+	$(REGRESS) --slow
 
 # =============================================================================
 #  pl_algo module verifies: build + run one bring-up mode under emulation.

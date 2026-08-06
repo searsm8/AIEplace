@@ -1,0 +1,124 @@
+# =============================================================================
+#  FROZEN regression config -- mms_adaptec1  (SLOW tier, ~150 s)
+# =============================================================================
+#  This file is a PINNED SNAPSHOT, not a copy that tracks run_config.toml.
+#  It is the exact input that produced ../../baselines/mms_adaptec1.baseline, so it must only change
+#  when the baseline is deliberately regenerated. Editing a value here without
+#  regenerating the baseline breaks the test; editing run_config.toml does NOT
+#  affect this file, which is the point -- test/regress is a tripwire on the
+#  CODE, not on whatever the tuned default config happens to be today.
+#
+#  Run:   cd vck5000 && make test-regress-slow
+#  See:   test/regress/README.md
+# =============================================================================
+
+[input]
+#benchmark = "host/benchmarks/ispd2005/adaptec1"
+benchmark = "host/benchmarks/mms/adaptec1"
+
+xclbin = "bin/aieplace.hw.xclbin"
+
+[params]
+# Computation method selection
+partials_compute_method = "cpu" # choose: cpu (exact WA gradient, the golden) or simple (LUT approximation)
+density_compute_method  = "cpu" # choose: cpu (only option in sw_only; AIE/PL offload lives in the pl_algo variant)
+# bins_per_row intentionally OMITTED -> grid auto-sized by the ePlace formula (AIEplace.cpp).
+# Set it here (or per-run) only to force a fixed grid (ad-hoc override / AIE datapath).
+bins_per_row = 512              # EXPLICIT: bookshelf has no placement.constraints
+wirelength_method = "HPWL"      # choose: HPWL
+ignore_net_degree = 100         # XPlace net_mask: nets with more pins than this are excluded
+                                 # from BOTH the WA wirelength gradient and the HPWL metric
+                                 # (matches XPlace ignore_net_degree=100). Makes reported HPWL
+                                 # apples-to-apples with XPlace's masked numbers. Set very
+                                 # large to include all nets (legacy behavior).
+enable_backtracking = true      # whether to use backtracking line search for step length selection
+enable_momentum     = true      # whether to use momentum in the optimization (Nesterov Accelerated Gradient)
+enable_filler       = true      # whether to include filler cells in placement (XPlace always does)
+# Preconditioner (diagonal, damps large macro movement, XPlace-style). Leave enable_preconditioning
+# UNSET to use the smart default: auto-ON iff the design has movable macros (essential for MMS
+# convergence, a wash on fixed-macro designs). Set it explicitly to force ON/OFF. auto_enable_preconditioning
+# (default true) governs the auto behavior when enable_preconditioning is absent.
+auto_enable_preconditioning = true
+precond_coef_escalation = true  # double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef); false = diagnostic (fixed precond_coef)
+enable_density_clamp = true     # clamp sub-bin cells to ~bin size in the density solve (XPlace expand_ratio); smooths the force
+
+# TODO #11b (renamed 2026-08-01 from `macro_td_expand_ratio`): a movable macro deposits density
+# equal to target_density instead of its area-conserving real/clamped ratio, so every bin it fully
+# covers sits at EXACTLY the bin capacity -- full at the target density, not overflowing. XPlace
+# does this unconditionally (database.py:921-923); locked unconditional here too as of 2026-08-02
+# (re-run A/B against correct fillers: mean +0.6% HPWL over 8 macro-heavy designs, -0.4% excluding
+# adaptec5, which the flag also fixes from a phase-1 divergence to a clean converged phase-2 run --
+# see 1_REVIEW/NEW_REPORT_footprint_ab_20260802.md). No config toggle any more.
+random_seed = 42                # PINNED: run_config.toml omits it, which time-seeds the
+                                # initial placement. deterministic=true alone is NOT enough.
+deterministic = true            # reduction policy for the threaded iteration (see Common.h).
+                                 # true  = additions happen in the same order the single-threaded
+                                 #         code used, so results are bit-identical to the serial
+                                 #         golden at ANY thread count. This is the reference every
+                                 #         pl_algo hardware block is verified against -- keep it on
+                                 #         unless you are only after throughput.
+                                 # false = atomics / OpenMP reductions. Faster, but the summation
+                                 #         order follows thread interleaving, so results move
+                                 #         slightly run to run.
+                                 # Thread count is OpenMP's default (all cores); cap a concurrent
+                                 # sweep with OMP_NUM_THREADS.
+dct_normalize = true            # 1/N per FORWARD DCT (bounds a_uv; global scale absorbed by lambda). The
+                                 # inverse transform is deliberately NOT normalized (field-faithful: the forward
+                                 # already carries 1/N^2; normalizing the inverse too would double-normalize and
+                                 # inflate lambda ~N^2 -- verified == compute_eField_naive and matches XPlace).
+
+# Hyperparameters
+init_gamma = 4          # plays XPlace's wa_coeff role; with gamma_bin_scaled, base_gamma = init_gamma*(bin_w+bin_h)
+gamma_schedule = true   # if true, gamma follows overflow-driven schedule (XPlace-style); starts at 10x base_gamma
+gamma_bin_scaled = true # tie base_gamma to bin geometry referenced to gamma_ref_grid (grid-independent); false = legacy bare init_gamma constant
+gamma_ref_grid = 512    # reference grid for gamma_bin_scaled: base_gamma = init_gamma*(die_w+die_h)/gamma_ref_grid; keeps absolute gamma grid-independent (512 matches the tuned suite)
+init_step_seed = 0.01   # SEED for the iteration-1 Barzilai-Borwein step estimate (XPlace args.lr),
+                        # not the literal first step: estimateInitialStep() takes one trial step of
+                        # this size, then sets α = ||Δpos|| / ||Δgrad||. A robust internal default;
+                        # rarely needs tuning now that the first step self-calibrates per design.
+density_weight_init_multiplier = 8e-5 # multiplier used to set density penalty
+                                       # 0.01 means that density will contribute about 1% as much
+                                       # as wirelength to the cost function at the start of placement
+density_weight_min_step = 0.95  # minimum step size for density_weight updates to prevent stagnation
+density_weight_max_step = 1.05  # maximum step size for density_weight updates to avoid divergence
+
+# Overflow plateau detection for emergency 2x density weight jolt
+adaptation_window = 25
+slow_improvement_threshold = 0.001
+high_overflow_threshold = 0.7
+backtrack_max_tries = 10
+backtrack_epsilon = 1.05
+
+# Convergence criteria (adaptive algorithm will stop early if met)
+convergence_min_iterations = 50   # per PHASE (phaseIteration), not per run
+# Whole-run runaway backstop, NOT a schedule — it spans BOTH mixed-size phases, as XPlace's
+# args.inner_iter does (default 10000; its observed MMS totals are 1344-2280, so it never binds).
+# Raised 1200 -> 10000 on 2026-08-01 with TODO #13 phase 2: at 1200 a two-phase newblue5 spent
+# 1069 iterations in phase 1 and died at the cap 131 iterations into phase 2, overflow 0.756 and
+# completely unspread. TODO #4's "leave at 1200" was reasoned about a SINGLE-phase run and is
+# still right about that case — a design that is stuck does not benefit from more iterations —
+# but the cap must cover both phases to be the backstop it is documented as.
+convergence_max_iterations = 10000
+convergence_window = 5  # Number of iterations used to determine convergence.
+convergence_hpwl_improvement_threshold = 0.01 # If HPWL improvement over window is below this, HPWL convergence is met.
+convergence_overflow_threshold = 0.07 # Stop when smoothed overflow/movable-area < this. Matches XPlace --stop_overflow default 0.07 (apples-to-apples; do not override lower in sweeps).
+convergence_iterations = 30 # Extra iterations to run after overflow drops below threshold (XPlace uses 30)
+maximum_utilization = 1.0  # EXPLICIT for bookshelf; XPlace tuned value for mms/adaptec1.
+
+[output]
+quiet = true
+# interactive: leave unset to follow the stream -- a terminal gets the banner and the live-status
+# table, a pipe (DSE sweep, nohup log) gets neither. Set true/false to force. Either way the run
+# directory gets run.log, the full-detail report; the console only ever shows a curated subset.
+interactive = false   # forced, so output does not depend on whether stdout is a tty
+iterations_per_status = 10 # live-status table cadence: print every Nth iteration (plus iteration 1)
+results_dir = "test/regress/work"
+
+# Node-position dump for the offline visualizer (TODO #16). Writes <run_dir>/viz/ -- positions
+# only; every per-iteration scalar is already in iterations.dat. tools/generate_viz.py (placement
+# GIFs/PNGs, full-die or zoom) and tools/plot_histories.py (HPWL/overflow/step/lambda charts)
+# render it afterwards, so a new zoom, window or node-locked view costs seconds instead of a
+# re-run. OFF by default because the dump is large and grows with the design: ~96 MB for an
+# adaptec1 run at the cadence below, ~480 MB for bigblue4. Nothing should pay that unasked.
+dump_positions = false
+iterations_per_dump = 20 # dump cadence; the renderer reads whatever was dumped, offline

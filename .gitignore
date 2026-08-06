@@ -31,6 +31,10 @@ __pycache__/
 # stray host build output (the real output goes to build/)
 /vck5000/host/src/objs/
 
+# Scratch output of `make test-regress`. The committed part of that test is
+# test/regress/{configs,baselines}/; this is just where the run under test lands.
+/vck5000/test/regress/work/
+
 # Limbo (third_party/Limbo) is a SUBMODULE and is built OUT OF TREE, so the checkout itself
 # stays pristine and can never show a spurious diff. These two are that build's output; both are
 # produced by vck5000/tools/bootstrap_third_party.sh and neither belongs in git.

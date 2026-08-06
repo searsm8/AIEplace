@@ -12,7 +12,8 @@ lines, say so and leave them alone.
 - **In progress:** composing the datapath + device-resident control into one resident `top` loop
   (Stage 5). `top.cpp` is still a mode-switch bring-up scaffold, and the host still owns the
   γ/λ schedule one round-trip per iteration.
-- **To verify anything:** `cd vck5000 && make test` — seconds, no Vitis needed. See
+- **To verify anything:** `cd vck5000 && make test` (pl_algo, seconds, no Vitis) and
+  `make test-regress` (sw_only vs committed baselines, ~12 s). See
   *Verification Loop* below before writing or checking any module.
 
 ## ⚠️ The Bash tool runs on Windows, not WSL — wrap every command in `wsl`
@@ -155,20 +156,35 @@ regression here is orders of magnitude, not a few percent.
 the only thing standing between a normalization typo and finding out three weeks later in sw_emu.
 Tier 3 is for integration points. A slow test you skip protects nothing.
 
+These three tiers are the **pl_algo** loop. sw_only has its own target at tier-2 cost —
+`make test-regress`, see below.
+
 Test *inputs* live in `test/fixtures/` and are committed. They deliberately do **not** live in
 `vck5000/results/`, which is gitignored — an automated test cannot depend on a file that isn't
 in the repo. See `test/fixtures/README.md` before swapping a fixture; `sched_verify`'s
 convergence config must match its trace's `config_used.json`.
 
-### Known gap: sw_only has no automated tests
-All five harnesses cover `pl_algo`. **sw_only — the most-tuned code in the repo and the golden
-everything else is checked against — has no tripwire at all.** `make run` exercises it end to
-end, but nothing asserts. The shape of the fix (not yet built, don't assume it exists): one
-tier-2-speed regression test running the smallest benchmark for N iterations with a pinned
-`random_seed`, asserting final HPWL and overflow against recorded values. **Full plan and the
-open decisions: TODO #17.** Until that exists,
-**changes to sw_only need manual A/B against a known-good run** — treat "the tests passed" as
-saying nothing whatsoever about sw_only.
+### sw_only's tripwire is a separate target
+The five tier-1 harnesses cover `pl_algo` only. sw_only is covered by **`make test-regress`**
+(`vck5000/test/regress/`, built 2026-08-05, TODO #17): it runs the real placer on a **frozen**
+config and asserts the per-iteration trajectory and a hash of every final cell position are
+**bit-identical** to a committed baseline. `deterministic = true` plus a pinned `random_seed`
+make that exact — there is no tolerance and nothing to flake.
+
+```bash
+cd vck5000 && make test-regress          # 2 ISPD-2015 designs, ~12 s
+cd vck5000 && make test-regress-slow     # + mms/adaptec1: phase 2 + LP legalization, ~3 min
+```
+
+**Run it before and after any change to `host/src/sw_only/`.** It is not part of `make test` on
+purpose — that suite is only useful because it costs seconds.
+
+Two things it does *not* do. It checks **stability, not quality**: a reproducibly wrong sw_only
+passes, so an intended algorithm change still needs a manual A/B against XPlace. And it is
+deliberately insensitive to `run_config.toml` — the frozen configs do not track it, so tuning a
+hyperparameter there is invisible here. Before regenerating a baseline read
+`vck5000/test/regress/README.md`; `--reason` is mandatory precisely so that "the test failed so I
+refreshed the baseline" leaves a trace.
 
 ### Other references
 - Toy bring-up templates (outside this repo, both build + emulate cleanly):
