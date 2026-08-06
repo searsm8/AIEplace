@@ -1728,10 +1728,41 @@ uniformly spaced grid-line ink reads as a translation; on mgc iter_220 it showed
 guard: a centred zoom window on iteration 1 is solid cells, and correlating two constants reads
 0.24 while the frames are in fact identical.
 
-Next action: handoff step 4 (node-lock, multi-view), then 5 (delete the cairo renderer).
-`check_viz_orientation.py` still wants promoting to `tools/` and generalizing off its hardcoded
-ISPD2015 paths — handoff §5.4. Minor: the 3-line header (benchmark+phase+zoom) overlaps the die
-box top edge at y=0.11 — faithful to cairo, worth fixing in step 4.
+Minor: the 3-line header (benchmark+phase+zoom) overlaps the die box top edge at y=0.11 —
+faithful to cairo, worth fixing whenever step 4 (below) is picked up.
+
+### Step 5 — DONE 2026-08-05 (delete the cairo renderer)
+
+Removed `Visualizer.{h,cpp}`, `BUILD_VIZ`, `CREATE_VISUALIZATION`, `-lcairo` from
+`makeflags.mk`/`host/Makefile`; the `visualize`, `iterations_per_export`, `zoom*`, `focus_nets`,
+`rand_focus_*`, `rand_macro_nets` keys from `run_config.toml`; every call site
+(`initializeVisualization`, `initializeZoomView`, `initializeFocus` + the four `addRandom*`
+helpers, `exportIterationVisualization`, `exportPhaseBoundaryVisualization`, `drawPlacementViews`,
+`exportVisualizationArtifacts`) from `AIEplace.h`/`Setup.cpp`/`Output.cpp`/`Phase2.cpp`/`main.cpp`;
+and the now-dead `mv_focus_nets`/`mv_focus_nodes` + `addFocusNet`/`addFocusNode`/`getFocusNets`/
+`getFocusNodes` plumbing from `common/include/DataBase.h` (Visualizer.cpp was their only
+consumer — nothing in pl_algo ever called them). `tools/make_viz_gifs.py` repointed at
+`dump_positions`/`iterations_per_dump` + `generate_viz.py --gif` instead of relying on the exe's
+own auto-GIF; `tools/dse.py`'s dead `visualize = False` pin dropped. New `docs/visualization.md`
+(repo root, alongside `vck5000/`) documents the resulting workflow end to end.
+
+**Gap found and closed — not in the original plan.** `Visualizer.h` also held `CairoPlotter`, a
+second and functionally unrelated class rendering the per-run convergence-history charts
+(`graphs/*.png` — TODO #18), which neither this handoff's reuse-map (§2) nor its deletion list
+(§3) ever mentions. Deleting `Visualizer.h` wholesale as originally specified would have silently
+dropped that output with nothing replacing it, hours after TODO #18 shipped it at Mark's explicit
+direction ("I like your decisions"). Ported to `tools/plot_histories.py` (matplotlib, reads
+`iterations.dat`, matches TODO #18's design: same 5 PNGs, per-metric identity colors, log-scale
+density weight, shared-x-axis stacked overview) before deleting the C++ version — see TODO #18's
+note.
+
+Gate: `make host HOST=sw_only` builds clean with no cairo on the link line; `cd vck5000 && make
+test` passes; a real run's `iterations.dat` fed through `plot_histories.py` reproduces all 5 PNGs
+(spot-checked visually against the `overview.png` layout above).
+
+**Next action: handoff step 4 (node-lock, multi-view) is still open** — nothing in this session
+touched it. `check_viz_orientation.py` still wants promoting to `tools/` and generalizing off its
+hardcoded ISPD2015 paths (handoff §5.4).
 
 ---
 
@@ -1826,57 +1857,64 @@ Parked at Mark's request 2026-08-03 — analysis done, no implementation.
 
 ---
 
-## #17 — sw_only has no automated tests (opened 2026-08-05)
+## #17 — sw_only has no automated tests (opened 2026-08-05, **BUILT 2026-08-05**)
 
-**Not built. This is the plan, not a description of something that exists.**
+**Built. `vck5000/test/regress/`, run with `make test-regress`.** Read
+`vck5000/test/regress/README.md` before touching a baseline — it is the authoritative doc; this
+entry records only the decisions and what is still open.
 
-`make test` landed 2026-08-05 (tier-1 offline suite, `vck5000/test/Makefile`, ~4 s, pure
-g++). It covers **pl_algo only**. sw_only — the most-tuned code in the repo, and the golden that
-every pl_algo module is verified against — has **no tripwire at all**. `make run` exercises it end
-to end but nothing asserts, so a silent quality regression is invisible until someone eyeballs a
-sweep. Note the asymmetry: a broken sw_only quietly invalidates every pl_algo verification too.
+```bash
+cd vck5000 && make test-regress          # 2 ISPD-2015 designs, ~15 s
+cd vck5000 && make test-regress-slow     # + mms/adaptec1 (phase 2 + LP legalization), ~3 min
+```
 
-Context on how the tiers work and why tier 1 must stay fast: `AIEplace/CLAUDE.md` § *Verification
-Loop*. **Do not put a slow sw_only run inside `make test`** — that suite's whole value is that it
-is cheap enough to run after every edit. This wants its own target (`make test-regress` or
-similar).
+Per design it asserts two things, both **exact** (no tolerance): `iterations.dat` matches the
+committed baseline row for row, and the `sha256` of the output `.def` (every final cell position)
+matches. The trajectory says *when* behaviour changed; the hash catches drift below the 4
+printed significant figures.
 
-### Why this is cheap to do well
-`params.deterministic` (default true) makes sw_only **bit-identical** — verified against the
-pre-threading serial binary on all 211447 adaptec1 positions at `OMP_NUM_THREADS` = 1, 3, 8
-(see #12 *Reproducibility*). So the test can assert **exact** equality against a recorded
-baseline, not a hand-tuned tolerance. No flakiness, no threshold to argue about, and it catches
-sub-percent drift that an eyeball A/B would sail straight past.
+### Open decisions — all resolved by measurement 2026-08-05
+- [x] **Which benchmark → `ispd2015/mgc_pci_bridge32_b` + `ispd2015/mgc_fft_a`.**
+      **ISPD-2019 is unusable**, which settles the "unverified whether sw_only handles it"
+      question: `DataBase::readDEF()` (`host/src/common/src/DataBase.cpp:199`) accepts *only* a
+      file literally named `floorplan.def`, and ISPD-2019 ships `<design>.input.def`, so the DEF
+      list is non-empty but `def_file` stays default-constructed and the parse fails with an
+      empty path. `BENCHMARKS.md` independently rules ISPD-2019 out of scope (no XPlace data).
+      ISPD-2015 is also the only suite shipping `placement.constraints`, so the fast tier cannot
+      fall into the `td = 1.0` trap at all.
+      **Two designs, not one** — the second is ~5 s and is not redundant: auto-sized grid 128 vs
+      256, target density 0.143 vs 0.5, so grid sizing and the filler path differ.
+- [x] **How many iterations → run to natural convergence.** Post-threading (#12) these are far
+      cheaper than the pre-threading figures in `BENCHMARKS.md` suggest: full converged runs are
+      **668 iters / ~5 s** and **616 iters / ~9 s**. No iteration cap needed, so the convergence
+      criterion is itself under test and the iteration count is an assertion.
+- [x] **What to assert → both.** Trajectory *and* the final-position hash. The hash costs one
+      `sha256sum`, and the two fail differently enough to be worth having separately.
+- [x] **MMS caveat →** `configs/slow/mms_adaptec1.toml` states `bins_per_row = 512` and
+      `maximum_utilization = 1.0` explicitly (XPlace's tuned pair, `tools/benchmarks.py::_ROWS`).
 
-### Shape
-- Run one small benchmark for a fixed iteration count with a **pinned `random_seed`**
-  (`run_config.toml` omits it and defaults to a time-based seed — see auto-memory
-  `pin-random-seed-in-manual-ab`; `deterministic = true` alone is not enough).
-- Assert final HPWL, final overflow, and iteration count against a committed baseline file.
-- Commit the baseline next to the test, with the config that produced it — same rule as
-  `vck5000/test/fixtures/`: a test cannot depend on anything under `results/`, which is
-  gitignored.
-- Make regenerating the baseline a deliberate, single documented command, so "the test failed so
-  I refreshed the baseline" cannot happen by reflex. A baseline updated without reading the diff
-  is the failure mode that turns this from a tripwire back into decoration.
+### Decisions made while building, worth not re-deriving
+- **The configs are frozen snapshots, not live copies of `run_config.toml`.** Editing
+  `run_config.toml` does not affect this test. It is a tripwire on the **code**; a test whose
+  expected output moves whenever a hyperparameter is tuned is one nobody can keep green.
+- **`random_seed = 42` is pinned in every frozen config and is load-bearing.** Measured: two
+  unpinned `mgc_pci_bridge32_b` runs took **668 vs 662** iterations and ended in different
+  positions. `deterministic = true` alone is not enough (auto-memory `pin-random-seed-in-manual-ab`).
+- **Determinism re-verified for this test, not assumed.** Identical trajectory *and* identical
+  final-position hash across repeat runs and `OMP_NUM_THREADS` = 1, 4, unset, on both fast designs.
+- **Baseline regeneration requires `--reason`**, which is written into the baseline header so it
+  lands in the git diff beside the numbers it explains.
+- **A slow tier exists because no ISPD-2015 design has movable macros** (all four candidates
+  measured `num_movable_macros = 0`), so the fast tier cannot reach phase 2. `mms/adaptec1` has
+  62 movable macros, 1374 iterations across both phases, ~161 s.
 
-### Open decisions — resolve before building
-- [ ] **Which benchmark.** Smallest on disk is `ispd2019/ispd19_test1` (2.3 MB), then
-      `ispd19_test3` (3.9 MB); everything in ispd2015 is 11 MB+. pl_algo bring-up uses
-      `ispd2015/mgc_pci_bridge32_b`. **Unverified whether sw_only handles the ispd2019 format** —
-      check before assuming. Pick on measured wall-clock, not file size.
-- [ ] **How many iterations.** Long enough that the λ schedule and BB step have actually engaged
-      (a handful of iterations only tests parsing and init), short enough to run on demand.
-      Target well under a minute.
-- [ ] **What to assert.** HPWL + overflow + iteration count is the cheap version. Hashing all
-      final positions is stricter and nearly free given bit-identical determinism — decide whether
-      the extra strictness is worth a baseline that changes on every legitimate algorithm change.
-- [ ] **MMS caveat if an MMS design is chosen:** Bookshelf suites carry no `placement.constraints`,
-      so a template-derived config silently sits at `td=1.0`. Must set `maximum_utilization` and
-      `bins_per_row` explicitly (auto-memory `mms-needs-explicit-target-density`).
-
-**Until this exists:** changes to sw_only need manual A/B against a known-good run. Treat "the
-tests passed" as saying *nothing whatsoever* about sw_only.
+### Still open
+- [ ] **Nothing checks quality, only stability.** A reproducibly *wrong* sw_only passes. Guarding
+      the XPlace ratio would need committed reference numbers and a tolerance — a separate job.
+- [ ] **`readDEF()`'s `floorplan.def` hardcoding is a latent bug**, not just an ISPD-2019
+      inconvenience: a benchmark dir with `.def` files but none named `floorplan.def` fails with
+      an empty path in the error message rather than saying what it wanted. Noticed here, not
+      fixed — out of scope for #17.
 
 ---
 
@@ -1974,6 +2012,16 @@ splits one surface into multiple axis regions.
 
 Verified: `make host` builds clean, and a real 400-iteration adaptec1 run produced all 5 PNGs
 with correct log-scale ticks, per-panel colors, aligned shared x-axis, and no label overlap.
+
+**2026-08-05, later the same day — moved to Python, `CairoPlotter` deleted.** TODO #16 step 5
+removed visualization from the host build entirely, including `Visualizer.h` — which is where
+`CairoPlotter` lived. That was a gap in step 5's own plan (it never accounts for this class; see
+the note there), caught while auditing what would be lost. Ported to `tools/plot_histories.py`
+(matplotlib) before deletion, preserving every decision recorded above verbatim: same 5 filenames,
+same per-metric identity colors, log-scale density weight, shared-x-axis `overview.png`, 1-based
+iteration x-axis. Reads `iterations.dat` exactly as `readDensityWeightHistory` did. Not run
+automatically at end-of-run anymore (nothing is, post-#16) — invoke it by hand:
+`python3 tools/plot_histories.py <run_dir>`.
 
 ---
 

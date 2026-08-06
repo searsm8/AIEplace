@@ -14,10 +14,6 @@
 
 #define DEVICE_ID 0 // Device ID to find VCK5000
 
-#ifdef CREATE_VISUALIZATION
-    #include "Visualizer.h"
-#endif
-
 AIEPLACE_NAMESPACE_BEGIN
 
 namespace ConfigUtils {
@@ -52,7 +48,7 @@ private:
     void applyMixedSizeStopPolicy();       // XPlace include_macros phase: 2x stop overflow, no plateau kill
     void setupGrid();                      // build the Grid from bins_per_row, clamp density, set die_size
     void configureGammaSchedule();         // grid-independent base_gamma, gamma/inv_gamma, LUT init
-    void initializeVisualization();        // no-op when CREATE_VISUALIZATION isn't defined
+    void initializePositionDump();         // config output.dump_positions; opens generation 0 (TODO #16)
 
     // Helper functions for DSE integration and output organization
     void createRunOutputStructure();
@@ -271,11 +267,48 @@ public:
     std::vector<float> ovfw_history; // history of overflow values for each iteration
     std::vector<float> step_length_history;
 
-#ifdef CREATE_VISUALIZATION
-    Visualizer viz;        // the whole die
-    Visualizer viz_zoom;   // one magnified window of it (config output.zoom); TODO #14
-    bool zoom_view_enabled = false;
-#endif
+    // --- Node-position dump for the offline visualizer (TODO #16) ------------------------------
+    // The successor to in-loop rendering: the placer writes only what it knows -- where every node
+    // is at iteration k -- and tools/generate_viz.py renders that offline, at any zoom, any window,
+    // any number of times, without re-running a placement that took an hour. The cairo renderer
+    // (Visualizer.{h,cpp}, CREATE_VISUALIZATION) was deleted in TODO #16 step 5; this dump path
+    // was always independent of it, so removal needed no change here.
+    //
+    // Gated by output.dump_positions, default OFF -- these files are large (~96 MB per adaptec1
+    // run, ~480 MB per bigblue4) and no run should pay for them unasked. Cadence is
+    // output.iterations_per_dump (default 20), separate from the renderer's own cadence key.
+    // Format spec: 1_REVIEW/handoffs/NEW_HANDOFF_viz_offline_tool_20260805.md §4.
+    //
+    // A "generation" is one span of the run over which the node SET is constant. Phase 2 breaks
+    // that twice -- freezeMovableMacros() moves macros out of the movable list, rebuildFillers()
+    // replaces the fillers -- so each break closes the current generation and opens a new one with
+    // its own static-node file. Without this the frames and the static records silently desync and
+    // every phase-2 frame renders as garbage.
+    struct DumpGeneration {
+        int id = 0;
+        std::string phase;
+        int first_iter = 0;
+        int num_static_nodes = 0;  // records in nodes_gen<N>.bin (movable+filler, then fixed, then IO)
+        int frame_nodes = 0;       // positions per frame = the movable+filler prefix of that order
+        int filler_start = 0;      // index within the prefix where the fillers begin
+        long long clamped = 0;     // positions that hit the quantization clamp (see dumpIterationPositions)
+        std::vector<int> frame_iters;
+        std::vector<std::string> frame_tags;  // "" or a boundary caption, parallel to frame_iters
+    };
+    struct PositionDump {
+        bool enabled = false;
+        int  interval = 20;
+        fs::path dir;
+        std::ofstream frames;      // frames_gen<N>.bin for the generation currently open
+        std::vector<DumpGeneration> generations;
+        float qx0 = 0.0f, qy0 = 0.0f, qw = 1.0f, qh = 1.0f;  // uint16 quantization box
+    };
+    PositionDump m_pos_dump;
+
+    void beginPositionDumpGeneration();   ///< close the open generation, open the next one
+    void dumpIterationPositions(const std::string& tag = "");  ///< one frame; forced when tagged
+    void finalizePositionDump();          ///< close the stream and write manifest.json
+
     // Constructor
     Placer(std::string);
 
@@ -344,7 +377,6 @@ public:
     void recordIterationResults();
     void snapshotBestPlacement();
     void restoreBestPlacement();
-    void plotHistories();
 
     // Post run analysis
     void computeStatistics();
@@ -352,27 +384,11 @@ public:
     // Print functions
     void printIterationResults();
     void printFinalResults();
-    void initializeFocus();
 
     // printIterationResults's steps, broken out for readability
     void printDSEInfoTable();                             // config output.DSE_info
     void printIterationSummaryTable(float hpwl, float overflow);
-    void exportIterationVisualization(float overflow);    // no-op build without CREATE_VISUALIZATION
     void appendIterationLog(float hpwl, float overflow);  // iterations.dat
-#ifdef CREATE_VISUALIZATION
-    std::string phaseLabelForPlot() const;                // "" when the run cannot have a phase 2
-    void exportPhaseBoundaryVisualization(const std::string& tag, const std::string& caption,
-                                          float overflow);
-    void initializeZoomView();                            // config output.zoom*; TODO #14
-    void drawPlacementViews(const fs::path& dir, const fs::path& zoom_dir, PlotInfo info);
-#endif
-
-    // initializeFocus's steps, broken out for readability
-    void addNamedFocusNets();               // config output.focus_nets
-    void addRandomFocusNets(std::mt19937& rng);   // config output.rand_focus_nets
-    void addRandomFocusNodes(std::mt19937& rng);  // config output.rand_focus_nodes
-    void addRandomMacroNets(std::mt19937& rng);   // config output.rand_macro_nets
-    void addRandomFocusIO(std::mt19937& rng);     // config output.rand_focus_IO
 
     // printFinalResults's steps, broken out for readability
     struct FinalMetrics {
@@ -391,8 +407,6 @@ public:
     void dumpBestPlacementDensity();
     void exportSummaryReports(const BestSolution& chosen, const FinalMetrics& metrics,
                               const std::string& run_output_dir);
-    void exportVisualizationArtifacts(const BestSolution& chosen, const FinalMetrics& metrics,
-                                      const std::string& run_output_dir);
     void writeFinalDesignArtifacts(const std::string& run_output_dir);
 };
 

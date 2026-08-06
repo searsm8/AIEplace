@@ -41,8 +41,6 @@ private:
     vector<Net *> mv_nets; // list of all nets
     vector<Component *> mv_fillers; // standard cell fillers
     map<int, std::vector<Net *>> mmv_nets_by_degree;
-    vector<Net *> mv_focus_nets; // list of nets to be highlighted with visualizer
-    vector<Node *> mv_focus_nodes; // list of nodes to be highlighted with visualizer
 
     // Index-addressable views of the maps above, built once by buildNodeIndex(). A std::map
     // cannot drive an `omp parallel for` (no random access), and walking its red-black tree
@@ -128,6 +126,7 @@ public:
     string getBenchmarkName() { return m_input_dir.filename().string(); }
     float getMaximumUtilization() { return m_maximum_utilization; }
     float getRowHeight() { return m_row_height; } // 0 when the input supplied none
+    Position getDieShift() { return m_die_shift; } // add back to convert internal -> benchmark frame
 
     // Parse functions
     std::vector<fs::path> findExtensions(fs::path, string);
@@ -160,11 +159,6 @@ public:
     void iterationReset();
     void sortPositionsByX();
     void sortPositionsByY();
-
-    void addFocusNet(Net* net_p) { mv_focus_nets.push_back(net_p); }
-    void addFocusNode(Node* node_p) { mv_focus_nodes.push_back(node_p); }
-    const vector<Net *> &getFocusNets() { return mv_focus_nets; }
-    const vector<Node *> &getFocusNodes() { return mv_focus_nodes; }
 
     float computeTotalWirelength(string, int max_net_degree = INT_MAX);
     float computeTotalComponentArea();

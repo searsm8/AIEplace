@@ -16,9 +16,6 @@ endif
 ifdef BUILD_XRT
 $(info MAKE INFO: Building with XRT support for VCK5000)
 endif
-ifdef BUILD_VIZ
-$(info MAKE INFO: Building with visualization support)
-endif
 
 .PHONY: all
 all: $(HOST_EXE)

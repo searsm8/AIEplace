@@ -1,8 +1,8 @@
 /**
  * @file Setup.cpp
  * @brief Pre-run setup: constructor-phase bring-up (config parse, LEF/DEF database read,
- *        area analysis, grid sizing, preconditioner/visualization setup) plus the one-time
- *        initial-placement and initial-density-weight steps run before iteration 1.
+ *        area analysis, grid sizing, preconditioner setup) plus the one-time initial-placement
+ *        and initial-density-weight steps run before iteration 1.
  *        Split out of AIEplace.cpp.
  */
 
@@ -391,54 +391,6 @@ void Placer::applyMixedSizeStopPolicy()
         + " movable macros (XPlace include_macros phase; stop overflow stays at "
         + PREC(overflow_threshold) + " until TODO #13 adds phase 2).");
 }
-
-/// @brief Initialize the visualization focus set and canvas — a no-op build without CREATE_VISUALIZATION.
-void Placer::initializeVisualization()
-{
-    #ifdef CREATE_VISUALIZATION
-        if (cfg["output"]["visualize"].value_or(false)) {
-            initializeFocus();
-            viz.init(db.getDieArea());
-            initializeZoomView();
-        }
-    #endif
-}
-
-#ifdef CREATE_VISUALIZATION
-/**
- * @brief Set up the optional zoom view — a second, magnified render of one region (TODO #14).
- *
- * The window is configured as a CENTRE + SPAN in fractions of the die rather than in absolute
- * die coordinates, so one config means the same thing on every benchmark (MMS die sizes span
- * two orders of magnitude). The span is a fraction of the SHORTER die dimension, which makes the
- * window square in die units and therefore the magnification isotropic.
- *
- * A window that runs off the die is left alone: seeing the die edge, and the filler/row structure
- * against it, is one of the things worth looking at.
- */
-void Placer::initializeZoomView()
-{
-    zoom_view_enabled = cfg["output"]["zoom"].value_or(false);
-    if (!zoom_view_enabled) return;
-
-    Box die = db.getDieArea();
-    const float die_w = die.getXsize(), die_h = die.getYsize();
-    const float span_fraction = std::clamp((float)cfg["output"]["zoom_span"].value_or(0.05), 1e-4f, 1.0f);
-    const float span = span_fraction * std::min(die_w, die_h);
-    const float center_x = (float)cfg["output"]["zoom_center_x"].value_or(0.5) * die_w;
-    const float center_y = (float)cfg["output"]["zoom_center_y"].value_or(0.5) * die_h;
-
-    ViewWindow view;
-    view.xl = center_x - 0.5f * span;  view.xh = center_x + 0.5f * span;
-    view.yl = center_y - 0.5f * span;  view.yh = center_y + 0.5f * span;
-    view.zoomed = true;
-    viz_zoom.init(die, view);
-
-    Logger::log_info("Zoom view: " + PREC(span) + " x " + PREC(span) + " window at ("
-        + PREC(center_x) + ", " + PREC(center_y) + ") = " + PREC(100.0f * span_fraction)
-        + "% of the shorter die dimension; frames in placement_zoom/");
-}
-#endif
 
 /**
  * @brief Initialize placement of all movable nodes: a tight Gaussian cluster at the die center

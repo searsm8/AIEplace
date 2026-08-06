@@ -81,10 +81,11 @@ bool Placer::beginFixedMacroPhase()
 
     // Frame the legalization on its own, before the re-seed wipes the phase-1 cell placement:
     // this is the only picture in the run where the LP's macro displacement is visible.
-    #ifdef CREATE_VISUALIZATION
-        exportPhaseBoundaryVisualization("a_legalized", "end of mixed_size — macros legalized + frozen",
-                                         m_phase1_summary.overflow_exact);
-    #endif
+    // TODO #16: freezeMovableMacros() moved the macros out of the movable list, so the node set
+    // this frame describes is no longer generation 0's. Close it and start a new one before
+    // recording the legalized placement.
+    beginPositionDumpGeneration();
+    dumpIterationPositions("legalized");
 
     target_density = db.rebuildFillers(target_density);
     grid.setTargetDensity(target_density);   // filler sizing may have raised it
@@ -95,6 +96,11 @@ bool Placer::beginFixedMacroPhase()
     m_phase            = Phase::STDCELL_FIXED_MACRO;
     m_phase_start_iter = iteration;   // schedule warmups restart here; `iteration` keeps counting
     mixed_size_mode    = false;       // XPlace include_macros = False for the rest of the run
+
+    // TODO #16: rebuildFillers() replaced the filler set, the second node-set change of this
+    // transition. Opened here rather than at the rebuild so the generation is labelled with the
+    // phase it actually belongs to.
+    beginPositionDumpGeneration();
 
     // Re-derive the stop threshold from config rather than un-doubling it (Mark's call). XPlace
     // sets stop_overflow = args.stop_overflow * 2 only while include_macros holds, so phase 2
@@ -115,10 +121,7 @@ bool Placer::beginFixedMacroPhase()
     initializeDensityWeight();
 
     // ...and the re-seeded starting state, so the GIF shows what phase 2 actually begins from.
-    #ifdef CREATE_VISUALIZATION
-        exportPhaseBoundaryVisualization("b_reseeded", "start of stdcell_fixed_macro — cells re-seeded",
-                                         computeOverflow(false, nullptr, true));
-    #endif
+    dumpIterationPositions("reseeded");
     return true;
 }
 

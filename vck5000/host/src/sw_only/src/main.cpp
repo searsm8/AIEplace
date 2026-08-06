@@ -13,7 +13,6 @@ int main(int argc, char *argv[])
     placer.db.printInfo(); 
     placer.run();
 
-    placer.plotHistories();
     placer.printFinalResults();
 
     return 0;

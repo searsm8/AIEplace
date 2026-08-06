@@ -5,7 +5,9 @@ runs entirely on the CPU** and is the golden reference every hardware block is v
 Hardware offload (AIE + PL) lives in the `pl_algo` variant; `AIE=markv1`/`PL=markv1` hold the older
 partial-offload kernels. The parser and data model are **shared** with `pl_algo` — they live in
 `host/src/common/`, not here (TODO #9, 2026-08-04). What remains in this directory is what is
-genuinely sw_only: the CPU optimizer, the DCT, and the visualizer.
+genuinely sw_only: the CPU optimizer and the DCT. Visualization is not built into the host at all
+(TODO #16) -- the placer only dumps node positions (`PositionDump.cpp`, config `output.dump_positions`);
+rendering happens afterward in `docs/visualization.md`'s post-processing tools (repo root, alongside `vck5000/`).
 
 The algorithm tracks XPlace (`~/phd/Xplace/src/`) as faithfully as possible; where it deliberately
 diverges, the comment at that line says so and why.
@@ -24,8 +26,7 @@ make host HOST=sw_only
 
 | | |
 |---|---|
-| **Placer** (`AIEplace.h`, `src/placer/`) | The optimizer. Owns every hyperparameter and all iteration state. Split across `AIEplace.cpp` (loop skeleton), `Setup.cpp` (bring-up + initial placement), `Partials.cpp` (∇wirelength), `Density.cpp` (∇density), `Step.cpp` (BB/Nesterov step), `Schedule.cpp` (γ/λ policy + convergence), `Output.cpp` (reporting), `Phase2.cpp`/`MacroLegalize.cpp` (mixed-size phase 2). |
-| **Visualizer** (`Visualizer.h/.cpp`) | Cairo placement rendering and convergence plots. Built only under `BUILD_VIZ` / `CREATE_VISUALIZATION`. |
+| **Placer** (`AIEplace.h`, `src/placer/`) | The optimizer. Owns every hyperparameter and all iteration state. Split across `AIEplace.cpp` (loop skeleton), `Setup.cpp` (bring-up + initial placement), `Partials.cpp` (∇wirelength), `Density.cpp` (∇density), `Step.cpp` (BB/Nesterov step), `Schedule.cpp` (γ/λ policy + convergence), `Output.cpp` (reporting), `Phase2.cpp`/`MacroLegalize.cpp` (mixed-size phase 2), `PositionDump.cpp` (node-position export for the offline visualizer). |
 | **DCT** (`DCT.h/.cpp`) | 1D DCT / IDCT / IDXST — a naive O(N²) reference *and* an O(N log N) FFT (Makhoul) implementation, verified equal. |
 
 ## Core classes — shared (`../common/`, also built into `pl_algo`)

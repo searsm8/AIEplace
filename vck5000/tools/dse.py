@@ -645,7 +645,8 @@ def dse(resume: str = None):
 
     # DSE overrides applied to every run (quiet + headless mode, DSE_info placeholder)
     base_config["output"]["quiet"] = True
-    base_config["output"]["visualize"] = False   # sweeps are headless; per-frame render is slow
+    base_config["output"]["dump_positions"] = False  # sweeps are headless; a position dump per
+                                                      # sweep point would be tens of GB (TODO #16)
     base_config.setdefault("output", {})
     base_config["output"]["results_dir"] = sweep_dir
     base_config.setdefault("output", {}).setdefault("DSE_info", "")

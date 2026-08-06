@@ -2,14 +2,13 @@
 # sw_only is the CPU-only golden reference by design -- there is no XRT/VCK5000 path here.
 # Hardware offload lives in the pl_algo variant (HOST=pl_algo, which honors BUILD_XRT).
 # See TODO #9: the two hosts merge once pl_algo bring-up completes.
-BUILD_VIZ ?= 1# Set to 1 to build with visualization support.
 
 THIRD_PARTY = $(PROJECT_ROOT)/../third_party
 
 HOST_MAIN = main.cpp
 HOST_SRCS = placer/AIEplace.cpp placer/Setup.cpp placer/Schedule.cpp placer/Step.cpp \
 	    placer/Partials.cpp placer/Density.cpp placer/Output.cpp \
-	    placer/Phase2.cpp placer/MacroLegalize.cpp DCT.cpp
+	    placer/Phase2.cpp placer/MacroLegalize.cpp placer/PositionDump.cpp DCT.cpp
 # Parser + data model, shared with pl_algo -- see host/src/common (TODO #9).
 COMMON_SRCS = DataBase.cpp Grid.cpp Net.cpp Logger.cpp Common.cpp
 HOST_OBJS = $(addprefix $(BUILD_DIR_HOST)/obj/, $(HOST_MAIN:.cpp=.o) $(HOST_SRCS:.cpp=.o) $(COMMON_SRCS:.cpp=.o))
@@ -73,14 +72,4 @@ LDFLAGS  += -L${LIMBO_LIB_DIR}
 
 # Tabulate
 TABLE_DIR = ${THIRD_PARTY}/tabulate
-
-# Enable Vizualization
-ifdef BUILD_VIZ
-HOST_SRCS += Visualizer.cpp
-CPPFLAGS += -DCREATE_VISUALIZATION
-LDLIBS += -lcairo
-# Cairo is used for generating images, but disabled now because it causes compile errors:
-# warning: libnvidia-tls.so.430.50, needed by //usr/lib64/libGL.so.1, not found
-#LDLIBS += -l:libcairo.so.2# Specific library for use on nextgenio-amd02 node
-endif
 

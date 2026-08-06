@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Run MMS benchmarks with visualization ON so the exe auto-builds a placement GIF for each
-(Output.cpp calls tools/gif_builder.py on the dumped per-iteration PNGs).
+"""Run MMS benchmarks with the node-position dump ON, then render placement GIFs from the dump
+offline (tools/generate_viz.py). The host itself no longer renders anything (TODO #16) -- it only
+writes positions; this script's job is to drive a run and then call the renderer on the result.
 
 Defaults to designs where the mixed-size phase 2 (TODO #13) actually fires, so the GIF shows the
 full two-phase trajectory: mixed-size global placement -> macro legalization -> the standard-cell
-re-seed -> phase 2. The visualizer marks these frames (phase banner in the overlay, frozen macros
-in purple) and Phase2.cpp forces an extra frame on each side of the transition, which the regular
-iterations_per_export cadence would otherwise straddle.
+re-seed -> phase 2. Phase2.cpp forces an extra dumped frame on each side of the transition, which
+the regular cadence would otherwise straddle.
 
-Runs sequentially -- per-frame cairo rendering of a large design is heavy and there is no benefit
-to overlapping it. Grid and target_density come from tools/benchmarks.py's XPlace values, and the
+Runs sequentially. Grid and target_density come from tools/benchmarks.py's XPlace values, and the
 seed is pinned, so the animated trajectory matches the swept result
 (2_ARTIFACTS/phase2_suite_results.tsv). Must be run from vck5000/, same as dse.py.
 
@@ -22,8 +21,10 @@ Usage:
 """
 import argparse
 import datetime
+import glob
 import os
 import subprocess
+import sys
 
 import tomlkit
 
@@ -41,7 +42,7 @@ MMS = {
     "newblue7": (2048, 0.8),
 }
 
-# Chosen for what each one SHOWS, not for coverage -- rendering every design is hours of cairo.
+# Chosen for what each one SHOWS, not for coverage -- rendering every design is a lot of frames.
 #   newblue5 - the flagship phase-2 design (memory phase2-implemented-newblue5-converges)
 #   newblue1 - smallest grid that still takes a clean two-phase run; quickest turnaround
 #   adaptec2 - the only design whose macro legalization needed the longest-path repair loop
@@ -50,7 +51,7 @@ MMS = {
 DEFAULT_DESIGNS = ["newblue1", "adaptec2", "newblue5"]
 
 
-def write_config(design, cfg_dir, out_root, seed, every, zoom):
+def write_config(design, cfg_dir, out_root, seed, every):
     grid, target_density = MMS[design]
     with open(TEMPLATE) as f:
         cfg = tomlkit.parse(f.read())
@@ -63,20 +64,11 @@ def write_config(design, cfg_dir, out_root, seed, every, zoom):
     params["random_seed"] = seed
 
     out = cfg["output"]
-    out["visualize"] = True            # per-iter PNGs + auto-built full_placement.gif
-    out["iterations_per_export"] = every
+    out["dump_positions"] = True       # <run_dir>/viz/ -- rendered afterward by generate_viz.py
+    out["iterations_per_dump"] = every
     out["quiet"] = True
     out["interactive"] = False
     out["results_dir"] = os.path.join(out_root, design)
-
-    # Zoom view (TODO #14): a second PNG stream in placement_zoom/, auto-built into
-    # zoom_placement.gif by the same exe. Doubles the cairo cost per frame, so it is opt-in.
-    if zoom is not None:
-        center_x, center_y, span = zoom
-        out["zoom"] = True
-        out["zoom_center_x"] = center_x
-        out["zoom_center_y"] = center_y
-        out["zoom_span"] = span
 
     path = os.path.join(cfg_dir, f"{design}.toml")
     with open(path, "w") as f:
@@ -84,15 +76,32 @@ def write_config(design, cfg_dir, out_root, seed, every, zoom):
     return path
 
 
+def find_run_dir(out_root, design):
+    """createRunOutputStructure() nests results_dir/<benchmark_name>/<timestamp>_.../, and
+    results_dir was pointed at out_root/design above, with benchmark_name == design."""
+    candidates = glob.glob(os.path.join(out_root, design, design, "*"))
+    return max(candidates, key=os.path.getmtime) if candidates else None
+
+
+def render_gifs(run_dir, zoom):
+    subprocess.run([sys.executable, "tools/generate_viz.py", run_dir, "--gif", "--quiet"],
+                   cwd=REPO, check=True)
+    if zoom is not None:
+        center_x, center_y, span = zoom
+        subprocess.run([sys.executable, "tools/generate_viz.py", run_dir, "--view", "zoom",
+                        "--center", f"{center_x},{center_y}", "--span", str(span),
+                        "--gif", "--quiet"], cwd=REPO, check=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--designs", nargs="*", default=DEFAULT_DESIGNS)
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--every", type=int, default=10, help="iterations_per_export (frame cadence)")
+    ap.add_argument("--every", type=int, default=10, help="iterations_per_dump (frame cadence)")
     ap.add_argument("--out-root", default=None, help="default: 2_ARTIFACTS/GIFS_<timestamp>")
     ap.add_argument("--zoom", nargs="?", const="0.5,0.5,0.05", default=None,
                     metavar="CX,CY,SPAN",
-                    help="also render the zoom view (TODO #14) into zoom_placement.gif. "
+                    help="also render a zoom GIF (tools/generate_viz.py --view zoom). "
                          "CX/CY are the window centre as a fraction of die width/height and "
                          "SPAN its side as a fraction of the shorter die dimension. "
                          "Bare --zoom means the die centre at 0.05 (1/400th of the die area).")
@@ -117,15 +126,24 @@ def main():
     os.makedirs(cfg_dir, exist_ok=True)
 
     for i, design in enumerate(args.designs, 1):
-        cfg_path = write_config(design, cfg_dir, out_root, args.seed, args.every, zoom)
+        cfg_path = write_config(design, cfg_dir, out_root, args.seed, args.every)
         grid, td = MMS[design]
         print(f"[gif] ({i}/{len(args.designs)}) {design} @ grid {grid}, td {td} — running...",
               flush=True)
         result = subprocess.run([EXE, cfg_path], cwd=REPO)
-        status = "ok" if result.returncode == 0 else f"FAIL ({result.returncode})"
-        print(f"[gif] ({i}/{len(args.designs)}) {design} — {status}", flush=True)
+        if result.returncode != 0:
+            print(f"[gif] ({i}/{len(args.designs)}) {design} — FAIL ({result.returncode})", flush=True)
+            continue
 
-    print(f"[gif] done. GIFs at {out_root}/<design>/<benchmark>/<run>/full_placement.gif",
+        run_dir = find_run_dir(out_root, design)
+        if run_dir is None:
+            print(f"[gif] ({i}/{len(args.designs)}) {design} — ran ok, but no run dir found "
+                  f"under {out_root}/{design}/{design}/", flush=True)
+            continue
+        render_gifs(run_dir, zoom)
+        print(f"[gif] ({i}/{len(args.designs)}) {design} — ok, {run_dir}/viz_render/", flush=True)
+
+    print(f"[gif] done. GIFs at {out_root}/<design>/<benchmark>/<run>/viz_render/<full|zoom>/placement.gif",
           flush=True)
 
 

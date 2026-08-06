@@ -89,7 +89,7 @@ Placer::Placer(std::string config_filepath)
     setupGrid();
     createRunOutputStructure();
     configureGammaSchedule();
-    initializeVisualization();
+    initializePositionDump();
 }
 
 /**

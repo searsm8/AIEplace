@@ -65,8 +65,7 @@ void Placer::printIterationResults()
     float overflow = ovfw_history.back();
 
     printIterationSummaryTable(hpwl, overflow);
-    exportIterationVisualization(overflow);
-    dumpIterationPositions();   // TODO #16: same call site as the renderer, so both see the same state
+    dumpIterationPositions();
     appendIterationLog(hpwl, overflow);
 }
 
@@ -128,81 +127,6 @@ void Placer::printIterationSummaryTable(float hpwl, float overflow)
                       SCI(density_weight));
 }
 
-/// @brief Every iterations_per_export iterations (config output), render the current placement.
-///        No-op build without CREATE_VISUALIZATION.
-void Placer::exportIterationVisualization(float overflow)
-{
-    #ifdef CREATE_VISUALIZATION
-        if (!cfg["output"]["visualize"].value_or(false)) return;
-        if (iteration > 1 && iteration % cfg["output"]["iterations_per_export"].value_or(10) != 0) return;
-
-        PlotInfo info = {iteration, hpwl_history.back(), overflow, step_length, density_weight,
-                         db.getBenchmarkName(), "", phaseLabelForPlot(), phaseIteration(),
-                         bins_per_row, bins_per_row};
-        drawPlacementViews(output_dir / "placement", output_dir / "placement_zoom", info);
-        //viz.drawElectricField(grid, output_dir / "efield", iteration);
-    #endif
-}
-
-#ifdef CREATE_VISUALIZATION
-/// @brief Phase name for the visualization overlay, empty on runs that cannot have a phase 2 so
-///        their frames stay exactly as they were before two-phase placement existed.
-std::string Placer::phaseLabelForPlot() const
-{
-    if (!enable_phase2 || num_movable_macros == 0) return "";
-    return phaseName(m_phase);
-}
-
-/// @brief Render one frame at the phase-1 -> phase-2 boundary, regardless of the export cadence.
-///
-/// The two things phase 2 does to the picture — the LP's macro legalization jump and the
-/// standard-cell re-seed — both happen inside a single transition, and the regular cadence can
-/// miss them by up to iterations_per_export frames on either side. Called twice by
-/// beginFixedMacroPhase(): once with the macros legalized but the cells still in their phase-1
-/// positions, once after the re-seed.
-///
-/// `caption` replaces the usual phase name because m_phase is a poor description mid-transition:
-/// at the first call the macros are already frozen (drawn purple) while m_phase still reads
-/// mixed_size, which looks like a contradiction on the frame.
-void Placer::exportPhaseBoundaryVisualization(const std::string& tag, const std::string& caption,
-                                              float overflow)
-{
-    if (!cfg["output"]["visualize"].value_or(false)) return;
-
-    // Recomputed rather than read from hpwl_history: the re-seed has just moved every standard
-    // cell, so the last recorded HPWL belongs to a placement that no longer exists.
-    float hpwl = db.computeTotalWirelength(
-        ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"),
-        cfg["params"]["ignore_net_degree"].value_or(100));
-
-    // Sorts between iter_<N> and iter_<N+1> in gif_builder.py's natural ordering, so the boundary
-    // frames land in trajectory order rather than at the head of the GIF.
-    std::string name = "iter_" + std::to_string(iteration) + "_" + tag;
-    PlotInfo info = {iteration, hpwl, overflow, step_length, density_weight,
-                     db.getBenchmarkName(), name, caption, phaseIteration(),
-                     bins_per_row, bins_per_row};
-    drawPlacementViews(output_dir / "placement", output_dir / "placement_zoom", info);
-}
-
-/**
- * @brief Render one frame in every configured view: the full die, and the zoom window if
- *        output.zoom is set (TODO #14).
- *
- * Zoom frames go to their own directory so `gif_builder.py` — which turns a directory of PNGs
- * into a GIF — animates them with no extra plumbing. The one exception is the final
- * best_solution frame, which is written into the run directory itself; there the zoom copy
- * shares the directory and takes a `_zoom` filename suffix so it cannot overwrite the full-die one.
- */
-void Placer::drawPlacementViews(const fs::path& dir, const fs::path& zoom_dir, PlotInfo info)
-{
-    viz.drawPlacement(db, dir, info);
-    if (!zoom_view_enabled) return;
-    if (zoom_dir == dir && !info.filename_override.empty())
-        info.filename_override += "_zoom";
-    viz_zoom.drawPlacement(db, zoom_dir, info);
-}
-#endif
-
 /// @brief Append this iteration's HPWL/overflow/step stats to iterations.dat, with a header on the first write.
 void Placer::appendIterationLog(float hpwl, float overflow)
 {
@@ -223,71 +147,6 @@ void Placer::appendIterationLog(float hpwl, float overflow)
               << SCI(density_weight) << ", "
               << backtrack_steps << endl;
     hpwl_file.close();
-}
-
-#ifdef CREATE_VISUALIZATION
-/// @brief Parse the density_weight column back out of iterations.dat (field 5 of "Iter, HPWL,
-///        OVFW, step_len, density_weight, BkSteps"). density_weight has no in-memory history
-///        vector -- iterations.dat already carries it once per iteration, written in the same
-///        call as hpwl_history/ovfw_history/step_length_history's push_back
-///        (recordIterationResults -> printIterationResults -> appendIterationLog, every
-///        iteration, unconditionally), so this reads the existing log instead of adding a
-///        fourth push_back to the hot loop.
-static std::vector<float> readDensityWeightHistory(const fs::path& iterations_dat)
-{
-    std::vector<float> history;
-    std::ifstream file(iterations_dat);
-    std::string line;
-    std::getline(file, line); // header
-    while (std::getline(file, line)) {
-        std::istringstream ss(line);
-        std::string field;
-        for (int col = 0; col <= 4 && std::getline(ss, field, ','); ++col)
-            if (col == 4) history.push_back(std::stof(field));
-    }
-    return history;
-}
-#endif
-
-void Placer::plotHistories() {
-#ifdef CREATE_VISUALIZATION
-    fs::path graph_dir = output_dir / "graphs";
-    if (!fs::exists(graph_dir))
-        fs::create_directories(graph_dir);
-
-    std::vector<float> density_weight_history = readDensityWeightHistory(output_dir / "iterations.dat");
-
-    // Categorical colors (TODO #18): blue/orange/aqua are the dataviz palette's first three
-    // fixed-order slots; density weight takes violet (slot 7) rather than the 4th slot (yellow),
-    // whose contrast against this chart's white background is too low for a 2px line.
-    using Series = CairoPlotter::Series;
-    Series hpwl_series{&hpwl_history,           "HPWL Convergence",    "HPWL",           0.165, 0.471, 0.839, false};
-    Series ovfw_series{&ovfw_history,           "Overflow",            "Overflow",       0.922, 0.408, 0.204, false};
-    Series step_series{&step_length_history,    "Step Length History", "Step Length",    0.106, 0.686, 0.478, false};
-    Series dens_series{&density_weight_history, "Density Weight",      "Density Weight", 0.290, 0.227, 0.655, true};
-
-    CairoPlotter hpwl_plotter(800, 600);
-    hpwl_plotter.plotHistory(hpwl_series);
-    hpwl_plotter.savePNG(graph_dir / "hpwl_history.png");
-
-    CairoPlotter ovfw_plotter(800, 600);
-    ovfw_plotter.plotHistory(ovfw_series);
-    ovfw_plotter.savePNG(graph_dir / "ovfw_history.png");
-
-    CairoPlotter step_plotter(800, 600);
-    step_plotter.plotHistory(step_series);
-    step_plotter.savePNG(graph_dir / "step_length_history.png");
-
-    CairoPlotter dens_plotter(800, 600);
-    dens_plotter.plotHistory(dens_series);
-    dens_plotter.savePNG(graph_dir / "density_weight_history.png");
-
-    // Stacked overview: all four, sharing one x-axis, in place of the old normalized dual-axis
-    // combined_history.png (dropped -- overlaying differently-scaled series risked manufacturing
-    // a correlation that wasn't really there).
-    CairoPlotter::plotStacked({hpwl_series, ovfw_series, step_series, dens_series},
-                               "Placement Convergence Overview", graph_dir / "overview.png");
-#endif
 }
 
 // Enhanced function to create organized output structure
@@ -529,7 +388,6 @@ void Placer::printFinalResults()
     // C++-vs-Python comparison is anchored on (handoff §6).
     dumpIterationPositions("best_solution");
 
-    exportVisualizationArtifacts(chosen, metrics, run_output_dir);
     writeFinalDesignArtifacts(run_output_dir);
     finalizePositionDump();
 
@@ -734,39 +592,6 @@ void Placer::exportSummaryReports(const BestSolution& chosen, const FinalMetrics
     Logger::export_markdown(function_stats, run_output_dir, "function_statistics");
 }
 
-/// @brief Render the restored-best placement and (if visualization is built) assemble the run's placement GIF.
-void Placer::exportVisualizationArtifacts(const BestSolution& chosen, const FinalMetrics& metrics,
-                                           const std::string& run_output_dir)
-{
-    #ifdef CREATE_VISUALIZATION
-        if (!cfg["output"]["visualize"].value_or(false)) return;
-
-        PlotInfo info;
-        if (chosen.valid) {
-            info = {chosen.iteration, chosen.hpwl, chosen.overflow, 0, 0,
-                    db.getBenchmarkName(), "best_solution", phaseLabelForPlot(), phaseIteration(),
-                    bins_per_row, bins_per_row};
-        } else {
-            info = {iteration, metrics.final_hpwl, metrics.final_overflow, step_length, density_weight,
-                    db.getBenchmarkName(), "best_solution", phaseLabelForPlot(), phaseIteration(),
-                    bins_per_row, bins_per_row};
-        }
-        drawPlacementViews(run_output_dir, run_output_dir, info);
-
-        // use python script to create gif from generated pngs in run directory
-        std::string quiet_flag = quiet ? " --quiet" : "";
-        auto build_gif = [&](const std::string& png_dir, const std::string& gif_name) {
-            std::string gif_command = "python3 tools/gif_builder.py " + png_dir + " -d 100 -o "
-                                    + run_output_dir + "/" + gif_name + quiet_flag;
-            if (system(gif_command.c_str()) != 0)
-                Logger::log_warning("gif_builder.py failed (non-fatal): " + gif_command);
-        };
-        build_gif(run_output_dir + "/placement", "full_placement.gif");
-        if (zoom_view_enabled)
-            build_gif(run_output_dir + "/placement_zoom", "zoom_placement.gif");
-    #endif
-}
-
 /// @brief Write the placed design to DEF, and copy the config file into the run directory for reproducibility.
 void Placer::writeFinalDesignArtifacts(const std::string& run_output_dir)
 {
@@ -817,125 +642,6 @@ void Placer::recordInitialHPWL()
 {
     m_initial_hpwl = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), cfg["params"]["ignore_net_degree"].value_or(100));
     Logger::log_detail("Initial HPWL recorded: " + std::to_string(m_initial_hpwl));
-}
-
-void Placer::initializeFocus()
-{
-    addNamedFocusNets();
-
-    std::mt19937 rng(std::random_device{}());
-    addRandomFocusNets(rng);
-    addRandomFocusNodes(rng);
-    addRandomMacroNets(rng);
-    addRandomFocusIO(rng);
-}
-
-/// @brief Add nets named in config output.focus_nets to the visualization focus set.
-void Placer::addNamedFocusNets()
-{
-    const toml::array* focus_nets = cfg["output"]["focus_nets"].as_array();
-    if (!focus_nets) return;
-
-    auto& nets = db.getNets();
-    for (auto&& elem : *focus_nets) {
-        string net_name = elem.value_or(string{});
-        auto it = nets.find(net_name);
-        if (it != nets.end()) {
-            db.addFocusNet(it->second);
-            Logger::log_detail("Focus net (named): " + net_name
-                + " (" + std::to_string(it->second->getNodes().size()) + " nodes)");
-        } else {
-            Logger::log_warning("Focus net not found: " + net_name);
-        }
-    }
-}
-
-/// @brief Add a random sample of nets (config output.rand_focus_nets) to the visualization focus set.
-void Placer::addRandomFocusNets(std::mt19937& rng)
-{
-    int num_focus_nets = cfg["output"]["rand_focus_nets"].value_or(0);
-    if (num_focus_nets <= 0) return;
-
-    auto& nets = db.getNets();
-    std::vector<Net*> all_nets;
-    all_nets.reserve(nets.size());
-    for (auto& [id, net_p] : nets)
-        all_nets.push_back(net_p);
-    std::shuffle(all_nets.begin(), all_nets.end(), rng);
-    int count = std::min(num_focus_nets, (int)all_nets.size());
-    for (int i = 0; i < count; i++) {
-        db.addFocusNet(all_nets[i]);
-        Logger::log_detail("Focus net (rand) " + std::to_string(i) + ": " + all_nets[i]->getName()
-            + " (" + std::to_string(all_nets[i]->getNodes().size()) + " nodes)");
-    }
-}
-
-/// @brief Add a random sample of movable nodes (config output.rand_focus_nodes) to the visualization focus set.
-void Placer::addRandomFocusNodes(std::mt19937& rng)
-{
-    int num_focus_nodes = cfg["output"]["rand_focus_nodes"].value_or(0);
-    if (num_focus_nodes <= 0) return;
-
-    std::vector<Node*> movable;
-    for (auto& [name, comp_p] : db.getComponents())
-        if (comp_p->getStatus() != FIXED)
-            movable.push_back(comp_p);
-    std::shuffle(movable.begin(), movable.end(), rng);
-    int count = std::min(num_focus_nodes, (int)movable.size());
-    for (int i = 0; i < count; i++) {
-        db.addFocusNode(movable[i]);
-        Logger::log_detail("Focus node (rand) " + std::to_string(i) + ": " + movable[i]->getName()
-            + " pos=(" + std::to_string(movable[i]->getPos().x) + ","
-            + std::to_string(movable[i]->getPos().y) + ")");
-    }
-}
-
-/// @brief Add a random sample of nets with a pin on a fixed macro (config output.rand_macro_nets,
-///        Component only, not IOPad) to the visualization focus set.
-void Placer::addRandomMacroNets(std::mt19937& rng)
-{
-    int num_macro_nets = cfg["output"]["rand_macro_nets"].value_or(0);
-    if (num_macro_nets <= 0) return;
-
-    auto& nets = db.getNets();
-    std::vector<Net*> macro_nets;
-    for (auto& [id, net_p] : nets) {
-        for (Node* node_p : net_p->getNodes()) {
-            if (dynamic_cast<Component*>(node_p) && node_p->getStatus() == FIXED) {
-                macro_nets.push_back(net_p);
-                break;
-            }
-        }
-    }
-    std::shuffle(macro_nets.begin(), macro_nets.end(), rng);
-    int count = std::min(num_macro_nets, (int)macro_nets.size());
-    for (int i = 0; i < count; i++) {
-        db.addFocusNet(macro_nets[i]);
-        Logger::log_detail("Focus net (macro) " + std::to_string(i) + ": " + macro_nets[i]->getName()
-            + " (" + std::to_string(macro_nets[i]->getNodes().size()) + " nodes)");
-    }
-}
-
-/// @brief Add a random sample of IOPads/fixed components (config output.rand_focus_IO) to the visualization focus set.
-void Placer::addRandomFocusIO(std::mt19937& rng)
-{
-    int num_focus_io = cfg["output"]["rand_focus_IO"].value_or(0);
-    if (num_focus_io <= 0) return;
-
-    std::vector<Node*> fixed_nodes;
-    for (auto& [name, pad] : db.getIOPads())
-        fixed_nodes.push_back(pad);
-    for (auto& [name, comp_p] : db.getComponents())
-        if (comp_p->getStatus() == FIXED)
-            fixed_nodes.push_back(comp_p);
-    std::shuffle(fixed_nodes.begin(), fixed_nodes.end(), rng);
-    int count = std::min(num_focus_io, (int)fixed_nodes.size());
-    for (int i = 0; i < count; i++) {
-        db.addFocusNode(fixed_nodes[i]);
-        Logger::log_detail("Focus IO (rand) " + std::to_string(i) + ": " + fixed_nodes[i]->getName()
-            + " pos=(" + std::to_string(fixed_nodes[i]->getPos().x) + ","
-            + std::to_string(fixed_nodes[i]->getPos().y) + ")");
-    }
 }
 
 void Placer::recordIterationResults()

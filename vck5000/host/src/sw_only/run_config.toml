@@ -7,7 +7,7 @@
 
 [input]
 #benchmark = "host/benchmarks/ispd2005/adaptec1"
-benchmark = "host/benchmarks/ispd2005/bigblue3"
+benchmark = "host/benchmarks/ispd2005/bigblue4"
 
 xclbin = "bin/aieplace.hw.xclbin"
 
@@ -104,24 +104,11 @@ quiet = false       # if true, suppress all std output. Errors still printed. Us
 iterations_per_status = 10 # live-status table cadence: print every Nth iteration (plus iteration 1)
 results_dir = "results/single_runs" # overridden by DSE
 
-# Visualization options
-visualize = false # if true, will export visualization images
-iterations_per_export = 10
-
-# Zoom view (TODO #14): a second, magnified render of ONE region of the die, exported to
-# placement_zoom/ alongside the full-die frames and animated into zoom_placement.gif. At MMS
-# scale the full-die frame is 200k-1M cells in ~2000 px, so everything below the macro scale is
-# a grey wash; the zoom is where the standard-cell rows, the filler distribution and the macro
-# edges become visible. Only drawn at zoom: row pitch, density-bin boundaries, per-cell outlines.
-# Requires visualize = true.
-zoom = false
-zoom_center_x = 0.5 # window centre, as a fraction of die WIDTH  (0 = left edge, 1 = right edge)
-zoom_center_y = 0.5 # window centre, as a fraction of die HEIGHT
-# Window side, as a fraction of the SHORTER die dimension -- so the window is square in die units
-# and one setting means the same magnification on any benchmark. 0.05 = 1/400th of the die area.
-zoom_span = 0.05
-focus_nets = [] # focus nets are highlighted in visualization exports.
-rand_focus_IO = 0 # not yet implemented
-rand_focus_nets = 0
-rand_macro_nets = 3
-rand_focus_nodes = 0 # not yet implemented
+# Node-position dump for the offline visualizer (TODO #16). Writes <run_dir>/viz/ -- positions
+# only; every per-iteration scalar is already in iterations.dat. tools/generate_viz.py (placement
+# GIFs/PNGs, full-die or zoom) and tools/plot_histories.py (HPWL/overflow/step/lambda charts)
+# render it afterwards, so a new zoom, window or node-locked view costs seconds instead of a
+# re-run. OFF by default because the dump is large and grows with the design: ~96 MB for an
+# adaptec1 run at the cadence below, ~480 MB for bigblue4. Nothing should pay that unasked.
+dump_positions = true
+iterations_per_dump = 20 # dump cadence; the renderer reads whatever was dumped, offline
