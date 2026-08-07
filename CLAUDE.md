@@ -11,8 +11,9 @@ lines, say so and leave them alone.
 - **Done:** *sw_only:* two-phase mixed-size flow with LP macro legalization, plus TODO #19's two
   XPlace faithfulness fixes (every XPlace overflow metric excludes fillers; the γ/λ throttle gates
   on the preconditioner ratio κ, not a gradient ratio). Confirmed on all 16 MMS designs:
-  **post-DP HPWL +0.97% vs XPlace over 15** (was +1.23%; +1.63%→+0.97% excluding newblue3's
-  now-corrected fake win), **15/16 runs converge** (was 6/16), post-DP density parity unchanged.
+  **post-DP HPWL +0.74% vs XPlace over all 16** (was +1.15%), **15/16 runs converge** (was 6/16),
+  post-DP density parity unchanged. adaptec3 joined the table once TODO #3's LG/DP-harness bug was
+  fixed (we had been patching the wrong `.pl` template), and is now the suite's best at −2.69%.
   Regression baselines regenerated and green.
   *pl_algo:* all datapath modules written; HLS C-synthesis clean; each verified against the
   sw_only CPU golden one at a time; `bb_reduce` + `param_scheduler` built and verified — but read
