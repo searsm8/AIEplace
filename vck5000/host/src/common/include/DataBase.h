@@ -124,6 +124,14 @@ public:
     int getTotalNetDegree() { return m_total_net_degree; }
     Box &getDieArea() { return m_die_area; }
     string getBenchmarkName() { return m_input_dir.filename().string(); }
+    // The suite directory the design lives in ("ispd2005", "ispd2015", "mms"), and the
+    // "<suite>/<design>" pair. **A bare design name is NOT a unique key**: adaptec1-4 and
+    // bigblue1-4 exist in BOTH ispd2005 (fixed macros) and mms (movable macros), and are
+    // different designs with different references -- ispd2005/adaptec1 GP-stops at 7.060e7,
+    // mms/adaptec1 at 6.453e7, a 15% gap. Anything keyed on the bare name silently returns
+    // whichever suite it happened to see. Matches tools/benchmarks.py's canonical path format.
+    string getSuiteName() { return m_input_dir.parent_path().filename().string(); }
+    string getBenchmarkPath() { return getSuiteName() + "/" + getBenchmarkName(); }
     float getMaximumUtilization() { return m_maximum_utilization; }
     float getRowHeight() { return m_row_height; } // 0 when the input supplied none
     Position getDieShift() { return m_die_shift; } // add back to convert internal -> benchmark frame

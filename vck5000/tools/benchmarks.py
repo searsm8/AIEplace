@@ -160,19 +160,95 @@ _XPLACE_MMS_FINAL = {
     "newblue7": (8.657061e8, 0.1283, 8.855537e8, 8.803187e8),
 }
 
+# XPlace end-of-flow reference for the two NON-mixed-size tiers, keyed "<suite>/<design>" because
+# adaptec1-4 / bigblue1-4 exist in BOTH ispd2005 and mms and are different designs.
+# Per design: (post_gp_hpwl_exact, post_gp_overflow_exact, post_lg_hpwl, post_dp_hpwl) -- the same
+# four lines and the same unmasked/exact conventions as _XPLACE_MMS_FINAL above.
+#
+# Captured 2026-08-07, `--seed 42 --num_threads 8 --load_from_raw True`, raw data in
+# 2_ARTIFACTS/xplace_ref_ispd.tsv, runners 2_ARTIFACTS/run_xplace_ref{,_2015}.sh.
+#
+# ⚠️ TIER 2 IS IN SITE UNITS. These ispd2015 HPWLs are XPlace's own, i.e. raw DBU / site_width
+# (database.py:602, `hpwl_scale = die_scale / site_width`). Multiply by SITE_WIDTH[path] before
+# comparing to a sw_only HPWL. site_width is NOT uniform: 200 for the 15 mgc_* designs, 100 for
+# the 5 mgc_superblue* -- a blanket x200 is wrong by 2x on those five.
+#
+# ispd2015 is 12 of 20: `--dataset ispd2015` is silently rewritten to `ispd2015_fix` by
+# Xplace/main.py:94-96 and we hold only one design in that variant, so these came via
+# `--custom_path`, which bypasses the rewrite. That workaround is only valid where XPlace's stated
+# objection (fence regions) does not apply, so the 8 designs whose floorplan.def has REGIONS/GROUPS
+# have NO reference rather than a number XPlace cannot compute correctly. See TODO #22.
+# `mgc_pci_bridge32_b` is the exception: its reference came from the official `_fix` data (regions
+# STRIPPED) while sw_only places the region-bearing floorplan.def -- flagged, not comparable.
+_XPLACE_ISPD_FINAL = {
+    # --- ispd2005 (8 of 8) ---
+    "ispd2005/adaptec1": (7.068107e+07, 0.1099, 7.421337e+07, 7.310315e+07),
+    "ispd2005/adaptec2": (7.861516e+07, 0.1269, 8.236126e+07, 8.131825e+07),
+    "ispd2005/adaptec3": (1.862965e+08, 0.1290, 1.998780e+08, 1.938490e+08),
+    "ispd2005/adaptec4": (1.677961e+08, 0.1150, 1.769727e+08, 1.733490e+08),
+    "ispd2005/bigblue1": (8.725546e+07, 0.1194, 8.967986e+07, 8.908078e+07),
+    "ispd2005/bigblue2": (1.309736e+08, 0.1112, 1.394881e+08, 1.369654e+08),
+    "ispd2005/bigblue3": (2.910774e+08, 0.1125, 3.090403e+08, 3.029441e+08),
+    "ispd2005/bigblue4": (7.256538e+08, 0.1126, 7.482465e+08, 7.425524e+08),
+    # --- ispd2015 (12 of 20; the other 8 are TODO #22) ---
+    "ispd2015/mgc_des_perf_1":     (5.453202e+06, 0.1167, 5.842434e+06, 5.632567e+06),
+    "ispd2015/mgc_fft_1":          (1.917159e+06, 0.1325, 2.059146e+06, 2.024385e+06),
+    "ispd2015/mgc_fft_2":          (1.707055e+06, 0.1565, 1.843155e+06, 1.810411e+06),
+    "ispd2015/mgc_fft_a":          (2.968405e+06, 0.1670, 3.092991e+06, 3.061765e+06),
+    "ispd2015/mgc_fft_b":          (4.034900e+06, 0.1849, 4.219101e+06, 4.181930e+06),
+    "ispd2015/mgc_matrix_mult_1":  (1.001578e+07, 0.1780, 1.068492e+07, 1.050204e+07),
+    "ispd2015/mgc_matrix_mult_2":  (1.020299e+07, 0.1782, 1.088948e+07, 1.070034e+07),
+    "ispd2015/mgc_matrix_mult_a":  (1.466008e+07, 0.1742, 1.538942e+07, 1.516973e+07),
+    "ispd2015/mgc_pci_bridge32_b": (3.432114e+06, 0.2431, 3.495595e+06, 3.477053e+06),
+    "ispd2015/mgc_superblue12":    (2.527073e+08, 0.1436, 2.590678e+08, 2.571014e+08),
+    "ispd2015/mgc_superblue14":    (2.263669e+08, 0.1300, 2.306337e+08, 2.282981e+08),
+    "ispd2015/mgc_superblue19":    (1.544428e+08, 0.1323, 1.573560e+08, 1.555965e+08),
+}
+
+# LEF site width in DBU: SITE SIZE x (microns) * UNITS DATABASE MICRONS, read from each design's
+# tech.lef. Only tier 2 needs it -- it is the factor between XPlace's site-unit HPWL and our raw
+# DBU. Tier 1 and 3 are bookshelf and already share sw_only's frame (site_width 100 cancels the
+# read-scale), so their entries are 1 and applying the conversion is a no-op.
+# **Not uniform within tier 2** -- mgc_superblue* are 100, everything else 200.
+_SITE_WIDTH_100 = ("mgc_superblue11_a", "mgc_superblue12", "mgc_superblue14",
+                   "mgc_superblue16_a", "mgc_superblue19")
+SITE_WIDTH = {f"{suite}/{name}": (100 if name in _SITE_WIDTH_100 else 200)
+              for (name, suite, _t, _g, _d) in _ROWS if suite == "ispd2015"}
+
+
+def _xplace_ref(suite, name):
+    """(post_gp_hpwl, post_gp_overflow, post_lg_hpwl, post_dp_hpwl) or a 4-tuple of None."""
+    if suite == "mms":
+        return _XPLACE_MMS_FINAL[name]
+    return _XPLACE_ISPD_FINAL.get(f"{suite}/{name}", (None, None, None, None))
+
+
+def xplace_hpwl_in_sw_frame(path, hpwl):
+    """Convert an XPlace HPWL for `path` into sw_only's raw-DBU frame.
+
+    Tier 2 only: XPlace divides by site_width (database.py:602), so its mgc_* numbers are in site
+    units and must be multiplied back. A no-op elsewhere. Always route a tier-2 comparison through
+    this rather than hardcoding 200 -- the superblue designs are 100.
+    """
+    return None if hpwl is None else hpwl * SITE_WIDTH.get(path, 1)
+
+
 # Canonical path is "suite/design" (matches host/benchmarks/<suite>/<design> and
 # the dse.py benchmark-override format).
 BENCHMARKS = {
     f"{suite}/{name}": dict(name=name, suite=suite, tier=tier,
                             grid=grid, target_density=dens,
-                            # phase-comparable XPlace reference; None outside the MMS tier
+                            site_width=SITE_WIDTH.get(f"{suite}/{name}", 1),
+                            # phase-comparable XPlace reference; MMS only (the other tiers have
+                            # one GP phase, so their post-GP number IS the end-of-flow one below)
                             xplace_gp_hpwl=_XPLACE_MMS_MIXED_GP[name][0] if suite == "mms" else None,
                             xplace_gp_overflow=_XPLACE_MMS_MIXED_GP[name][1] if suite == "mms" else None,
-                            # end-of-flow reference: phase 2, then legalization, then DP
-                            xplace_final_hpwl=_XPLACE_MMS_FINAL[name][0] if suite == "mms" else None,
-                            xplace_final_overflow=_XPLACE_MMS_FINAL[name][1] if suite == "mms" else None,
-                            xplace_lg_hpwl=_XPLACE_MMS_FINAL[name][2] if suite == "mms" else None,
-                            xplace_dp_hpwl=_XPLACE_MMS_FINAL[name][3] if suite == "mms" else None)
+                            # end-of-flow reference: (phase 2,) then legalization, then DP.
+                            # None on the 8 ispd2015 designs with no reference (TODO #22).
+                            xplace_final_hpwl=_xplace_ref(suite, name)[0],
+                            xplace_final_overflow=_xplace_ref(suite, name)[1],
+                            xplace_lg_hpwl=_xplace_ref(suite, name)[2],
+                            xplace_dp_hpwl=_xplace_ref(suite, name)[3])
     for (name, suite, tier, grid, dens) in _ROWS
 }
 

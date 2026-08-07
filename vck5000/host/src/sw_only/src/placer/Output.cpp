@@ -191,7 +191,7 @@ void Placer::writeResultsCSV(float final_hpwl, float final_hpwl_exact, float fin
     out_file.open(csv_path, std::ios_base::app);
     out_file.imbue(std::locale::classic());  // Prevent comma thousands separators
 
-    float xplace_ref = lookupXplaceReferenceHPWL(db.getBenchmarkName());
+    float xplace_ref = lookupXplaceReferenceHPWL(db.getBenchmarkPath());  // suite/design -- bare name collides across suites
     std::vector<std::pair<std::string, std::string>> dse_params = parseDSEParams();
 
     if (need_header)
@@ -206,24 +206,36 @@ void Placer::writeResultsCSV(float final_hpwl, float final_hpwl_exact, float fin
  * @brief XPlace GP-ONLY reference HPWL (masked_hpwl at "GP Stop", NOT legalized), so the Ratio
  *        column is an honest GP-vs-GP comparison instead of our-GP vs XPlace-GP+legalization.
  *        Values from local XPlace runs: ~/phd/Xplace/result/<ts>_<design>/log/test.log line
- *        "GP Stop! ... masked_hpwl: X". Only ISPD2005 is populated: XPlace's ispd2005 HPWL
- *        shares sw_only's raw-DBU frame. ISPD2015 (mgc_*) XPlace HPWL is site-width-normalized
- *        (~ /site_width, e.g. /200) -- a DIFFERENT frame -- so it must NOT be mixed in here;
- *        populate mgc as masked_hpwl*site_width once measured. bigblue3/bigblue4 need a local
- *        XPlace GP run.
+ *        "GP Stop! ... masked_hpwl: X".
+ *
+ * ### KEYED ON "<suite>/<design>", NOT the bare design name (fixed 2026-08-07)
+ * adaptec1-4 and bigblue1-4 exist in BOTH `ispd2005` and `mms`, and their references differ by
+ * ~15% (ispd2005/adaptec1 7.060e7 vs mms/adaptec1 6.453e7). Keyed on the bare name this returned
+ * the ISPD2005 number for an MMS run, silently, and the Ratio column of every MMS results.csv
+ * row was wrong by that much. `tools/xplace_gp_ref.py` had the same defect.
+ *
+ * Only ISPD2005 is populated: XPlace's ispd2005 HPWL shares sw_only's raw-DBU frame. ISPD2015
+ * (mgc_*) XPlace HPWL is site-width-normalized (~ /site_width, e.g. /200) -- a DIFFERENT frame --
+ * so it must NOT be mixed in here; populate mgc as masked_hpwl*site_width once measured.
+ * ispd2005 bigblue3/bigblue4 still need a local XPlace GP run.
+ *
+ * NOTE this is a second copy of data that also lives in `tools/benchmarks.py` (which carries the
+ * richer post-GP/LG/DP reference, but only for MMS). Two tables that can disagree is exactly the
+ * pattern this fix was cleaning up; collapsing them is worth doing once benchmarks.py covers all
+ * three suites.
  * @return the reference HPWL, or 0.0f if this benchmark has no recorded reference.
  */
-float Placer::lookupXplaceReferenceHPWL(const std::string& bench_name)
+float Placer::lookupXplaceReferenceHPWL(const std::string& bench_path)
 {
     static const std::map<std::string, float> xplace_hpwl = {
-        {"adaptec1",  7.060218e+07f},
-        {"adaptec2",  7.893496e+07f},
-        {"adaptec3",  1.858436e+08f},
-        {"adaptec4",  1.675808e+08f},
-        {"bigblue1",  8.721903e+07f},
-        {"bigblue2",  1.298895e+08f},
+        {"ispd2005/adaptec1",  7.060218e+07f},
+        {"ispd2005/adaptec2",  7.893496e+07f},
+        {"ispd2005/adaptec3",  1.858436e+08f},
+        {"ispd2005/adaptec4",  1.675808e+08f},
+        {"ispd2005/bigblue1",  8.721903e+07f},
+        {"ispd2005/bigblue2",  1.298895e+08f},
     };
-    auto it = xplace_hpwl.find(bench_name);
+    auto it = xplace_hpwl.find(bench_path);
     return (it != xplace_hpwl.end()) ? it->second : 0.0f;
 }
 
