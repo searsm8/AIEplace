@@ -7,7 +7,7 @@
  * as anyone wants -- instead of paying for a render inside the optimizer's loop and re-running an
  * hour-long placement every time the view changes.
  *
- * Layout under <output_dir>/viz/ (full spec + rationale in
+ * Layout under <output_dir>/coord_dump/ (full spec + rationale in
  * 1_REVIEW/handoffs/NEW_HANDOFF_viz_offline_tool_20260805.md §4):
  *
  *   manifest.json      text  -- dtypes, die frame, quantization box, per-generation frame index
@@ -59,7 +59,7 @@ constexpr float QUANT_MAX = 65535.0f;
 } // namespace
 
 /**
- * @brief Open the dump for this run: create viz/, fix the quantization box, start generation 0.
+ * @brief Open the dump for this run: create coord_dump/, fix the quantization box, start gen 0.
  *
  * Called from the constructor after createRunOutputStructure(), so output_dir exists, and after
  * the node set is final (fillers created, flat index built).
@@ -70,7 +70,7 @@ void Placer::initializePositionDump()
     if (!m_pos_dump.enabled) return;
 
     m_pos_dump.interval = std::max(1, cfg["output"]["iterations_per_dump"].value_or(20));
-    m_pos_dump.dir = output_dir / "viz";
+    m_pos_dump.dir = output_dir / "coord_dump";
     fs::create_directories(m_pos_dump.dir);
 
     // Quantization box: the die, inflated 2x about its centre.

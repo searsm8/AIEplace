@@ -14,7 +14,7 @@ diverges, the comment at that line says so and why.
 
 ```
 make host HOST=sw_only
-./build/hw/host/sw_only/aieplace_sw_only.exe [config.toml]   # defaults to host/src/sw_only/run_config.toml
+./build/hw/host/sw_only/aieplace_sw_only.exe [config.toml]   # defaults to host/src/sw_only/default_config.toml
 ```
 
 ## Where to start reading
@@ -56,7 +56,7 @@ make host HOST=sw_only
    - `updateSchedule()` — throttled γ and λ update (XPlace's shared `perform_update` gate)
 4. **`printFinalResults()`** — restore the best solution found, write DEF + CSV + summary.
 
-## Compute-method selection (`run_config.toml`)
+## Compute-method selection (`default_config.toml`)
 
 - `partials_compute_method` — `cpu` (exact weighted-average gradient, the golden) or `simple`
   (LUT-based approximation).

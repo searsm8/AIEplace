@@ -15,7 +15,7 @@ ITERS=${3:-40}
 SET=${4:-fast}
 ROOT=/home/msears/phd/AIEplace/vck5000
 NEW=$ROOT/build/hw/host/sw_only/aieplace_sw_only.exe
-BASE=$ROOT/host/src/sw_only/run_config.toml
+BASE=$ROOT/host/src/sw_only/default_config.toml
 
 FAST="
 adaptec1:host/benchmarks/ispd2005/adaptec1

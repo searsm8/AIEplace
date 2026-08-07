@@ -28,7 +28,7 @@ help:
 	@echo -e '\tmake pl-algo:\t Shorthand for: make pl PL=pl_algo HOST=pl_algo (HLS C-synth of top.xo).'
 	@echo ""
 	@echo 'Run and verify:'
-	@echo -e '\tmake run:\t Build (if needed) and run HOST=$(HOST) with its default run_config.toml.'
+	@echo -e '\tmake run:\t Build (if needed) and run HOST=$(HOST) with its default_config.toml.'
 	@echo -e '\tmake test:\t Tier-1 offline verification suite. Seconds, pure g++, no Vitis/XRT needed.'
 	@echo -e '\tmake test-regress:\t sw_only regression vs committed baselines (~12 s).'
 	@echo -e '\tmake test-regress-slow:\t ...plus the mixed-size phase-2 design (~3 min).'

@@ -1,6 +1,6 @@
 # dse.py
 # Design Space Exploration python script
-# Runs bin/AIEplace.exe while modifying host/run_config.toml between runs
+# Runs bin/AIEplace.exe while modifying host/default_config.toml between runs
 
 import copy
 import datetime
@@ -34,7 +34,7 @@ MAX_PARALLEL = 1
 # Compiled placer binary (current sw_only build) and the base config it reads.
 # Both paths are relative to vck5000/, which is where this script must be run from.
 EXE_PATH = "build/hw/host/sw_only/aieplace_sw_only.exe"
-CONFIG_PATH = "host/src/sw_only/run_config.toml"
+CONFIG_PATH = "host/src/sw_only/default_config.toml"
 
 
 # =============================================================================
@@ -109,7 +109,7 @@ dse_sweep = OrderedDict([
 # Explicit one-off runs (in ADDITION to the Cartesian product above)
 # =============================================================================
 # Each dict is one run: a set of {param: value} overrides applied to the base
-# run_config.toml. Use this for specific configs the product can't express — e.g.
+# default_config.toml. Use this for specific configs the product can't express — e.g.
 # per-benchmark grids, or a hand-picked combination. "benchmark" goes in the
 # "input" section (and is prefixed with host/benchmarks/); every other key goes in
 # "params". Add an optional "label" to name the run in the results table.
@@ -154,7 +154,7 @@ def _full_suite():
         "mgc_pci_bridge32_a":("ispd2015/mgc_pci_bridge32_a",512),
         "mgc_pci_bridge32_b":("ispd2015/mgc_pci_bridge32_b",512),
     }
-    # No convergence_overflow_threshold override -> uses run_config.toml's 0.07 (XPlace-matched).
+    # No convergence_overflow_threshold override -> uses default_config.toml's 0.07 (XPlace-matched).
     return [
         {"label": f"{name}@{n}", "benchmark": path, "bins_per_row": n, "random_seed": 42}
         for name, (path, n) in grid.items()

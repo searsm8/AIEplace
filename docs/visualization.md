@@ -10,7 +10,7 @@ in git) and `vck5000/0_TODO/TODO.md` TODO #16 / #18 (tracked, the durable record
 
 ## 1. Turning the dump on
 
-In `run_config.toml`, under `[output]`:
+In `default_config.toml`, under `[output]`:
 
 ```toml
 dump_positions      = false   # master gate. OFF by default -- these files are large
@@ -19,7 +19,7 @@ dump_positions      = false   # master gate. OFF by default -- these files are l
 iterations_per_dump = 20      # cadence: dump a frame every N iterations
 ```
 
-This writes `<run_dir>/viz/{manifest.json, nodes_gen<N>.bin, frames_gen<N>.bin}`. A run's node SET
+This writes `<run_dir>/coord_dump/{manifest.json, nodes_gen<N>.bin, frames_gen<N>.bin}`. A run's node SET
 can change mid-run (phase 2 freezes movable macros and rebuilds fillers — see TODO #13), so a dump
 may span more than one `nodes_gen<N>.bin`/`frames_gen<N>.bin` pair, one per "generation." Both
 rendering tools below handle this automatically.
@@ -43,7 +43,7 @@ python3 tools/generate_viz.py <run_dir> --view zoom --center 0.5,0.5 --span 0.05
 ```
 
 Output defaults to `<run_dir>/viz_render/<full|zoom>/`, one PNG per dumped frame plus
-`placement.gif` (via `tools/gif_builder.py`, unchanged from before).
+`0_placement.gif` (via `tools/gif_builder.py`, which now takes the frame order explicitly).
 
 **Before rendering a full zoom animation, preview one late-run frame at the candidate window** —
 a badly-centered window is easy to land on (solid inside one macro, or empty whitespace):

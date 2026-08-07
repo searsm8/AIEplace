@@ -2,9 +2,9 @@
 """
 Render placement frames from a run's position dump (TODO #16).
 
-The placer no longer draws: it writes node positions to <run_dir>/viz/ (see PositionDump.cpp) and
-this turns them into PNGs. Re-runnable in seconds against a placement that took an hour, which is
-the whole point -- a new window or a new cadence no longer costs a re-run.
+The placer no longer draws: it writes node positions to <run_dir>/coord_dump/ (see
+PositionDump.cpp) and this turns them into PNGs. Re-runnable in seconds against a placement that
+took an hour, which is the whole point -- a new window or a new cadence no longer costs a re-run.
 
     python3 tools/generate_viz.py <run_dir>                 # every exported frame, full die
     python3 tools/generate_viz.py <run_dir> --iters 1:600:2 # a subset/stride of them
@@ -45,6 +45,11 @@ K_STDCELL, K_MOV_MACRO, K_FIXED, K_IOPAD, K_FILLER, K_FROZEN_MACRO = range(6)
 # A detail layer denser than this is a solid wash, so it is dropped rather than drawn.
 MAX_DETAIL_LINES = 256
 
+# Digit prefixes so the two summary outputs sort above the per-iteration frames in a file listing
+# (digits precede letters), GIF first.
+GIF_NAME = "0_placement.gif"
+BEST_PNG_PREFIX = "1_best_solution_"
+
 # Layer order + colours from Visualizer.cpp::drawPlacement. Later layers paint over earlier ones
 # deliberately; the outlines are part of that ordering, so they are drawn in sequence rather than
 # all at the end. Colours are cairo's 0..1 floats scaled to 8-bit.
@@ -81,15 +86,15 @@ SUPERSAMPLE_DEFAULT = {"full": 2, "zoom": 4}
 
 def load_run(run_dir):
     """manifest + per-generation static records, and a flat frame index across generations."""
-    viz = run_dir / "viz"
-    if not viz.is_dir():
-        sys.exit(f"{viz} not found -- was the run made with output.dump_positions = true?")
-    manifest = json.loads((viz / "manifest.json").read_text())
+    dump = run_dir / "coord_dump"
+    if not dump.is_dir():
+        sys.exit(f"{dump} not found -- was the run made with output.dump_positions = true?")
+    manifest = json.loads((dump / "manifest.json").read_text())
 
     frames = []   # (generation, index within its frame stream, iteration, tag)
     for gen in manifest["generations"]:
-        gen["static"] = np.fromfile(viz / f"nodes_gen{gen['id']}.bin", dtype=STATIC_DTYPE)
-        gen["path"] = viz / f"frames_gen{gen['id']}.bin"
+        gen["static"] = np.fromfile(dump / f"nodes_gen{gen['id']}.bin", dtype=STATIC_DTYPE)
+        gen["path"] = dump / f"frames_gen{gen['id']}.bin"
         for i, (it, tag) in enumerate(zip(gen["frame_iters"], gen["frame_tags"])):
             frames.append((gen, i, it, tag))
     return manifest, frames
@@ -228,6 +233,11 @@ class View:
                     int((DIE_START + DIE_SCALE) * self.px_w),
                     int((DIE_START + DIE_SCALE) * self.px_h))
         self.clip = self.box if self.zoomed else None
+
+    def center_frac(self):
+        """Window centre as a fraction of the die -- i.e. what --center was given."""
+        return ((self.xl + 0.5 * self.width) / self.die_w,
+                (self.yl + 0.5 * self.height) / self.die_h)
 
     def map_x(self, die_x):
         return DIE_START + (die_x - self.xl) * DIE_SCALE / self.width
@@ -372,7 +382,11 @@ def draw_overlay(image, view, manifest, iteration, tag, phase, phase_iter, scala
     def text(ux, uy, s):
         draw.text((ux * W, uy * H), s, fill=(0, 0, 0), font=font, anchor="ls")
 
-    text(0.01, 0.04, f"Benchmark: {manifest['benchmark']}")
+    # The frame tag rides the benchmark line rather than claiming a header line of its own: with
+    # DIE_START = 0.10 a 4th line lands inside the die box and is unreadable against the cells.
+    # It used to be printed in the footer's alpha slot, which cost tagged frames alpha and lambda
+    # -- exactly the two scalars a phase-boundary frame is worth looking at for.
+    text(0.01, 0.04, f"Benchmark: {manifest['benchmark']}" + (f"   [{tag}]" if tag else ""))
 
     # Optional header lines, each its OWN line rather than a suffix on the one above: past ~70
     # characters a line runs off the canvas and neither renderer wraps or warns.
@@ -383,21 +397,24 @@ def draw_overlay(image, view, manifest, iteration, tag, phase, phase_iter, scala
     # Where on the die this window is, and how much of it. Without this a zoom frame is
     # unreadable -- a few hundred cells with nothing to locate them by.
     if view.zoomed:
+        # Centre as a die FRACTION, not the window's lower-left in die units: it is the number
+        # --center was given, so a frame can be reproduced from its own caption. Absolute die
+        # coordinates are unreadable without knowing the die size, which the caption does not carry.
+        cx, cy = view.center_frac()
         text(0.01, header_y,
              f"Zoom: {100.0 * view.width / view.die_w:.2g}% x "
              f"{100.0 * view.height / view.die_h:.2g}% of die @ "
-             f"({view.xl:.3e}, {view.yl:.3e})")
+             f"({cx:.3f}, {cy:.3f})")
+        header_y += HEADER_LINE
 
+    # The footer is now the same four scalars in every view and on every frame, tagged or not.
     text(0.01, 0.99, f"Iter: {iteration}")
     if iteration in scalars:
         hpwl, ovfw, step, lam = scalars[iteration]
         text(0.18, 0.99, f"HPWL: {hpwl:.3e}")
         text(0.40, 0.99, f"OVFW: {ovfw:.2g}")
-        if not tag:
-            text(0.55, 0.99, f"alpha: {step:.3e}")
-            text(0.78, 0.99, f"lambda: {lam:.3e}")
-    if tag:
-        text(0.55, 0.99, tag)
+        text(0.55, 0.99, f"alpha: {step:.3e}")
+        text(0.78, 0.99, f"lambda: {lam:.3e}")
 
 
 def render_frame(manifest, view, gen, index, iteration, tag, scalars):
@@ -505,25 +522,33 @@ def main():
     wanted = parse_iters(args.iters)
     selected = [f for f in frames if wanted(f[2])]
     if not args.quiet:
-        where = (f", window {view.width:.4g} x {view.height:.4g} @ "
-                 f"({view.xl:.4g}, {view.yl:.4g})") if view.zoomed else ""
+        where = (f", window {view.width:.4g} x {view.height:.4g} @ centre "
+                 f"({view.center_frac()[0]:.3f}, {view.center_frac()[1]:.3f})") if view.zoomed else ""
         print(f"{len(selected)} of {len(frames)} frames, "
               f"{len(manifest['generations'])} generation(s), "
               f"canvas {view.out_w}x{view.out_h} ({view.ss}x supersampled)"
               f"{where} -> {out_dir}")
 
+    written = []
     for gen, index, iteration, tag in selected:
         image = render_frame(manifest, view, gen, index, iteration, tag, scalars)
-        # Matches the cairo renderer's naming so the two are directly comparable, and sorts in
-        # trajectory order under gif_builder.py's natural ordering.
-        name = f"iter_{iteration}" + (f"_{tag}" if tag else "") + ".png"
+        # The two files worth reaching for first are named to sort first: the GIF, then the
+        # best-solution frame. Everything else keeps the cairo renderer's iter_<N> naming, so the
+        # rest of the folder still reads in trajectory order below them.
+        name = (f"{BEST_PNG_PREFIX}iter{iteration}.png" if tag == "best_solution"
+                else f"iter_{iteration}" + (f"_{tag}" if tag else "") + ".png")
         image.save(out_dir / name)
+        written.append(out_dir / name)
         if not args.quiet:
             print(f"  {name}", flush=True)
 
     if args.gif:
+        # Hand gif_builder the frame order explicitly. It otherwise natural-sorts the directory,
+        # which put the trajectory in order only as long as every frame was named iter_<N> -- the
+        # best-solution frame is deliberately no longer, and would sort to the front of the GIF.
         builder = Path(__file__).resolve().parent / "gif_builder.py"
-        cmd = [sys.executable, str(builder), str(out_dir), "-o", str(out_dir / "placement.gif")]
+        cmd = [sys.executable, str(builder), "-o", str(out_dir / GIF_NAME),
+               "--frames", *(str(p) for p in written)]
         subprocess.run(cmd + (["--quiet"] if args.quiet else []), check=True)
 
 

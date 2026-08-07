@@ -21,33 +21,43 @@ def natural_sort_key(filename):
             for text in re.split(r'(\d+)', str(filename))]
 
 
-def create_gif(input_dir, output_file, duration=100, loop=0, optimize=True, resize=None, quiet=False):
+def create_gif(input_dir, output_file, duration=100, loop=0, optimize=True, resize=None, quiet=False,
+               files=None):
     """
     Create an animated GIF from PNG files in a directory.
 
     Args:
-        input_dir: Directory containing PNG images
+        input_dir: Directory containing PNG images (ignored when `files` is given)
         output_file: Output GIF filename
         duration: Duration of each frame in milliseconds (default: 100ms = 10fps)
         loop: Number of loops (0 = infinite loop)
         optimize: Whether to optimize the GIF (reduces file size)
         resize: Optional tuple (width, height) to resize images
         quiet: If True, suppress all print output
+        files: Explicit frame list, already in the order they should animate. Use this whenever
+               the caller knows the order; natural-sorting a directory only recovers it while
+               every filename encodes its position.
     """
     def log(msg):
         if not quiet:
             print(msg)
 
-    input_path = Path(input_dir)
+    if files:
+        png_files = [Path(f) for f in files]
+        missing = [str(f) for f in png_files if not f.is_file()]
+        if missing:
+            raise FileNotFoundError(f"Frame(s) not found: {', '.join(missing)}")
+    else:
+        input_path = Path(input_dir)
 
-    if not input_path.exists():
-        raise FileNotFoundError(f"Directory not found: {input_dir}")
+        if not input_path.exists():
+            raise FileNotFoundError(f"Directory not found: {input_dir}")
 
-    # Get all PNG files and sort them naturally
-    png_files = sorted(input_path.glob("*.png"), key=natural_sort_key)
+        # Get all PNG files and sort them naturally
+        png_files = sorted(input_path.glob("*.png"), key=natural_sort_key)
 
-    if not png_files:
-        raise ValueError(f"No PNG files found in {input_dir}")
+        if not png_files:
+            raise ValueError(f"No PNG files found in {input_dir}")
 
     log(f"Found {len(png_files)} PNG files")
 
@@ -113,9 +123,18 @@ Examples:
     
     parser.add_argument(
         'input_dir',
-        help='Directory containing PNG images'
+        nargs='?',
+        help='Directory containing PNG images (natural-sorted). Omit when using --frames.'
     )
-    
+
+    parser.add_argument(
+        '--frames',
+        nargs='+',
+        metavar='PNG',
+        help='Explicit ordered frame list; overrides input_dir. Use when the filenames do not '
+             'sort into the order the frames should animate in.'
+    )
+
     parser.add_argument(
         '-o', '--output',
         default='output.gif',
@@ -161,6 +180,9 @@ Examples:
     # Convert resize tuple if provided
     resize = tuple(args.resize) if args.resize else None
 
+    if not args.input_dir and not args.frames:
+        parser.error("give either input_dir or --frames")
+
     try:
         create_gif(
             input_dir=args.input_dir,
@@ -169,7 +191,8 @@ Examples:
             loop=args.loop,
             optimize=not args.no_optimize,
             resize=resize,
-            quiet=args.quiet
+            quiet=args.quiet,
+            files=args.frames
         )
     except Exception as e:
         print(f"Error: {e}")

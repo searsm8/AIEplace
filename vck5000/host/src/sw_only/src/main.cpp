@@ -7,7 +7,7 @@
 int main(int argc, char *argv[])
 {
 
-    std::string config_filepath = (argc > 1) ? argv[1] : "host/src/sw_only/run_config.toml"; // default
+    std::string config_filepath = (argc > 1) ? argv[1] : "host/src/sw_only/default_config.toml"; // default
 
     AIEplace::Placer placer(config_filepath);
     placer.db.printInfo(); 

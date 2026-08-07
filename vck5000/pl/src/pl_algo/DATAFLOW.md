@@ -69,6 +69,27 @@ bb_reduce + param_scheduler core C-synthesizes (`vck5000/test/synth_check.{cpp,t
 the datapath (stages 1-3) + control into one resident `top` loop with the AIE FFT streaming per
 iteration, then sw_emu-verify the trajectory vs the golden (needs the Vitis/AIE env).
 
+> ### ⚠️ 2026-08-06 — compose this loop LAST, not next. See TODO #20.
+> The algorithm in these modules is pinned to the **2026-07-14** sw_only. `param_scheduler.hpp` has
+> not been touched since; sw_only has taken 20 commits plus the uncommitted #19 since, including the
+> #11a in-die-shift deletion, #11b's movable-macro deposit weight, XPlace-faithful filler sizing, the
+> coarse-divergence overflow conjunct, phase-relative counters, and mixed-size phase 2.
+>
+> The drift went unnoticed because **`Placer::dumpScheduleTrace()` was deleted from sw_only as dead
+> code** (`44612cc`, 2026-07-28). It was the only producer of the golden `vck5000/test/sched_verify.cpp`
+> replays, and that consumer is in another variant and names it by filename — nothing in the build
+> could see the coupling. So the fixture cannot be regenerated, and `sched_verify` passes against a
+> 2026-07-18 golden and always will. It is not evidence about the current algorithm.
+>
+> Also: only 3 of 17 modules are covered at tier 1 (`fft_pl`, `field_solve_pl`, `param_scheduler` are
+> the only ones a harness `#include`s; `density_bin_model.cpp` holds its own stale copy of
+> `node_footprint`), so every module Stage 5 must change is unverifiable without a full sw_emu cycle.
+>
+> Restore the trace + the tier-1 coverage first. Full assessment, including the known datapath
+> divergences and the structural gaps (second movable-only density map for the convergence overflow,
+> backtracking, best-position buffer, fillers, phase-2 re-entrancy):
+> `vck5000/1_REVIEW/reports/_NEW_REPORT_pl_algo_stage5_assessment_20260806.md`.
+
 > **`bb_reduce.hpp` and `param_scheduler.hpp` are BUILT AND VERIFIED BUT NOT WIRED INTO `top.cpp`.**
 > This is the correct in-progress state, not an oversight -- they are the *device-resident* control
 > path, and nothing consumes them until the resident loop above is composed. They are exercised

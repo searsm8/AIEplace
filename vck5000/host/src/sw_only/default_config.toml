@@ -6,8 +6,8 @@
 # =============================================================================
 
 [input]
-#benchmark = "host/benchmarks/ispd2005/adaptec1"
-benchmark = "host/benchmarks/ispd2005/bigblue4"
+benchmark = "host/benchmarks/ispd2005/adaptec1"
+#benchmark = "host/benchmarks/ispd2005/bigblue4"
 
 xclbin = "bin/aieplace.hw.xclbin"
 
@@ -104,11 +104,11 @@ quiet = false       # if true, suppress all std output. Errors still printed. Us
 iterations_per_status = 10 # live-status table cadence: print every Nth iteration (plus iteration 1)
 results_dir = "results/single_runs" # overridden by DSE
 
-# Node-position dump for the offline visualizer (TODO #16). Writes <run_dir>/viz/ -- positions
+# Node-position dump for the offline visualizer (TODO #16). Writes <run_dir>/coord_dump/ -- positions
 # only; every per-iteration scalar is already in iterations.dat. tools/generate_viz.py (placement
 # GIFs/PNGs, full-die or zoom) and tools/plot_histories.py (HPWL/overflow/step/lambda charts)
 # render it afterwards, so a new zoom, window or node-locked view costs seconds instead of a
 # re-run. OFF by default because the dump is large and grows with the design: ~96 MB for an
 # adaptec1 run at the cadence below, ~480 MB for bigblue4. Nothing should pay that unasked.
-dump_positions = true
-iterations_per_dump = 20 # dump cadence; the renderer reads whatever was dumped, offline
+dump_positions = false
+iterations_per_dump = 20 # dump cadence; more dumps = more disk, but more frames for the GIFs. Must be a multiple of iterations_per_status.

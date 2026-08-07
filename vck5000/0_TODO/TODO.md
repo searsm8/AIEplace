@@ -289,16 +289,36 @@ preconditioner works as intended. Now clean up the experiment scaffolding it was
 
 ### New, opened 2026-08-04 by the LG/DP suite
 
-- [ ] **adaptec3 segfaults inside XPlace's `gpudp.greedyLegalization`** on our placement —
-      reproducible 3/3, the only failure in 15. `bash /tmp/lgdp/run_one.sh adaptec3 /tmp/lgdp/pl/adaptec3.pl`
-      (see `2_ARTIFACTS/run_lgdp_suite.sh` for the invocation). Crash is in XPlace's compiled CUDA op,
-      after `Check Pass in Macro Legalization`, at `Start running Greedy Legalization`.
-      **Ruled out:** the ragged-core hypothesis below — clamping all 315 out-of-row cells into their
-      row spans still segfaults, same place. **Untested leads:** adaptec3 is the only MMS design with
-      **zero fixed nodes** (`#Fix = 0`), and in skip-GP mode XPlace creates fillers (1.81M here) but
-      never places them, so they enter LG stacked. Discriminator worth running: feed XPlace its *own*
-      07-17 phase-2 output back through the same skip-GP path — if that also crashes, the bug is in
-      the skip-GP path and not in our placement.
+- [x] **adaptec3 segfault inside XPlace's `gpudp.greedyLegalization` — ROOT-CAUSED AND FIXED
+      2026-08-07. It was OUR harness, not our placement and not XPlace's skip-GP path.**
+      `2_ARTIFACTS/gen_lgdp_inputs.py` hardcoded the patch template as `mms/<design>/<design>.pl`
+      instead of reading the `.pl` the design's **`.aux`** actually names. adaptec3's `.aux` names
+      **`adaptec3.2.pl`**, which carries `/FIXED` on 665 nodes; the default `adaptec3.pl` carries
+      **zero**. So we handed XPlace 665 movable **0×0** terminals (`#Mov = 451650, #Fix = 0`,
+      against its own reference `#Mov = 450985, #Fix = 665`).
+      **The crash chain**, confirmed under gdb: a 0×0 movable non-macro reaches
+      `cpp_to_py/gpudp/lg/greedy_legalize.cpp:265`, where `num_node_rows = ceilDiv(0, row_height)`
+      is **0**, so the VLAs at 266/274/289 are zero-length; line 299 writes `blank_index_offset[0]`
+      out of bounds and line 300's `std::fill(p+1, p+0, -1)` has `first > last`, which GCC lowers to
+      a `memset` of `(size_t)(-4)` → SIGSEGV in `__memset_avx2_erms` called from `dp::legalizeBin`.
+      **Verified by fixing only the flags:** same coordinates, 665 `/FIXED` markers restored →
+      exit 0, full LG+DP. Input HPWL bit-identical to the crashing run (1.510788E+08).
+      **Fixed** in `gen_lgdp_inputs.py` (`template_pl()` reads the `.aux`); verified for all 16.
+      **Only adaptec3 was affected.** Three designs' `.aux` name a non-default `.pl`
+      (adaptec1 → `adaptec1_graphplanner.pl`, adaptec2 → `adaptec2.nonlinear.pl`,
+      adaptec3 → `adaptec3.2.pl`), but adaptec1/adaptec2's fixed sets are **identical** in name and
+      coordinates between the two files, so the wrong template was harmless there. ⚠️ They differ in
+      *line endings and whitespace* (CRLF + spaces vs LF + tabs), so a naive `diff` says they
+      differ — normalize before concluding anything from that comparison.
+      **sw_only itself was never wrong:** `DataBase.cpp:236-249` discovers and parses the `.aux`, so
+      sw_only used `adaptec3.2.pl` and never moved those 665 terminals (verified byte-identical in
+      our export). No sw_only re-run was needed. The old "HPWL round-trips exactly" check was valid
+      but blind here — it round-tripped through the same wrong template, so it could not see a
+      missing fixedness flag.
+      **Latent XPlace bug, upstream's call, NOT patched by us:** `legalizeBin` is UB for *any*
+      zero-height movable non-macro cell. XPlace never hits it only because zero-size nodes are
+      always fixed terminals in its own flow. `num_node_rows = std::max(1, ceilDiv(...))` would
+      harden it.
 - [ ] **sw_only has no per-row site model; `enforceDieBoundaries` clamps to the die *rectangle* only.**
       11 of 16 MMS designs have a ragged (staircase) core — each `CoreRow` carries its own
       `SubrowOrigin`/`NumSites` — so "inside the die bbox" is weaker than "inside a row". Measured with
@@ -2222,10 +2242,15 @@ automatically at end-of-run anymore (nothing is, post-#16) — invoke it by hand
 >
 > | | before | after |
 > |---|---|---|
-> | **post-DP HPWL vs XPlace** (15 designs) | +1.23% | **+0.97%** |
+> | **post-DP HPWL vs XPlace** (**all 16** designs) | +1.15% | **+0.74%** |
 > | post-GP HPWL vs XPlace (16 designs) | +2.06% | **+1.19%** |
 > | **runs that `converged`** (rest = `divergence_guard`) | 6/16 | **15/16** |
 > | post-DP density vs XPlace (8 measurable) | parity | **parity, unchanged** |
+>
+> *(Updated 2026-08-07: adaptec3 was missing from the original 15-design figure because our LG/DP
+> harness crashed XPlace's legalizer — a bug in OUR input generation, now fixed; see #3. With it
+> in, both arms move: 15-design +1.23%→+0.97% becomes 16-design **+1.15%→+0.74%**. adaptec3 is the
+> single best design in the suite at **−2.69%** vs XPlace, up from −0.05%.)*
 >
 > **The post-DP gain is understated by that table.** The "before" column is flattered by
 > newblue3's −4.35%, which was a *fake* win — it guard-stopped at 1087 iterations, under-spread.

@@ -29,7 +29,7 @@ import sys
 import tomlkit
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TEMPLATE = os.path.join(REPO, "host/src/sw_only/run_config.toml")
+TEMPLATE = os.path.join(REPO, "host/src/sw_only/default_config.toml")
 EXE = os.path.join(REPO, "build/hw/host/sw_only/aieplace_sw_only.exe")
 
 # design -> (xplace_grid, xplace_target_density), from tools/benchmarks.py _ROWS (mms tier).
@@ -64,7 +64,7 @@ def write_config(design, cfg_dir, out_root, seed, every):
     params["random_seed"] = seed
 
     out = cfg["output"]
-    out["dump_positions"] = True       # <run_dir>/viz/ -- rendered afterward by generate_viz.py
+    out["dump_positions"] = True       # <run_dir>/coord_dump/ -- rendered afterward by generate_viz.py
     out["iterations_per_dump"] = every
     out["quiet"] = True
     out["interactive"] = False
@@ -143,7 +143,7 @@ def main():
         render_gifs(run_dir, zoom)
         print(f"[gif] ({i}/{len(args.designs)}) {design} — ok, {run_dir}/viz_render/", flush=True)
 
-    print(f"[gif] done. GIFs at {out_root}/<design>/<benchmark>/<run>/viz_render/<full|zoom>/placement.gif",
+    print(f"[gif] done. GIFs at {out_root}/<design>/<benchmark>/<run>/viz_render/<full|zoom>/0_placement.gif",
           flush=True)
 
 

@@ -9,7 +9,7 @@ OUT=${1:-/tmp/mt12/profile}
 ITERS=${2:-20}
 ROOT=/home/msears/phd/AIEplace/vck5000
 EXE=$ROOT/build/hw/host/sw_only/aieplace_sw_only.exe
-BASE=$ROOT/host/src/sw_only/run_config.toml
+BASE=$ROOT/host/src/sw_only/default_config.toml
 
 mkdir -p "$OUT"
 cd "$ROOT" || exit 1
