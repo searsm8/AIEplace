@@ -3,7 +3,7 @@
  * @brief LP-based macro legalization — stage 2 of the mixed-size flow (TODO #13).
  *
  * Port of XPlace's `src/core/macro_legalization.py`. A full walkthrough of the algorithm lives in
- * `1_REVIEW/NEW_EXPLAINER_lp_macro_legalization.md`; the short version:
+ * `.claude/1_REVIEW/NEW_EXPLAINER_lp_macro_legalization.md`; the short version:
  *
  *   Non-overlap of two rectangles is a DISJUNCTION (left OR right OR below OR above), which is
  *   non-convex and would normally force a MILP with O(n^2) binaries. The trick is to decide, for

@@ -46,21 +46,34 @@ __pycache__/
 /vck5000/aie/x86simulator_output/
 /vck5000/aie/golden_data/
 
-# Numbered workflow dirs (N_CAPSNAME: 0_TODO, 0_OVERNIGHT_WORK, 1_REVIEW, 2_ARTIFACTS, ...):
-# local async handoff / scratch between Mark & Claude, mostly not tracked.
-# Tracked exceptions: workflow history files (backed up in git for disaster recovery)
+# Numbered workflow dirs (N_CAPSNAME: 0_OVERNIGHT_WORK, 1_REVIEW, 2_ARTIFACTS, ...):
+# local async handoff / scratch between Mark & Claude, never tracked.
 #
-# ORDER MATTERS, twice over:
-#  1. The catch-all must match at ANY depth (no leading slash) -- these dirs live under vck5000/.
-#     The leading slash added by the MARK_TO_REVIEW -> REVIEW rename stopped it matching
-#     vck5000/1_REVIEW and vck5000/2_ARTIFACTS, which then sat untracked-but-NOT-ignored,
-#     including ~80 MB of GIFs that a `git add -A` would have swept in.
-#  2. It must come BEFORE the 0_TODO exceptions. git does not descend into an excluded
-#     DIRECTORY, so a re-include of a file inside one can never fire -- the negation has to
-#     win on the directory itself, which means appearing later in the file.
+# The catch-all must match at ANY depth (no leading slash) -- these dirs live under vck5000/.
+# The leading slash added by the MARK_TO_REVIEW -> REVIEW rename stopped it matching
+# vck5000/1_REVIEW and vck5000/2_ARTIFACTS, which then sat untracked-but-NOT-ignored,
+# including ~80 MB of GIFs that a `git add -A` would have swept in.
+#
+# 2026-08-07: the whole workflow set moved into /.claude/ -- notes (TLDR/TODO/history) out of
+# 0_TODO, plus 1_REVIEW and 2_ARTIFACTS wholesale. One hidden dir, so a newcomer browsing the repo
+# sees code first. The catch-all still ignores 0_OVERNIGHT_WORK and anything else numbered.
 [0-9]_*/
-!/vck5000/0_TODO/
-/vck5000/0_TODO/*
-!/vck5000/0_TODO/history.md
-!/vck5000/0_TODO/TODO.md
 vck5000/host/benchmarks/mms/
+
+# /.claude/1_REVIEW/ -- the REPORTS ARE TRACKED (Mark, 2026-08-07). The negation must come after
+# the catch-all above AND must win on the DIRECTORY: git does not descend into an excluded
+# directory, so a re-include of a file inside one can never fire. Once git descends, everything
+# under it is tracked unless re-excluded below.
+!/.claude/1_REVIEW/
+
+# ...except archive/, which is 161 MB of placement GIFs and visualizations, not reports.
+/.claude/1_REVIEW/archive/
+
+# /.claude/2_ARTIFACTS/ is NOT tracked -- 1.9 GB of GIFs, PNGs and DEFs, all regenerable output
+# (`tools/generate_viz.py`, the viz-gif skill). Already ignored by the catch-all; stated here so
+# nobody "fixes" the asymmetry with 1_REVIEW by adding a negation. Git blobs are forever: a commit
+# of this would stay in the pack after any later removal, and only a history rewrite reclaims it.
+
+# Local-only Claude Code settings, and the Obsidian vault config.
+/.claude/settings.local.json
+/.claude/.obsidian/

@@ -1,115 +1,89 @@
-# AIEplace — project notes for Claude
-
-## TL;DR — where the project stands
-*Last updated 2026-08-06.* **Whenever you write a handoff, checkpoint, or end-of-session
-summary, update these four lines as part of writing it.** A stale TL;DR is worse than no
-TL;DR, because it gets believed. If what you're summarising doesn't change any of these
-lines, say so and leave them alone.
-
-- **Working on:** two threads. (1) **sw_only algorithm quality vs XPlace** — the active one, see
-  TODO #19; (2) `pl_algo` (branch `pl_algo`) — moving the entire placement iteration onto the PL.
-- **Done:** *sw_only:* two-phase mixed-size flow with LP macro legalization, plus TODO #19's two
-  XPlace faithfulness fixes (every XPlace overflow metric excludes fillers; the γ/λ throttle gates
-  on the preconditioner ratio κ, not a gradient ratio). Confirmed on all 16 MMS designs:
-  **post-DP HPWL +0.74% vs XPlace over all 16** (was +1.15%), **15/16 runs converge** (was 6/16),
-  post-DP density parity unchanged. adaptec3 joined the table once TODO #3's LG/DP-harness bug was
-  fixed (we had been patching the wrong `.pl` template), and is now the suite's best at −2.69%.
-  Regression baselines regenerated and green.
-  *pl_algo:* all datapath modules written; HLS C-synthesis clean; each verified against the
-  sw_only CPU golden one at a time; `bb_reduce` + `param_scheduler` built and verified — but read
-  the next bullet before trusting "verified": those goldens are late-July.
-- **In progress:** *sw_only:* TODO #19 is landed and measured; what is open is small — decide
-  whether to retire the `schedule_gate_metric` toggle, and look at **newblue4**, the one design
-  the fix did not convert to `converged`. ✅ **#19 NARROWS the pl_algo drift on the schedule axis**
-  (an earlier note here said "widens" — wrong): `pl_algo`'s `sched_dff` closed form
-  `c·λ/(1+c·λ)` is *algebraically* XPlace's κ, so pl_algo has been right all along and sw_only was
-  the one that was wrong. The two now agree. `sched_verify`'s own dff_coef-constancy check has
-  been reporting the disagreement as a **633,000× spread** for weeks — printed, never asserted.
-  *pl_algo:* **TODO #20 opened 2026-08-06 — do NOT compose Stage 5 first.** pl_algo's algorithm is
-  frozen at the **2026-07-14** sw_only, and the mechanism that would have caught that
-  (`dumpScheduleTrace()`) was deleted from sw_only as dead code on 07-28, so `make test`'s green
-  `sched_verify` checks against a 07-18 golden and always will. Restore the trace and the tier-1
-  coverage (3 of 17 modules today) *before* the resident loop. `top.cpp` is still a mode-switch
-  bring-up scaffold, the host still owns the γ/λ schedule one round-trip per iteration, and
-  `make host HOST=pl_algo` needs one `make clean HOST=pl_algo` (stale `.d`, not a source break).
-  Assessment: `1_REVIEW/reports/_NEW_REPORT_pl_algo_stage5_assessment_20260806.md`.
-- **To verify anything:** `cd vck5000 && make test` (pl_algo, seconds, no Vitis) and
-  `make test-regress` (sw_only vs committed baselines, ~12 s). See
-  *Verification Loop* below before writing or checking any module.
+# Software Project notes for Claude
 
 ## ⚠️ The Bash tool runs on Windows, not WSL — wrap every command in `wsl`
-The `Bash` tool executes in **Git Bash / MINGW64 on Windows**, even though this project
-lives in WSL. Symptoms when you forget: `uname` reports `MINGW64_NT…Msys`, WSL paths like
-`/home/msears/phd/AIEplace` return `No such file or directory`, and the Linux toolchain
-(Vitis, XRT, `make`, `v++`) is missing. The working dir shows up as the UNC path
-`//wsl.localhost/Ubuntu/…`.
+The `Bash` tool executes in **Git Bash / MINGW64 on Windows**, but this project
+lives in WSL. 
 
 **Fix — run everything inside WSL by wrapping the command:**
 ```bash
 wsl -e bash -c "cd /home/msears/phd/AIEplace && <your command>"
 ```
-Use real WSL/Linux paths (`/home/msears/…`) *inside* the wrapper, not the Windows UNC path.
-Anything touching the repo build, the toolchain, or Linux tools must go through `wsl -e bash -c`.
 
-## 🔧 A fresh clone must bootstrap third_party first
-`bash vck5000/tools/bootstrap_third_party.sh` — fetches the **Limbo submodule**
-(`third_party/Limbo`, pinned to upstream tag 3.5.2) and builds it out of tree into
-`third_party/limbo_{build,install}` (both gitignored). Without it `third_party/Limbo/` is empty
-and the host build fails on missing `limbo/parsers/...` headers. **No `.a` is tracked in this
-repo** — if you find yourself wanting to commit one, that is the bug. Details + the
-`-DBoost_NO_BOOST_CMAKE=ON` gotcha: `vck5000/host/README.md`.
+Filling your context with the right information is important.
 
-## 📋 Always read vck5000/0_TODO/TODO.md for context
-Before starting work, read `vck5000/0_TODO/TODO.md` to understand current priorities, blockers,
-and in-progress tasks. This file is the source of truth for project state and helps avoid
-re-doing work or working on stale branches.
+## TLDR.md holds the living status of the project, summarized concisely. 
+It also holds references for diving deeper on the topic at hand.
+
+**The three project-notes files live in the repo-root `.claude/`** — `.claude/TLDR.md`,
+`.claude/TODO.md`, `.claude/history.md`. All three are tracked. They sit in a dotfolder so a
+newcomer browsing the repo sees the code first, not our workflow.
+
+For a new session, follow these steps:
+
+1) Build context. Read `.claude/TLDR.md` to quickly gain current summarized status.
+2) From Mark's prompt and TLDR, decide if you need to read TODO.md items and reports relevant to the task at hand.
+3) Do the task.
+4) If requested by Mark, write a report or generate an artifact.
+5) Update TODO by summarizing the task or report, then update TLDR by summarizing the TODO.
+
+Recall how useful the TLDR was when starting the session. 
+It only stays useful if it is meticulously kept up to date.
+A stale TLDR is worse than no TLDR, because it gets believed. 
+Mark will also read TLDR, so treat it as a report to both him and your future self.
+
+**Maintain a timestamp** in TLDR with minute precision accuracy. Eastern time.
+
+### Keep TODO.md from bloating
+Every session may load this file whole, so anything finished that stays in it is paid for again on
+every future session. Also, Mark needs to read it sometimes! Three rules:
+
+1. **When a TODO is completed, move the whole section to `.claude/history.md`**
+   - Prepend history.md with a summary line: the TODO number "#n" and a brief description of what was accomplished. Reference other TODOs as needed.
+   - Insert the full text of the completed TODO after all the summary lines, so it keeps most-recently completed items first.
+   - Don't leave a completed task open -- that's clutter. If uncertain, ask Mark.
+
+2. **Status lives in TODO.md; evidence lives in a report.** A TODO is simply the gist — what, why,
+   state, next action — plus a [[link]] to its `.claude/1_REVIEW/reports/` file for the measurements and
+   reasoning. 
+
+3. **Avoid editing history.md** unless you can justify literally rewriting history. 
+If something does need amending, an annotation is better than hard edits.
+
+4. Place new reports in `1_REPORTS/`. These files should be text only, since it is git tracked.
+
+
 
 ## 📄 Naming what you hand Mark — the filename carries the metadata
-Work here is asynchronous and multi-session. A directory listing must tell you a document's
-**read state** and **age** before you open it, because the moment you read the filename that
-context is already loaded — and because another session will read the same name without any of
-your context. Both halves matter: the writing rule and the reading rule.
+Work here is asynchronous and multi-session, so filenames are an efficient channel to communicate across different coding sessions, and to me when I am reviewing files.
 
-```
-[_NEW_]<TYPE>_<brief_description>[_<YYYYMMDD>].<ext>
-```
+When naming new files:
+1) If Mark requested a report or other specific file, or you think he should read it, include the tag `_NEW_`.
+  **Only Mark clears this prefix to signal that he's finished reviewing it.**
+  The leading underscore is load-bearing: it sorts the unread set to the top of a listing in File Explorer, VS Code and PowerShell.
 
-**Writing**
-- `<TYPE>` — one of `REPORT`, `HANDOFF`, `PLAN`, `EXPLAINER`. Deliberately small; if none fits,
-  it is a `REPORT`. Type leads so a listing groups by kind, then description, then date.
-- `<brief_description>` — snake_case, 2-4 words (`footprint_ab`, `viz_offline_tool`).
-- `_<YYYYMMDD>` — **only** for files in `1_REVIEW/` and `2_ARTIFACTS/`. Nothing else gets a date;
+2)  `<TYPE>` — one of `REPORT`, `HANDOFF`, `PLAN`, `EXPLAINER`. Deliberately small; if none fits,
+  default to `REPORT`.
+
+3) If the file is attached to an open TODO, add it's number to the filename.
+
+4) `<brief_description>` — snake_case, 2-4 words (`footprint_ab`, `viz_offline_tool`).
+
+5) `_<YYYYMMDD>` — **only** for files in `.claude/1_REVIEW/` and `.claude/2_ARTIFACTS/`. Nothing else gets a date;
   a run directory is already timestamped, and dating a file twice is worse than not at all.
-- `_NEW_` — **only** on a document written for Mark to read that he has not read yet. Not on
-  intermediate output, not on anything a tool consumes, not "because it is recent."
-  **Only Mark clears the prefix. Never drop it yourself**, and never add it to something that was
-  not written for him — if everything is `_NEW_`, nothing is. The leading underscore is load-bearing:
-  it sorts the unread set to the top of a listing in File Explorer, VS Code and PowerShell.
 
-**Does not apply to** code, machine-read data (`*.tsv`/`*.csv` an `analyze_*.py` reads), files
-inside a timestamped run directory, fixed-name contracts (`manifest.json`, `results.csv`,
-`iterations.dat`, `config_used.toml`, `nodes_gen<N>.bin`), or scratch. Renaming a contract breaks
-its reader; that is the whole reason this rule is scoped to documents.
+```
+[_NEW_]<TYPE>_<#n>_<brief_description>[_<YYYYMMDD>].<ext>
+```
 
-**Reading — this is the half that prevents misconstrual**
-- `_NEW_` = **unreviewed**. It is a proposal, not a decision. Do not cite it as agreed, established,
-  or settled, and do not build on its conclusions without saying they are unconfirmed.
-- No prefix = Mark has read it. **That means read, NOT correct.** A reviewed report can still be
-  wrong and can go stale without being amended — `1_REVIEW/reports/REPORT_phase2_mms_suite_20260802.md`
-  §5 asserted ~15 XPlace GPU re-runs were needed, was retracted 2026-08-04, and kept costing
-  sessions time until a pointer was appended to it on 2026-08-06. Its correction still carries
-  `_NEW_` (unread), so for four days the wrong file read as authoritative and the right one read
-  as a draft. **Prefix state is about attention, never about truth.**
-- The date is **when it was written, not when it was true.** Check `0_TODO/TODO.md` before treating
-  a dated claim as current.
+**Report Writing**
 
-Unread files sort to the top ahead of the type grouping. That is intended — the `_NEW_` set is
-small by design, so it should be the first thing a listing shows. The 19 pre-existing `NEW_` files
-were renamed to `_NEW_` on 2026-08-06 with their cross-references updated; the older un-prefixed
-files were left alone, since retro-fitting `<TYPE>_` onto files Mark has already read buys nothing
-and breaks links.
+**File links** -- For Mark's benefit. Wrap filenames with double-brackets [[filename.md]] so that 
+Obsidian software generates a clickable link when viewed by a human. 
+It also clearly denotes filenames for your benefit.
 
-## What this is
+## End of Software Project notes
+
+## This project
 AIEplace ports the ePlace analytical placement algorithm onto the AMD Versal VCK5000
 (Programmable Logic + AI Engines) for acceleration. Design variants live under
 `vck5000/{aie,pl,host}/src/<variant>/`, selected by the make vars `AIE=`/`PL=`/`HOST=`
@@ -304,7 +278,7 @@ function.** The κ bug sat under a doc-block that said it was computing `weighte
 next line assigned something else. Prefer to make the claim checkable (see *A test asserts*) over
 asserting it in prose.
 
-## Keeping `0_TODO/TODO.md` true
+## Keeping `.claude/TODO.md` true
 TODO.md is the **source of truth for project state** — CLAUDE.md's TL;DR points at it and every
 session reads it first. It is also 2000+ lines of corrections layered on corrections, and on
 2026-08-06 four checkboxes were still open on work that had already landed. A source of truth
@@ -319,7 +293,7 @@ that is 4 items stale is worse than one nobody trusts, because it gets believed.
    *Never delete the original* — the retraction trail is the most valuable content in the file
    (see `#11b`'s "RULED OUT" verdict, kept verbatim because it was cited for four days).
 3. **State what would falsify it.** "Re-measure before closing" is only actionable with the
-   command and the artifact path. `/tmp` does not survive; put durable data in `2_ARTIFACTS/`
+   command and the artifact path. `/tmp` does not survive; put durable data in `.claude/2_ARTIFACTS/`
    and name it in the entry.
 4. **Close the loop the same day the measurement lands.** The re-baseline that closed adaptec5
    finished on 08-04 and the entry still read "pending" on 08-06 — the run was done, the

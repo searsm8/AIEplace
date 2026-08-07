@@ -5,8 +5,8 @@ separate command-line tools turn that dump into images afterward, as many times 
 ways as you like, without re-running the placement. This replaced an earlier design where the
 placer itself rendered PNGs with cairo in-loop (`Visualizer.{h,cpp}`, config `output.visualize` /
 `output.zoom*`) — removed entirely 2026-08-05 (TODO #16 step 5). Background and the full design
-history: `vck5000/1_REVIEW/handoffs/NEW_HANDOFF_viz_offline_tool_20260805.md` (local, not tracked
-in git) and `vck5000/0_TODO/TODO.md` TODO #16 / #18 (tracked, the durable record).
+history: `.claude/1_REVIEW/handoffs/_NEW_HANDOFF_viz_offline_tool_20260805.md` (tracked
+in git) and `.claude/TODO.md` TODO #16 / #18 (tracked, the durable record).
 
 ## 1. Turning the dump on
 

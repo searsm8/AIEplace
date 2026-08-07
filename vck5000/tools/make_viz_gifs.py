@@ -10,7 +10,7 @@ the regular cadence would otherwise straddle.
 
 Runs sequentially. Grid and target_density come from tools/benchmarks.py's XPlace values, and the
 seed is pinned, so the animated trajectory matches the swept result
-(2_ARTIFACTS/phase2_suite_results.tsv). Must be run from vck5000/, same as dse.py.
+(.claude/2_ARTIFACTS/phase2_suite_results.tsv). Must be run from vck5000/, same as dse.py.
 
 Usage:
   python3 tools/make_viz_gifs.py                       # the default 3-design set
@@ -98,7 +98,7 @@ def main():
     ap.add_argument("--designs", nargs="*", default=DEFAULT_DESIGNS)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--every", type=int, default=10, help="iterations_per_dump (frame cadence)")
-    ap.add_argument("--out-root", default=None, help="default: 2_ARTIFACTS/GIFS_<timestamp>")
+    ap.add_argument("--out-root", default=None, help="default: .claude/2_ARTIFACTS/GIFS_<timestamp>")
     ap.add_argument("--zoom", nargs="?", const="0.5,0.5,0.05", default=None,
                     metavar="CX,CY,SPAN",
                     help="also render a zoom GIF (tools/generate_viz.py --view zoom). "
@@ -120,8 +120,10 @@ def main():
             raise SystemExit(f"unknown MMS design: {design}")
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    # 2_ARTIFACTS is gitignored -- GIF sets run to tens of MB and must not reach the repo.
-    out_root = args.out_root or os.path.join(REPO, "2_ARTIFACTS", f"GIFS_{timestamp}")
+    # .claude/2_ARTIFACTS is gitignored -- GIF sets run to tens of MB and must not reach the repo.
+    # It moved out of vck5000/ on 2026-08-07 and REPO is vck5000/, hence the climb to the git root.
+    artifacts = os.path.normpath(os.path.join(REPO, os.pardir, ".claude", "2_ARTIFACTS"))
+    out_root = args.out_root or os.path.join(artifacts, f"GIFS_{timestamp}")
     cfg_dir = os.path.join(out_root, "configs")
     os.makedirs(cfg_dir, exist_ok=True)
 

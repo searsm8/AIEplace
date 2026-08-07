@@ -21,7 +21,7 @@ Node-lock and multi-view are still to come; the coordinate map already takes an 
 so they are additive.
 
 Fidelity: the geometry constants, layer order and colours below are ported from Visualizer.cpp and
-must stay in step with it while both renderers exist. `2_ARTIFACTS/compare_viz_frames.py` is the
+must stay in step with it while both renderers exist. `.claude/2_ARTIFACTS/compare_viz_frames.py` is the
 regression test for that -- it compares this output against the cairo frames of the same run.
 """
 import argparse

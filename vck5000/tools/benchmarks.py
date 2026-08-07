@@ -166,7 +166,7 @@ _XPLACE_MMS_FINAL = {
 # four lines and the same unmasked/exact conventions as _XPLACE_MMS_FINAL above.
 #
 # Captured 2026-08-07, `--seed 42 --num_threads 8 --load_from_raw True`, raw data in
-# 2_ARTIFACTS/xplace_ref_ispd.tsv, runners 2_ARTIFACTS/run_xplace_ref{,_2015}.sh.
+# .claude/2_ARTIFACTS/xplace_ref_ispd.tsv, runners .claude/2_ARTIFACTS/run_xplace_ref{,_2015}.sh.
 #
 # ⚠️ TIER 2 IS IN SITE UNITS. These ispd2015 HPWLs are XPlace's own, i.e. raw DBU / site_width
 # (database.py:602, `hpwl_scale = die_scale / site_width`). Multiply by SITE_WIDTH[path] before

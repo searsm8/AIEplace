@@ -8,7 +8,7 @@
  * hour-long placement every time the view changes.
  *
  * Layout under <output_dir>/coord_dump/ (full spec + rationale in
- * 1_REVIEW/handoffs/NEW_HANDOFF_viz_offline_tool_20260805.md §4):
+ * .claude/1_REVIEW/handoffs/_NEW_HANDOFF_viz_offline_tool_20260805.md §4):
  *
  *   manifest.json      text  -- dtypes, die frame, quantization box, per-generation frame index
  *   nodes_gen<N>.bin   bin   -- static per-node record (position, size, kind) for generation N
