@@ -1,7 +1,9 @@
 # TODO
 
 Cross-session task parking. New workflow (2026-07-25): park work here, not only in loose reports.
-Report deliverables are named `NEW_<name>.md` until Mark has read them (then the prefix is dropped).
+Deliverables are named `_NEW_<TYPE>_<description>_<YYYYMMDD>.md` until Mark has read them (then he
+drops the `_NEW_`). Full convention — including what it means when you *read* one — is in the
+repo-root `CLAUDE.md`, "Naming what you hand Mark".
 
 ---
 
@@ -159,6 +161,59 @@ preconditioner works as intended. Now clean up the experiment scaffolding it was
 
 ## #3 — Tooling & evaluation workflow
 
+- [x] **DONE 2026-08-06: two Claude skills in `vck5000/.claude/skills/`** — `run-benchmark`
+      (one sw_only run: derive a config instead of editing the tracked default, per-design td/grid
+      from `benchmarks.py::_ROWS`, check the shared box first, read the run dir) and `viz-gif`
+      (existing; refreshed). **`.claude/` is gitignored, so these do not travel with a clone.**
+      They point at `benchmarks.py` / `Output.cpp` rather than restating values, precisely so a
+      rename doesn't strand them (`viz-gif` had gone stale telling sessions to avoid a cairo path
+      TODO #16 step 5 had already deleted).
+
+- [x] **A third skill, `xplace-compare`, was written, benchmarked, and SCRAPPED the same day.**
+      Worth recording because the negative result is the useful part. It encoded the four ways a
+      "vs XPlace" number goes wrong (phase-1-vs-phase-2, masked `GP Stop!` figures, wrong sw_only
+      row, tier-2 site-width frame). A 3-eval A/B against a no-skill baseline scored **16/17 vs
+      16/17** — a dead tie. The baseline independently found the `GP Stop!` masked-overflow trap
+      and quantified it at the same 2.6x.
+
+      **Why it was redundant: `tools/benchmarks.py` already documents this well.** Its header
+      comments on `_XPLACE_MMS_MIXED_GP` / `_XPLACE_MMS_FINAL` / `_ROWS` are what let the baseline
+      get it right. **The lesson generalises — a skill earns its place where the repo does NOT
+      already document something, or where the knowledge is procedural (do X before Y) rather than
+      referential.** `run-benchmark` survives on exactly that test; `xplace-compare` did not.
+      (One real split, kept below: the macro-excluded overflow row. And one instructive loss — the
+      skill made its run *apply* the post-DP rule without *reporting* the reasoning, while the
+      baseline derived and explained it. A rule that says "do X" buys compliance; the "and say why"
+      is what buys a defensible number.)
+
+### XPlace-reference traps found by that benchmark (keep — they are not written down elsewhere)
+
+- **A result directory is not a reference run until you check its argv AND that it reached
+  `After DP`.** The 2026-07-17 timestamp range mixes in: aborted runs (`22:54:09_adaptec1` vs the
+  valid `22:57:06`), a `--dataset ispd2005` run (`12:55:49_adaptec1`), and
+  `--global_placement False --given_solution swonly_<design>.pl` runs — those are XPlace
+  legalizing *our* placement, not XPlace placing the design. All produce plausible numbers. Same
+  class as the morris/DSE timestamp-pairing trap in #1.
+- **The log header is the argument dump, not what ran.** `num_bin_x: 512` and
+  `target_density: 1.0` are pre-override CLI defaults; `setup_dataset.py` overrides per design and
+  the real values print later as `#Bins = (1024, 1024)` / `target density = 0.50`. Quote the
+  post-setup lines.
+- **`gp_ovfl_in` in `2_ARTIFACTS/lgdp_rebase_results.tsv` is macro-INCLUDED** (the
+  `--given_solution` path never sets `ps.zero_macro_grad`), so it is not comparable to XPlace's own
+  exact overflow. On newblue4 that is 0.3213 vs the comparable 0.1828 against XPlace's 0.1840.
+  XPlace's post-GP eval runs under `zero_macro_grad=True`, so the sw_only counterpart is
+  `final_overflow_macro_excluded`, not `final_overflow`.
+- ⚠️ **newblue4 is build-sensitive at ~1%, and it is not recorded anywhere else.** The 2026-08-04
+  build converges at 1734 iters with macro-excluded overflow 0.1828; the 2026-08-06 build gives
+  2.326e8 at 0.2026 and stops on `divergence_guard`. Configs byte-identical apart from
+  `results_dir`; binary md5s differ. No post-DP number exists for the newer build yet — re-run
+  `2_ARTIFACTS/gen_lgdp_inputs.py` + `run_lgdp_suite.sh` after the TODO #19 faithful suite
+  finishes before quoting a newblue4 line.
+- **`REPORT_phase2_mms_suite_20260802.md` §5 is still uncorrected on disk** and keeps regenerating
+  the "we need ~15 more XPlace GPU runs" myth. Its retraction is in this file and in
+  `_NEW_REPORT_lgdp_suite_20260804.md` §1. Note the read-state inversion: the **wrong** report has
+  no `NEW_` prefix (read), the **correction** still has one (unread).
+
 - [x] **DONE 2026-08-04: resumability in `dse.py`.** `python3 tools/dse.py --resume results/DSE_<ts>`
       re-enters an existing sweep dir and runs only what is missing from its `results.csv`. A run's
       identity is design + the value it gave every swept column — the same tuple `write_run_config`
@@ -169,7 +224,7 @@ preconditioner works as intended. Now clean up the experiment scaffolding it was
       **Caveat, documented in the docstring:** runs are matched on parameter *values*, so editing
       `dse_sweep` between the original launch and the resume silently re-runs whatever no longer matches.
 - [x] **DONE 2026-08-04 (first full pass): full-pipeline evaluation (GP → LG → DP).**
-      Report: `1_REVIEW/reports/NEW_REPORT_lgdp_suite_20260804.md`. Harness:
+      Report: `1_REVIEW/reports/_NEW_REPORT_lgdp_suite_20260804.md`. Harness:
       `2_ARTIFACTS/gen_lgdp_inputs.py` → `run_lgdp_suite.sh` → `analyze_lgdp_suite.py`, raw data
       `2_ARTIFACTS/lgdp_suite_results.tsv`. **Stock XPlace needs no source change** — the
       `--global_placement False --given_solution` path is `run_placement_nesterov.py:15-25` and it
@@ -177,6 +232,20 @@ preconditioner works as intended. Now clean up the experiment scaffolding it was
       header claim that this "requires the XPlace skip-GP + mixed_size macro-LG branch" is stale.)
       **Result: post-DP HPWL mean +1.17% vs XPlace over 14 clean designs**, and our phase-2 macro
       placement passes XPlace's own macro-legalization check on all 16 (15 at zero displacement).
+      > **REFRESHED 2026-08-06 — that first pass mixed two GP generations; this one does not.**
+      > It reused the 08-02 phase-2 placements, but 7 designs had moved by the 08-04 re-baseline
+      > (adaptec5 materially: 3.020e8 `diverged_hpwl` -> 3.248e8 `converged`), and newblue5's input
+      > came from neither. Re-run over the **re-baseline** DEFs, one generation throughout:
+      > **post-DP HPWL mean +1.23% over 15 designs** (median +1.21%, best newblue3 −4.35%, worst
+      > adaptec5 +4.38%; adaptec3 still segfaults in XPlace's legalizer, see below).
+      > Data `2_ARTIFACTS/lgdp_rebase_results.tsv`; regenerate with
+      > `LGDP_PL=/tmp/lgdp2/pl LGDP_RES=…/lgdp_rebase_results.tsv bash 2_ARTIFACTS/run_lgdp_suite.sh`
+      > then `LGDP_OURS_GLOB='2026-08-06*' python3 2_ARTIFACTS/analyze_lgdp_suite.py <tsv> --density`
+      > (the harness gained `LGDP_{PL,LOG,RES,PROG}` and `LGDP_OURS_GLOB` overrides for this).
+      > **Density is now at parity on all 8 designs where it is measurable** (td < 1.0): −23.2%
+      > (newblue1) … +0.4% (newblue4), with **adaptec5 at +0.2%, down from +14.0%**. The headline
+      > no longer needs a density-based exclusion.
+      > ⚠️ Both numbers predate TODO #19; they must be re-measured on the faithful-pair placements.
       ⚠ **HPWL is UNMASKED on both sides, and this is a second `GP Stop!`-style trap.** XPlace has
       two HPWL functions: `fast_evaluator` → `masked_scale_hpwl` produces the per-iteration
       `masked_hpwl:` lines *including the one inside `GP Stop!`*, while `get_obj_hpwl` → `get_hpwl`
@@ -199,11 +268,20 @@ preconditioner works as intended. Now clean up the experiment scaffolding it was
             proxy was tried and dropped**: it reads exactly 1.000 for both tools on every design at
             both the GP grid and a coarse 64×64 grid, because the busiest bins are movable-macro
             interiors. It measures macro presence, not quality.
-      - [ ] **Reconcile the overflow XPlace reports on our given solution** (`gp_ovfl_in` in the TSV)
+      - [~] **Reconcile the overflow XPlace reports on our given solution** (`gp_ovfl_in` in the TSV)
             with our own `computeOverflow`. XPlace reads adaptec1 0.0484 / adaptec3 0.0190 where we
             report macro-excluded 0.109 / 0.071 on the same placement and the same 1024 grid — a
             consistent ~2-4x, direction unexplained. Until this is closed, treat that column as a
             diagnostic, not a metric. (HPWL round-trips exactly, so the input transfer itself is fine.)
+            **PARTIALLY EXPLAINED 2026-08-06 (TODO #19a): fillers.** Our headline exact overflow was
+            filler-INCLUDED and XPlace's is not, which is most of a ~1.7x factor on its own (adaptec1
+            0.186 +filler vs 0.109 no-filler on the identical placement). It is **not the whole
+            story** — a residual ~2.2x remains on adaptec1/adaptec4, and **newblue1 has the opposite
+            sign** (XPlace 0.1633 vs our 0.1242). That sign flip tracks target_density, which points
+            at the second factor: `--global_placement False` never sets `zero_macro_grad`
+            (TODO #8's 2026-08-01 correction), so XPlace's number here **includes movable macros**
+            while our macro-excluded row drops them. Still open; the discriminator is a macro-included
+            variant of our own metric — i.e. the `computeOverflow` variant TODO #8 already asks for.
 - [x] **`verify_swonly.sh` diff bug — ALREADY FIXED, TODO was stale.** `function_statistics.md` goes
       to `timings/`, not `artifacts/`, and the script header documents exactly why. Verified 2026-08-04.
 - [x] **`gen_footprint_ab_configs.py` staleness — ALREADY FIXED, TODO was stale.** Its header records
@@ -427,7 +505,7 @@ too slowly to reach 0.182.
       size sample; filler height = ROW height, not a mean; the `target_density` raise to
       `stdcell_util`; a warning when zero fillers result). ISPD2005 verified bit-identical.
       **Quality impact UNMEASURED** — needs the MMS re-baseline. Full writeup + sweep instructions:
-      `1_REVIEW/NEW_HANDOFF_filler_faithfulness_20260731.md`.
+      `1_REVIEW/_NEW_HANDOFF_filler_faithfulness_20260731.md`.
 
 Measured 2026-07-26 (report `1_REVIEW/NEW_mms_overflow_faithfulness_20260726.md`, data
 `2_ARTIFACTS/mms_xplace_overflow.tsv`). **Root cause = FILLERS, not grid, not deposit formula.** sw_only's
@@ -449,12 +527,19 @@ XPlace does this too), so "converged" ≠ fully spread on the hardest designs.
       exits phase 1 on the eligible guard at 645, takes its phase 2, and lands **post-DP HPWL +1.80%
       vs XPlace at IDENTICAL post-DP density** (overflow 0.3332 both sides, `tools/post_dp_density.py`).
       Nothing further owed on this design.
-- [~] **adaptec5 spreading — root cause found 2026-08-04, confirmation pending the re-baseline.**
-      Two compounding causes, both now addressed by changes that already landed: the #11b macro
-      deposit (removes the overflow floor -> phase 1 converges at 649 instead of diverging at 1163)
-      and phase 2 (which the old `diverged_hpwl` stop denied it). Its known bad number — the suite's
-      only poor post-DP density, +14.0% vs XPlace — was measured on the pre-#11b placement.
-      **Re-measure from the running re-baseline (`/tmp/rebase`) before closing.**
+- [x] **adaptec5 spreading — CLOSED 2026-08-06. Confirmed from the re-baseline, which had in fact
+      finished on 2026-08-04 22:14** (`/tmp/rebase/progress.txt`, `2_ARTIFACTS/rebase_suite_results.tsv`);
+      this entry simply was never updated. Both predicted effects are measured:
+      - **Phase 1 converges** — `[STOP] reason=converged iteration=1436`, versus `diverged_hpwl`
+        at 1163 before. HPWL 3.020e8 -> 3.248e8; the *lower* old number was the under-spread
+        artifact, not a better result (macro-excluded exact overflow 0.104 -> 0.140).
+      - **The post-DP density penalty is gone: +14.0% -> +0.2% vs XPlace** (ours 0.3834 vs XPlace
+        0.3828 at td 0.5, `tools/post_dp_density.py` over both tools' own written post-DP `.pl`).
+        adaptec5 no longer needs excluding from the headline on density grounds — though
+        `2_ARTIFACTS/analyze_lgdp_suite.py` still prints a stale "phase-1 divergence -> under-spread
+        GP" rationale for excluding it, which should go.
+      Re-baseline verified HEAD-representative: mms/adaptec1 re-run on 2026-08-06 is **bit-identical**
+      (`iterations.dat` and `RowBasedPlacement.def` md5 `b6d64d8a1fb9…`) to the 08-04 run.
 - [x] **adaptec5 + newblue4 spreading (original scope)** — superseded by the two entries above.
       > ### ⚠️ The "#11b RULED OUT" verdict that used to live here was WRONG and is retracted
       > It read: *"RULED OUT 2026-07-31: TODO #11b is not the fix — the MMS A/B hit exactly these
@@ -463,7 +548,7 @@ XPlace does this too), so "converged" ≠ fully spread on the hardest designs.
       >
       > That A/B ran on **zero-filler arms** (the `addFillers` bug, fixed 2026-07-31), which is
       > recorded under #8 as a double confound. Re-run with correct fillers on 2026-08-02
-      > (`NEW_REPORT_footprint_ab_20260802.md`): **mean +0.61% HPWL over 8 macro-heavy designs,
+      > (`_NEW_REPORT_footprint_ab_20260802.md`): **mean +0.61% HPWL over 8 macro-heavy designs,
       > −0.38% excluding adaptec5**, and `on` converts a phase-1 divergence into a clean converged
       > run. The toggle was deleted the same day and the XPlace-faithful branch made unconditional.
       > #11b is now understood to be a large part of the actual fix for adaptec5 (2026-08-04):
@@ -564,7 +649,15 @@ PyTorch/autograd setting (see conversation on 2026-07-29 for the paper summary):
 From the same Xplace summary (2026-07-29 conversation), items 2 and 4 of the contributions list —
 distinct from the operator-level optimizations in #6, worth a look independently:
 
-- [ ] **Placement-stage-aware parameter scheduling** — Xplace defines a "precondition weighted
+- [x] **CLOSED 2026-08-06 against TODO #19b — it was already implemented, on the wrong quantity.**
+      The skip_update gate, the ×3 throttle, the (0.5, 0.95) window and the `<50` warmup are all
+      present in `Schedule.cpp::updateSchedule` and faithful. What was wrong is that the window was
+      tested against `density_force_fraction` (a gradient-norm ratio) rather than XPlace's
+      `weighted_weight` (the preconditioner mass ratio, now `precond_kappa`) — and because the
+      gradient ratio is not monotone in λ, the throttle stayed engaged through the endgame and λ
+      ramped ~6× slower than XPlace's. Fixed; see #19. Original text below.
+      <details><summary>original item</summary>
+      Xplace defines a "precondition weighted
       ratio" κ(η) = |H_D| / |H_W + H_D| from the existing preconditioner terms (net-degree term H_W,
       cell-area term H_D) to classify each iteration into wirelength-dominated / spreading /
       final-overlap phases, then deliberately slows the γ/λ parameter update during the spreading
@@ -574,6 +667,7 @@ distinct from the operator-level optimizations in #6, worth a look independently
       check whether κ(η) is cheap to compute from what we already track, and whether slowing the
       schedule during spreading helps our known-hard designs (adaptec5/newblue4/newblue5, see memory
       `mms-hard-spreading-three-diseases`) without hurting runtime elsewhere.
+      </details>
 - [ ] **Xplace-Route (detailed-routability-driven placement)** — Xplace extends beyond global-router
       validation to actual detailed-routability: PG-rail/I/O-pin density penalties, a GPU pattern
       router for a live congestion map, congestion-driven cell inflation with historical inflation
@@ -588,7 +682,7 @@ distinct from the operator-level optimizations in #6, worth a look independently
 ## #8 — Investigate zero-area interior `terminal` nodes in newblue5 (opened 2026-07-29)
 
 > ### ✅ ANSWERED 2026-07-31 — the terminals are INERT. Report:
-> ### `1_MARK_TO_REVIEW/NEW_REPORT_newblue5_todo8_20260731.md`
+> ### `1_MARK_TO_REVIEW/_NEW_REPORT_newblue5_todo8_20260731.md`
 >
 > **The terminal-node theory is dead, structurally — not merely "no evidence found".** All 4790 are
 > 0×0, all FIXED, and the zero-area set and the `terminal` set **coincide exactly** (0 zero-area
@@ -690,7 +784,7 @@ distinct from the operator-level optimizations in #6, worth a look independently
 > that A/B ran on **zero-filler arms**, so it must be redone after the filler change lands.
 > - [x] DONE 2026-08-02: re-ran the #11b A/B with correct fillers, mean +0.61% HPWL over 8
 >       macro-heavy designs (−0.38% excluding adaptec5), where `on` also fixes a phase-1
->       divergence into a clean converged run. `1_REVIEW/NEW_REPORT_footprint_ab_20260802.md`.
+>       divergence into a clean converged run. `1_REVIEW/_NEW_REPORT_footprint_ab_20260802.md`.
 > - [x] DONE 2026-08-02: toggle + legacy branch removed (as #11a was), per TODO #2's
 >       retire-settled-toggles pattern. `macro_deposits_target_density` is no longer a config key;
 >       the XPlace-faithful branch is unconditional in `Grid.cpp::computeNodeFootprint`.
@@ -699,7 +793,7 @@ distinct from the operator-level optimizations in #6, worth a look independently
 > case for it.
 >
 > ⚠️ **Corrections to the record (see report §5):**
-> - `NEW_HANDOFF_filler_faithfulness_20260731.md` §4 is **wrong** that the memories
+> - `_NEW_HANDOFF_filler_faithfulness_20260731.md` §4 is **wrong** that the memories
 >   `mms-hard-spreading-three-diseases` / `overflow-metric-grid-faithfulness` were derived on a
 >   *zero-filler* newblue4/adaptec5. Those runs were at **td = 1.0**, where the macro term cancels:
 >   measured **adaptec5 1,509,741 · newblue4 1,104,300 · newblue5 2,602,944** fillers. (Mark caught
@@ -967,7 +1061,7 @@ that turned out to be the benchmark's zero-area `terminal` nodes, not misclassif
 From the 2026-07-30 fresh-eyes codebase review. Clarity/hygiene, not blockers. Worked 2026-08-02
 under a no-CPU constraint (another session held the box for sweeps), so everything below was
 verified by inspection / `g++ -fsyntax-only` / `make -n` — **no build, no synthesis, no emulation**.
-Report: `2_ARTIFACTS/NEW_pl_algo_cleanup_20260802.md`.
+Report: `2_ARTIFACTS/_NEW_pl_algo_cleanup_20260802.md`.
 
 ### Stale docs that actively mislead (cheapest, highest value) — ALL DONE
 - [x] DONE **`pl/src/pl_algo/README.md` rewritten.** Status now reflects Gate-1-passed + verified
@@ -1080,7 +1174,7 @@ Report: `2_ARTIFACTS/NEW_pl_algo_cleanup_20260802.md`.
 > divergence rather than an oversight. Toggles NOT yet deleted (see cleanup steps below).
 >
 > **RESULT 2026-07-31 — A/B DONE (46/48 runs). Report:
-> `1_REVIEW/NEW_REPORT_footprint_ab_20260731.md`.**
+> `1_REVIEW/_NEW_REPORT_footprint_ab_20260731.md`.**
 > **#11a ADOPT** — exactly neutral (mean +0.0% HPWL / 15 designs, worst 0.7%); take it for
 > faithfulness + deleting the deposit-time-shift branch. **#11b REJECT** — mean +5.2% HPWL worse
 > / 7 designs, and worst (+17.9%, +11.2%, +6.1%) on adaptec5/newblue5/newblue4, the exact designs
@@ -1150,9 +1244,12 @@ fires on exactly the ISPD2015/MMS designs with movable macros, target_density 0.
 same population as the known MMS under-spreading problem (#4, and auto-memories
 `mms-hard-spreading-three-diseases` / `overflow-metric-grid-faithfulness`).
 
-- [ ] Test whether adding this closes any of the residual MMS under-spread. Cheap to try: one
-      `masked_fill`-equivalent in `computeNodeFootprint` gated on `target_density < 1.0` and a
-      movable-macro flag (`num_movable_macros` detection already exists in `analyzeDesignArea`).
+- [x] **DONE — stale checkbox.** This landed 2026-08-02 as `macro_deposits_target_density` and the
+      toggle was deleted the same day; the XPlace-faithful branch is unconditional in
+      `Grid.cpp::computeNodeFootprint`. It is a large part of the actual adaptec5 fix (removes the
+      overflow floor that starved λ's feedback loop) — see the #8 banner and #4's closed adaptec5
+      entry. The `[ ]` here survived the landing; the answer to "does it close the residual
+      under-spread" is **yes, in combination with phase 2**.
 
 ---
 
@@ -1161,7 +1258,7 @@ same population as the known MMS under-spreading problem (#4, and auto-memories
 sw_only was single-threaded: one placement run used one core of the 8-core box, so interactive
 turnaround on a big MMS design stayed at tens of minutes no matter what. Now threaded with OpenMP.
 Commits: `e2f039c` (profile + DCT tables), `372861d` (threading). Report:
-`1_REVIEW/NEW_multithread_swonly_20260731.md`.
+`1_REVIEW/_NEW_multithread_swonly_20260731.md`.
 
 ### Step 0 — profile: the premise of this task was WRONG, and that changed the plan
 
@@ -1440,18 +1537,23 @@ Three faithfulness/structure gaps that phase 2 would otherwise inherit. Ordered 
 - [x] **P1 — filler sizing in the standard-cell frame. DONE 2026-07-31 (code), sweep pending.**
       Six divergences from `compute_filler_without_fence` fixed in one landing; adaptec5 went from
       0 to 310,073 fillers, matching XPlace exactly. Details in #4 above and in
-      `1_REVIEW/NEW_HANDOFF_filler_faithfulness_20260731.md`. **MMS re-baseline still owed
+      `1_REVIEW/_NEW_HANDOFF_filler_faithfulness_20260731.md`. **MMS re-baseline still owed
       — the quality effect is unmeasured.** Divergence D (overlapping fixed macros double-counted
       in placeable area) deliberately NOT implemented: no test design exercises it.
-- [ ] **P2 — unify the two macro definitions.** `num_movable_macros` (die-area 0.02% heuristic,
-      `Setup.cpp::analyzeDesignArea`, drives the auto-preconditioner + `mixed_size_mode` + the grid
-      divisor) vs `Node::m_is_movable_macro` (XPlace `is_mov_macro` rule,
-      `Setup.cpp::tagMovableMacros`). Phase 2 forces the choice: the set that gets legalized and
-      fixed must be XPlace's. P1 already moved `tagMovableMacros()` ahead of the filler math, so
-      the tag exists early; what remains is pointing `analyzeDesignArea` at it, which **changes
-      grid sizing** and needs its own re-baseline. Measure where the two rules disagree first —
-      if the answer is "nowhere", this is free.
-- [ ] **P3 — phase-relative iteration counter.** XPlace's `set_init_param` resets
+- [x] **P2 — unify the two macro definitions. DONE (verified in code 2026-08-06; this checkbox was
+      stale — the IMPLEMENTED banner at the top of this section already listed it).**
+      `analyzeDesignArea` now classifies with `Node::isMovableMacro()`, the single definition set by
+      `tagMovableMacros()` from XPlace's `is_mov_macro` rule; the die-area 0.02% heuristic is gone.
+      `Setup.cpp:295-301` records the measurement the entry below asked for: the two rules disagreed
+      on **7 of 16 MMS designs** (worst newblue1, 64 vs 53), but unifying is behaviour-preserving in
+      practice — every functional use is a `> 0` test, and the ePlace grid is identical on all 16
+      because the power-of-2 rounding absorbs the difference.
+- [x] **P3 — phase-relative iteration counter. DONE (stale checkbox, same as P2).** `phaseIteration()`
+      exists and is used by all six equivalents (`Schedule.cpp` warmup/`%3`/μ decay/jolt warmup/
+      precond `%20`/guard arming, `Output.cpp` `BEST_SOL_MIN_ITER`); `reachedMaxIterations` correctly
+      stays absolute. Verified a no-op at the time on adaptec1 + newblue5.
+      <details><summary>original P3 text</summary>
+      XPlace's `set_init_param` resets
       `init_iter = iter`, and every schedule term is `iter - init_iter`: skip_update (`%3`, `<50`),
       the μ decay `0.9999^(iter-init_iter)`, precond escalation (`%20`), `need_to_early_stop`'s
       `<100` arming, `check_plateau`. sw_only uses raw `iteration` in the six equivalents
@@ -1460,6 +1562,7 @@ Three faithfulness/structure gaps that phase 2 would otherwise inherit. Ordered 
       stays ABSOLUTE — XPlace's `args.inner_iter` spans both phases. **Provably a no-op while
       there is one phase**, so it is verifiable with `tools/verify_swonly.sh` before phase 2
       exists — do it first.
+      </details>
 
 ### Scope / how hard
 - **Stage 3 is nearly free**: it is the GP loop we already have, with macros treated as fixed and
@@ -1571,13 +1674,13 @@ for whether `MIN_SIZE` (0.001 of canvas) still floors anything at zoom, where it
       at setup, and changing it means re-running the placement. Same conclusion: this belongs in
       an offline tool.
 - [→] **MOVED TO THE VIZ REWORK (below):** both of the above, plus the existing zoom config keys.
-      Handoff: `1_REVIEW/handoffs/NEW_HANDOFF_viz_offline_tool_20260805.md`.
+      Handoff: `1_REVIEW/handoffs/_NEW_HANDOFF_viz_offline_tool_20260805.md`.
 
 ---
 
 ## #16 — Move visualization OUT of the placer into an offline tool (opened 2026-08-05)
 
-**Full plan: `1_REVIEW/handoffs/NEW_HANDOFF_viz_offline_tool_20260805.md`. Build in a new session.**
+**Full plan: `1_REVIEW/handoffs/_NEW_HANDOFF_viz_offline_tool_20260805.md`. Build in a new session.**
 
 Mark, 2026-08-05: *"we should rethink how visualizations are made... I might want to generate
 multiple gifs of different zoom levels, or perhaps locked to a particular node. So let's move all
@@ -1763,6 +1866,57 @@ test` passes; a real run's `iterations.dat` fed through `plot_histories.py` repr
 **Next action: handoff step 4 (node-lock, multi-view) is still open** — nothing in this session
 touched it. `check_viz_orientation.py` still wants promoting to `tools/` and generalizing off its
 hardcoded ISPD2015 paths (handoff §5.4).
+
+### Legibility + naming pass — DONE 2026-08-06 (Mark's review of the first adaptec1 zoom GIF)
+
+Five things, all cosmetic-or-naming except the third. Gate: `make test` and `make test-regress`
+both pass; a zoom re-render of the adaptec1 run was inspected frame by frame.
+
+- [x] **Zoom caption reads a normalized CENTRE, not the window's lower-left in die units.**
+      Was `@ (2.676e+03, 0.000e+00)`, now `@ (0.500, 0.250)` — the same number `--center` takes,
+      so a frame can be reproduced from its own caption. Absolute die coordinates were
+      uninterpretable: the caption never carried the die size needed to normalize them. The
+      non-quiet stdout line got the same treatment. New `View.center_frac()`.
+- [x] **The footer (iter / HPWL / OVFW / alpha / lambda) is now identical on every frame.**
+      It was already drawn in *both* views — the full-die view was never missing it. The real gap
+      was narrower: `if not tag:` suppressed alpha and lambda on **tagged** frames, so
+      `best_solution`, `legalized` and `reseeded` — the frames most worth reading those two off —
+      were the only ones without them, because the tag was printed in alpha's slot.
+      The tag now rides the `Benchmark:` line as `[best_solution]`.
+
+      > ⚠️ Tried it as its own header line first; it lands at y=0.11 and `DIE_START = 0.10`, so it
+      > renders *inside* the die box, illegible over the cells. Same trap as the 3-line overlap
+      > already noted under step 3 — **the header has room for 3 lines, not 4.** That overlap
+      > (benchmark + phase + zoom, i.e. a two-phase MMS zoom render) is still unfixed.
+
+- [x] **`<run_dir>/viz/` → `<run_dir>/coord_dump/`.** Says what it holds; `viz` was easy to confuse
+      with the *rendered* `viz_render/` next to it. One line of behaviour (`PositionDump.cpp`
+      `output_dir / "coord_dump"`), the rest comments/docs: `generate_viz.py::load_run`,
+      `2_ARTIFACTS/check_position_dump.py`, `make_viz_gifs.py`, `docs/visualization.md`,
+      `default_config.toml`, the `viz-gif` skill. **No compatibility fallback was added** — there
+      were only 4 dumps on this box and they were renamed in place, so a reader for the old name
+      would have been dead code from the day it was written. `viz_render/` keeps its name (it is
+      renders, not coordinates).
+- [x] **`host/src/sw_only/run_config.toml` → `default_config.toml`** (`git mv`, so history follows).
+      It is the *default*, not the config any given run used — that one is `config_used.toml` in the
+      run dir, and the old name blurred the two. Updated: `common.mk`, `main.cpp`'s fallback path,
+      `Makefile` help text, `dse.py`, `make_viz_gifs.py`, `verify_swonly.sh`, `bench_swonly.sh`,
+      `profile_swonly.sh`, both `2_ARTIFACTS/gen_*_configs.py`, `run_thread_throughput_ab.sh`,
+      `host/src/sw_only/README.md`, `docs/visualization.md`, the `viz-gif` skill.
+      **Deliberately NOT rewritten:** historical entries in this file and in `1_REVIEW/` (they
+      record what was true then), and `test/regress/configs/*.toml` (frozen snapshots — the name
+      appears only in a comment there).
+- [x] **`0_placement.gif` + `1_best_solution_iter<N>.png` sort to the top of `viz_render/<view>/`**,
+      above the `iter_<N>.png` trajectory (digits precede letters). Only `best_solution` is
+      hoisted; `legalized`/`reseeded` keep `iter_<N>_<tag>.png` so the phase boundary still reads
+      in place in the listing.
+
+      > ⚠️ **This broke the GIF's frame order and the fix is the interesting part.** `gif_builder.py`
+      > natural-sorts the directory, which recovered trajectory order *only* while every frame was
+      > named `iter_<N>` — so `1_best_solution_*` jumped from last frame to first. `gif_builder.py`
+      > now takes `--frames` (an explicit ordered list, `input_dir` still works standalone) and
+      > `generate_viz.py` passes the order it already knows. The naming→ordering coupling is gone
+      > rather than re-tuned; renaming a frame can no longer silently reorder an animation.
 
 ---
 
@@ -2057,6 +2211,281 @@ same per-metric identity colors, log-scale density weight, shared-x-axis `overvi
 iteration x-axis. Reads `iterations.dat` exactly as `readDensityWeightHistory` did. Not run
 automatically at end-of-run anymore (nothing is, post-#16) — invoke it by hand:
 `python3 tools/plot_histories.py <run_dir>`.
+
+---
+
+## #19 — Two XPlace faithfulness gaps in the overflow metric and the schedule gate (opened 2026-08-06)
+
+> ### ✅ CONFIRMED on all 16 MMS designs, 2026-08-06. Both found by reading XPlace source.
+> Between them they explained why 10 of 16 MMS designs stopped on `divergence_guard` instead of
+> converging, and why our phase-2 overflow descent was 3–6× slower than XPlace's.
+>
+> | | before | after |
+> |---|---|---|
+> | **post-DP HPWL vs XPlace** (15 designs) | +1.23% | **+0.97%** |
+> | post-GP HPWL vs XPlace (16 designs) | +2.06% | **+1.19%** |
+> | **runs that `converged`** (rest = `divergence_guard`) | 6/16 | **15/16** |
+> | post-DP density vs XPlace (8 measurable) | parity | **parity, unchanged** |
+>
+> **The post-DP gain is understated by that table.** The "before" column is flattered by
+> newblue3's −4.35%, which was a *fake* win — it guard-stopped at 1087 iterations, under-spread.
+> It now converges and reads +0.95%, an honest number replacing an artifact. Excluding newblue3
+> from both sides: **+1.63% → +0.97%**.
+>
+> Worst case tightened more than the mean: the three worst post-DP designs went
+> adaptec5 +4.38 / adaptec4 +3.59 / bigblue4 +3.20 → adaptec5 +3.17 / bigblue3 +2.39 /
+> bigblue4 +1.64. Biggest single gains post-GP: adaptec4 +5.50→+2.00, bigblue4 +4.76→+2.87,
+> newblue6 +4.35→+2.27, bigblue2 +2.50→+0.19, newblue7 +3.42→+1.57.
+>
+> **Direction of travel is exactly the diagnosis:** our exact overflow *rose* toward XPlace's on
+> nearly every design (e.g. bigblue4 0.0833→0.1073 vs XPlace 0.1134) — we had been **over**-spreading
+> and paying wirelength for it, because a filler-inflated stop signal kept a throttled λ grinding.
+>
+> Data: `2_ARTIFACTS/faithful_suite_results.tsv` (GP) and `2_ARTIFACTS/lgdp_faithful_results.tsv`
+> (LG/DP), against `rebase_suite_results.tsv` / `lgdp_rebase_results.tsv`.
+>
+> **Remaining outlier: newblue4.** The only design still stopping on `divergence_guard`, and the
+> only one whose overflow ended *above* XPlace's (0.2026 vs 0.1840). Post-DP +1.33%, so it is not
+> a quality problem — but it is the one design the throttle fix did not convert, and worth its own
+> look. bigblue1 also now sits slightly above XPlace on overflow (0.1260 vs 0.1178) while gaining
+> HPWL (+1.34%→+0.49%).
+
+### (a) RETRACTION — every XPlace overflow metric EXCLUDES fillers. We included them.
+
+`convergence_include_fillers` was forced **true in phase 2** on 2026-08-02 (TODO #13) citing
+*"XPlace's own std-cell-fixed-macro GP has no toggle for this; it always counts fillers."*
+**That is wrong on all three XPlace code paths**, and so was the matching claim that its reported
+overflow is `sharp/+filler`:
+
+| XPlace path | what it does |
+|---|---|
+| `direct_calc_overflow` (`electronic_density_layer.py:272-292`) — the per-iteration + `GP Stop!` signal | slices pos/size/weight/expand_ratio to `[mov_lhs:mov_rhs]`, `num_mov_nodes = mov_rhs - mov_lhs` |
+| `ElectronicDensityLayer.forward` (same file, 36-50) | computes `overflow` from `[mov_lhs:mov_rhs]`, and only THEN adds `filler_density_map` (from `[mov_rhs:]`) to build the map used for the **force** |
+| `get_obj_overflow` (`evaluator.py:26-50`) — the reported "exact Overflow" | same slice, denominator `total_mov_area_without_filler` |
+
+Fillers really are past `mov_rhs`: `get_mov_node_info` appends them (`database.py:901-904`).
+XPlace's own comment (`evaluator.py:55-56`) says the only difference between its two overflow
+metrics is **clamp-vs-exact node size — not fillers**. This also settles the contradiction TODO #8
+left open ("code says excluded, the newblue2 calibration says included"): **excluded**, and the
+`.claude/skills/xplace-compare` Trap-3 table already said so.
+
+- [x] `Placer::convergenceIncludesFillers()` no longer forces true in phase 2 — both phases read
+      the config key, whose default (`false`) is the faithful setting.
+- [x] Headline `final_overflow` and `Phase2.cpp`'s phase-1 `overflow_exact` switched to
+      filler-EXCLUDED; the summary rows are relabelled "(exact, no fillers)". The row-prefix
+      `Final Overflow (exact` that `run_footprint_ab.sh` / `run_mms_ab.sh` grep is preserved.
+- [x] `logOverflowDiagnostics`' legend corrected (was "XPlace GP stop = clamp/+filler, XPlace
+      report = sharp/+filler").
+- ⚠️ **Any overflow number recorded between 2026-07-31 and 2026-08-06 is filler-INCLUDED** and
+      reads roughly 2× high against anything XPlace prints. That includes the "Final Overflow
+      (exact, +fillers)" column of `2_ARTIFACTS/rebase_suite_results.tsv`.
+
+### (b) The schedule throttle gates on the WRONG QUANTITY — this is the big one
+
+XPlace freezes λ, γ and `precond_coef` together on 2 of every 3 iterations while
+`weighted_weight ∈ (0.5, 0.95)` or `iter < 50` (`param_scheduler.py:284-289`), where
+
+```python
+alpha_1 = mov_node_to_num_pins                              # pin count
+alpha_2 = precond_coef * density_weight * mov_node_area     # area, carries lambda LINEARLY
+weighted_weight = ||alpha_2||_1 / (||alpha_1||_1 + ||alpha_2||_1)     # param_scheduler.py:386
+```
+
+sw_only computed `a1_norm`/`a2_norm` correctly in `updatePrecondWeights` — and then gated on
+`density_force_fraction`, a **gradient-norm** ratio `‖λ∇den‖₁/(‖∇wl‖₁+‖λ∇den‖₁)`, while the
+doc-comment above it claimed to be computing XPlace's `weighted_weight`. Different functions:
+
+- **κ carries λ linearly ⇒ monotone.** It crosses (0.5, 0.95) **once**, in ~50 iterations, then
+  sits at ~1.0 and the throttle is off for the whole endgame.
+- **The gradient ratio is not monotone in λ** — ∇den *falls* as cells spread — so it drifts
+  *into* the window late and holds the 3× throttle on exactly when λ needs to ramp.
+
+Measured, MMS adaptec1 (td 1.0, grid 512, seed 42), phase-2 iteration 1163:
+`kappa=0.999 force_frac=0.534 throttled=yes` — XPlace would be running at full rate.
+Endgame λ growth per 100 iterations: **XPlace ×68 · legacy gate ×11 · κ gate ×20→×105.**
+
+- [x] `Placer::scheduleGateMetric()` + config **`schedule_gate_metric`**, default
+      **`"precond_kappa"`** (faithful); `"force_fraction"` keeps the legacy quantity so the A/B
+      stays reproducible. `precond_kappa` is now a first-class member; a `[GATE]` detail line
+      every 50 iterations prints **both** candidates and whether the throttle fired, so this can
+      never again be invisible.
+
+### Measured so far — MMS adaptec1, td 1.0 / grid 512 / seed 42
+Metric is **exact HPWL (all nets)** and **Macro-Excluded Overflow (exact, no fillers)**, i.e. the
+two rows `.claude/skills/xplace-compare` Trap 3 names. XPlace reference = `_XPLACE_MMS_FINAL`
+(post-phase-2 `After GP, best solution eval`).
+
+| arm | HPWL | exact overflow | iters | stop |
+|---|---|---|---|---|
+| baseline (filler-incl conv, force_fraction) | 6.385e7 | 0.1092 | 1373 | converged |
+| + filler fix only | 6.397e7 | 0.1350 | 1189 | converged |
+| **+ filler fix + κ gate (both faithful)** | **6.368e7** | **0.1115** | **1325** | converged |
+| XPlace | 6.457e7 | 0.1146 | 1344 | GP Stop |
+
+The faithful pair lands within **19 iterations** of XPlace's total and at essentially its
+overflow, for **−1.4% HPWL**. Note the filler fix ALONE is a regression (it stops 184 iterations
+early); the two are a pair, because the filler-inflated signal was partly compensating for the
+throttled λ.
+
+- [ ] **MMS 16-design suite on the faithful pair — RUNNING** (launched 2026-08-06 18:04,
+      `/tmp/faithful/`, ~5 h, configs copied from `/tmp/rebase/configs`, binary md5 in
+      `/tmp/faithful/binary.md5`). Results land in `2_ARTIFACTS/faithful_suite_results.tsv`.
+      Compare against `2_ARTIFACTS/rebase_suite_results.tsv` (same configs, pre-change binary,
+      verified bit-reproducible at HEAD on 2026-08-06).
+      > **Provenance — a rebuild DID land mid-sweep** (the trap that cost TODO #11 its newblue7
+      > arms), at ~18:14, two designs in: `59d65125…` -> `03791bef…`. **Verified benign, not
+      > assumed:** the edits were comment-only (`Schedule.cpp` stale-TODO note, `Output.cpp`
+      > filler comment, plus `default_config.toml`, which the sweep does not read), and re-running
+      > adaptec1 on the *new* binary reproduces the sweep's own adaptec1 **bit-identically** —
+      > same `iterations.dat`, same DEF md5 `30f9e41b524b…`. The suite is one generation.
+- [x] **DONE — LG/DP re-run on the new placements** (`2_ARTIFACTS/lgdp_faithful_results.tsv`,
+      `/tmp/lgdp3/`). The harness now takes `LGDP_{PL,LOG,RES,PROG}` env overrides and
+      `analyze_lgdp_suite.py` takes `LGDP_OURS_GLOB`, so both suites are reproducible side by side.
+      ⚠️ `gen_lgdp_inputs.py` must be run to completion in the FOREGROUND before launching the
+      runner — backgrounding the whole `gen && run` chain kills generation partway (it produced 3
+      of 16 `.pl` files, silently).
+- [x] **DONE — regression baselines regenerated** (all three; the κ gate affects phase 1, so the
+      two ISPD2015 designs moved too: 616→731 and 668→751 iterations, both still `converged`).
+      `--reason` records the change and the confirming numbers in each baseline header.
+      `make test-regress` and `--slow` are green again.
+- [x] **DONE 2026-08-07 (Mark): BOTH toggles retired**, per TODO #2's settled-toggle pattern —
+      "if there is no reason to use the knob, remove it and keep the best default."
+      `schedule_gate_metric` and `convergence_include_fillers` are gone as config keys, along with
+      `Placer::scheduleGateMetric()` and `Placer::convergenceIncludesFillers()`; the faithful
+      behaviour (κ gate, filler-excluded overflow) is now unconditional. The reasoning and the
+      measured numbers moved into the surviving code comments at `Schedule.cpp::updateSchedule`
+      and `Output.cpp::recordIterationResults`, so the record survives the deletion.
+      **Verified behaviour-neutral:** `make test-regress` and `--slow` bit-identical on all three
+      baselines (731 / 751 / 1325 iterations).
+      `density_force_fraction` is still computed and printed on the `[GATE]` line — it is just no
+      longer the gate, and having both visible is what makes the divergence observable.
+- [x] **newblue4 — CLOSED as good enough (Mark, 2026-08-07).** Still the one design stopping on
+      `divergence_guard`, and the only one whose exact overflow ends above XPlace's (0.2026 vs
+      0.1840), but post-DP is +1.33% and the density is at parity, so there is no quality problem
+      to chase. Not worth the time. If it is ever revisited, the `[GATE]` trace in the run log
+      makes the mechanism directly observable now.
+
+### 🔑 pl_algo was RIGHT all along — and its own test has been reporting the mismatch for weeks
+
+`pl/src/pl_algo/src/modules/param_scheduler.hpp:76` computes the gate quantity in closed form:
+`sched_dff(λ, c) = c·λ/(1+c·λ)`, `c = precond_coef·K/total_pins` (K = Σ areas). Substitute
+XPlace's definition and that **is** κ exactly:
+
+```
+κ = ‖α₂‖₁/(‖α₁‖₁+‖α₂‖₁) = (pcoef·λ·ΣA)/(ΣP + pcoef·λ·ΣA) = c·λ/(1+c·λ),  c = pcoef·ΣA/ΣP
+```
+
+So pl_algo implemented the **right function under the wrong name** (`density_force_fraction`),
+while sw_only implemented the **wrong function under the right name**. Verified numerically on the
+new adaptec1 run: `c = κ/((1−κ)·λ)` is constant to ~0.4% within a fixed `precond_coef`
+(121.28 · 121.59 · 121.43 · 121.20 · 121.62 · 121.13 · 121.49 · 121.35 · 121.20), and steps by
+exactly ×2 at each escalation (242.6 → 487.5), resetting to 70.2 at the phase-2 restart and
+holding constant again. That is the signature of the closed form, and it did not hold before.
+
+**`test/sched_verify.cpp` derives `dff_coef` from the trace and its own comment says "its
+constancy across the run is itself a check on the closed form" (lines 11-12, 61-62).** On the old
+golden that check reads `min=2.34 max=1.48e6`, a **633,000× spread** — and the harness *prints*
+it, takes the median anyway, and passes. It also feeds the golden's `dff` straight into the
+scheduler ("to isolate the lambda-trend logic", line 93), so the choice of gate quantity is
+structurally outside what it can test.
+
+- [ ] **Make `sched_verify` assert dff_coef constancy** (within a `precond_coef` plateau; allow the
+      ×2 steps). This is the single highest-value test change in the repo right now: it is an
+      already-designed check that was left as a print, and asserting it would have caught #19b on
+      day one from the pl_algo side.
+- [ ] **Regenerate the fixture trace from the post-#19 sw_only** — but note TODO #20: it needs
+      `dumpScheduleTrace()` restored first (deleted as dead code 2026-07-28). Until then the
+      fixture is a 2026-08-05 capture of the OLD gate quantity.
+- [ ] **Rename pl_algo's `dff`/`dff_coef` to `kappa`/`kappa_coef`** to match sw_only's
+      `precond_kappa` and XPlace's `weighted_weight`. The name is what hid this.
+
+### This reframes TODO #7's first bullet
+"Placement-stage-aware parameter scheduling / κ(η)" was filed as *not implemented*. It **was**
+implemented — the skip_update gate, the ×3 throttle, the (0.5, 0.95) window and the `<50` warmup
+are all present and faithful. Only the quantity being tested was wrong. What remains of #7 item 1
+is nothing; close it against this section.
+
+---
+
+## #20 — pl_algo Stage 5: wire the full device design, on the CURRENT sw_only algorithm (opened 2026-08-06)
+
+Full assessment: `1_REVIEW/reports/_NEW_REPORT_pl_algo_stage5_assessment_20260806.md` (UNREAD).
+`DATAFLOW.md` stays the authority on the dataflow itself; this item is the work plan.
+
+**The problem is not "compose the resident loop".** pl_algo's algorithm is pinned to the
+**2026-07-14** sw_only (`param_scheduler.hpp`, commit `3a42098`), 20 sw_only commits + the
+uncommitted #19 ago. Composing Stage 5 on top of that hardens a three-week-old algorithm.
+
+Three findings that are not recorded anywhere else:
+
+- **`Placer::dumpScheduleTrace()` was deleted from sw_only as dead code** (`44612cc`, 2026-07-28).
+  It was the only producer of the golden `test/sched_verify.cpp` replays, and that consumer lives in
+  another variant and names it by *filename* — nothing in the build could see the coupling. So the
+  fixture **cannot be regenerated**, and `make test`'s green `sched_verify` validates the on-device
+  scheduler against **sw_only as of 2026-07-18** and will keep passing forever. Its companion config
+  is still `.json` — it predates the TOML migration.
+- **`sched_dff` in `param_scheduler.hpp` already computes XPlace's κ**, not the
+  `density_force_fraction` its comments claim — i.e. pl_algo has #19b's fix by accident. Proven from
+  the committed fixture (which carries `precond_a1_norm`/`precond_a2_norm`): fitting `q/(1-q)=c·λ`
+  gives **1.12 % spread for κ vs 2136 % for dff**. Two catches: `dff_coef` is a fixed scalar but
+  κ's `c` carries `precond_coef`, which escalates ×2/20 iters to 1024 (the fixture never exercises
+  it — `precond_coef ≡ 1.0` for all 692 rows); and `sched_verify` feeds the trace's **dff** column
+  in, so it verifies against the wrong quantity either way. The harness's
+  `closed-form dff max rel err: 1.608` line was measuring exactly this and `fixtures/README.md`
+  explains it away as a precond-on artifact.
+- **Tier-1 covers 3 modules of 17.** Only `fft_pl`, `field_solve_pl`, `param_scheduler` are
+  `#include`d by a harness; `density_bin_model.cpp` holds its **own copy** of `node_footprint`, and
+  the two are stale together. Every module Stage 5 must change is uncovered, so today those edits
+  can only be checked through a full Vitis + sw_emu cycle.
+
+Datapath divergences from the golden (all small, all currently unverifiable — see step 3):
+`node_footprint.hpp` still does the in-die shift #11a **deleted**; it lacks #11b's movable-macro
+`weight = target_density` (needs a macro tag in `NodeBox`); `iteration_update.hpp` clamps to
+`[0, die−w]` where sw_only clamps to the √2-expanded box; and **pl_algo has no fillers at all**
+(`Packer.cpp` walks `getComponents()`, which excludes `getFillers()`).
+
+Structural, decide before composing: the convergence overflow needs a **second, movable-only**
+density map (sw_only rebuilds it independently; overflow is nonlinear so it cannot be subtracted
+out — adopt XPlace's mov-map + filler-map decomposition); backtracking is a re-entrant inner loop
+around the whole datapath; best-solution **positions** need an M-sized DDR buffer (the scheduler
+tracks only the metrics); phase 2 is host-side LP work that makes the device loop re-enterable
+rather than run-once; `GRID` is a compile-time 1024 vs sw_only's per-design formula grid.
+
+### Steps (cheap and load-bearing first; 1–4 need no Vitis and no free CPU)
+- [x] **0. The build is broken on arrival for a boring reason.** `make host HOST=pl_algo` fails with
+      `No rule to make target '.../host/src/pl_algo/src/DataBase.cpp'`, which reads like the
+      `host/src/common/` extraction (#9) broke pl_algo. It did not: `build/hw/host/pl_algo/obj/
+      DataBase.d` is dated 2026-07-10 and still names the pre-move path, and `host/Makefile` does
+      `-include $(HOST_DEPS)`. **`make clean HOST=pl_algo` once** — verified, builds and links clean.
+      Worth a README line; it is the first thing a returning session hits and it accuses the wrong
+      commit.
+- [ ] **1. Restore `dumpScheduleTrace()` in sw_only** with today's columns (`precond_kappa`,
+      `precond_coef`, phase, `phaseIteration`, stop reason, `backtrack_steps`) and regenerate the
+      adaptec1 fixture + its `config_used.toml`. Verify: `make test-regress` bit-identical before and
+      after (the dump is config-gated, so it MUST be a no-op). Do this **before** touching pl_algo —
+      it is the instrument every later step is measured with.
+- [ ] **2. Re-verify `param_scheduler` against the new trace**, feeding **κ**, not dff. Fix what
+      falls out: escalating `dff_coef` (`precond_coef_k·K/total_pins`), the missing
+      `overflow rising` conjunct on the coarse divergence test, phase-relative counters, jolt
+      params read from config instead of hardcoded. Verify: `make test`.
+- [ ] **3. Tier-1 harnesses for the uncovered modules** — `node_footprint`, `density_bin` (include
+      the real header; delete the copy in `density_bin_model`), `iteration_update`, `bb_reduce`,
+      `metrics`, `force_gather` — each against its named sw_only golden. This is what makes 4–6
+      safe.
+- [ ] **4. Close the datapath divergences** above, under that coverage.
+- [ ] **5. Fillers** — packer, uniform-random initial placement (not centre-clustered), the λ-init
+      balance that counts them, and the movable/filler split the two density maps need. Largest
+      single change; largest quality lever.
+- [ ] **6. Compose the resident loop (Stage 5 proper)** with the second density map, the
+      best-position buffer, and phase-2 re-entrancy designed in from the start.
+
+### Open questions for Mark (in the report's §10)
+1. Does "the exact same algorithm" include **phase 2** and the **backtracking line search**, or is
+   v1 "phase-1 GP, device-resident, bit-comparable"?
+2. Step 1 touches sw_only while #19 is uncommitted and its suite is running — go, or wait?
+3. **Pin pl_algo to a named sw_only commit** (recommend: the one that lands #19) rather than chasing
+   HEAD? Chasing HEAD is what produced this drift.
+4. Grid: pin sw_only to 1024 for the A/B, or build pl_algo per-design with `-DPL_GRID`?
 
 ---
 

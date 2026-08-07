@@ -1,17 +1,37 @@
 # AIEplace — project notes for Claude
 
 ## TL;DR — where the project stands
-*Last updated 2026-08-05.* **Whenever you write a handoff, checkpoint, or end-of-session
+*Last updated 2026-08-06.* **Whenever you write a handoff, checkpoint, or end-of-session
 summary, update these four lines as part of writing it.** A stale TL;DR is worse than no
 TL;DR, because it gets believed. If what you're summarising doesn't change any of these
 lines, say so and leave them alone.
 
-- **Working on:** `pl_algo` (branch `pl_algo`) — moving the entire placement iteration onto the PL.
-- **Done:** all datapath modules written; HLS C-synthesis clean; each module verified against the
-  sw_only CPU golden one at a time; `bb_reduce` + `param_scheduler` built and verified.
-- **In progress:** composing the datapath + device-resident control into one resident `top` loop
-  (Stage 5). `top.cpp` is still a mode-switch bring-up scaffold, and the host still owns the
-  γ/λ schedule one round-trip per iteration.
+- **Working on:** two threads. (1) **sw_only algorithm quality vs XPlace** — the active one, see
+  TODO #19; (2) `pl_algo` (branch `pl_algo`) — moving the entire placement iteration onto the PL.
+- **Done:** *sw_only:* two-phase mixed-size flow with LP macro legalization, plus TODO #19's two
+  XPlace faithfulness fixes (every XPlace overflow metric excludes fillers; the γ/λ throttle gates
+  on the preconditioner ratio κ, not a gradient ratio). Confirmed on all 16 MMS designs:
+  **post-DP HPWL +0.97% vs XPlace over 15** (was +1.23%; +1.63%→+0.97% excluding newblue3's
+  now-corrected fake win), **15/16 runs converge** (was 6/16), post-DP density parity unchanged.
+  Regression baselines regenerated and green.
+  *pl_algo:* all datapath modules written; HLS C-synthesis clean; each verified against the
+  sw_only CPU golden one at a time; `bb_reduce` + `param_scheduler` built and verified — but read
+  the next bullet before trusting "verified": those goldens are late-July.
+- **In progress:** *sw_only:* TODO #19 is landed and measured; what is open is small — decide
+  whether to retire the `schedule_gate_metric` toggle, and look at **newblue4**, the one design
+  the fix did not convert to `converged`. ✅ **#19 NARROWS the pl_algo drift on the schedule axis**
+  (an earlier note here said "widens" — wrong): `pl_algo`'s `sched_dff` closed form
+  `c·λ/(1+c·λ)` is *algebraically* XPlace's κ, so pl_algo has been right all along and sw_only was
+  the one that was wrong. The two now agree. `sched_verify`'s own dff_coef-constancy check has
+  been reporting the disagreement as a **633,000× spread** for weeks — printed, never asserted.
+  *pl_algo:* **TODO #20 opened 2026-08-06 — do NOT compose Stage 5 first.** pl_algo's algorithm is
+  frozen at the **2026-07-14** sw_only, and the mechanism that would have caught that
+  (`dumpScheduleTrace()`) was deleted from sw_only as dead code on 07-28, so `make test`'s green
+  `sched_verify` checks against a 07-18 golden and always will. Restore the trace and the tier-1
+  coverage (3 of 17 modules today) *before* the resident loop. `top.cpp` is still a mode-switch
+  bring-up scaffold, the host still owns the γ/λ schedule one round-trip per iteration, and
+  `make host HOST=pl_algo` needs one `make clean HOST=pl_algo` (stale `.d`, not a source break).
+  Assessment: `1_REVIEW/reports/_NEW_REPORT_pl_algo_stage5_assessment_20260806.md`.
 - **To verify anything:** `cd vck5000 && make test` (pl_algo, seconds, no Vitis) and
   `make test-regress` (sw_only vs committed baselines, ~12 s). See
   *Verification Loop* below before writing or checking any module.
@@ -42,6 +62,51 @@ repo** — if you find yourself wanting to commit one, that is the bug. Details 
 Before starting work, read `vck5000/0_TODO/TODO.md` to understand current priorities, blockers,
 and in-progress tasks. This file is the source of truth for project state and helps avoid
 re-doing work or working on stale branches.
+
+## 📄 Naming what you hand Mark — the filename carries the metadata
+Work here is asynchronous and multi-session. A directory listing must tell you a document's
+**read state** and **age** before you open it, because the moment you read the filename that
+context is already loaded — and because another session will read the same name without any of
+your context. Both halves matter: the writing rule and the reading rule.
+
+```
+[_NEW_]<TYPE>_<brief_description>[_<YYYYMMDD>].<ext>
+```
+
+**Writing**
+- `<TYPE>` — one of `REPORT`, `HANDOFF`, `PLAN`, `EXPLAINER`. Deliberately small; if none fits,
+  it is a `REPORT`. Type leads so a listing groups by kind, then description, then date.
+- `<brief_description>` — snake_case, 2-4 words (`footprint_ab`, `viz_offline_tool`).
+- `_<YYYYMMDD>` — **only** for files in `1_REVIEW/` and `2_ARTIFACTS/`. Nothing else gets a date;
+  a run directory is already timestamped, and dating a file twice is worse than not at all.
+- `_NEW_` — **only** on a document written for Mark to read that he has not read yet. Not on
+  intermediate output, not on anything a tool consumes, not "because it is recent."
+  **Only Mark clears the prefix. Never drop it yourself**, and never add it to something that was
+  not written for him — if everything is `_NEW_`, nothing is. The leading underscore is load-bearing:
+  it sorts the unread set to the top of a listing in File Explorer, VS Code and PowerShell.
+
+**Does not apply to** code, machine-read data (`*.tsv`/`*.csv` an `analyze_*.py` reads), files
+inside a timestamped run directory, fixed-name contracts (`manifest.json`, `results.csv`,
+`iterations.dat`, `config_used.toml`, `nodes_gen<N>.bin`), or scratch. Renaming a contract breaks
+its reader; that is the whole reason this rule is scoped to documents.
+
+**Reading — this is the half that prevents misconstrual**
+- `_NEW_` = **unreviewed**. It is a proposal, not a decision. Do not cite it as agreed, established,
+  or settled, and do not build on its conclusions without saying they are unconfirmed.
+- No prefix = Mark has read it. **That means read, NOT correct.** A reviewed report can still be
+  wrong and can go stale without being amended — `1_REVIEW/reports/REPORT_phase2_mms_suite_20260802.md`
+  §5 asserted ~15 XPlace GPU re-runs were needed, was retracted 2026-08-04, and kept costing
+  sessions time until a pointer was appended to it on 2026-08-06. Its correction still carries
+  `_NEW_` (unread), so for four days the wrong file read as authoritative and the right one read
+  as a draft. **Prefix state is about attention, never about truth.**
+- The date is **when it was written, not when it was true.** Check `0_TODO/TODO.md` before treating
+  a dated claim as current.
+
+Unread files sort to the top ahead of the type grouping. That is intended — the `_NEW_` set is
+small by design, so it should be the first thing a listing shows. The 19 pre-existing `NEW_` files
+were renamed to `_NEW_` on 2026-08-06 with their cross-references updated; the older un-prefixed
+files were left alone, since retro-fitting `<TYPE>_` onto files Mark has already read buys nothing
+and breaks links.
 
 ## What this is
 AIEplace ports the ePlace analytical placement algorithm onto the AMD Versal VCK5000
@@ -145,6 +210,15 @@ exactly this until 2026-08-05. Keep printing the numbers (drift is informative),
 margin — `field_solve_test` sits at 0.98× a 1e-6 bound, so its bound is 2e-6; a genuine
 regression here is orders of magnitude, not a few percent.
 
+**…and that applies to EVERY number it prints as evidence, not just the headline one.** A harness
+that asserts its main comparison and prints a secondary one is still half-disarmed, and the
+half that is printed is where the bug hides. `sched_verify` derives `dff_coef` from the golden and
+its own comment says *"its constancy across the run is itself a check on the closed form"* — then
+prints `min=2.34 max=1.48e6`, a **633,000× spread**, takes the median, and exits 0. That check was
+correct, deliberate, and reporting a real defect (TODO #19b) for weeks. If a line is worth
+printing because it would tell you something is wrong, it is worth an `if` and a non-zero exit.
+If it genuinely is not a verdict, say so in the output (`[info]`) so nobody mistakes it for one.
+
 ### Three tiers, by cost
 | tier | what | cost | needs | how |
 |---|---|---|---|---|
@@ -204,3 +278,53 @@ memory-resource intent (`_URAM`/`_BRAM`/`_DDR` suffixes), and a short note on wh
 pipelined/unrolled the way it is. The hardware structure is not obvious from the C, so make it
 explicit. Host and model code is plain C++ and wants none of that — there, favor clarity and
 brevity and let idiomatic control flow carry the meaning.
+
+### Naming a quantity we borrow from XPlace
+**Name it for what it IS; map it to XPlace's name in a comment at the declaration.** XPlace's own
+names are frequently poor (`weighted_weight` describes nothing), so copying them verbatim is not
+faithfulness, it is just inheriting a bad name. Rename freely — then anchor it:
+
+```cpp
+float precond_kappa;  // matches XPlace's weighted_weight (param_scheduler.py:386)
+```
+
+One line, at the declaration, naming the upstream symbol **and where it lives**. That is what
+makes `grep -rn "weighted_weight" ~/phd/Xplace/src/` round-trip back to our code.
+
+**sw_only and pl_algo must use the SAME name for the same quantity.** This is not tidiness — it is
+the only thing that makes a divergence between them visible. TODO #19b cost real time precisely
+because both variants had a `density_force_fraction` and they were *different functions*:
+sw_only's was a gradient-norm ratio, pl_algo's closed form `c·λ/(1+c·λ)` was algebraically
+XPlace's κ. Same name, same units, same range, silently different maths — and no diff, grep, or
+test could see it. When you rename on one side, rename on the other in the same change.
+
+**A comment that names an upstream function is a claim. Check the code below it computes that
+function.** The κ bug sat under a doc-block that said it was computing `weighted_weight` while the
+next line assigned something else. Prefer to make the claim checkable (see *A test asserts*) over
+asserting it in prose.
+
+## Keeping `0_TODO/TODO.md` true
+TODO.md is the **source of truth for project state** — CLAUDE.md's TL;DR points at it and every
+session reads it first. It is also 2000+ lines of corrections layered on corrections, and on
+2026-08-06 four checkboxes were still open on work that had already landed. A source of truth
+that is 4 items stale is worse than one nobody trusts, because it gets believed. The procedure:
+
+1. **Verify before you inherit.** An unchecked box is a claim about the code, not a fact. Before
+   working an item, confirm it against the code — `Setup.cpp` had carried the "unify the two macro
+   definitions" fix, with the measurement in its comment, for four days while P2 read as open.
+2. **The headline states current truth; superseded text goes into `<details>`.** Do not append a
+   correction under a wrong statement and leave both at the same level — that is how
+   `#4`/`#8`/`#11` became unreadable. Rewrite the top line, fold the original underneath.
+   *Never delete the original* — the retraction trail is the most valuable content in the file
+   (see `#11b`'s "RULED OUT" verdict, kept verbatim because it was cited for four days).
+3. **State what would falsify it.** "Re-measure before closing" is only actionable with the
+   command and the artifact path. `/tmp` does not survive; put durable data in `2_ARTIFACTS/`
+   and name it in the entry.
+4. **Close the loop the same day the measurement lands.** The re-baseline that closed adaptec5
+   finished on 08-04 and the entry still read "pending" on 08-06 — the run was done, the
+   conclusion was sitting in `progress.txt`, and two sessions re-derived the open question.
+5. **When you close an item, check what it was blocking.** #19b closed #7's first bullet outright;
+   nobody would have found that by reading #7.
+6. **A number in TODO.md carries its basis or it is not a number.** Which phase, masked or exact,
+   which sw_only row, td and grid — see the `xplace-compare` skill. Numbers without that have
+   needed retracting three times.

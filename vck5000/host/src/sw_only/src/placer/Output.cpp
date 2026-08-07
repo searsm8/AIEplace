@@ -432,12 +432,15 @@ Placer::FinalMetrics Placer::computeFinalMetrics()
     // A huge cap (not -1, which would exclude every net) includes every degree.
     m.final_hpwl_exact = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), 1000000000);
     // Exact (physical) overflow — sharp footprints, the real spreading quality. Fillers are
-    // INCLUDED: XPlace's reported overflow (evaluate_placement) counts filler density, so this
-    // is the directly XPlace-comparable headline number. Excluding them reads ~2x low.
-    m.final_overflow = computeOverflow(false, nullptr, true);
+    // EXCLUDED, matching XPlace's reported overflow (evaluate_placement -> get_obj_overflow,
+    // evaluator.py:26-50: movable slice `[mov_lhs:mov_rhs]` only, denominator
+    // `total_mov_area_without_filler`). CORRECTED 2026-08-06 — this was `true` from 2026-07-31
+    // on the belief that XPlace counts fillers here; it does not, and the +filler number reads
+    // roughly 2x high against anything XPlace prints.
+    m.final_overflow = computeOverflow(false, nullptr, false);
     // The smoothed overflow the run actually converged on — same filler policy as the
     // convergence signal (recordIterationResults), so the report explains why it stopped.
-    m.final_smoothed_overflow = computeOverflow(true, nullptr, convergenceIncludesFillers());
+    m.final_smoothed_overflow = computeOverflow(true, nullptr, false);
     // Macro-excluded, sharp, no filler: the number comparable to XPlace's Mixed-GP reference
     // (see logOverflowDiagnostics). Zero-cost on non-mixed-size designs (no movable macros to
     // exclude), so always computed rather than gated on mixed_size_mode.
@@ -457,32 +460,14 @@ Placer::FinalMetrics Placer::computeFinalMetrics()
 }
 
 /**
- * @brief Whether the GP-stop signal counts filler density, as XPlace's overflow_fn does.
- *
- * TODO #13 re-decision (2026-08-01): unconditionally true in phase 2. The two things that
- * blocked it as a standalone phase-1 fix are specific to phase 1 and do not apply once macros
- * are frozen: phase 2 rebuilds the filler set in its own frame (so "phase 1 counts phase 2's
- * fillers" is moot), and phase 2 already runs under the un-doubled stop_overflow with the
- * plateau kill enabled (mixed_size_mode=false, Phase2.cpp:90/95) -- the same rules a
- * filler-inclusive signal was always going to need. XPlace's own std-cell-fixed-macro GP has no
- * toggle for this; it always counts fillers.
- *
- * Phase 1 keeps the config-controlled default (false) -- deciding it needs the per-design
- * clamp/no-filler vs clamp/+filler split across the full MMS suite (TODO #13 breadth item 1),
- * not yet measured.
- */
-bool Placer::convergenceIncludesFillers()
-{
-    if (m_phase == Phase::STDCELL_FIXED_MACRO) return true;
-    return cfg["params"]["convergence_include_fillers"].value_or(false);
-}
-
-/**
  * @brief DIAGNOSTIC: overflow the four ways {clamp,sharp}×{no-filler,+filler} on the
  *        restored-best placement, to reconcile our convergence metric with XPlace. XPlace's
- *        GP STOP signal is clamp+filler (overflow_fn on mov+filler density) and its reported
- *        overflow is sharp+filler. Self-contained (does not reuse FinalMetrics) so the labels
- *        stay truthful whatever filler policy the headline metrics use.
+ *        GP STOP signal is clamp/NO-filler and its reported "exact Overflow" is sharp/NO-filler
+ *        -- both slice the movable range `[mov_lhs:mov_rhs]`, which excludes fillers; see
+ *        the recordIterationResults note for the three XPlace call sites. (This used to say
+ *        clamp/+filler and sharp/+filler respectively; corrected 2026-08-06.) Self-contained
+ *        (does not reuse FinalMetrics) so the labels stay truthful whatever filler policy the
+ *        headline metrics use.
  *
  *        macro-excluded is the fifth, mixed-size-only number: sharp/no-filler with movable
  *        macros dropped from the deposit. This is the one directly comparable to
@@ -500,7 +485,7 @@ void Placer::logOverflowDiagnostics()
         + "  clamp/+filler="   + PREC(computeOverflow(true,  nullptr, true))
         + "  sharp/+filler="   + PREC(computeOverflow(false, nullptr, true))
         + "  macro-excluded="  + PREC(computeOverflow(false, nullptr, false, true))
-        + "  (XPlace GP stop = clamp/+filler, XPlace report = sharp/+filler, "
+        + "  (XPlace GP stop = clamp/no-filler, XPlace report = sharp/no-filler, "
         + "XPlace Mixed-GP reference = macro-excluded)");
 }
 
@@ -529,7 +514,7 @@ void Placer::exportSummaryReports(const BestSolution& chosen, const FinalMetrics
         results.add_row(RowStream{} << "Phase 1 Iterations" << m_phase1_summary.iterations);
         results.add_row(RowStream{} << "Phase 1 HPWL" << std::scientific << std::setprecision(3) << m_phase1_summary.hpwl);
         results.add_row(RowStream{} << "Phase 1 Overflow (smoothed)" << std::scientific << std::setprecision(3) << m_phase1_summary.overflow_smoothed);
-        results.add_row(RowStream{} << "Phase 1 Overflow (exact, +fillers)" << std::scientific << std::setprecision(3) << m_phase1_summary.overflow_exact);
+        results.add_row(RowStream{} << "Phase 1 Overflow (exact, no fillers)" << std::scientific << std::setprecision(3) << m_phase1_summary.overflow_exact);
         results.add_row({"Phase 1 Stop reason", stopReasonName(m_phase1_summary.stop_reason)});
     }
     results.add_row(RowStream{} << "Total runtime (s)" << std::fixed << std::setprecision(3) << metrics.total_runtime);
@@ -542,10 +527,9 @@ void Placer::exportSummaryReports(const BestSolution& chosen, const FinalMetrics
         results.add_row(RowStream{} << "Initial HPWL" << std::scientific << std::setprecision(3) << m_initial_hpwl);
         results.add_row(RowStream{} << "HPWL improvement (%)" << std::fixed << std::setprecision(2) << metrics.hpwl_improvement);
     }
-    results.add_row(RowStream{} << (convergenceIncludesFillers() ? "Final Overflow (smoothed, +fillers)"
-                                                                 : "Final Overflow (smoothed, no fillers)")
+    results.add_row(RowStream{} << "Final Overflow (smoothed, no fillers)"
                                 << std::scientific << std::setprecision(3) << metrics.final_smoothed_overflow);
-    results.add_row(RowStream{} << "Final Overflow (exact, +fillers)" << std::scientific << std::setprecision(3) << metrics.final_overflow);
+    results.add_row(RowStream{} << "Final Overflow (exact, no fillers)" << std::scientific << std::setprecision(3) << metrics.final_overflow);
     if (num_movable_macros > 0) {
         // Gate on num_movable_macros, not mixed_size_mode -- the latter is set false at the
         // phase-2 transition (Phase2.cpp:90), which would otherwise silently drop this row on
@@ -651,9 +635,14 @@ void Placer::recordIterationResults()
     // Drive convergence off the smoothed overflow (clamped footprints; equivalent to XPlace's
     // expand_ratio-inflated field): the smoothed density the optimizer minimizes, which descends
     // toward the stop threshold. The exact overflow is reported separately as the physical result.
-    // convergence_include_fillers=true mirrors XPlace's GP-stop metric (overflow_fn), which counts
-    // filler density too; default false keeps the filler-excluded (XPlace-exact) signal.
-    float overflow = computeOverflow(true, nullptr, convergenceIncludesFillers()); // convergence signal
+    // Fillers are EXCLUDED, as XPlace's overflow_fn excludes them: it runs on `mov_density_map`,
+    // the movable-only slice `[mov_lhs:mov_rhs]`, and `filler_density_map` (`[mov_rhs:]`) is added
+    // only afterwards, and only for the FORCE (electronic_density_layer.py:36-50, 272-292;
+    // fillers are appended past mov_rhs by get_mov_node_info, database.py:901-904). The reported
+    // "exact Overflow" excludes them too (get_obj_overflow, evaluator.py:26-50).
+    // A `convergence_include_fillers` toggle briefly forced this TRUE in phase 2 (2026-08-02) on
+    // the opposite belief; retracted and deleted 2026-08-07 after the 16-design A/B — TODO #19a.
+    float overflow = computeOverflow(true, nullptr, false); // convergence signal
 
     hpwl_history.push_back(hpwl);
     step_length_history.push_back(step_length);

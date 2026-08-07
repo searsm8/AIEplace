@@ -126,8 +126,12 @@ public:
     bool dct_normalize = true;   // apply 1/N per forward DCT (bounds a_uv intermediates; global scale absorbed by lambda)
     float precond_coef = 1.0f; // escalating preconditioner coefficient (doubles every 20 iters when overflow < 0.3)
     float avg_node_size = 1.0f; // average movable cell area; grid-sizing divisor for the no-macros case
-    float density_force_fraction = 0.0f; // density's share of total preconditioner force-mass, in [0,1]
-                                          // (0 = all wirelength, 1 = all density); XPlace calls this "weighted_weight"
+    float density_force_fraction = 0.0f; // GRADIENT-norm ratio ||lambda*grad_den||_1 / (||grad_wl||_1 + ||lambda*grad_den||_1).
+                                          // NOT XPlace's "weighted_weight" -- see precond_kappa.
+    float precond_kappa = 0.0f;  // ||alpha_2||_1 / (||alpha_1||_1 + ||alpha_2||_1) -- XPlace's "weighted_weight"
+                                 // (param_scheduler.py:386), the quantity its skip_update gate reads.
+                                 // Monotone in lambda (alpha_2 = pcoef*lambda*area), so it crosses the
+                                 // (0.5, 0.95) throttle window once and then leaves it for good.
     float precond_a1_norm = 0.0f; // ||alpha_1||_1 = sum of movable num_pins (preconditioner pin-mass; diag) [instrumentation]
     float precond_a2_norm = 0.0f; // ||alpha_2||_1 = sum of precond_coef*lambda*area (preconditioner density-mass) [instrumentation]
 
@@ -373,7 +377,6 @@ public:
     void logStepDiagnostics();
 
     // Bookkeeping and visualization
-    bool convergenceIncludesFillers();   // config params.convergence_include_fillers
     void recordIterationResults();
     void snapshotBestPlacement();
     void restoreBestPlacement();

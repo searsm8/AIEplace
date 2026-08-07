@@ -210,8 +210,8 @@ void Placer::resetSolverState()
  */
 void Placer::reportPhaseSummary()
 {
-    float overflow_smoothed = computeOverflow(true,  nullptr, convergenceIncludesFillers());
-    float overflow_exact    = computeOverflow(false, nullptr, true);
+    float overflow_smoothed = computeOverflow(true,  nullptr, false);  // filler-EXCLUDED, as XPlace overflow_fn is
+    float overflow_exact    = computeOverflow(false, nullptr, false);  // filler-EXCLUDED, as XPlace reports it
     float hpwl              = hpwl_history.empty() ? 0.0f : hpwl_history.back();
 
     m_phase1_summary = { true, iteration, hpwl, overflow_smoothed, overflow_exact, m_stop_reason };

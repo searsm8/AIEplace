@@ -15,23 +15,44 @@ AIEPLACE_NAMESPACE_BEGIN
  * @brief XPlace param_scheduler.step(): one shared perform_update flag throttles the
  *        density-weight, gamma (wa_coeff), and precond-coef updates together — freezing all
  *        three on 2 of every 3 iterations during the early stage (iter<50) or while the
- *        wirelength/density forces are mid-balance (density_force_fraction ∈ (0.5,0.95)).
- *        sw_only previously scoped this gate to density_weight only, letting gamma sharpen
- *        3x too fast early and over-clumping the cells.
+ *        placement is mid-spread. sw_only previously scoped this gate to density_weight only,
+ *        letting gamma sharpen 3x too fast early and over-clumping the cells.
+ *
+ * ### The "mid-spread" test reads precond_kappa, NOT a gradient ratio — TODO #19b
+ * XPlace tests `weighted_weight` (== our `precond_kappa`), the PRECONDITIONER mass ratio.
+ * sw_only used to test `density_force_fraction`, a GRADIENT-norm ratio, under a doc-comment
+ * claiming it was XPlace's quantity. They are different functions and the difference is not
+ * cosmetic: κ carries λ linearly, so it crosses (0.5, 0.95) once and leaves, releasing the
+ * throttle for the endgame; the gradient ratio is not monotone in λ (∇den falls as cells spread),
+ * so it drifts INTO the window late and holds the 3x throttle on exactly when λ must ramp.
+ * Measured, MMS adaptec1 phase-2 endgame: λ grows x68 per 100 iterations in XPlace, x11 under the
+ * gradient ratio, x20->x105 under κ. Over 16 MMS designs the fix (with the filler retraction in
+ * Output.cpp, which does not work alone) took post-DP HPWL vs XPlace +1.23% -> +0.97% and runs
+ * that `converged` 6/16 -> 15/16. A `schedule_gate_metric` config selected between the two for
+ * the A/B; deleted 2026-08-07 once settled, per the retire-settled-toggles pattern (TODO #2).
+ * `density_force_fraction` is still computed and logged below — it is just not the gate.
  */
 void Placer::updateSchedule()
 {
     // Phase-relative: XPlace gates all three on `self.iter - self.init_iter`
     // (param_scheduler.py:285-288), so a new phase re-enters its own warmup.
     bool past_warmup      = (phaseIteration() >= 50);
-    bool forces_balanced  = (density_force_fraction > 0.5f && density_force_fraction < 0.95f);
+    bool mid_spread       = (precond_kappa > 0.5f && precond_kappa < 0.95f);
     bool every_third_iter = (phaseIteration() % 3 == 0);
 
-    bool perform_update = every_third_iter || (past_warmup && !forces_balanced);
+    bool perform_update = every_third_iter || (past_warmup && !mid_spread);
     if (perform_update) {
         updateGamma(ovfw_history.back());
         updateDensityWeight();
     }
+
+    // Both gate candidates, every 50 iterations: the throttle is the difference between a lambda
+    // that ramps and one that crawls, and which quantity is in the window is otherwise invisible.
+    if (phaseIteration() % 50 == 0)
+        Logger::log_detail("[GATE] iter=" + std::to_string(iteration) +
+                           " kappa=" + PREC(precond_kappa) +
+                           " force_frac=" + PREC(density_force_fraction) +
+                           " throttled=" + std::string(perform_update ? "no" : "yes"));
 }
 
 /**
@@ -283,10 +304,18 @@ void Placer::updatePrecondWeights()
                 node_p->precond_weight = std::max(1.0f, num_pins + a2);
         }, a1_norm, a2_norm);
 
+    // XPlace's weighted_weight, verbatim (param_scheduler.py:386): the ratio of the two
+    // PRECONDITIONER addend masses. alpha_2 carries λ linearly, so κ rises monotonically with λ,
+    // crosses the (0.5, 0.95) throttle window once, and then stays above it -- which is what lets
+    // XPlace's λ ramp at the full μ every iteration in the endgame.
+    precond_kappa = a2_norm / (a1_norm + a2_norm + 1e-8f);
+
     // density_force_fraction: force-magnitude ratio ‖λ·∇den‖₁ / (‖∇wl‖₁ + ‖λ·∇den‖₁), invariant to the
     // field-normalization constant. Uses the PREVIOUS iteration's committed gradient L1 norms (last_g*_L1,
     // refreshed each combineGradients / seeded by initializeDensityWeight on iteration 1), since
     // updatePrecondWeights runs before this iteration's performNextStep→combineGradients.
+    // NOT the same function as κ above: it is a ratio of GRADIENT norms, and ∇den falls as cells
+    // spread, so it is not monotone in λ. See updateSchedule() for which one gates the schedule.
     density_force_fraction = last_gden_L1 / (last_gwl_L1 + last_gden_L1 + 1e-8f);
 
     precond_a1_norm = a1_norm; // instrumentation: expose the two preconditioner addend norms for the trace
@@ -394,11 +423,16 @@ bool Placer::checkFineDivergenceGuard()
     // legalization and the optimizer reset (run_placement_nesterov.py:167-172), then clears the
     // signal and continues. The guard is its phase-1 EXIT, not a kill.
     //
-    // sw_only has no phase 2 yet (TODO #13), so we keep the plateau kill active in mixed-size and
-    // let it end the run at the same point XPlace would have handed off to macro legalization.
-    // Disabling it (tried 2026-07-31) just grinds to convergence_max_iterations with the density
-    // weight running away — newblue4/newblue5 went 670 -> 1200 iterations for a 0.02 overflow gain
-    // and a 45% HPWL inflation. Re-gate on `!mixed_size_mode` once #13 lands.
+    // We keep the plateau kill active in mixed-size so it ends PHASE 1 at the same point XPlace
+    // would have handed off to macro legalization. Disabling it (tried 2026-07-31) just grinds to
+    // convergence_max_iterations with the density weight running away — newblue4/newblue5 went
+    // 670 -> 1200 iterations for a 0.02 overflow gain and a 45% HPWL inflation.
+    //
+    // The old note here said "re-gate on `!mixed_size_mode` once TODO #13 lands". #13 landed
+    // 2026-08-01 and that re-gate is NOT wanted: `mixed_size_mode` is set false at the phase-2
+    // transition (Phase2.cpp), so the kill is already enabled in phase 2 — which is what XPlace
+    // does too (`not self.include_macros`, param_scheduler.py:467). Gating on `!mixed_size_mode`
+    // would only DISABLE it in phase 1, i.e. remove our phase-1 exit. Left as is, deliberately.
     if (overflow >= overflow_threshold && checkOverflowPlateau(50, 0.05f))
         life -= MAX_LIFE;
 
