@@ -1,10 +1,15 @@
 # Completed Tasks — History
 
 Cross-session task archive. A task moves here when every one of its items is done — see the
-repo-root `CLAUDE.md`, "Keeping TODO.md from bloating". Entries are **frozen at archive time**:
+repo-root `CLAUDE.md`, "Keep tasks.md from bloating". Entries are **frozen at archive time**:
 if a later task overturns one, add a retraction banner at its top rather than editing the body,
-so the reasoning stays readable and the reversal is impossible to miss. See `TODO.md` for active
+so the reasoning stays readable and the reversal is impossible to miss. See `tasks.md` for active
 work.
+
+> **Naming note, 2026-08-07.** The active file was renamed `TODO.md` → `tasks.md` and `TLDR.md` →
+> `summary.md`. Only these header pointers were updated. **Every archived entry below still says
+> `TODO.md`, and that is deliberate** — those are frozen records of what was written at the time,
+> and rewriting them would be exactly the hard edit this file's own rule forbids.
 
 **Archived 2026-08-07:** #2, #4, #8, #12, #13, #16, #18 (and #5's duplicate copy in TODO.md
 removed — it had been sitting in both files since 2026-07-30).

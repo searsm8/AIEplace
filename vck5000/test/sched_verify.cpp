@@ -8,11 +8,26 @@
 // Build: g++ -std=c++17 -O2 -I../src sched_verify.cpp -o sched_verify
 // Run:   ./sched_verify <schedule_trace.csv>
 //
-// dff_coef (the density_force_fraction closed-form constant, precond OFF) is DERIVED from the
-// trace itself -- dff/(1-dff) = dff_coef * lambda_prev -- and its constancy across the run is
-// itself a check on the closed form. lambda on iteration 1 is the golden init value (the L1 norms
-// that produce it are not in the trace), so it is seeded, not recomputed; the trend is verified
-// from iteration 2 on.
+// The closed-form constant c (sched_dff: q = c*lambda/(1+c*lambda)) is DERIVED from the trace and
+// its constancy across the run is itself a check on the closed form -- so it is ASSERTED, not just
+// printed. c is derived from KAPPA (XPlace's weighted_weight, = precond_a2_norm/(a1+a2)), NOT from
+// the trace's density_force_fraction column. That distinction is the whole of TODO #19b:
+//
+//   kappa carries lambda linearly, so c = kappa/((1-kappa)*lambda_prev) is constant  -- 1.12% here
+//   dff is a gradient-norm ratio and is NOT monotone in lambda, so the same fit    -- 2136% here
+//
+// For weeks this harness derived c from dff, printed the resulting 633,000x spread, took the median
+// anyway and exited 0. The check was correct and was reporting a real defect; only the assert was
+// missing. c is derived per precond_coef plateau, since c carries precond_coef (which escalates
+// x2/20 iters on a real run; this fixture holds it at 1.0 throughout).
+//
+// NOTE the replay below still feeds the golden's dff column into param_scheduler's throttle gate.
+// That is deliberate: this fixture was produced by the pre-#19 sw_only, which gated on dff, so
+// feeding kappa would diverge from the golden it is checked against. Regenerating the fixture is
+// blocked on TODO #20 step 1 (dumpScheduleTrace() was deleted from sw_only 2026-07-28).
+//
+// lambda on iteration 1 is the golden init value (the L1 norms that produce it are not in the
+// trace), so it is seeded, not recomputed; the trend is verified from iteration 2 on.
 
 #include "modules/param_scheduler.hpp"
 #include <cstdio>
@@ -29,6 +44,9 @@ using namespace plalgo;
 struct Row {
     int iter; float hpwl, overflow, pos2, grad2, dff, base_gamma, gamma, inv_gamma,
         step_length, nesterov_ak, coeff, density_weight;
+    float precond_coef, a1_norm, a2_norm;   // cols 14-16: the kappa inputs (XPlace alpha_1/alpha_2)
+    // kappa == XPlace's weighted_weight (param_scheduler.py:386), == sw_only's precond_kappa.
+    double kappa() const { return (double)a2_norm / ((double)a1_norm + (double)a2_norm); }
 };
 
 static std::vector<Row> load(const char* path) {
@@ -38,11 +56,14 @@ static std::vector<Row> load(const char* path) {
     std::string line; std::getline(f, line); // header
     while (std::getline(f, line)) {
         if (line.empty()) continue;
-        std::stringstream ss(line); std::string c; Row r; float v[13]; int i = 0;
-        while (std::getline(ss, c, ',') && i < 13) v[i++] = std::stof(c);
+        std::stringstream ss(line); std::string c; Row r; float v[16] = {0}; int i = 0;
+        while (std::getline(ss, c, ',') && i < 16) v[i++] = std::stof(c);
+        if (i < 16) { fprintf(stderr, "trace row %d has %d columns, need 16 (precond_coef, "
+                             "precond_a1_norm, precond_a2_norm are required)\n", r.iter, i); exit(1); }
         r.iter=(int)v[0]; r.hpwl=v[1]; r.overflow=v[2]; r.pos2=v[3]; r.grad2=v[4]; r.dff=v[5];
         r.base_gamma=v[6]; r.gamma=v[7]; r.inv_gamma=v[8]; r.step_length=v[9];
         r.nesterov_ak=v[10]; r.coeff=v[11]; r.density_weight=v[12];
+        r.precond_coef=v[13]; r.a1_norm=v[14]; r.a2_norm=v[15];
         rows.push_back(r);
     }
     return rows;
@@ -58,22 +79,66 @@ int main(int argc, char** argv) {
     auto rows = load(argv[1]);
     if (rows.size() < 2) { fprintf(stderr, "trace too short\n"); return 1; }
 
-    // Derive dff_coef from the trace: dff/(1-dff) = c*lambda_prev, lambda_prev = density_weight[k-1].
-    // Constancy of c is a check on the closed form itself.
-    std::vector<double> cs;
-    for (size_t i = 1; i < rows.size(); i++) {
-        double dff = rows[i].dff, lam_prev = rows[i-1].density_weight;
-        if (dff > 0 && dff < 1 && lam_prev > 0) cs.push_back((dff / (1.0 - dff)) / lam_prev);
+    // Derive c from KAPPA: kappa/(1-kappa) = c*lambda_prev.  c carries precond_coef, so it is only
+    // constant WITHIN a precond_coef plateau -- group by it and check each group separately.
+    // Bound: the observed spread is 1.12%; a genuine break here is orders of magnitude (the dff
+    // quantity this replaced reads 2136%), so 5% is a real margin, not a rubber stamp.
+    const double KAPPA_C_TOL_PCT = 5.0;
+    double worst_plateau_pct = 0.0; int worst_plateau_n = 0; float worst_plateau_pc = 0;
+    double c_med = 0;
+    {
+        std::vector<double> all;
+        size_t g0 = 1;
+        for (size_t i = 1; i <= rows.size(); i++) {
+            const bool end_of_plateau =
+                (i == rows.size()) || (rows[i].precond_coef != rows[g0].precond_coef);
+            if (!end_of_plateau) continue;
+            std::vector<double> cs;
+            for (size_t j = g0; j < i; j++) {
+                double k = rows[j].kappa(), lam_prev = rows[j-1].density_weight;
+                if (k > 0 && k < 1 && lam_prev > 0) cs.push_back(k / ((1.0 - k) * lam_prev));
+            }
+            if (cs.size() >= 2) {
+                std::sort(cs.begin(), cs.end());
+                double med = cs[cs.size()/2];
+                double pct = 100.0 * (cs.back() - cs.front()) / med;
+                if (pct > worst_plateau_pct) {
+                    worst_plateau_pct = pct; worst_plateau_n = (int)cs.size();
+                    worst_plateau_pc = rows[g0].precond_coef;
+                }
+                all.insert(all.end(), cs.begin(), cs.end());
+            }
+            g0 = i;
+        }
+        if (all.empty()) { fprintf(stderr, "no usable kappa rows in trace\n"); return 1; }
+        std::sort(all.begin(), all.end());
+        c_med = all[all.size()/2];
     }
-    std::sort(cs.begin(), cs.end());
-    double c_med = cs[cs.size()/2], c_min = cs.front(), c_max = cs.back();
-    printf("dff_coef: median=%.6g  min=%.6g  max=%.6g  (spread %.2g%%)\n",
-           c_med, c_min, c_max, 100.0*(c_max-c_min)/c_med);
+    const bool kappa_c_ok = worst_plateau_pct < KAPPA_C_TOL_PCT;
+    printf("kappa_coef: median=%.6g  worst plateau spread=%.3g%% (precond_coef=%g, n=%d, tol %.0f%%)  %s\n",
+           c_med, worst_plateau_pct, worst_plateau_pc, worst_plateau_n, KAPPA_C_TOL_PCT,
+           kappa_c_ok ? "ok" : "FAIL");
+
+    // [info] the same fit against the trace's density_force_fraction column -- the quantity sw_only
+    // WAS gating on before TODO #19b. Not a verdict: it is expected to be wildly non-constant, and
+    // that is the defect #19b fixed. Printed so the divergence stays visible.
+    {
+        std::vector<double> ds;
+        for (size_t i = 1; i < rows.size(); i++) {
+            double dff = rows[i].dff, lam_prev = rows[i-1].density_weight;
+            if (dff > 0 && dff < 1 && lam_prev > 0) ds.push_back((dff / (1.0 - dff)) / lam_prev);
+        }
+        std::sort(ds.begin(), ds.end());
+        printf("[info] same fit on the golden's density_force_fraction column: median=%.6g "
+               "spread=%.3g%% (not a verdict -- see TODO #19b)\n",
+               ds[ds.size()/2], 100.0*(ds.back()-ds.front())/ds[ds.size()/2]);
+    }
 
     SchedParams p;
     p.base_gamma = rows[0].base_gamma;
     p.min_step = 0.95f; p.max_step = 1.05f; p.init_multiplier = 8e-5f;
-    p.dff_coef = (float)c_med; p.enable_momentum = 1; p.gamma_schedule = 1;
+    p.dff_coef = (float)c_med;   // the kappa-derived c above, not the dff-derived one (TODO #19b)
+    p.enable_momentum = 1; p.gamma_schedule = 1;
     // Convergence config MUST match the config_used.json of the run that produced the trace --
     // the stop check compares against where the golden actually stopped, so a mismatched
     // threshold fails convergence while the schedule scalars still verify bit-exact. These are
@@ -123,22 +188,35 @@ int main(int argc, char** argv) {
            golden_stop, first_stop,
            premature_stop >= 0 ? "  [PREMATURE]" : (first_stop < 0 ? "  [NEVER]" : ""));
 
-    // Closed-form dff fidelity: sched_dff(lambda_prev, c_med) vs golden density_force_fraction.
+    // Closed-form fidelity: sched_dff(lambda_prev, c) vs KAPPA derived from the trace's own
+    // a1/a2 norms. sched_dff computes c*l/(1+c*l), which IS kappa (TODO #19b) -- so this is the
+    // check that the PL's closed form reproduces the golden's preconditioner ratio, and it is
+    // asserted. It was previously compared against the dff column, where it read 1.608 (161%) and
+    // fixtures/README.md explained that away as a precond-on artifact. It was not an artifact.
     // (The real PL uses the exact c = precond_coef*K/total_pins; here c is fit from the trace.)
-    double e_dff = 0;
+    // Bound: observed 5.33e-3. This CANNOT be tighter than the plateau spread above -- sched_dff is
+    // fed one median c, so each row inherits that row's deviation from the median (1.12% spread =>
+    // ~0.56% worst-case here, which is what it reads). Same phenomenon, not an independent budget.
+    // 2e-2 leaves ~4x margin; the dff column this replaced reads 1.608, i.e. 80x ABOVE this bound.
+    const double KAPPA_TOL = 2e-2;
+    double e_kappa = 0; int worst_kappa = 0;
     for (size_t i = 1; i < rows.size(); i++) {
         float got = sched_dff(rows[i-1].density_weight, (float)c_med);
-        double e = relerr(got, rows[i].dff);
-        if (e > e_dff) e_dff = e;
+        double e = relerr(got, rows[i].kappa());
+        if (e > e_kappa) { e_kappa = e; worst_kappa = rows[i].iter; }
     }
-    printf("closed-form dff max rel err vs golden: %.3e\n", e_dff);
+    const bool kappa_form_ok = e_kappa < KAPPA_TOL;
+    printf("closed-form sched_dff vs golden kappa: max rel err %.3e (iter %d, tol %.0e)  %s\n",
+           e_kappa, worst_kappa, KAPPA_TOL, kappa_form_ok ? "ok" : "FAIL");
 
     const double TOL = 1e-4;
     bool sched_ok = e_ig < TOL && e_al < TOL && e_la < TOL && e_co < TOL;
     bool conv_ok  = (first_stop == golden_stop) && (premature_stop < 0);
-    bool ok = sched_ok && conv_ok;
-    printf("%s  (%zu iterations, tol %.0e; schedule %s, convergence %s)\n",
+    bool ok = sched_ok && conv_ok && kappa_c_ok && kappa_form_ok;
+    printf("%s  (%zu iterations, tol %.0e; schedule %s, convergence %s, kappa_coef %s, "
+           "closed form %s)\n",
            ok ? "PASS" : "FAIL", rows.size(), TOL,
-           sched_ok ? "ok" : "FAIL", conv_ok ? "ok" : "FAIL");
+           sched_ok ? "ok" : "FAIL", conv_ok ? "ok" : "FAIL",
+           kappa_c_ok ? "ok" : "FAIL", kappa_form_ok ? "ok" : "FAIL");
     return ok ? 0 : 1;
 }

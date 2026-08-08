@@ -1,5 +1,5 @@
-# TLDR — project status at a glance
-*Updated 2026-08-07. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+# Summary — project status at a glance
+*Updated 2026-08-08 14:08 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 
 ## Two threads
 - **sw_only** — CPU golden reference; goal is to match XPlace. The active thread.
@@ -40,6 +40,6 @@ cd vck5000 && make test-regress   # sw_only vs committed baselines, ~12 s
 ```
 
 ## Deeper
-`.claude/TODO.md` (open items)
+`.claude/tasks.md` (open items)
 `.claude/1_REVIEW/reports/` (evidence) 
 `vck5000/pl/src/pl_algo/DATAFLOW.md` (authoritative for pl_algo)

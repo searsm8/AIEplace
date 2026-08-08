@@ -54,7 +54,7 @@ __pycache__/
 # vck5000/1_REVIEW and vck5000/2_ARTIFACTS, which then sat untracked-but-NOT-ignored,
 # including ~80 MB of GIFs that a `git add -A` would have swept in.
 #
-# 2026-08-07: the whole workflow set moved into /.claude/ -- notes (TLDR/TODO/history) out of
+# 2026-08-07: the whole workflow set moved into /.claude/ -- notes (summary/tasks/history) out of
 # 0_TODO, plus 1_REVIEW and 2_ARTIFACTS wholesale. One hidden dir, so a newcomer browsing the repo
 # sees code first. The catch-all still ignores 0_OVERNIGHT_WORK and anything else numbered.
 [0-9]_*/

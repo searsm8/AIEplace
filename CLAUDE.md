@@ -11,46 +11,46 @@ wsl -e bash -c "cd /home/msears/phd/AIEplace && <your command>"
 
 Filling your context with the right information is important.
 
-## TLDR.md holds the living status of the project, summarized concisely. 
+## summary.md holds the living status of the project, summarized concisely. 
 It also holds references for diving deeper on the topic at hand.
 
-**The three project-notes files live in the repo-root `.claude/`** — `.claude/TLDR.md`,
-`.claude/TODO.md`, `.claude/history.md`. All three are tracked. They sit in a dotfolder so a
+**The three project-notes files live in the repo-root `.claude/`** — `.claude/summary.md`,
+`.claude/tasks.md`, `.claude/history.md`. All three are tracked. They sit in a dotfolder so a
 newcomer browsing the repo sees the code first, not our workflow.
 
 For a new session, follow these steps:
 
-1) Build context. Read `.claude/TLDR.md` to quickly gain current summarized status.
-2) From Mark's prompt and TLDR, decide if you need to read TODO.md items and reports relevant to the task at hand.
+1) Build context. Read `.claude/summary.md` to quickly gain current summarized status.
+2) From Mark's prompt and the summary, decide if you need to read tasks.md items and reports relevant to the task at hand.
 3) Do the task.
 4) If requested by Mark, write a report or generate an artifact.
-5) Update TODO by summarizing the task or report, then update TLDR by summarizing the TODO.
+5) Update tasks.md by summarizing the task or report, then update summary.md by summarizing tasks.md.
 
-Recall how useful the TLDR was when starting the session. 
+Recall how useful the summary was when starting the session. 
 It only stays useful if it is meticulously kept up to date.
-A stale TLDR is worse than no TLDR, because it gets believed. 
-Mark will also read TLDR, so treat it as a report to both him and your future self.
+A stale summary is worse than no summary, because it gets believed. 
+Mark will also read it, so treat it as a report to both him and your future self.
 
-**Maintain a timestamp** in TLDR with minute precision accuracy. Eastern time.
+**Maintain a timestamp** in summary.md with minute precision accuracy. Eastern time.
 
-### Keep TODO.md from bloating
+### Keep tasks.md from bloating
 Every session may load this file whole, so anything finished that stays in it is paid for again on
 every future session. Also, Mark needs to read it sometimes! Three rules:
 
-1. **When a TODO is completed, move the whole section to `.claude/history.md`**
-   - Prepend history.md with a summary line: the TODO number "#n" and a brief description of what was accomplished. Reference other TODOs as needed.
-   - Insert the full text of the completed TODO after all the summary lines, so it keeps most-recently completed items first.
+1. **When a task is completed, move the whole section to `.claude/history.md`**
+   - Prepend history.md with a summary line: the task number "#n" and a brief description of what was accomplished. Reference other tasks as needed.
+   - Insert the full text of the completed task after all the summary lines, so it keeps most-recently completed items first.
    - Don't leave a completed task open -- that's clutter. If uncertain, ask Mark.
 
-2. **Status lives in TODO.md; evidence lives in a report.** A TODO is simply the gist — what, why,
+2. **Status lives in tasks.md; evidence lives in a report.** A task is simply the gist — what, why,
    state, next action — plus a [[link]] to its `.claude/1_REVIEW/reports/` file for the measurements and
    reasoning. 
 
 3. **Avoid editing history.md** unless you can justify literally rewriting history. 
 If something does need amending, an annotation is better than hard edits.
 
-4. Place new reports in `1_REPORTS/`. These files should be text only, since it is git tracked.
-
+4. Place new reports in `.claude/1_REPORTS/`. These files should be text only, since it is git tracked.
+Large artifacts such as images or gifs should be placed in `.claude/2_ARTIFACTS` which is not git tracked (create if needed).
 
 
 ## 📄 Naming what you hand Mark — the filename carries the metadata
@@ -79,7 +79,6 @@ When naming new files:
 
 **File links** -- For Mark's benefit. Wrap filenames with double-brackets [[filename.md]] so that 
 Obsidian software generates a clickable link when viewed by a human. 
-It also clearly denotes filenames for your benefit.
 
 ## End of Software Project notes
 
@@ -117,7 +116,7 @@ grep -rn "<the quantity>" ~/phd/Xplace/src/
 ```
 If XPlace has a formulation, match it. If it genuinely has none, say so explicitly and flag
 that the choice is ours — that is exactly the kind of decision that must be written down
-(TODO.md or memory), or a later session will re-derive it from scratch.
+(tasks.md or memory), or a later session will re-derive it from scratch.
 
 ## pl_algo current state
 **`vck5000/pl/src/pl_algo/DATAFLOW.md` is the single authoritative source** — read it before
@@ -278,11 +277,12 @@ function.** The κ bug sat under a doc-block that said it was computing `weighte
 next line assigned something else. Prefer to make the claim checkable (see *A test asserts*) over
 asserting it in prose.
 
-## Keeping `.claude/TODO.md` true
-TODO.md is the **source of truth for project state** — CLAUDE.md's TL;DR points at it and every
-session reads it first. It is also 2000+ lines of corrections layered on corrections, and on
-2026-08-06 four checkboxes were still open on work that had already landed. A source of truth
-that is 4 items stale is worse than one nobody trusts, because it gets believed. The procedure:
+## Keeping `.claude/tasks.md` true
+tasks.md is the **source of truth for project state** — `summary.md` points at it and every
+session reads that first. It was 1621 lines of corrections layered on corrections until the
+2026-08-07 compaction, and on 2026-08-06 four checkboxes were still open on work that had already
+landed. A source of truth that is 4 items stale is worse than one nobody trusts, because it gets
+believed. The procedure:
 
 1. **Verify before you inherit.** An unchecked box is a claim about the code, not a fact. Before
    working an item, confirm it against the code — `Setup.cpp` had carried the "unify the two macro
@@ -300,6 +300,6 @@ that is 4 items stale is worse than one nobody trusts, because it gets believed.
    conclusion was sitting in `progress.txt`, and two sessions re-derived the open question.
 5. **When you close an item, check what it was blocking.** #19b closed #7's first bullet outright;
    nobody would have found that by reading #7.
-6. **A number in TODO.md carries its basis or it is not a number.** Which phase, masked or exact,
+6. **A number in tasks.md carries its basis or it is not a number.** Which phase, masked or exact,
    which sw_only row, td and grid — see the `xplace-compare` skill. Numbers without that have
    needed retracting three times.

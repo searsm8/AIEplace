@@ -1,10 +1,10 @@
-# TODO
+# Tasks
 
 Open work, one section per task. **Status lives here; evidence lives in a
 report.** Don't reuse numbers, find the highest number and add one.
 
 **Compacted 2026-08-07** from 1621 lines. Nothing was closed by that edit — the full prior text
-of every task below is in [[history.md]] § *2026-08-07 TODO.md compaction*. Go there for
+of every task below is in [[history.md]] § *2026-08-07 TODO.md compaction* (its historical name). Go there for
 measurements, provenance, and retraction trails.
 
 ---
@@ -17,7 +17,7 @@ tree committed, **67 GB freed** from `results/` (helper: `tools/prune_run_artifa
 
 - [ ] Consolidate `.claude/1_REVIEW/` handoffs and reports; apply the `_NEW_` convention consistently —
       un-prefix the ones Mark has read, keep it on the rest.
-- [ ] Fold the still-relevant findings out of old reports into TODO.md / memory so those reports
+- [ ] Fold the still-relevant findings out of old reports into tasks.md / memory so those reports
       can be archived.
 - [ ] **Per-run `viz/` dumps are reproducible output** (~96 MB per adaptec1 run, ~480 MB per
       bigblue4). Already swept by the default slim. Given the size, consider making viz output
@@ -236,10 +236,17 @@ name. newblue4 closed as good enough (Mark, 2026-08-07).
 ⚠️ **Any overflow number recorded between 2026-07-31 and 2026-08-06 is filler-INCLUDED** and reads
 roughly 2× high against anything XPlace prints.
 
-- [ ] **Make `sched_verify` assert `dff_coef` constancy** (within a `precond_coef` plateau; allow the
-      ×2 steps). **The single highest-value test change in the repo right now** — an already-designed
-      check that was left as a print, reading a **633,000× spread** and passing anyway. Asserting it
-      would have caught #19b on day one from the pl_algo side.
+- [x] **DONE 2026-08-08 — `sched_verify` now asserts the coefficient's constancy.** It derives the
+      constant from **κ** (`precond_a2_norm/(a1+a2)`, cols 14-16 of the trace, which the harness
+      never parsed) instead of from the `density_force_fraction` column, grouped per `precond_coef`
+      plateau. On the fixture: **κ gives 1.12% spread, dff gives 2136%** — the closed form was right
+      and the quantity it was fitted against was wrong, exactly as #19b predicted. Two asserts added
+      (plateau spread < 5%, closed form vs κ < 2e-2), both bounds taken from the observed values.
+      The dff fit is still printed, tagged `[info]`, so the divergence stays visible.
+      **Negative control run:** scaling `a2` by 1.5× over half the trace → 51.1% spread, both checks
+      FAIL, exit 1 — while schedule and convergence still pass, which is the blind spot they had.
+      Also corrected `test/fixtures/README.md`, which had explained the 1.608 closed-form error away
+      as a preconditioning artifact. It was not an artifact.
 - [ ] **Regenerate the fixture trace from the post-#19 sw_only** — blocked on #20 step 1
       (`dumpScheduleTrace()` must be restored first). Until then the fixture is a 2026-08-05 capture
       of the OLD gate quantity.

@@ -9,7 +9,7 @@
 > - schedule / step length → `vck5000/host/src/sw_only/src/placer/{Step,Schedule}.cpp`
 > - density + field solve → `vck5000/host/src/sw_only/src/placer/Density.cpp`
 > - pl_algo state → `vck5000/pl/src/pl_algo/DATAFLOW.md` (authoritative), then its `README.md`
-> - current priorities → `.claude/TODO.md`
+> - current priorities → `.claude/tasks.md`
 >
 > **Known-stale headline claims below** — they describe code that no longer exists:
 > - the `precond_weight_mean` **BB step clamp is GONE**. sw_only now applies *no* magnitude clamp,
