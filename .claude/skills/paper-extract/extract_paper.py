@@ -212,6 +212,15 @@ def _side_box(cap_rect, gfx, blocks, layout, above, reach=520):
         br = blk["rect"]
         if band.intersects(br) and (br & band).get_area() > 0.5 * br.get_area():
             box = box | br
+    # the band step can pull in a block that pokes past `reach` (e.g. a
+    # neighbouring item's own caption, sitting just past the boundary the
+    # caller computed from sibling captions) -- reapply the same limit here,
+    # not just on the initial gfx seed, or that neighbour's content rides
+    # along for free.
+    if above:
+        box.y0 = max(box.y0, cap_rect.y0 - reach)
+    else:
+        box.y1 = min(box.y1, cap_rect.y1 + reach)
     return box
 
 
@@ -256,9 +265,15 @@ def captioned_items(doc, layout):
             # brushes the caption by a couple points (axis line, descender)
             # flips it to the wrong branch.
             if above:
-                box = fitz.Rect(box.x0 - 6, box.y0 - 6, box.x1 + 6, cap_rect.y0 - 1.5)
+                # the +/-6 crop padding is cosmetic breathing room, not part of
+                # the content -- it must not itself cross into a sibling's
+                # caption above, so clamp with the same above_reach bound
+                # that scoped the content search in the first place.
+                y0 = max(box.y0 - 6, cap_rect.y0 - above_reach)
+                box = fitz.Rect(box.x0 - 6, y0, box.x1 + 6, cap_rect.y0 - 1.5)
             else:
-                box = fitz.Rect(box.x0 - 6, cap_rect.y1 + 1.5, box.x1 + 6, box.y1 + 6)
+                y1 = min(box.y1 + 6, cap_rect.y1 + below_reach)
+                box = fitz.Rect(box.x0 - 6, cap_rect.y1 + 1.5, box.x1 + 6, y1)
             key = (kind, m.group(2))
             if key not in found:                       # first occurrence wins
                 found[key] = {"page": pno, "box": box & page.rect,

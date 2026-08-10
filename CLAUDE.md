@@ -35,7 +35,7 @@ Mark will also read it, so treat it as a report to both him and your future self
 
 ### Keep tasks.md from bloating
 Every session may load this file whole, so anything finished that stays in it is paid for again on
-every future session. Also, Mark needs to read it sometimes! Three rules:
+every future session. Also, Mark needs to read it sometimes! Four rules:
 
 1. **When a task is completed, move the whole section to `.claude/history.md`**
    - Prepend history.md with a summary line: the task number "#n" and a brief description of what was accomplished. Reference other tasks as needed.
@@ -49,7 +49,7 @@ every future session. Also, Mark needs to read it sometimes! Three rules:
 3. **Avoid editing history.md** unless you can justify literally rewriting history. 
 If something does need amending, an annotation is better than hard edits.
 
-4. Place new reports in `.claude/1_REPORTS/`. These files should be text only, since it is git tracked.
+4. Place new reports in `.claude/1_REVIEW/reports`. These files should be text only, since it is git tracked.
 Large artifacts such as images or gifs should be placed in `.claude/2_ARTIFACTS` which is not git tracked (create if needed).
 
 

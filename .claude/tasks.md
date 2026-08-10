@@ -1,7 +1,7 @@
 # Tasks
 
 Open work, one section per task. **Status lives here; evidence lives in a
-report.** Don't reuse numbers, find the highest number and add one.
+report.** Don't reuse task numbers, find the highest number and add one.
 
 **Compacted 2026-08-07** from 1621 lines. Nothing was closed by that edit — the full prior text
 of every task below is in [[history.md]] § *2026-08-07 TODO.md compaction* (its historical name). Go there for
@@ -135,13 +135,31 @@ template run looks nondeterministic. **Pin it in any manual A/B.**
       ours leaves the cell and displaces only the phantom footprint. Adopting XPlace's form makes
       `computeNodeFootprint`'s movable branch disappear entirely. **Not behavior-preserving — needs a
       suite re-baseline either way.**
-- [ ] **❓FOR MARK — this entry contradicts itself and I did not resolve it.** The 2026-07-31 header
-      says #11b's `macro_td_expand_ratio` toggle was **KEPT** (default false, rejected on results but
-      faithful, re-test once the stop criterion is fixed). A later 2026-08-02 line says the toggle was
-      **DELETED** the same day it landed and the faithful branch is unconditional. A third note
-      (2026-08-07) says the re-test is now **unblocked by #19** and that `tagMovableMacros()` stays to
-      serve it. Those cannot all be true. Check the code, then fix the entry — and if the re-test is
-      real, run it now that #19 has fixed the stop criterion.
+- [x] **RESOLVED 2026-08-09 — the toggle is GONE; the faithful branch is unconditional.** The
+      2026-08-02 line was the true one. `git grep macro_td_expand_ratio -- '*.cpp' '*.hpp'` returns
+      **zero** hits. The name survives only as a rename note in
+      `host/src/sw_only/default_config.toml:37`, which says it outright — *"locked unconditional here
+      too as of 2026-08-02 … No config toggle any more"* — plus the three frozen regress configs that
+      copy that comment. It was **renamed 2026-08-01 to `macro_deposits_target_density`**, which is
+      part of why the old name reads as "deleted".
+      So: the 2026-07-31 "KEPT, default false" header is **stale**, and the 2026-08-07 "re-test now
+      unblocked by #19" is **moot as written** — there is no toggle left to A/B; a re-test means
+      re-adding the branch, a code change rather than a run. `tagMovableMacros()` stays for an
+      unrelated reason — `Setup.cpp:74` needs it to precede `createFillers` (the filler math is
+      std-cell-only) — so its presence is **not** evidence of a pending re-test.
+      **Still Mark's call:** is the post-#19 re-test worth re-adding the branch for? The A/B that
+      rejected it (mean +0.6% HPWL over 8 macro-heavy designs, −0.4% excluding adaptec5) predates the
+      stop-criterion fix, so its verdict is measured on the old criterion.
+      <details><summary>superseded — the self-contradicting entry, verbatim</summary>
+
+      - [ ] **❓FOR MARK — this entry contradicts itself and I did not resolve it.** The 2026-07-31 header
+            says #11b's `macro_td_expand_ratio` toggle was **KEPT** (default false, rejected on results but
+            faithful, re-test once the stop criterion is fixed). A later 2026-08-02 line says the toggle was
+            **DELETED** the same day it landed and the faithful branch is unconditional. A third note
+            (2026-08-07) says the re-test is now **unblocked by #19** and that `tagMovableMacros()` stays to
+            serve it. Those cannot all be true. Check the code, then fix the entry — and if the re-test is
+            real, run it now that #19 has fixed the stop criterion.
+      </details>
 
 ---
 
@@ -207,9 +225,13 @@ before touching a baseline. The frozen configs are **snapshots, not live copies*
 
 - [ ] **Nothing checks quality, only stability.** A reproducibly *wrong* sw_only passes. Guarding the
       XPlace ratio would need committed reference numbers and a tolerance — a separate job.
-- [ ] **`readDEF()`'s `floorplan.def` hardcoding is a latent bug**, not just an ISPD-2019
-      inconvenience: a benchmark dir holding `.def` files but none named `floorplan.def` fails with an
-      empty path in the error message rather than saying what it wanted.
+- [x] **DONE 2026-08-09 — `readDEF()` now says what it wanted.** `DataBase.cpp:212` returns false with
+      *"No 'floorplan.def' in \<dir\>; that is the only .def name readDEF() accepts. Found: \<names\>"*
+      instead of handing the parser an empty path. **The hardcoding itself is unchanged** — this fixes
+      the diagnosis, not the constraint; a dir whose DEF is named anything else still cannot be read.
+      Control flow is identical (both paths returned false, and `readDesignFiles()` still falls back to
+      Bookshelf), so `make test-regress` is bit-identical before and after. Error path exercised
+      directly on a probe dir with `renamed_top.def`, not just reasoned about.
 
 ---
 
@@ -250,8 +272,22 @@ roughly 2× high against anything XPlace prints.
 - [ ] **Regenerate the fixture trace from the post-#19 sw_only** — blocked on #20 step 1
       (`dumpScheduleTrace()` must be restored first). Until then the fixture is a 2026-08-05 capture
       of the OLD gate quantity.
-- [ ] **Rename pl_algo's `dff`/`dff_coef` to `kappa`/`kappa_coef`** to match sw_only's `precond_kappa`
-      and XPlace's `weighted_weight`. **The name is what hid this.**
+- [x] **DONE 2026-08-09 — renamed pl_algo's `dff`/`dff_coef` to `kappa`/`kappa_coef`** (matching
+      sw_only's `precond_kappa` and XPlace's `weighted_weight`). `sched_dff`→`sched_kappa`,
+      `SchedParams::dff_coef`→`kappa_coef`, `param_scheduler`'s `dff` arg→`kappa`, plus the comments
+      that made the false claim. Four files: `param_scheduler.hpp`, `test/sched_verify.cpp`,
+      `test/synth_check.cpp` (its s_axilite port names change with it), `DATAFLOW.md`.
+      `make test` prints **byte-identical numbers** before and after (kappa_coef median 70.4116,
+      spread 1.12%; closed form 5.327e-03) — a pure rename, as intended. The module is not yet
+      instantiated in `top.cpp`, so those two harnesses were the only callers.
+      Remaining `dff` mentions are deliberate: the trace **column** is genuinely
+      density_force_fraction, and the `[info]` line that prints its 2136% spread must keep its name.
+- [ ] **`host/src/pl_algo/` still gates on the real dff — the pre-#19 bug, live.** Found doing the
+      rename above and deliberately NOT bundled with it. `Placement.hpp`'s throttle uses
+      `densityForceFraction()` (gradient L1 norms, `Driver.cpp`), i.e. exactly the non-monotone
+      quantity #19b replaced in sw_only. It was left alone because fixing it is a behaviour change to
+      the pl_algo host schedule, not a rename. Fold into #20 step 2, or fix standalone — but it
+      should not silently outlive #19.
 
 ---
 
@@ -376,16 +412,54 @@ it fails identically. The only reliable detector is `α == 0` itself. Same famil
 **Found by the 44-design snapshot — exactly the blind spot that suite was built to expose.** Nothing
 else covers ISPD2015.
 
-- [ ] **Decide the fix**, in order of preference: (a) make the probe **relative** — scale the trial
-      displacement by the die span or position magnitude so it can never round to zero; this removes
-      the seed's design-sensitivity entirely; (b) detect `α == 0` and retry with a geometrically
-      larger seed; (c) raise the default seed — cheapest, but it only moves the cliff and needs a full
-      re-baseline.
-- [ ] **Assert it, do not just fix it.** `α == 0` at iteration 1 should be a hard error with a clear
-      message, not a silent 2133-iteration no-op that writes a plausible-looking HPWL. Same rule as
-      `CLAUDE.md` § *A test asserts*.
+- [x] **DONE 2026-08-10 — the seed is now in SITE WIDTHS.** Chose (a), with the scale taken from
+      XPlace rather than invented: `step_length = init_step_seed * site_width` in
+      `estimateInitialStep()`. → [[REPORT_23_site_width_seed_20260810.md]]
+      **Why site width and not die span:** XPlace's estimator (`initializer.py:171-177`) is
+      character-for-character ours, guard included (it has none) — it never trips because
+      `database.py:854` prescales every coordinate by site width first, so its `args.lr = 0.01` is
+      0.01 *site widths*. Ours was 0.01 raw DBU. Scaling by site width restores XPlace's unit; a
+      die-span fraction would have been our own invention.
+      ⚠️ **This is a change of UNITS, not of precision.** float32's relative epsilon is
+      scale-invariant, so normalizing coordinates buys **nothing** numerically — the ULP scales with
+      them (superblue11_a: 0.25 DBU ours, 0.38 DBU-equivalent XPlace). **Shifts buy precision, scales
+      do not**; that is why #15 (net-local frames, a shift) measures 301× and this measures 1×.
+      **Bookshelf `Sitewidth = 1`** on every ISPD2005/MMS design ⇒ `seed·1 == seed` ⇒ the whole tuned
+      MMS suite is bit-unchanged, confirmed not assumed (`mms_adaptec1` PASSes untouched). LEF/DEF
+      sites are 100-200 DBU, which is exactly where the bug lived.
+      **Verified:** `make test-regress` red before / green after with both ISPD2015 baselines
+      regenerated via `--reason`; `mgc_fft_a` 5.903e8→5.906e8 (+0.05%), `mgc_pci_bridge32_b`
+      7.248e8→**7.196e8 (−0.72%)**; `make test` unaffected; `make host HOST=pl_algo` builds.
+      Both designs re-run end-to-end: `mgc_des_perf_b` **converges in 825 iters** (overflow
+      0.996→0.046) and `mgc_superblue11_a` in **849** (overflow 0.972→0.047, HPWL 7.443e10→3.300e10,
+      −56%), where both previously never moved a cell.
+      **Global normalization was considered and rejected** — exactly ONE active config parameter
+      carries coordinate units (`init_gamma` was the other and was already fixed the same targeted
+      way via `gamma_bin_scaled`/`gamma_ref_grid`), against a refactor that re-baselines everything
+      and desyncs pl_algo. **Exception: `ap_fixed` has an absolute resolution, so if pl_algo ever
+      narrows to fixed point this stops being cosmetic** — tracked under #15.
+- [x] **DONE 2026-08-10 — the no-op now aborts instead of reporting a number.** `Step.cpp:209`
+      guards the BB estimate at the end of `estimateInitialStep()`: `if (!(step_length > 0.0f))` →
+      `Logger::log_error(...)` + `exit(1)`, naming the iteration, the phase, and the offending
+      `init_step_seed`. Written as `!(α > 0)` so a NaN α trips it too. **This is the detector, not
+      the fix** — the four other bullets stand, and these 5 designs now fail loudly rather than
+      silently. Fires at *any* `phaseIteration() == 1`, so a phase-2 α of 0 aborts too and discards
+      the phase-1 result; that has never been observed, and it is the correct default (a zero step
+      makes the rest of the phase a no-op either way), but it is the one behaviour worth revisiting
+      if it ever trips there.
+      **Verified:** `make test-regress` green and **bit-identical** before and after (mgc_fft_a 731
+      iters, mgc_pci_bridge32_b 751). Error path **exercised directly**, not reasoned about — the
+      frozen mgc_fft_a regress config with `init_step_seed = 1e-30` exits **1** with
+      *"Initial BB step estimate is 0 at iteration 1 (mixed_size): a trial step of init_step_seed =
+      1e-30 displaced no movable node, so no later step can either."*
 - [ ] **Add one large design to `make test-regress`.** The two mgc designs are small enough that the
-      probe never underflows, so the tripwire cannot see this class of bug.
+      probe never underflows, so the tripwire cannot see this class of bug. **Still true after the
+      2026-08-10 fix, and now for two reasons:** the fast tier is small LEF/DEF, and the slow tier is
+      bookshelf where `site_width = 1` makes the new scaling a no-op. Nothing in the suite exercises
+      a large site width.
+- [ ] **pl_algo's mirror is compile-verified only.** `Driver.cpp::estimate_initial_step` now scales
+      by `cfg.site_width` (set in `main.cpp` from `db.getSiteWidth()`), and `make host HOST=pl_algo`
+      builds — but it has never been run against the golden. Needs Geert's card or sw_emu.
 - [ ] **Re-run the 4 excluded designs** once fixed; they are marked `nan_metrics` in the snapshot.
 
 **Do NOT "fix" the snapshot by re-running these with a hand-tuned seed** — that is a per-design
@@ -406,6 +480,56 @@ hyperparameter, not comparable to the other 40, and it hides the defect.
       0.000" in Run Statistics, noticed in passing and never investigated.
 - [ ] **(optional) `init_step_seed` narrow-range Morris** [0.005, 0.05] — low priority, mechanism
       already understood. ⚠️ #23 changes the premise: read it first.
+
+---
+
+## #24 — `best_solution_pos` is ONE buffer shared by two trackers (opened 2026-08-10)
+
+**The "Restored … from iteration N" log line names a placement that is not the one shipped.**
+Headline HPWL/overflow are still trustworthy; the *provenance* line is not.
+
+There is exactly one snapshot buffer, `Node::best_solution_pos` (`AIEplace.cpp:107`), and **both**
+`best_primary` and `best_fallback` write it through the same `snapshotBestPlacement()`
+(`Output.cpp:670-685`). Last writer wins. `restoreBestSolution()` (`Output.cpp:414`) then selects by
+*metadata* priority (primary > fallback), logs that metadata, and calls `restoreBestPlacement()`,
+which loads whatever geometry happens to be in the buffer. When the fallback updated after the
+primary last did — the common case, since overflow keeps falling after the threshold crossing — the
+log names the primary's iteration while the restored cells are the fallback's.
+
+**Evidence (adaptec1, `full44_v2` run 2026-08-10):**
+```
+log:            Restored primary (converged) best placement from iteration 728
+                (HPWL: 70346752, overflow: 0.069424)
+reported:       Final Overflow (smoothed, no fillers) = 3.746e-02
+iterations.dat: iter 757 OVFW = 3.746e-02   <- exact match
+                iter 728 OVFW = 0.0694
+```
+`m.final_smoothed_overflow` is recomputed on the restored positions (`Output.cpp:455`), so the
+geometry is demonstrably iteration **757** while the log says **728**. Reproduced on
+`mgc_matrix_mult_c` (log it863 / 0.0692; reported 4.317e-02 = iter 892).
+
+Two defects, ranked:
+
+- [ ] **1. Selection has no control over the geometry.** The priority rule chooses one solution and
+      the buffer supplies a different one. Today this accidentally favours the better-spread
+      placement, but that is luck, not design: if `best_primary` were genuinely the right pick it
+      would not be honoured. **Fix:** give each tracker its own buffer (or snapshot lazily at
+      restore time from a stored iteration).
+      **Falsifies the fix:** after it, adaptec1's restore line and `Final Overflow (smoothed)` must
+      agree. Where they already agree on some design, that design's fallback simply never outlived
+      its primary — not evidence of correctness.
+- [ ] **2. The log line is false, and it misleads.** It caused a wrong diagnosis on 2026-08-10
+      (concluded sw_only was shipping under-spread placements to XPlace's legalizer; it is not).
+      Cheap to fix with 1; worth fixing even alone.
+
+⚠️ **Related but SEPARATE — do not conflate.** sw_only has no equivalent of XPlace's `best_sol_aux`,
+and `best_fallback`'s accept rule is *inverted* against XPlace's: ours tolerates overflow degrading
+by `OVFW_EPSILON = 0.005` to gain HPWL, XPlace's requires overflow to strictly improve and tolerates
+0.5% HPWL loss (`param_scheduler.py:432-441`), then prefers it over the HPWL-driven pick when
+`aux_hpwl < best_hpwl*1.005 and aux_ovfl*1.1 < best_ovfl` (`get_best_solution`, :563-577). That is a
+real faithfulness gap, **but defect 1 confounds any measurement of it** — fix 1 first, then re-measure.
+
+→ [[_NEW_HANDOFF_24_best_solution_buffer_20260810.md]]
 
 ---
 
