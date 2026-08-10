@@ -8,7 +8,7 @@
 // Build: g++ -std=c++17 -O2 -I../src sched_verify.cpp -o sched_verify
 // Run:   ./sched_verify <schedule_trace.csv>
 //
-// The closed-form constant c (sched_dff: q = c*lambda/(1+c*lambda)) is DERIVED from the trace and
+// The closed-form constant c (sched_kappa: q = c*lambda/(1+c*lambda)) is DERIVED from the trace and
 // its constancy across the run is itself a check on the closed form -- so it is ASSERTED, not just
 // printed. c is derived from KAPPA (XPlace's weighted_weight, = precond_a2_norm/(a1+a2)), NOT from
 // the trace's density_force_fraction column. That distinction is the whole of TODO #19b:
@@ -21,10 +21,11 @@
 // missing. c is derived per precond_coef plateau, since c carries precond_coef (which escalates
 // x2/20 iters on a real run; this fixture holds it at 1.0 throughout).
 //
-// NOTE the replay below still feeds the golden's dff column into param_scheduler's throttle gate.
-// That is deliberate: this fixture was produced by the pre-#19 sw_only, which gated on dff, so
-// feeding kappa would diverge from the golden it is checked against. Regenerating the fixture is
-// blocked on TODO #20 step 1 (dumpScheduleTrace() was deleted from sw_only 2026-07-28).
+// NOTE the replay below still feeds the golden's dff column into param_scheduler's `kappa`
+// parameter. That is deliberate: this fixture was produced by the pre-#19 sw_only, which gated on
+// dff, so feeding kappa would diverge from the golden it is checked against. The argument name and
+// the value passed disagree ON PURPOSE and only here. Regenerating the fixture is blocked on TODO
+// #20 step 1 (dumpScheduleTrace() was deleted from sw_only 2026-07-28).
 //
 // lambda on iteration 1 is the golden init value (the L1 norms that produce it are not in the
 // trace), so it is seeded, not recomputed; the trend is verified from iteration 2 on.
@@ -137,7 +138,7 @@ int main(int argc, char** argv) {
     SchedParams p;
     p.base_gamma = rows[0].base_gamma;
     p.min_step = 0.95f; p.max_step = 1.05f; p.init_multiplier = 8e-5f;
-    p.dff_coef = (float)c_med;   // the kappa-derived c above, not the dff-derived one (TODO #19b)
+    p.kappa_coef = (float)c_med; // the kappa-derived c above, not the dff-derived one (TODO #19b)
     p.enable_momentum = 1; p.gamma_schedule = 1;
     // Convergence config MUST match the config_used.json of the run that produced the trace --
     // the stop check compares against where the golden actually stopped, so a mismatched
@@ -155,8 +156,9 @@ int main(int argc, char** argv) {
         const Row& r = rows[i];
         float inv_gamma, alpha, coeff, lambda; int stop;
         float g_wl = 0, g_den = 0;
-        // Feed the golden density_force_fraction to isolate the lambda-trend logic; the closed
-        // form that produces dff on the PL (sched_dff) is validated separately below.
+        // Feed the golden density_force_fraction into the `kappa` parameter (see NOTE at the top --
+        // pre-#19 fixture) to isolate the lambda-trend logic; the closed form that produces kappa on
+        // the PL (sched_kappa) is validated separately below.
         param_scheduler(st, p, r.hpwl, r.overflow, r.pos2, r.grad2, r.dff, g_wl, g_den,
                         inv_gamma, alpha, coeff, lambda, stop);
         if (stop) {
@@ -188,25 +190,25 @@ int main(int argc, char** argv) {
            golden_stop, first_stop,
            premature_stop >= 0 ? "  [PREMATURE]" : (first_stop < 0 ? "  [NEVER]" : ""));
 
-    // Closed-form fidelity: sched_dff(lambda_prev, c) vs KAPPA derived from the trace's own
-    // a1/a2 norms. sched_dff computes c*l/(1+c*l), which IS kappa (TODO #19b) -- so this is the
+    // Closed-form fidelity: sched_kappa(lambda_prev, c) vs KAPPA derived from the trace's own
+    // a1/a2 norms. sched_kappa computes c*l/(1+c*l), which IS kappa (TODO #19b) -- so this is the
     // check that the PL's closed form reproduces the golden's preconditioner ratio, and it is
     // asserted. It was previously compared against the dff column, where it read 1.608 (161%) and
     // fixtures/README.md explained that away as a precond-on artifact. It was not an artifact.
     // (The real PL uses the exact c = precond_coef*K/total_pins; here c is fit from the trace.)
-    // Bound: observed 5.33e-3. This CANNOT be tighter than the plateau spread above -- sched_dff is
+    // Bound: observed 5.33e-3. This CANNOT be tighter than the plateau spread above -- sched_kappa is
     // fed one median c, so each row inherits that row's deviation from the median (1.12% spread =>
     // ~0.56% worst-case here, which is what it reads). Same phenomenon, not an independent budget.
     // 2e-2 leaves ~4x margin; the dff column this replaced reads 1.608, i.e. 80x ABOVE this bound.
     const double KAPPA_TOL = 2e-2;
     double e_kappa = 0; int worst_kappa = 0;
     for (size_t i = 1; i < rows.size(); i++) {
-        float got = sched_dff(rows[i-1].density_weight, (float)c_med);
+        float got = sched_kappa(rows[i-1].density_weight, (float)c_med);
         double e = relerr(got, rows[i].kappa());
         if (e > e_kappa) { e_kappa = e; worst_kappa = rows[i].iter; }
     }
     const bool kappa_form_ok = e_kappa < KAPPA_TOL;
-    printf("closed-form sched_dff vs golden kappa: max rel err %.3e (iter %d, tol %.0e)  %s\n",
+    printf("closed-form sched_kappa vs golden kappa: max rel err %.3e (iter %d, tol %.0e)  %s\n",
            e_kappa, worst_kappa, KAPPA_TOL, kappa_form_ok ? "ok" : "FAIL");
 
     const double TOL = 1e-4;

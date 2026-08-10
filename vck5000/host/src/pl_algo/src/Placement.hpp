@@ -31,7 +31,9 @@ struct PlacementConfig {
     float target_density;        // overflow capacity fraction (e.g. 0.9)
     float base_gamma;            // HPWL sharpness base (gamma = base, or 10*base if scheduled)
     int   gamma_schedule;        // 0/1
-    float init_step_seed;        // seed for the iteration-1 BB step estimate (XPlace args.lr)
+    float init_step_seed;        // seed for the iteration-1 BB step estimate, in SITE WIDTHS
+                                 // (XPlace args.lr's unit -- it prescales coords by site width)
+    float site_width;            // DBU per placement site; converts init_step_seed to DBU (TODO #23)
     float density_weight_init_multiplier;
     int   enable_momentum;       // 0/1
     // --- density-weight schedule + convergence (ported from sw_only) ---

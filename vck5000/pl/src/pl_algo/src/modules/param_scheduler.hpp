@@ -20,8 +20,11 @@
 //   initializeDensityWeight (:611) .............. lambda on iteration 1
 //   recordIterationResults best-tracking (Output.cpp:690) ... best_primary / best_fallback
 //   checkConvergence (:652) + checkDivergence (:418) ........ stop flag (countdown + life guard)
-// See MARK_TO_REVIEW/PL_PORT_PLAN.md sec 3. Precond is OFF in the tuned config, so density_force_
-// fraction has the closed form dff = c*lambda/(1 + c*lambda), c a single host-precomputed scalar.
+// See MARK_TO_REVIEW/PL_PORT_PLAN.md sec 3. The quantity that throttles the gamma/lambda update is
+// kappa -- XPlace's weighted_weight (param_scheduler.py:386), sw_only's precond_kappa -- which with
+// precond OFF has the closed form kappa = c*lambda/(1 + c*lambda), c a host-precomputed scalar.
+// It is NOT density_force_fraction (a gradient-norm ratio, not monotone in lambda): this module
+// always computed kappa, under the name dff, and that name is what hid TODO #19b for weeks.
 //
 // Scalar C++ (cmath only) so it compiles under BOTH g++ (offline sched_verify replays the golden
 // schedule_trace.csv) and Vitis HLS (the on-device call). History windows use small fixed rings.
@@ -55,7 +58,9 @@ struct SchedParams {
     float min_step;          // density_weight_min_step (0.95)
     float max_step;          // density_weight_max_step (1.05)
     float init_multiplier;   // density_weight_init_multiplier (8e-5)
-    float dff_coef;          // c = precond_coef*K/total_pins; dff = c*lambda/(1+c*lambda)
+    float kappa_coef;        // c = precond_coef*K/total_pins; kappa = c*lambda/(1+c*lambda).
+                             // kappa matches XPlace's weighted_weight (param_scheduler.py:386)
+                             // and sw_only's precond_kappa.
     int   enable_momentum;   // 0/1
     int   gamma_schedule;    // 0/1; if 1 initial gamma = 10*base_gamma (else base_gamma)
     // convergence
@@ -68,13 +73,13 @@ struct SchedParams {
 
 static const int SCHED_BEST_MIN_ITER = 50; // best-tracking skips iters < this (BEST_SOL_MIN_ITER)
 
-// density_force_fraction closed form (precond OFF): dff = c*lambda/(1 + c*lambda), c = dff_coef =
+// kappa closed form (precond OFF): kappa = c*lambda/(1 + c*lambda), c = kappa_coef =
 // precond_coef*K/total_pins (host-precomputed; K = sum of movable+filler normalized areas). This
-// REPLACES sw_only's per-node updatePrecondWeights reduction. It is the caller's job to compute dff
+// REPLACES sw_only's per-node updatePrecondWeights reduction. It is the caller's job to compute kappa
 // with this and pass it into param_scheduler -- mirroring sw_only, where updateDensityWeight consumes
-// the density_force_fraction that updatePrecondWeights produced. Verified separately from the trend.
-static inline float sched_dff(float lambda, float dff_coef) {
-    const float cl = dff_coef * lambda;
+// the precond_kappa that updatePrecondWeights produced. Verified separately from the trend.
+static inline float sched_kappa(float lambda, float kappa_coef) {
+    const float cl = kappa_coef * lambda;
     return cl / (1.0f + cl);
 }
 
@@ -136,7 +141,7 @@ static void param_scheduler(
     SchedState& st, const SchedParams& p,
     float hpwl, float overflow,              // metrics reduce (this iteration)
     float pos_norm_sq, float grad_norm_sq,   // BB reduce (this iteration)
-    float dff,                               // density_force_fraction = sched_dff(lambda, dff_coef)
+    float kappa,                             // preconditioner mass ratio = sched_kappa(lambda, kappa_coef)
     float iter1_gwl_L1, float iter1_gden_L1, // iteration-1 lambda init only
     float& inv_gamma_out, float& alpha_out, float& coeff_out, float& lambda_out, int& stop_out)
 {
@@ -159,9 +164,9 @@ static void param_scheduler(
 
     // ===== schedule =====
     // Shared skip_update gate (matches the golden performIteration): on 2 of every 3 iterations in
-    // the early stage (k<50) or while the WL/density forces are mid-balance (dff in (0.5,0.95)),
+    // the early stage (k<50) or while the preconditioner mass is mid-transfer (kappa in (0.5,0.95)),
     // FREEZE both gamma and lambda together (XPlace step() freezes lambda, gamma, precond together).
-    const bool skip_update = ((k < 50) || (dff > 0.5f && dff < 0.95f)) && (k % 3 != 0);
+    const bool skip_update = ((k < 50) || (kappa > 0.5f && kappa < 0.95f)) && (k % 3 != 0);
 
     // (a) gamma: gamma = 10^((overflow-0.1)*20/9 - 1) * base_gamma; recomputed only when not skipping,
     // else held at its previous value (throttled with lambda). inv_gamma is used the NEXT iteration.
@@ -184,8 +189,8 @@ static void param_scheduler(
     if (k == 1) {
         st.lambda = (iter1_gwl_L1 / (iter1_gden_L1 + 1e-8f)) * p.init_multiplier;
     } else {
-        // dff is supplied by the caller (sched_dff on the current lambda), mirroring sw_only where
-        // updateDensityWeight reads the density_force_fraction updatePrecondWeights already computed.
+        // kappa is supplied by the caller (sched_kappa on the current lambda), mirroring sw_only where
+        // updateDensityWeight reads the precond_kappa updatePrecondWeights already computed.
         // Same skip_update gate as gamma above -- the two are frozen together.
         if (!skip_update) {
             const float dHPWL = hpwl - st.prev_hpwl;

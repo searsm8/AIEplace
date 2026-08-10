@@ -261,6 +261,9 @@ int main(int argc, char** argv) {
         cfg.bin_w = die_x / G; cfg.bin_h = die_y / G; cfg.target_density = target_density;
         cfg.base_gamma = base_gamma; cfg.gamma_schedule = 1;   // sw_only enables the overflow-driven gamma schedule
         cfg.init_step_seed = 0.01f; cfg.density_weight_init_multiplier = 8e-5f;
+        // Mirrors sw_only estimateInitialStep: the seed is in site widths, so it needs the design's
+        // DBU-per-site. Row height is the fallback when the input names no site (TODO #23).
+        cfg.site_width = db.getSiteWidth() > 0.0f ? db.getSiteWidth() : db.getRowHeight();
         cfg.enable_momentum = 1;
         cfg.density_weight_min_step = 0.95f; cfg.density_weight_max_step = 1.05f;
         cfg.overflow_threshold = 0.07f; cfg.min_iters = 50; cfg.conv_iters = 30;

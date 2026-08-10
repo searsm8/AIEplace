@@ -15,8 +15,8 @@ extern "C" void synth_check(
     const coord_t* v_cur, const coord_t* v_prev, const coord_t* g_hpwl,
     const coord_t* g_density, const coord_t* g_total_prev, const float* precond,
     coord_t* g_total_out, int num_movable,
-    float lambda, float hpwl, float overflow, float dff,
-    float base_gamma, float dff_coef, float overflow_threshold, float* outs)
+    float lambda, float hpwl, float overflow, float kappa,
+    float base_gamma, float kappa_coef, float overflow_threshold, float* outs)
 {
 #pragma HLS INTERFACE m_axi port=v_cur        bundle=g0 offset=slave
 #pragma HLS INTERFACE m_axi port=v_prev       bundle=g1 offset=slave
@@ -39,9 +39,9 @@ extern "C" void synth_check(
 #pragma HLS INTERFACE s_axilite port=lambda       bundle=control
 #pragma HLS INTERFACE s_axilite port=hpwl         bundle=control
 #pragma HLS INTERFACE s_axilite port=overflow     bundle=control
-#pragma HLS INTERFACE s_axilite port=dff          bundle=control
+#pragma HLS INTERFACE s_axilite port=kappa        bundle=control
 #pragma HLS INTERFACE s_axilite port=base_gamma   bundle=control
-#pragma HLS INTERFACE s_axilite port=dff_coef     bundle=control
+#pragma HLS INTERFACE s_axilite port=kappa_coef   bundle=control
 #pragma HLS INTERFACE s_axilite port=overflow_threshold bundle=control
 #pragma HLS INTERFACE s_axilite port=return bundle=control
 
@@ -54,12 +54,12 @@ extern "C" void synth_check(
 
     SchedParams p;
     p.base_gamma = base_gamma; p.min_step = 0.95f; p.max_step = 1.05f;
-    p.init_multiplier = 8e-5f; p.dff_coef = dff_coef; p.enable_momentum = 1; p.gamma_schedule = 1;
+    p.init_multiplier = 8e-5f; p.kappa_coef = kappa_coef; p.enable_momentum = 1; p.gamma_schedule = 1;
     p.overflow_threshold = overflow_threshold; p.min_iters = 50; p.max_iters = 1200;
     p.conv_iters = 30; p.max_life = 30;
 
     float inv_gamma, alpha, coeff, lam_out; int stop;
-    param_scheduler(st, p, hpwl, overflow, pos, grad, dff, 0.0f, 0.0f,
+    param_scheduler(st, p, hpwl, overflow, pos, grad, kappa, 0.0f, 0.0f,
                     inv_gamma, alpha, coeff, lam_out, stop);
 
     outs[0] = inv_gamma; outs[1] = alpha; outs[2] = coeff;

@@ -1046,7 +1046,7 @@ int runPlacement(const PlacementConfig& cfg,
 
     // XPlace-style iteration-1 initial learning-rate estimate (mirrors sw_only estimateInitialStep,
     // Xplace estimate_initial_learning_rate). From v (=x0) with total gradient g0 (=gtot), take ONE
-    // trial step v' = x0 - seed·P·g0 via iteration_update (alpha=seed, coeff=0), recompute the total
+    // trial step v' = x0 - (seed·site_width)·P·g0 via iteration_update (alpha, coeff=0), recompute the total
     // gradient g' at v', and return  alpha = ||v' - x0||₂ / ||g' - g0||₂  (Barzilai-Borwein). g_hpwl,
     // g_density and node_box are restored to their x0 values so the real first step is unaffected
     // apart from the calibrated alpha. Preconditions: lambda, precond, gtot are set for iteration 1.
@@ -1064,7 +1064,7 @@ int runPlacement(const PlacementConfig& cfg,
         b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
         { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
                            b_box, b_bd, b_din, b_dout,
-                           lambda, cfg.init_step_seed, 0, 0, M, 0, 0, /*coeff=*/0.0f,
+                           lambda, cfg.init_step_seed * cfg.site_width, 0, 0, M, 0, 0, /*coeff=*/0.0f,
                            cfg.die_x, cfg.die_y, 0, 0, (int)MODE_ITERATION_UPDATE);
           r.wait(); }
         b_bd.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
@@ -1085,7 +1085,8 @@ int runPlacement(const PlacementConfig& cfg,
         for (int n = 0; n < M; n++) { node_box[n].x = v[n].x; node_box[n].y = v[n].y; }
         std::memcpy(b_box.map<void*>(), node_box.data(), (size_t)N*sizeof(NodeBox));
         b_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-        printf("[place] estimated initial alpha (BB): %.6g (seed %.4g)\n", alpha0, cfg.init_step_seed);
+        printf("[place] estimated initial alpha (BB): %.6g (seed %.4g x site_width %.4g)\n",
+               alpha0, cfg.init_step_seed, cfg.site_width);
         return alpha0;
     };
 
