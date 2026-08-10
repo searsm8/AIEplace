@@ -62,10 +62,13 @@ init_gamma = 4          # plays XPlace's wa_coeff role; with gamma_bin_scaled, b
 gamma_schedule = true   # if true, gamma follows overflow-driven schedule (XPlace-style); starts at 10x base_gamma
 gamma_bin_scaled = true # tie base_gamma to bin geometry referenced to gamma_ref_grid (grid-independent); false = legacy bare init_gamma constant
 gamma_ref_grid = 512    # reference grid for gamma_bin_scaled: base_gamma = init_gamma*(die_w+die_h)/gamma_ref_grid; keeps absolute gamma grid-independent (512 matches the tuned suite)
-init_step_seed = 0.01   # SEED for the iteration-1 Barzilai-Borwein step estimate (XPlace args.lr),
-                        # not the literal first step: estimateInitialStep() takes one trial step of
-                        # this size, then sets α = ||Δpos|| / ||Δgrad||. A robust internal default;
-                        # rarely needs tuning now that the first step self-calibrates per design.
+init_step_seed = 0.01   # SEED for the iteration-1 Barzilai-Borwein step estimate, in SITE WIDTHS
+                        # (the unit XPlace's args.lr is in — it prescales all coordinates by site
+                        # width). Not the literal first step: estimateInitialStep() takes one trial
+                        # step of this size, then sets α = ||Δpos|| / ||Δgrad||. A robust internal
+                        # default; rarely needs tuning now that the first step self-calibrates.
+                        # In raw DBU this was design-dependent and underflowed to α=0 on 5 ISPD2015
+                        # designs (TODO #23); bookshelf Sitewidth is 1, so MMS is unaffected.
 density_weight_init_multiplier = 8e-5 # multiplier used to set density penalty
                                        # 0.01 means that density will contribute about 1% as much
                                        # as wirelength to the cost function at the start of placement

@@ -106,7 +106,7 @@ you believed was behaviour-preserving and this test went red, the test is doing 
 ```
 configs/       frozen run configs -- the exact input that produced each baseline
 configs/slow/  same, for designs measured in minutes (opt-in via --slow)
-baselines/     expected trajectory + final-position hash, one file per design
+golden/        expected trajectory + final-position hash, one file per design
 work/          scratch output of the run under test (gitignored)
 ```
 

@@ -2,7 +2,7 @@
 #  FROZEN regression config -- mgc_pci_bridge32_b
 # =============================================================================
 #  This file is a PINNED SNAPSHOT, not a copy that tracks run_config.toml.
-#  It is the exact input that produced ../baselines/mgc_pci_bridge32_b.baseline, so it must only change
+#  It is the exact input that produced ../golden/mgc_pci_bridge32_b.baseline, so it must only change
 #  when the baseline is deliberately regenerated. Editing a value here without
 #  regenerating the baseline breaks the test; editing run_config.toml does NOT
 #  affect this file, which is the point -- test/regress is a tripwire on the

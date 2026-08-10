@@ -233,9 +233,10 @@ void Placer::loadConfiguration()
     gamma_schedule = cfg["params"]["gamma_schedule"].value_or(gamma_schedule);
     gamma_bin_scaled = cfg["params"]["gamma_bin_scaled"].value_or(gamma_bin_scaled);
     gamma_ref_grid   = cfg["params"]["gamma_ref_grid"].value_or(gamma_ref_grid);
-    // init_step_seed: BB trial-step SEED for estimateInitialStep() (XPlace args.lr, default
-    // 0.01) — not the literal first step. The real iteration-1 α is calibrated by the
-    // Barzilai-Borwein estimate. Back-compat: accept the old init_step_length key if present.
+    // init_step_seed: BB trial-step SEED for estimateInitialStep(), in SITE WIDTHS — the unit
+    // XPlace's args.lr (default 0.01) is in, since XPlace prescales every coordinate by site width.
+    // Not the literal first step: the real iteration-1 α is calibrated by the Barzilai-Borwein
+    // estimate. Back-compat: accept the old init_step_length key if present.
     init_step_seed = cfg["params"]["init_step_seed"].value<float>()
                    .value_or(cfg["params"]["init_step_length"].value_or(0.01f));
     if (!cfg["params"]["init_step_seed"] && cfg["params"]["init_step_length"])

@@ -39,6 +39,7 @@ void DataBase::readDesignFiles()
             macro->setSize(macro->getXsize() * scale, macro->getYsize() * scale);
         }
         m_row_height *= scale;   // lef_site_cbk recorded it in microns too
+        m_site_width *= scale;   // ditto
         Logger::log_detail("Scaled " + std::to_string(mm_macros.size()) +
                         " LEF macro sizes by " + std::to_string(m_units_per_micron) +
                         " (microns -> dbu)");
@@ -208,6 +209,16 @@ bool DataBase::readDEF()
     {
         if(def_files[i].filename() == "floorplan.def")
             def_file = def_files[i];
+    }
+    if(def_file.empty())
+    {
+        // Without this the parser is handed an empty path and reports it as one (TODO #17).
+        std::string found;
+        for(const fs::path & f : def_files)
+            found += (found.empty() ? "" : ", ") + f.filename().string();
+        Logger::log_error("No 'floorplan.def' in " + m_input_dir.string() +
+                          "; that is the only .def name readDEF() accepts. Found: " + found);
+        return false;
     }
 
     Logger::log_detail("Begin parsing .DEF design...");
@@ -503,13 +514,14 @@ float DataBase::computeTotalComponentArea()
         void DataBase::lef_via_cbk(LefParser::lefiVia const& ) {}
         void DataBase::lef_viarule_cbk(LefParser::lefiViaRule const& ) {}
         void DataBase::lef_spacing_cbk(LefParser::lefiSpacing const& ) {}
-        /// @brief record the standard-cell row height. A DEF ROW carries only an origin, so for
-        /// LEF/DEF input the height has to come from the CORE SITE it instantiates. Recorded in
-        /// microns; readDesignFiles scales it to DBU with the macro sizes.
+        /// @brief record the standard-cell row height and site width. A DEF ROW carries only an
+        /// origin, so for LEF/DEF input both have to come from the CORE SITE it instantiates.
+        /// Recorded in microns; readDesignFiles scales them to DBU with the macro sizes.
         void DataBase::lef_site_cbk(LefParser::lefiSite const& s) {
             if (!s.hasSize()) return;
             bool is_core = s.hasClass() && std::string(s.siteClass()) == "CORE";
             if (is_core || m_row_height == 0.0f) m_row_height = s.sizeY();
+            if (is_core || m_site_width == 0.0f) m_site_width = s.sizeX();
         }
         void DataBase::lef_macrobegin_cbk(std::string const& n) {
             // Create macro early so lef_pin_cbk (which fires before lef_macro_cbk) can add pin offsets
@@ -762,6 +774,7 @@ float DataBase::computeTotalComponentArea()
                 m_row_xmin = x0; m_row_xmax = x1;
                 m_row_ymin = y0; m_row_ymax = y1;
                 m_row_height = (float)row.height;  // uniform across CoreRows; sizes fillers
+                m_site_width = (float)row.site_width;  // .scl Sitewidth; 1 on every ISPD2005/MMS design
             } else {
                 m_row_xmin = std::min(m_row_xmin, x0);
                 m_row_xmax = std::max(m_row_xmax, x1);

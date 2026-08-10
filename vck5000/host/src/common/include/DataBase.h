@@ -73,6 +73,13 @@ private:
     // Bookshelf reads it from the .scl CoreRow; LEF/DEF from the CORE SITE, since a DEF ROW
     // records only an origin. Sizes fillers -- see addFillers.
     float m_row_height = 0.0f;
+    // Placement-site width in DBU (XPlace site_width, database.py:147). Same two sources as
+    // m_row_height. This is the design's natural length unit: XPlace divides every coordinate by
+    // it (prescale_by_site_width, database.py:854), so any hyperparameter expressed as an absolute
+    // displacement is in site widths there and must be scaled by this here -- see
+    // Placer::estimateInitialStep(). Bookshelf .scl carries Sitewidth = 1, which is why ISPD2005/MMS
+    // coordinates are already effectively site units and LEF/DEF ones are not.
+    float m_site_width = 0.0f;
     Position m_die_shift; // (0,0) unless a bookshelf die_shift was applied
     string m_design_name;
     // DEF convention default (matches this repo's ispd2015 .def samples); set_def_unit()
@@ -134,6 +141,7 @@ public:
     string getBenchmarkPath() { return getSuiteName() + "/" + getBenchmarkName(); }
     float getMaximumUtilization() { return m_maximum_utilization; }
     float getRowHeight() { return m_row_height; } // 0 when the input supplied none
+    float getSiteWidth() { return m_site_width; } // 0 when the input supplied none
     Position getDieShift() { return m_die_shift; } // add back to convert internal -> benchmark frame
 
     // Parse functions

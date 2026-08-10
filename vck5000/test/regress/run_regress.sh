@@ -73,7 +73,7 @@ failures=0
 for design in "${designs[@]}"; do
     config="$REGRESS_DIR/configs/$design.toml"
     [ -f "$config" ] || config="$REGRESS_DIR/configs/slow/$design.toml"
-    baseline="$REGRESS_DIR/baselines/$design.baseline"
+    baseline="$REGRESS_DIR/golden/$design.baseline"
     printf '\n=== %s ===\n' "$design"
 
     if [ ! -f "$config" ]; then
@@ -134,7 +134,7 @@ for design in "${designs[@]}"; do
     fi
 
     if [ ! -f "$baseline" ]; then
-        echo "FAIL: no baseline at test/regress/baselines/$design.baseline"
+        echo "FAIL: no baseline at test/regress/golden/$design.baseline"
         echo "      Create it with: $0 --update-baselines --reason \"initial baseline\" $design"
         failures=$((failures + 1))
         continue

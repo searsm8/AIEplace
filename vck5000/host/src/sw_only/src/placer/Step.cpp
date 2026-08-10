@@ -168,12 +168,22 @@ void Placer::stepAllNodes()
  * @brief XPlace-style initial learning-rate (step-length) estimate, run once at iteration 1.
  *
  * Mirrors Xplace estimate_initial_learning_rate (initializer.py:171): from the current movable
- * positions x0 with total gradient g0, take ONE trial step x' = x0 − seed·P·g0
- * (seed = init_step_seed, XPlace args.lr), recompute the total gradient g' there, and set
+ * positions x0 with total gradient g0, take ONE trial step x' = x0 − (seed·site_width)·P·g0,
+ * recompute the total gradient g' there, and set
  *     step_length = ‖x' − x0‖₂ / ‖P·(g' − g0)‖₂        (Barzilai-Borwein inverse-Lipschitz)
  * which is exactly the ratio computeLipschitzEstimate() forms. The step (Node::step) and the
  * estimate both divide by precond_weight, so the whole ratio is in the preconditioned gradient
  * — matching XPlace, whose calc_obj_and_grad returns the preconditioned gradient.
+ *
+ * WHY site_width: XPlace divides every coordinate by it before placing
+ * (prescale_by_site_width, database.py:854), so its args.lr = 0.01 is a displacement of 0.01 SITE
+ * WIDTHS. Ours is in raw DBU, where the same 0.01 means a different physical distance on every
+ * design -- 0.01 DBU on an ISPD2015 die whose site is 200-400 DBU wide. Below one float32 ULP of
+ * the coordinates it rounds to zero and alpha comes out 0 (TODO #23, 5 ISPD2015 designs).
+ * Multiplying the seed by site_width restores XPlace's unit without normalizing the whole
+ * coordinate system. NOTE this is a change of UNITS, not of precision: scaling all coordinates
+ * would not help, since float32's relative epsilon is scale-invariant.
+ * Bookshelf .scl carries Sitewidth = 1, so ISPD2005/MMS trajectories are bit-unchanged by this.
  *
  * Positions are restored to x0 afterwards and next.probe_grad left = g0 (the total gradient), so
  * the real first step in performNextStep starts from x0 exactly as every later iteration does —
@@ -190,8 +200,16 @@ void Placer::estimateInitialStep()
     // Snapshot the anchor (x0, g0) into current so computeLipschitzEstimate can diff against it.
     advanceIterationState();
 
-    // One trial step x' = x0 − seed·P·g0, momentum off (matches XPlace's x_k − lr·g_k).
-    step_length    = init_step_seed;
+    // One trial step x' = x0 − (seed·site_width)·P·g0, momentum off (XPlace's x_k − lr·g_k, whose
+    // lr is in site widths because its coordinates are). Fall back to the row height if the input
+    // named no site: both are the design's own length scale, and it beats a raw-DBU seed.
+    const float site_width = db.getSiteWidth() > 0.0f ? db.getSiteWidth() : db.getRowHeight();
+    if (site_width <= 0.0f) {
+        Logger::log_error("Design supplies neither a site width nor a row height, so init_step_seed "
+                          "has no length unit to scale by (see TODO #23).");
+        exit(1);
+    }
+    step_length    = init_step_seed * site_width;
     momentum_coeff = 0.0f;
     stepAllNodes();
 
@@ -204,7 +222,22 @@ void Placer::estimateInitialStep()
     // Barzilai-Borwein estimate α = ‖Δv‖₂ / ‖P·Δg‖₂ (no magnitude clamp — as in XPlace).
     step_length = computeLipschitzEstimate();
     Logger::log_detail("Estimated initial step_length (BB): " + PREC_P(step_length, 6) +
-                     "  (seed " + PREC_P(init_step_seed, 4) + ")");
+                     "  (seed " + PREC_P(init_step_seed, 4) + " x site_width " +
+                     PREC_P(site_width, 4) + ")");
+
+    // A zero α is self-sustaining: Node::step then moves nothing, so the next BB estimate is
+    // also ‖0‖/‖0‖ and the run no-ops to max_iterations while reporting the UNTOUCHED initial
+    // placement as its HPWL. Seen on 5 ISPD2015 designs, where seed·P·g0 falls below one float32
+    // ULP of their coordinates so Δv is exactly 0 (TODO #23). Fail loudly instead of emitting a
+    // plausible-looking number. The guard is written as !(α > 0) so a NaN α trips it too.
+    if (!(step_length > 0.0f)) {
+        Logger::log_error("Initial BB step estimate is " + PREC_P(step_length, 6) + " at iteration "
+                          + std::to_string(iteration) + " (" + phaseName(m_phase) + "): a trial step of "
+                          "init_step_seed = " + PREC_P(init_step_seed, 6) + " site widths (" +
+                          PREC_P(init_step_seed * site_width, 6) + " DBU) displaced no movable node, "
+                          "so no later step can either. Raise init_step_seed (see TODO #23).");
+        exit(1);
+    }
 
     // Undo the probe step: restore x0 / g0 into next so the real first step starts from x0.
     const auto& nodes = db.getMovableNodes();
