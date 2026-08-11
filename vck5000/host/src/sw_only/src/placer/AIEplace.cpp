@@ -125,23 +125,38 @@ void Placer::snapshotBestPlacement(BestSlot slot)
 
 /// @brief Restore movable + filler positions from one tracker's snapshot.
 ///
-/// probe_pos is set to the restored node_pos, NOT left as it was. A placement here is the PAIR
-/// (node_pos, probe_pos) -- HPWL reads node_pos (Net.h:25) while every density/overflow metric
-/// deposits at probe_pos (computeNodeFootprint, Grid.cpp:36). Restoring only node_pos leaves the
-/// node in a state that existed at no point in the run -- committed position from one iteration,
-/// lookahead from another -- and the reported overflow then describes the last iteration rather
-/// than the placement being shipped (TODO #24). freezeMovableMacros already collapses state this
-/// way for exactly this reason (DataBase.cpp:396); this generalises it to every restore.
-///
-/// The .def is written from node_pos, so the metrics now describe the placement actually shipped.
+/// Restores node_pos ONLY. Callers that are about to *report* on this placement must follow with
+/// syncProbeToCommitted() -- see there for why, and why it is not done here.
 void Placer::restoreBestPlacement(BestSlot slot)
 {
     const auto& nodes = db.getMovableNodes();
     #pragma omp parallel for schedule(static)
-    for (int i = 0; i < (int)nodes.size(); i++) {
-        nodes[i]->next.node_pos  = bestSlotPos(nodes[i], slot);
+    for (int i = 0; i < (int)nodes.size(); i++)
+        nodes[i]->next.node_pos = bestSlotPos(nodes[i], slot);
+}
+
+/// @brief Collapse the lookahead onto the committed position, so every metric describes the same
+///        placement.
+///
+/// A placement here is the PAIR (node_pos, probe_pos): HPWL reads node_pos (Net.h:25) while every
+/// density/overflow metric deposits at probe_pos (computeNodeFootprint, Grid.cpp:36). A restore
+/// writes only node_pos, which leaves the node in a state that existed at no point in the run --
+/// committed position from one iteration, lookahead from another -- so the reported overflow
+/// describes the last iteration rather than the placement being shipped (TODO #24).
+/// freezeMovableMacros collapses state the same way, for the same reason (DataBase.cpp:396).
+///
+/// DELIBERATELY NOT folded into restoreBestPlacement(). That runs mid-iteration too, at the phase-2
+/// macro freeze, where nothing is being reported and everything downstream is re-initialised
+/// anyway. Doing it there perturbs the phase-2 restart by ~0.04% in step_length/density_weight,
+/// which amplifies chaotically over the remaining iterations (mms_adaptec1: 1325 -> 1288 iterations,
+/// HPWL +0.24%, overflow +2.8% -- a wash, but it costs an MMS re-baseline for nothing). This is a
+/// REPORTING fix, so it is applied only where a report is about to be produced.
+void Placer::syncProbeToCommitted()
+{
+    const auto& nodes = db.getMovableNodes();
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)nodes.size(); i++)
         nodes[i]->next.probe_pos = nodes[i]->next.node_pos;
-    }
 }
 
 AIEPLACE_NAMESPACE_END

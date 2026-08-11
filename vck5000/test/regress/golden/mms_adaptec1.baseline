@@ -2,8 +2,8 @@
 #
 # Produced by:  test/regress/run_regress.sh --update-baselines
 # Config:       test/regress/configs/slow/mms_adaptec1.toml  (frozen; changes with this file)
-# Recorded:     2026-08-11 at commit d0117cb
-# Reason:       TODO #24 fix (B): restoreBestPlacement now sets probe_pos = node_pos, so density/overflow metrics describe the restored placement rather than the last iteration lookahead (computeNodeFootprint deposits at probe_pos, Grid.cpp:36). MMS ONLY: restoreBestPlacement also fires mid-run at the phase-2 macro freeze, perturbing the restart by ~0.04% in step_length/density_weight, which amplifies chaotically over the ~620 remaining iterations. Net: 1325 -> 1288 iterations, final HPWL +0.24%, overflow +2.8% -- a wash, not a quality change. Scoping this to the final restore only (leaving MMS bit-identical) is an OPEN decision, see report #24.
+# Recorded:     2026-08-11 at commit 2f6bfc4
+# Reason:       TODO #24 selection fix, NOT the probe-sync. beginFixedMacroPhase (Phase2.cpp:72) picks the phase-1 placement to freeze the macros at via selectBestSolution(); the three-tracker rule + per-tracker buffers change that pick, so phase 2 restarts from slightly different macro positions (iter 667: step_length 2.565e+03 -> 2.566e+03, density_weight 1.442e-10 -> 1.443e-10, HPWL and overflow identical) and the ~0.04% nudge amplifies chaotically over the remaining ~620 iterations: 1325 -> 1288 iterations, final HPWL +0.24%, overflow +2.8%. PROVEN not to be fix (B): scoping the probe sync to the final restore only (syncProbeToCommitted) yields a byte-identical sha e9cc52242ad0. MMS results therefore move under #24 regardless of that scoping.
 #
 # DO NOT refresh this file to make a failing test pass. Read the diff first: the
 # body below is the full per-iteration trajectory, so the row where it starts to

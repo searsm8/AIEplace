@@ -412,6 +412,7 @@ Placer::BestChoice Placer::restoreBestSolution()
 
     if (chosen.sol) {
         restoreBestPlacement(chosen.slot);
+        syncProbeToCommitted();   // everything below this point reports on the restored placement
         Logger::log_info("Restored " + std::string(chosen.type) + " best placement from iteration " +
             std::to_string(chosen.sol->iteration) +
             " (HPWL: " + std::to_string(chosen.sol->hpwl) +

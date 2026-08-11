@@ -123,11 +123,13 @@ consumers use it: the restore, the CSV row, the summary table, and the phase-2 m
 `bestReference()` is kept **separate and unchanged in role** — it is the divergence guards'
 reference metric, it feeds stopping criteria, and widening or narrowing it would move trajectories.
 
-### Fix (B) — restore leaves a coherent state
+### Fix (B) — the reported placement is the shipped one
 
-`restoreBestPlacement` now sets `probe_pos = node_pos`, matching what `freezeMovableMacros` already
-did. The `.def` is written from `node_pos`, so the reported metrics now describe the placement
-actually shipped.
+`syncProbeToCommitted()` collapses the lookahead onto the committed position, matching what
+`freezeMovableMacros` already did. It is called **only** from `restoreBestSolution()`, i.e. only
+where a report is about to be produced; `restoreBestPlacement()` itself restores `node_pos` alone,
+so the mid-run phase-2 macro freeze is untouched (§6a). The `.def` is written from `node_pos`, so
+the reported metrics now describe the placement actually shipped.
 
 **Verified on the case that exposed it** (`mgc_pci_bridge32_b`, restores iter 723 of 752):
 
@@ -237,37 +239,44 @@ the penalty — but it never recovers all of it.
 
 ## 6. Open decisions
 
-### 6a. Fix (B)'s scope — an MMS re-run hangs on this
+### 6a. RESOLVED — fix (B) scoped to the final restore, and the MMS change is NOT its fault
 
-`restoreBestPlacement` also fires **mid-run**, at the phase-2 macro freeze. Fix (B) therefore
-perturbs every mixed-size run. On `mms_adaptec1` the phase-2 restart moves in the fourth digit:
+**Settled 2026-08-11.** `syncProbeToCommitted()` is now a separate step called only from
+`restoreBestSolution()`, where a report is about to be produced. `restoreBestPlacement()` restores
+`node_pos` alone, so the phase-2 macro freeze is untouched.
+
+**⚠️ Correction to what this section said on 2026-08-10.** It claimed fix (B) perturbed the
+mixed-size phase-2 restart and that scoping it out would leave MMS bit-identical. **Both were
+wrong.** Building (b) and re-running produced `mms_adaptec1` sha `e9cc52242ad0` — **byte-identical
+to the (a) build**. Fix (B) has *no* effect on MMS.
+
+The MMS change comes from **#24's selection fix**: `beginFixedMacroPhase` (`Phase2.cpp:72`) chooses
+the phase-1 placement to freeze the macros at via `selectBestSolution()`, and the three-tracker rule
+plus per-tracker buffers change that pick. Phase 2 therefore restarts from slightly different macro
+positions:
 
 ```
-iter 667   step_len 2.565e+03 -> 2.566e+03    density_weight 1.442e-10 -> 1.443e-10
+iter 667   step_length 2.565e+03 -> 2.566e+03   density_weight 1.442e-10 -> 1.443e-10
            HPWL and overflow identical
 ```
 
-which then amplifies chaotically over ~620 remaining iterations:
+and the ~0.04% nudge amplifies chaotically over the remaining ~620 iterations:
 
-| | before | after (B) |
+| | pre-#24 | with #24 (either scoping) |
 |---|---|---|
 | iterations | 1325 | 1288 |
 | final HPWL | 6.367e+07 | 6.382e+07 (+0.24%) |
 | final overflow | 4.002e-02 | 4.115e-02 (+2.8%) |
 
-Chaotic divergence from a rounding-scale perturbation, not a quality regression — and n=1 on a
-620-iteration chaotic phase cannot establish direction.
+**Consequence that survives the correction: MMS results move under #24 regardless.** The
+`mms_adaptec1` baseline is regenerated on that basis, and **the MMS suite needs re-running** — the
+`full44_v2` exclusion (justified because #23 provably could not touch bookshelf designs) does not
+carry over to #24.
 
-- **(a) Keep it everywhere** — *what is committed*. Simpler rule: a restore always leaves a coherent
-  state. Cost: **the MMS suite must be re-run and re-baselined.** Note MMS was excluded from
-  `full44_v2` because #23 provably could not affect it; (B) can, so that exclusion no longer holds.
-- **(b) Confine the probe reset to the final restore** — MMS stays bit-identical, no MMS re-run, and
-  the fix is provably scoped to what gets reported. One-line change.
-
-**Recommendation: (b).** The whole justification for (B) is that *reported* metrics should describe
-the shipped placement, which is a final-restore concern; mid-run the perturbation buys nothing
-measurable and costs a re-baseline. (a) is committed only because it is what was literally asked
-for. Reversal is one line plus regenerating `mms_adaptec1`.
+**How the error happened, since it is the kind that repeats:** `test-regress-slow` was never run
+between the tracker port and fix (B). Its first run came immediately after (B), so the whole
+divergence was attributed to the change that happened to be most recent. *Run the slow suite at
+each step that can touch phase 2, not once at the end.*
 
 ### 6b. Widen the A/B?
 

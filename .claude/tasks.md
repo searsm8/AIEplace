@@ -558,14 +558,19 @@ Two defects, ranked:
       free-on-first-convergence lifetime. The inverted `OVFW_EPSILON = 0.005` rule is gone.
 
 **Still open:**
-- [ ] **Fix (B)'s scope — blocks an MMS re-run either way.** `restoreBestPlacement` also fires
-      mid-run at the phase-2 macro freeze, so (B) perturbs every mixed-size run (`mms_adaptec1`:
-      1325→1288 iterations, HPWL +0.24%, overflow +2.8% — chaotic amplification of a ~0.04%
-      step/λ nudge, not a quality change). **(a)** keep it everywhere (committed) and re-run +
-      re-baseline MMS, or **(b)** confine the probe reset to the final restore, leaving MMS
-      bit-identical. **Recommended: (b)**, one line. (a) is committed only because it is what was
-      literally asked for. See report §6a.
-      ⚠️ MMS was excluded from `full44_v2` because #23 provably could not affect it. (B) **can**.
+- [x] **Fix (B)'s scope — RESOLVED 2026-08-11 as (b).** `syncProbeToCommitted()` is a separate step
+      called only from `restoreBestSolution()`; `restoreBestPlacement()` restores `node_pos` alone,
+      so the phase-2 macro freeze is untouched.
+      ⚠️ **The premise for choosing (b) was wrong, and the correction matters more than the choice.**
+      (b) does **not** leave MMS bit-identical: it produces sha `e9cc52242ad0`, byte-identical to
+      the (a) build. Fix (B) never affected MMS at all. The MMS change is **#24's selection fix** —
+      `beginFixedMacroPhase` (`Phase2.cpp:72`) picks the placement to freeze macros at via
+      `selectBestSolution()`. So **MMS results move under #24 either way**, and the `full44_v2` MMS
+      exclusion (valid for #23, which provably could not touch bookshelf designs) does **not**
+      carry over. Cause of the error: `test-regress-slow` was never run between the tracker port
+      and (B), so the divergence was pinned on the most recent change. See report §6a.
+- [ ] **Re-run the MMS suite (16 designs).** Newly required by the above — #24 changes what phase 2
+      freezes its macros at. Not needed for #23; is needed for #24.
 - [ ] **Widen the A/B (n=2).** Only `bigblue2` and `mgc_superblue19` both flipped and produced DP
       numbers. Needs ~8–10 more designs run blind — the trace projection **cannot** identify
       flippers near the budget (4-sig-fig HPWL; `adaptec3`'s ratio straddles 1.005), so do not

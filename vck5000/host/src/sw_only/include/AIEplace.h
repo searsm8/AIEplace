@@ -397,6 +397,7 @@ public:
     void recordIterationResults();
     void snapshotBestPlacement(BestSlot slot);
     void restoreBestPlacement(BestSlot slot);
+    void syncProbeToCommitted();  // follow a restore with this before REPORTING on the placement
 
     // Post run analysis
     void computeStatistics();
