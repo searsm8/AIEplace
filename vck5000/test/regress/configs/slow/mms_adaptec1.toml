@@ -34,11 +34,9 @@ ignore_net_degree = 100         # XPlace net_mask: nets with more pins than this
 enable_backtracking = true      # whether to use backtracking line search for step length selection
 enable_momentum     = true      # whether to use momentum in the optimization (Nesterov Accelerated Gradient)
 enable_filler       = true      # whether to include filler cells in placement (XPlace always does)
-# Preconditioner (diagonal, damps large macro movement, XPlace-style). Leave enable_preconditioning
-# UNSET to use the smart default: auto-ON iff the design has movable macros (essential for MMS
-# convergence, a wash on fixed-macro designs). Set it explicitly to force ON/OFF. auto_enable_preconditioning
-# (default true) governs the auto behavior when enable_preconditioning is absent.
-auto_enable_preconditioning = true
+# Preconditioner: ON for every design (XPlace --use_precond default). PINNED explicitly here so this
+# frozen config keeps testing the same thing if the shipped default ever moves.
+enable_preconditioning = true
 precond_coef_escalation = true  # double precond_coef every 20 iters once overflow<0.3 (XPlace step_precond_coef); false = diagnostic (fixed precond_coef)
 enable_density_clamp = true     # clamp sub-bin cells to ~bin size in the density solve (XPlace expand_ratio); smooths the force
 

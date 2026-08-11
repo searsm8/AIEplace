@@ -373,7 +373,13 @@ selection — the answer changes `common.mk`.
 
 ---
 
-## #22 — 8 ISPD2015 designs have no XPlace reference (opened 2026-08-07)
+## #22 — 8 ISPD2015 designs have no XPlace reference (opened 2026-08-07, SUPERSEDED by #26 2026-08-11)
+
+**Work [[#26]], not this.** The root cause is now exact (XPlace raises `NotImplementedError` in
+`init_filler`, before legalization), the affected set is proven identical to the paper's †-marked
+designs, and `mgc_pci_bridge32_b` is scoreable today. #26 also raises the part this entry never
+mentioned: our own parser discards `REGIONS`/`GROUPS`, so we place these designs unconstrained.
+Kept below for its retraction trail and the construction-validation argument, which still holds.
 
 **Decided 2026-08-07 (Mark): SKIP for now.** The 44-design snapshot ships with 36 of 44 carrying a
 reference; these 8 appear with our own numbers and no ratio. This entry exists so the analysis is not
@@ -658,6 +664,93 @@ part of the ISPD2015 HPWL gap** — a tighter density target buys spread with wi
       overflow has the same defect. `adaptec1`-style bookshelf designs are unaffected.
 
 → [[_NEW_REPORT_24_best_solution_trackers_20260810.md]] §8 (measurement + XPlace source trail)
+
+---
+
+## #26 — Fence regions: 9 ISPD2015 designs unscored, and we place them wrong (opened 2026-08-11)
+
+**Supersedes #22's "SKIP for now".** Same root cause, but the diagnosis is now exact and one design
+is scoreable today with a one-line harness change. #22 stays for its retraction trail; work here.
+
+### The problem, precisely
+
+`mgc_pci_bridge32_b`'s `floorplan.def` carries `REGIONS 3` / `GROUPS 3` — a *fence region*, i.e. a
+set of cells constrained to a sub-rectangle of the die rather than the whole core. Two independent
+consequences, and they are usually conflated:
+
+**(a) XPlace crashes on them, so our stage-2 legal-vs-legal scoring dies.** Not a DP failure — it
+never reaches DP:
+
+```
+run_placement_nesterov.py:442  data.init_filler()
+database.py:863                self.compute_filler(...)
+database.py:655                return self.compute_filler_with_fence(...)      # enable_fence = len(regions) > 1
+database.py:660                raise NotImplementedError("We haven't yet supported fence region.")
+```
+
+`run_lgdp44.sh` records this as `exit1_nodp` (exit code 1, no `After DP` line) — an accurate status
+that reads like a DP bug and is not one.
+
+**(b) sw_only ignores fence regions entirely.** `DataBase::add_def_region()` and
+`add_def_group()` are **empty stubs** (`common/src/DataBase.cpp:662-665`) — Limbo hands us the
+parsed regions and we discard them. So on these 9 designs we solve an *unconstrained* problem and
+report an HPWL that is optimistically low against any tool that honours the constraint. Nobody has
+measured how much. This is a correctness question, not a scoring inconvenience, and it is the part
+that has never been written down.
+
+### The affected set is exactly the paper's †
+
+Our 9 `exit1_nodp` designs and Table III's 9 †-marked designs are the **same set**, no exceptions:
+`des_perf_a`, `des_perf_b`, `edit_dist_a`, `matrix_mult_b`, `matrix_mult_c`, `pci_bridge32_a`,
+`pci_bridge32_b`, `superblue11_a`, `superblue16_a`. † means "fence region constraints removed", so
+**the paper never reports a fence-carrying number either** — every published figure for these 9 is
+on the stripped variant. Any comparison we make must be against the stripped variant too.
+
+### Why one of the 9 already works
+
+`Xplace/main.py:95` rewrites `--dataset ispd2015` → `ispd2015_fix` (their released fence-stripped
+data). `run_lgdp44.sh` uses `--custom_path ... benchmark:ispd2015` for the ISPD2015 tier, which is
+dispatched *before* that rewrite and hands XPlace the fence-carrying DEF — so our harness walks
+straight into the crash XPlace works around. `data/raw/ispd2015_fix/` exists locally but holds
+**only `mgc_pci_bridge32_b`** (fetched 2026-07-13), which is why that one design has a reference.
+
+Verified 2026-08-11: patching a sw_only placement into
+`ispd2015_fix/mgc_pci_bridge32_b/mgc_pci_bridge32_b.def` and running
+`--dataset ispd2015_fix --global_placement False --given_solution <patched>` **completes LG+DP
+cleanly**. Die area, `COMPONENTS` count and `UNITS` are byte-identical between the two variants, so
+the patch is a straight coordinate substitution. Post-DP 3.310820e+06 site units = 6.62e+08 DBU,
+against XPlace's own 3.477053e+06 — we are ~5% *ahead* on this design.
+
+### What to do, in order
+
+- [ ] **1. Score `mgc_pci_bridge32_b` now (cheap, unblocks 1 of 9).** Teach `run_lgdp44.sh` to use
+      `--dataset ispd2015_fix --design_name <d>` when `Xplace/data/raw/ispd2015_fix/<d>/` exists,
+      falling back to the current `--custom_path`. Template for the patch becomes that dir's
+      `<design>.def`. Verify against the 6.62e+08 DBU above before trusting it.
+- [ ] **2. Obtain the official `ispd2015_fix` for the other 8** (`Xplace/tree/main/data`, per the
+      paper's footnote 4). No code change needed beyond step 1. **Preferred over constructing it** —
+      and if constructed instead, `mgc_pci_bridge32_b` is a free validation: a hand-built `_fix` must
+      reproduce its known numbers or none of the 8 can be trusted (this check is inherited from #22
+      and still stands).
+- [ ] **3. Measure what ignoring the fence costs us.** With both variants of `mgc_pci_bridge32_b` in
+      hand, place *both* and compare: if our fence-carrying GP HPWL is materially below our
+      fence-stripped GP HPWL, we are buying wirelength with illegal placements and every ISPD2015
+      number on those 9 is inflated in our favour. This is the measurement that decides whether #26
+      is a scoring chore or a correctness bug.
+- [ ] **4. Decide whether to implement fence regions at all.** XPlace doesn't (it raises), the paper
+      sidesteps them, and the ISPD2015 contest scored them. Implementing = per-region filler areas
+      and a per-region density objective. **Do not start this before step 3** — if step 3 says the
+      cost is negligible, the honest fix is to document that we place the stripped variant and stop
+      pretending otherwise. If it is large, it is a real gap in the placer.
+- [ ] **5. Either way, stop reporting fence-carrying designs as if unconstrained.** Whatever step 4
+      decides, the run log should say which variant was placed.
+
+⚠️ **Applies today:** `mgc_pci_bridge32_b`'s existing reference came from `_fix` data while sw_only
+places the region-bearing DEF. For that design the two tools solved slightly different problems, so
+the ~5% lead above is real but not strictly like-for-like. (Carried over from #22.)
+
+Related: [[#22]] (same root cause, superseded decision), [[#25]] (the other ISPD2015 comparability
+defect — different `target_density`).
 
 ---
 

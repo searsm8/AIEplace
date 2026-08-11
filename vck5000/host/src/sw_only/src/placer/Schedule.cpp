@@ -46,6 +46,15 @@ void Placer::updateSchedule()
         updateDensityWeight();
     }
 
+    // OUTSIDE the throttle, deliberately. step_precond_coef is the one member of XPlace's step()
+    // trio with no `if self.skip_update: return` guard (param_scheduler.py:359-366, vs :299 and
+    // :353 which both have one) -- because precond_coef is exactly what carries kappa out of the
+    // (0.5, 0.95) window above, so throttling it makes the throttle self-sustaining. Gated here
+    // until 2026-08-11, the %20 grid could only fire where it met %3, i.e. every 60: bigblue3
+    // took 3 doublings across its 160-iteration throttled window where XPlace's cadence gives 8,
+    // lambda crawled at 1/3 rate, and the run died on the overflow-plateau guard at iteration 678.
+    updatePrecondCoef();
+
     // Both gate candidates, every 50 iterations: the throttle is the difference between a lambda
     // that ramps and one that crawls, and which quantity is in the window is otherwise invisible.
     if (phaseIteration() % 50 == 0)
@@ -179,8 +188,25 @@ void Placer::updateDensityWeight()
             PREC(density_weight));
     }
 
-    // Escalate preconditioner: double precond_coef every 20 iterations once overflow < 0.3
-    // This progressively tightens macro movement in late placement (XPlace param_scheduler.py:340-347)
+}
+
+
+/**
+ * @brief Escalate the preconditioner coefficient: double precond_coef every 20 iterations once
+ *        overflow < 0.3, capped at 1024 (XPlace step_precond_coef, param_scheduler.py:359-366).
+ *
+ * Called from updateSchedule() on EVERY iteration, not under its perform_update gate -- see the
+ * comment at the call site for why that placement is load-bearing rather than incidental.
+ *
+ * The `enable_preconditioning` guard mirrors XPlace's `if not self.use_precond: return`. Note what
+ * it costs when it fires: precond_coef feeds BOTH the per-node precond_weight (written only when
+ * preconditioning is on) AND precond_kappa, which gates the schedule unconditionally. So turning
+ * the preconditioner off also freezes the schedule's throttle-release mechanism. XPlace carries
+ * the same coupling but never exercises it -- `--use_precond` defaults to True (main.py:35) and
+ * nothing in its flow turns it off.
+ */
+void Placer::updatePrecondCoef()
+{
     bool escalation_enabled = (enable_preconditioning && precond_coef_escalation);
     bool overflow_low       = (ovfw_history.back() < 0.3f);
     bool coef_below_cap     = (precond_coef < 1024.0f);
@@ -268,7 +294,7 @@ bool Placer::checkDivergence(int window, float threshold)
  * weight = max(1.0, num_pins + precond_coef * density_weight * area)
  *
  * Large macros (many pins, large area) get heavy damping, while standard cells
- * are barely affected. The precond_coef escalates over time (see updateDensityWeight),
+ * are barely affected. The precond_coef escalates over time (see updatePrecondCoef),
  * progressively tightening macro movement as placement matures.
  *
  * Reference: XPlace param_scheduler.py:349-364, calculator.py:5-8

@@ -260,9 +260,7 @@ void Placer::loadConfiguration()
     target_density = cfg["params"]["maximum_utilization"].value_or(target_density);
     enable_backtracking = ConfigUtils::require<bool>(cfg, "params", "enable_backtracking");
     enable_momentum = ConfigUtils::require<bool>(cfg, "params", "enable_momentum");
-    precond_explicitly_set = bool(cfg["params"]["enable_preconditioning"]);
     enable_preconditioning = cfg["params"]["enable_preconditioning"].value_or(enable_preconditioning);
-    auto_enable_preconditioning = cfg["params"]["auto_enable_preconditioning"].value_or(auto_enable_preconditioning);
     precond_coef_escalation = cfg["params"]["precond_coef_escalation"].value_or(precond_coef_escalation);
     enable_density_clamp = cfg["params"]["enable_density_clamp"].value_or(enable_density_clamp);
     // TODO #13 phase 2 (see Phase2.cpp). Only ever engages on a design with movable macros.
@@ -349,20 +347,26 @@ void Placer::analyzeDesignArea(bool bins_auto)
 }
 
 /**
- * @brief Smart default: the preconditioner is essential for movable-macro (MMS) convergence but a
- *        wash on fixed-macro designs. When the config did not name enable_preconditioning, turn it
- *        ON iff this design has movable macros. An explicit config value always wins.
+ * @brief The preconditioner is ON for every design, matching XPlace (`--use_precond` defaults to
+ *        True, main.py:35, and nothing in its flow turns it off). A config value can force it OFF,
+ *        which is a diagnostic only -- see the trap noted in updatePrecondCoef.
+ *
+ * ### Why the movable-macro auto-rule was removed — 2026-08-11
+ * `enable_preconditioning` was a flat `false` until 638b9a8 (2026-07-17), which made it auto-ON iff
+ * `num_movable_macros > 0` on the evidence that preconditioning was "a wash on fixed-macro designs".
+ * True of the preconditioner itself; false of the flag, because precond_coef ALSO feeds
+ * precond_kappa, which gates the gamma/lambda throttle for every design (see updatePrecondCoef).
+ * Zero movable macros meant the whole ISPD tier -- 28 of 28 designs -- ran with the throttle's only
+ * release mechanism frozen at precond_coef = 1.0. bigblue3 is where it finally cost a run: lambda
+ * stalled at 1/3 rate, overflow flattened at 0.18, and the plateau guard killed it at iteration 678
+ * for +5.65% HPWL vs XPlace. Forcing this ON: 798 iterations, converged, +1.15%.
+ *
+ * The lesson generalises past this flag: a switch named for one mechanism silently gated a second.
  */
 void Placer::configurePreconditioner()
 {
-    if (auto_enable_preconditioning && !precond_explicitly_set) {
-        enable_preconditioning = (num_movable_macros > 0);
-        Logger::log_info("Preconditioner auto-" + std::string(enable_preconditioning ? "ON" : "OFF")
-            + " (" + std::to_string(num_movable_macros) + " movable macros detected)");
-    } else {
-        Logger::log_info("Movable macros detected: " + std::to_string(num_movable_macros)
-            + " (preconditioner " + std::string(enable_preconditioning ? "ON" : "OFF") + ", explicit)");
-    }
+    Logger::log_info("Movable macros detected: " + std::to_string(num_movable_macros)
+        + " (preconditioner " + std::string(enable_preconditioning ? "ON" : "OFF") + ")");
 }
 
 /**

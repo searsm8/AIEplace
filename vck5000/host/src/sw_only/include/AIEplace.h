@@ -103,11 +103,8 @@ public:
     float backtrack_epsilon;
     bool enable_backtracking;
     bool enable_momentum;
-    bool enable_preconditioning = false;
-    bool auto_enable_preconditioning = true; // if enable_preconditioning is not set explicitly, turn it
-                                             // ON iff the design has movable macros (essential for MMS
-                                             // convergence; a wash on fixed-macro designs). See #5 handoff.
-    bool precond_explicitly_set = false;     // config named enable_preconditioning => honor it, skip auto
+    bool enable_preconditioning = true;      // matches XPlace --use_precond, default True (main.py:35).
+                                             // ON for every design; see configurePreconditioner.
     int  num_movable_macros = 0;             // movable components with area > macro_area_frac * die area
     bool mixed_size_mode = false;            // macros + std cells placed together (XPlace include_macros);
                                              // set by applyMixedSizeStopPolicy, loosens the stop rules.
@@ -386,6 +383,7 @@ public:
     void updateSchedule();              // throttled γ/λ update (skip_update gate)
     void updateDensityWeight();
     void updateGamma(float overflow);
+    void updatePrecondCoef();
     void updatePrecondWeights();
     bool checkOverflowPlateau(int window, float threshold);
     bool checkDivergence(int window, float threshold);
