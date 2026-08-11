@@ -311,18 +311,16 @@ void Placer::writeResultsCSVRow(std::ofstream& out_file, float final_hpwl_exact,
 
     out_file << "\"" << db.getBenchmarkName() << "\",";
     out_file << iteration << ",";
-    // Best solution info (primary > fallback > N/A)
-    const BestSolution& best = best_primary.valid ? best_primary
-                             : best_fallback.valid ? best_fallback
-                             : best_primary;
-    if (best.valid) {
-        out_file << best.iteration << ","
-                 << std::scientific << PREC(best.overflow) << ","
-                 << std::scientific << SCI(best.hpwl) << ",";
+    // Best solution info -- the same rule that picked the shipped placement, or N/A
+    const BestChoice best = selectBestSolution();
+    if (best.sol) {
+        out_file << best.sol->iteration << ","
+                 << std::scientific << PREC(best.sol->overflow) << ","
+                 << std::scientific << SCI(best.sol->hpwl) << ",";
         // XPlace reference and ratio
         if (xplace_ref > 0.0f) {
             out_file << std::scientific << SCI(xplace_ref) << ","
-                     << std::fixed << std::setprecision(2) << (best.hpwl / xplace_ref) << ",";
+                     << std::fixed << std::setprecision(2) << (best.sol->hpwl / xplace_ref) << ",";
         } else {
             out_file << "N/A,N/A,";
         }
@@ -379,7 +377,7 @@ void Placer::printFinalResults()
     Logger::log_info("[STOP] reason=" + std::string(stopReasonName(m_stop_reason))
                    + " iteration=" + std::to_string(iteration));
 
-    BestSolution& chosen = restoreBestSolution();
+    BestChoice chosen = restoreBestSolution();
 
     // Use the output directory created in constructor
     std::string run_output_dir = output_dir.string();
@@ -406,24 +404,18 @@ void Placer::printFinalResults()
     Logger::log_info("All outputs saved to: " + run_output_dir);
 }
 
-/**
- * @brief Select the best solution to report: primary (HPWL-driven, converged) > fallback
- *        (Pareto) > the last solution reached (BestSolution left invalid; restore is then a
- *        no-op). Restores the chosen placement's positions.
- */
-Placer::BestSolution& Placer::restoreBestSolution()
+/// @brief Apply selectBestSolution() and restore THAT tracker's geometry. The slot comes from the
+///        same struct as the metadata being logged, so the two cannot disagree (TODO #24).
+Placer::BestChoice Placer::restoreBestSolution()
 {
-    BestSolution& chosen = best_primary.valid ? best_primary
-                         : best_fallback.valid ? best_fallback
-                         : best_primary;
+    BestChoice chosen = selectBestSolution();
 
-    if (chosen.valid) {
-        restoreBestPlacement();
-        std::string type = (&chosen == &best_primary) ? "primary (converged)" : "fallback (lowest overflow)";
-        Logger::log_info("Restored " + type + " best placement from iteration " +
-            std::to_string(chosen.iteration) +
-            " (HPWL: " + std::to_string(chosen.hpwl) +
-            ", overflow: " + std::to_string(chosen.overflow) + ")");
+    if (chosen.sol) {
+        restoreBestPlacement(chosen.slot);
+        Logger::log_info("Restored " + std::string(chosen.type) + " best placement from iteration " +
+            std::to_string(chosen.sol->iteration) +
+            " (HPWL: " + std::to_string(chosen.sol->hpwl) +
+            ", overflow: " + std::to_string(chosen.sol->overflow) + ")");
     } else {
         Logger::log_info("No best placement saved (solver may not have stabilized). Using last solution.");
     }
@@ -511,7 +503,7 @@ void Placer::dumpBestPlacementDensity()
 
 /// @brief Build and log the console results/hyperparameters tables, then export the run
 ///        summary and per-function timing stats as markdown into the run directory.
-void Placer::exportSummaryReports(const BestSolution& chosen, const FinalMetrics& metrics,
+void Placer::exportSummaryReports(const BestChoice& chosen, const FinalMetrics& metrics,
                                    const std::string& run_output_dir)
 {
     Table statistics;
@@ -553,12 +545,11 @@ void Placer::exportSummaryReports(const BestSolution& chosen, const FinalMetrics
                                     << std::setprecision(3) << metrics.final_overflow_macro_excluded);
     }
     results.add_row({"Stop reason", stopReasonName(m_stop_reason)});
-    if (chosen.valid) {
-        std::string type = (&chosen == &best_primary) ? "primary" : "fallback";
+    if (chosen.sol) {
         std::ostringstream best_str;
-        best_str << "iter " << chosen.iteration
-                 << " (" << type << ", HPWL=" << std::scientific << std::setprecision(3)
-                 << chosen.hpwl << ", ovfw=" << chosen.overflow << ")";
+        best_str << "iter " << chosen.sol->iteration
+                 << " (" << chosen.type << ", HPWL=" << std::scientific << std::setprecision(3)
+                 << chosen.sol->hpwl << ", ovfw=" << chosen.sol->overflow << ")";
         results.add_row(RowStream{} << "Best Solution" << best_str.str());
     }
     results.column(0).format().font_align(FontAlign::right);
@@ -660,28 +651,41 @@ void Placer::recordIterationResults()
     step_length_history.push_back(step_length);
     ovfw_history.push_back(overflow);
 
-    // Two-tier best solution tracking.
-    // Skip early iterations to let the solver stabilize.
+    // Best-solution tracking, ported from XPlace's update_best_sol (param_scheduler.py:390-451).
+    // Skip early iterations to let the solver stabilize (XPlace: `iter - init_iter < 50`).
     if (iteration < BEST_SOL_MIN_ITER) return;
 
-    constexpr float OVFW_EPSILON = 0.005f;
+    const bool converged_now = (overflow < overflow_threshold);
 
-    // Primary: lowest HPWL among solutions that meet the overflow threshold (converged)
-    if (overflow < overflow_threshold && hpwl < best_primary.hpwl) {
-        best_primary = {hpwl, overflow, iteration, true};
-        snapshotBestPlacement();
+    // XPlace frees the rollback net on the FIRST converged iteration (param_scheduler.py:396-405).
+    // That lifetime is what lets the selection rule give rollback absolute priority: if it is still
+    // around, the run never converged and there is nothing else to choose. Once dropped it stays
+    // dropped, even if overflow later climbs back above the threshold.
+    if (converged_now && !ever_converged) {
+        ever_converged = true;
+        best_rollback  = BestSolution{};
     }
 
-    // Fallback: lowest overflow achieved. Tiebreak on HPWL when overflow is similar.
-    bool overflow_clearly_improved     = (overflow < best_fallback.overflow - OVFW_EPSILON);
-    bool overflow_tied_but_hpwl_better = (overflow < best_fallback.overflow + OVFW_EPSILON &&
-                                          hpwl < best_fallback.hpwl);
-    if (overflow_clearly_improved || overflow_tied_but_hpwl_better)
+    // Rollback: near-converged band, before any converged solution exists. Overflow must improve;
+    // HPWL is allowed to creep 1% to buy it (param_scheduler.py:407-428).
+    if (!ever_converged && overflow < 5.0f * overflow_threshold &&
+        hpwl < best_rollback.hpwl * 1.01f && overflow < best_rollback.overflow)
     {
-        best_fallback = {hpwl, overflow, iteration, true};
-        // Only snapshot if primary hasn't already saved this iteration
-        if (!best_primary.valid || best_primary.iteration != iteration)
-            snapshotBestPlacement();
+        best_rollback = {hpwl, overflow, iteration, true};
+        snapshotBestPlacement(BestSlot::ROLLBACK);
+    }
+
+    // Aux: converged, driving overflow down, paying at most 0.5% HPWL per update (:431-441).
+    // This is NOT a divergence guard -- it is the spread-out solution the selection rule PREFERS.
+    if (converged_now && hpwl < best_aux.hpwl * 1.005f && overflow < best_aux.overflow) {
+        best_aux = {hpwl, overflow, iteration, true};
+        snapshotBestPlacement(BestSlot::AUX);
+    }
+
+    // Primary: converged, lowest HPWL (:444-450).
+    if (converged_now && hpwl < best_primary.hpwl) {
+        best_primary = {hpwl, overflow, iteration, true};
+        snapshotBestPlacement(BestSlot::PRIMARY);
     }
 }
 

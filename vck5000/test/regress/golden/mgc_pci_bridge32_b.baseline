@@ -2,13 +2,13 @@
 #
 # Produced by:  test/regress/run_regress.sh --update-baselines
 # Config:       test/regress/configs/mgc_pci_bridge32_b.toml  (frozen; changes with this file)
-# Recorded:     2026-08-10 at commit ca5f258
-# Reason:       TODO #23: init_step_seed is now in SITE WIDTHS (XPlace args.lr units, prescale_by_site_width database.py:854) instead of raw DBU, so the iteration-1 BB trial step is design-relative. Changes alpha_1 on LEF/DEF designs (site 200/100 DBU here); bookshelf Sitewidth=1 so mms_adaptec1 is bit-identical and its baseline is untouched.
+# Recorded:     2026-08-11 at commit d0117cb
+# Reason:       TODO #24: three best-solution trackers (primary/aux/rollback), each with its own geometry buffer in Node, plus XPlace get_best_solution selection (param_scheduler.py:540-577). The shipped placement is now the one the rule selects and the log names; previously one shared buffer meant last-writer-won. Trajectory is unchanged (verified bit-identical before regeneration); final positions move where the rule now picks a different stored solution.
 #
 # DO NOT refresh this file to make a failing test pass. Read the diff first: the
 # body below is the full per-iteration trajectory, so the row where it starts to
 # differ tells you what changed and when. See test/regress/README.md.
-positions_sha256 330fe8cd392d4e26c5416b4a0815e6c53845ee14a069cfbfbadc0aecc3d602aa
+positions_sha256 00c02bfbd36ecabb703873b8fdb12e81e1398edd88e311b7f9f1f892730efc70
 ---
 Iter, HPWL, OVFW, step_len, density_weight, BkSteps
 001, 6.977e+08, 9.767e-01, 7.015e+04, 1.229e-12, 0

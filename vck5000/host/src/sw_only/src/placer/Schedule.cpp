@@ -227,7 +227,7 @@ bool Placer::checkOverflowPlateau(int window, float threshold)
 bool Placer::checkDivergence(int window, float threshold)
 {
     // Reference the CONVERGED best only (XPlace check_divergence returns False while
-    // best_metric["hpwl"] is inf). best_fallback tracks the newest lowest-overflow point,
+    // best_metric["hpwl"] is inf). best_aux tracks the newest lowest-overflow point,
     // so on a healthy monotonic descent a trailing-mean-vs-newest comparison always reads
     // "worse than best" on both HPWL and overflow and false-fires the guard — that killed
     // adaptec2 at iter 332 with overflow still dropping ~2%/iter toward the 0.07 threshold.
@@ -365,12 +365,36 @@ bool Placer::hasNaNMetrics()
     return true;
 }
 
-/// @brief The converged (primary) best if valid, else the lowest-overflow fallback.
+/// @brief The divergence guards' reference metric — deliberately NOT the shipping rule. This one
+///        feeds stopping criteria, so its population must stay as wide as it was before TODO #24
+///        (any tracker, converged or not); selectBestSolution() answers the different question of
+///        which placement to hand over at the end.
 const Placer::BestSolution& Placer::bestReference() const
 {
-    return best_primary.valid ? best_primary
-         : best_fallback.valid ? best_fallback
+    return best_primary.valid  ? best_primary
+         : best_aux.valid      ? best_aux
+         : best_rollback.valid ? best_rollback
          : best_primary;
+}
+
+/**
+ * @brief Which solution to ship. Ported from XPlace get_best_solution (param_scheduler.py:540-577):
+ *        a surviving rollback wins outright (it only survives when the run never converged, so
+ *        nothing else exists); otherwise PREFER the lower-overflow aux, but only when it costs
+ *        <= 0.5% HPWL and buys >= 10% overflow. The default lean is toward the spread-out solution.
+ */
+Placer::BestChoice Placer::selectBestSolution() const
+{
+    if (best_rollback.valid)
+        return {&best_rollback, BestSlot::ROLLBACK, "rollback (never converged)"};
+    if (!best_primary.valid && !best_aux.valid) return {};
+    if (!best_aux.valid)     return {&best_primary, BestSlot::PRIMARY, "primary (HPWL driven)"};
+    if (!best_primary.valid) return {&best_aux,     BestSlot::AUX,     "aux (overflow driven)"};
+
+    const bool aux_worth_its_hpwl = (best_aux.hpwl < best_primary.hpwl * best_aux_max_hpwl_ratio &&
+                                     best_aux.overflow * 1.1f < best_primary.overflow);
+    return aux_worth_its_hpwl ? BestChoice{&best_aux,     BestSlot::AUX,     "aux (overflow driven)"}
+                              : BestChoice{&best_primary, BestSlot::PRIMARY, "primary (HPWL driven)"};
 }
 
 /**

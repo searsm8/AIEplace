@@ -275,6 +275,46 @@ def _grid_ab():
                          "convergence_overflow_threshold": 0.04, "random_seed": 42})
     return runs
 
+def _best_sol_ab():
+    """A/B: best_aux_max_hpwl_ratio 1.005 (XPlace's literal) vs 1.010, on the TODO #24 selection
+    rule. The two arms have IDENTICAL trajectories -- the ratio is read only by
+    selectBestSolution(), at the end -- so the difference is purely which stored placement gets
+    shipped, and therefore what LG+DP is handed.
+
+    Subset picked from the 2026-08-10 full44_v2 traces (projection in the #24 report), 4 designs
+    that FLIP at 1.01 plus 4 controls that must NOT move:
+      flips   mgc_superblue19 1.0070 | mgc_superblue16_a 1.0052 | adaptec3 1.0053 | bigblue2 1.0053
+      stays AUX  adaptec1 1.0030, mgc_matrix_mult_c 1.0043   (cost already inside 0.5%)
+      stays PRI  mgc_fft_b 1.0210                            (cost outside both budgets)
+      stays PRI  mgc_des_perf_1                              (fails the *overflow* gate, not HPWL
+                                                              -- the control for the other condition)
+    A control that moves means the ratio is reaching something it should not.
+
+    NOT covered: the mixed-size phase-2 path, where selectBestSolution() also picks the placement
+    the macros are frozen at and the arms genuinely diverge in trajectory. Needs its own MMS run.
+    ~21 min per arm, sequential."""
+    grid = {
+        "mgc_fft_b":         ("ispd2015/mgc_fft_b",          512),
+        "mgc_des_perf_1":    ("ispd2015/mgc_des_perf_1",     512),
+        "mgc_matrix_mult_c": ("ispd2015/mgc_matrix_mult_c",  512),
+        "adaptec1":          ("ispd2005/adaptec1",           512),
+        "mgc_superblue19":   ("ispd2015/mgc_superblue19",    512),
+        "mgc_superblue16_a": ("ispd2015/mgc_superblue16_a",  512),
+        "adaptec3":          ("ispd2005/adaptec3",          1024),
+        "bigblue2":          ("ispd2005/bigblue2",          1024),
+    }
+    runs = []
+    for name, (path, n) in grid.items():
+        for ratio in (1.005, 1.010):
+            runs.append({
+                "label": f"{name}@{n}_aux{ratio}",
+                "benchmark": path, "bins_per_row": n,
+                "best_aux_max_hpwl_ratio": ratio,
+                "random_seed": 42,
+            })
+    return runs
+
+
 # Run-set selected by the DSE_RUN_SET env var so a follow-up sweep can be queued without
 # editing this file between runs. Defaults to the full 28-design suite.
 def _morris():
@@ -294,6 +334,7 @@ _RUN_SETS = {
     "gamma_ab": _gamma_ab,
     "nonconverge_ab": _nonconverge_ab,
     "grid_ab": _grid_ab,
+    "best_sol_ab": _best_sol_ab,
     "morris": _morris,
 }
 explicit_runs = _RUN_SETS[os.environ.get("DSE_RUN_SET", "full_suite")]()

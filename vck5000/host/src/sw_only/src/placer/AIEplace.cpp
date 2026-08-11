@@ -103,22 +103,45 @@ void Placer::iterationReset()
 }
 
 
-/// @brief Save current movable + filler positions as the best-so-far solution (divergence guard).
-void Placer::snapshotBestPlacement()
+/// @brief The snapshot buffer belonging to one tracker. Selecting by slot rather than sharing one
+///        buffer is what makes the shipped geometry match the solution the rule picked (TODO #24).
+static inline Position& bestSlotPos(Node* node_p, Placer::BestSlot slot)
 {
-    const auto& nodes = db.getMovableNodes();
-    #pragma omp parallel for schedule(static)
-    for (int i = 0; i < (int)nodes.size(); i++)
-        nodes[i]->best_solution_pos = nodes[i]->next.node_pos;
+    switch (slot) {
+        case Placer::BestSlot::AUX:      return node_p->best_aux_pos;
+        case Placer::BestSlot::ROLLBACK: return node_p->best_rollback_pos;
+        default:                         return node_p->best_primary_pos;
+    }
 }
 
-/// @brief Restore movable + filler positions from the saved best-so-far solution.
-void Placer::restoreBestPlacement()
+/// @brief Save current movable + filler positions into one tracker's snapshot.
+void Placer::snapshotBestPlacement(BestSlot slot)
 {
     const auto& nodes = db.getMovableNodes();
     #pragma omp parallel for schedule(static)
     for (int i = 0; i < (int)nodes.size(); i++)
-        nodes[i]->next.node_pos = nodes[i]->best_solution_pos;
+        bestSlotPos(nodes[i], slot) = nodes[i]->next.node_pos;
+}
+
+/// @brief Restore movable + filler positions from one tracker's snapshot.
+///
+/// probe_pos is set to the restored node_pos, NOT left as it was. A placement here is the PAIR
+/// (node_pos, probe_pos) -- HPWL reads node_pos (Net.h:25) while every density/overflow metric
+/// deposits at probe_pos (computeNodeFootprint, Grid.cpp:36). Restoring only node_pos leaves the
+/// node in a state that existed at no point in the run -- committed position from one iteration,
+/// lookahead from another -- and the reported overflow then describes the last iteration rather
+/// than the placement being shipped (TODO #24). freezeMovableMacros already collapses state this
+/// way for exactly this reason (DataBase.cpp:396); this generalises it to every restore.
+///
+/// The .def is written from node_pos, so the metrics now describe the placement actually shipped.
+void Placer::restoreBestPlacement(BestSlot slot)
+{
+    const auto& nodes = db.getMovableNodes();
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)nodes.size(); i++) {
+        nodes[i]->next.node_pos  = bestSlotPos(nodes[i], slot);
+        nodes[i]->next.probe_pos = nodes[i]->next.node_pos;
+    }
 }
 
 AIEPLACE_NAMESPACE_END

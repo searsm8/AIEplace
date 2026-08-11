@@ -246,18 +246,35 @@ public:
     };
     PhaseSummary m_phase1_summary;
 
-    // Two-tier best solution tracking (XPlace-inspired):
-    //   Primary: lowest HPWL among solutions with overflow < convergence threshold
-    //   Fallback: Pareto-improving (overflow strictly decreasing, HPWL within 1%)
+    // Three best-solution trackers, mirroring XPlace's (param_scheduler.py:94-101).
+    // Each has its OWN geometry buffer in Node (TODO #24): they shared one until 2026-08-10, so
+    // the restored placement was whichever tracker wrote last, not the one the rule selected.
     struct BestSolution {
         float hpwl = std::numeric_limits<float>::max();
         float overflow = std::numeric_limits<float>::max();
         int iteration = 0;
         bool valid = false;
     };
-    BestSolution best_primary;   // HPWL-driven, only when overflow < threshold
-    BestSolution best_fallback;  // Pareto-improving, always available
-    const BestSolution& bestReference() const; // converged best if valid, else lowest-overflow fallback
+    BestSolution best_primary;   // XPlace best_sol: lowest HPWL among CONVERGED solutions
+    BestSolution best_aux;       // XPlace best_sol_aux: drives overflow down, HPWL may creep <=0.5%
+    BestSolution best_rollback;  // XPlace best_sol_rollback: pre-convergence net, dropped once converged
+    // XPlace expresses this as `life < max_life` (param_scheduler.py:396-405). Spelled out here
+    // because OUR `life` is a different quantity — a divergence-guard budget, burned 6 at a time.
+    bool ever_converged = false;
+    // How much HPWL the spread-out (aux) solution may cost before selectBestSolution() rejects it.
+    // XPlace hard-codes 1.005 (param_scheduler.py:565); exposed here because roughly a third of the
+    // suite sits within 1% of it, so it decides how spread the shipped placement is.
+    float best_aux_max_hpwl_ratio = 1.005f;
+    enum class BestSlot { PRIMARY, AUX, ROLLBACK };
+    // The selected solution and the buffer holding its geometry. `sol` is null when nothing is
+    // valid (the last iterated placement is then shipped as-is).
+    struct BestChoice {
+        const BestSolution* sol = nullptr;
+        BestSlot slot = BestSlot::PRIMARY;
+        const char* type = "none";
+    };
+    BestChoice selectBestSolution() const;     // XPlace get_best_solution (param_scheduler.py:540-577)
+    const BestSolution& bestReference() const; // divergence guards' reference metric — NOT the ship rule
     static constexpr int BEST_SOL_MIN_ITER = 50; // don't save before this
     int last_density_jolt_iter = -1000; // tracks last emergency 2x jolt for cooldown
     
@@ -378,8 +395,8 @@ public:
 
     // Bookkeeping and visualization
     void recordIterationResults();
-    void snapshotBestPlacement();
-    void restoreBestPlacement();
+    void snapshotBestPlacement(BestSlot slot);
+    void restoreBestPlacement(BestSlot slot);
 
     // Post run analysis
     void computeStatistics();
@@ -404,11 +421,11 @@ public:
         float hpwl_improvement;
         bool has_improvement;
     };
-    BestSolution& restoreBestSolution(); // primary (converged) > fallback (Pareto) > last; restores its placement
+    BestChoice restoreBestSolution();    // applies selectBestSolution() and restores its geometry
     FinalMetrics computeFinalMetrics();
     void logOverflowDiagnostics();
     void dumpBestPlacementDensity();
-    void exportSummaryReports(const BestSolution& chosen, const FinalMetrics& metrics,
+    void exportSummaryReports(const BestChoice& chosen, const FinalMetrics& metrics,
                               const std::string& run_output_dir);
     void writeFinalDesignArtifacts(const std::string& run_output_dir);
 };

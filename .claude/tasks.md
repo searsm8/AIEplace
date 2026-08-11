@@ -483,18 +483,50 @@ hyperparameter, not comparable to the other 40, and it hides the defect.
 
 ---
 
-## #24 — `best_solution_pos` is ONE buffer shared by two trackers (opened 2026-08-10)
+## #24 — best-solution trackers: shared buffer + torn restore (opened 2026-08-10, CODE DONE 2026-08-10)
 
-**The "Restored … from iteration N" log line names a placement that is not the one shipped.**
-Headline HPWL/overflow are still trustworthy; the *provenance* line is not.
+**FIXED — two defects, only one of which was known when this was opened.** Three trackers
+(`best_primary`/`best_aux`/`best_rollback`) each with their own geometry buffer, plus XPlace's
+`get_best_solution` selection; and `restoreBestPlacement()` now also sets `probe_pos = node_pos`.
+`make test`, `make test-regress`, `make test-regress-slow` green; 3 baselines regenerated with
+reasons. **Two decisions still open — see below.**
+→ [[_NEW_REPORT_24_best_solution_trackers_20260810.md]]
 
-There is exactly one snapshot buffer, `Node::best_solution_pos` (`AIEplace.cpp:107`), and **both**
-`best_primary` and `best_fallback` write it through the same `snapshotBestPlacement()`
-(`Output.cpp:670-685`). Last writer wins. `restoreBestSolution()` (`Output.cpp:414`) then selects by
-*metadata* priority (primary > fallback), logs that metadata, and calls `restoreBestPlacement()`,
-which loads whatever geometry happens to be in the buffer. When the fallback updated after the
-primary last did — the common case, since overflow keeps falling after the threshold crossing — the
-log names the primary's iteration while the restored cells are the fallback's.
+- **Defect 1 (as opened): one buffer, two writers.** Confirmed on 17 of 29 `full44_v2` runs — and
+  those 17 are exactly the *converged* designs, the ones that get scored.
+- **Defect 2 (NOT known when this was opened): a placement is two variables and the snapshot copied
+  one.** HPWL reads `node_pos`; density/overflow deposits at `probe_pos` (`Grid.cpp:36`), which the
+  restore never touched. After a restore the node held committed position from one iteration and
+  lookahead from another — a state that existed at no point in the run.
+  **This is what produced the evidence quoted below**, so that evidence does not prove what it says.
+  The real proof of defect 1 is the *HPWL* mismatch: adaptec1 logged iter 728 (HPWL 7.035e+07) while
+  `Final HPWL` read 7.051e+07 = iteration **751**. `freezeMovableMacros` (`DataBase.cpp:396`) had
+  already diagnosed and locally patched defect 2 — it was never generalised.
+
+**⚠️ The rule does NOT always ship the spread-out solution** — it prefers it only when
+`aux_hpwl < best_hpwl*1.005` and `aux_ovfl*1.1 < best_ovfl`. Over 29 traces: aux 8, primary 11,
+none 10. The *bug* shipped the spread one nearly always, so this makes 11 designs less spread,
+deliberately. A/B on that 0.5% budget (`best_aux_max_hpwl_ratio`, `DSE_RUN_SET=best_sol_ab`):
+1.010 buys ~35% less overflow for ~0.5–0.7% GP HPWL, DP recovers 41–74% of it but never all —
+**keep XPlace's 1.005** (n=2 designs with usable DP data; see report §5).
+
+<details><summary>Superseded framing as opened (2026-08-10) — kept for the retraction trail</summary>
+
+> **The "Restored … from iteration N" log line names a placement that is not the one shipped.**
+> Headline HPWL/overflow are still trustworthy; the *provenance* line is not.
+>
+> There is exactly one snapshot buffer, `Node::best_solution_pos` (`AIEplace.cpp:107`), and **both**
+> `best_primary` and `best_fallback` write it through the same `snapshotBestPlacement()`
+> (`Output.cpp:670-685`). Last writer wins. `restoreBestSolution()` (`Output.cpp:414`) then selects by
+> *metadata* priority (primary > fallback), logs that metadata, and calls `restoreBestPlacement()`,
+> which loads whatever geometry happens to be in the buffer. When the fallback updated after the
+> primary last did — the common case, since overflow keeps falling after the threshold crossing — the
+> log names the primary's iteration while the restored cells are the fallback's.
+
+**Two corrections.** "Headline HPWL/overflow are still trustworthy" was wrong for **overflow**:
+defect 2 meant every reported overflow described the last iteration, not the shipped placement.
+And the adaptec1 overflow evidence below is defect 2's signature, not defect 1's.
+</details>
 
 **Evidence (adaptec1, `full44_v2` run 2026-08-10):**
 ```
@@ -510,26 +542,56 @@ geometry is demonstrably iteration **757** while the log says **728**. Reproduce
 
 Two defects, ranked:
 
-- [ ] **1. Selection has no control over the geometry.** The priority rule chooses one solution and
-      the buffer supplies a different one. Today this accidentally favours the better-spread
-      placement, but that is luck, not design: if `best_primary` were genuinely the right pick it
-      would not be honoured. **Fix:** give each tracker its own buffer (or snapshot lazily at
-      restore time from a stored iteration).
-      **Falsifies the fix:** after it, adaptec1's restore line and `Final Overflow (smoothed)` must
-      agree. Where they already agree on some design, that design's fallback simply never outlived
-      its primary — not evidence of correctness.
-- [ ] **2. The log line is false, and it misleads.** It caused a wrong diagnosis on 2026-08-10
-      (concluded sw_only was shipping under-spread placements to XPlace's legalizer; it is not).
-      Cheap to fix with 1; worth fixing even alone.
+- [x] **1. Selection has no control over the geometry.** DONE — three trackers, three buffers, one
+      shared `selectBestSolution()`. Verified on **both** branches of the rule: adaptec1 ships aux
+      iter 757, `mgc_pci_bridge32_b` ships primary iter 723, and in each `Final HPWL` equals the
+      selected solution's HPWL.
+      ⚠️ **The falsifier as written is unusable** — it assumes `Final Overflow` describes the
+      restored placement, which was defect 2. It can only be applied on a design whose selected
+      solution is *not* the last iteration.
+- [x] **2. The log line is false, and it misleads.** DONE — the slot now travels in the same struct
+      as the metadata, so they cannot disagree.
 
-⚠️ **Related but SEPARATE — do not conflate.** sw_only has no equivalent of XPlace's `best_sol_aux`,
-and `best_fallback`'s accept rule is *inverted* against XPlace's: ours tolerates overflow degrading
-by `OVFW_EPSILON = 0.005` to gain HPWL, XPlace's requires overflow to strictly improve and tolerates
-0.5% HPWL loss (`param_scheduler.py:432-441`), then prefers it over the HPWL-driven pick when
-`aux_hpwl < best_hpwl*1.005 and aux_ovfl*1.1 < best_ovfl` (`get_best_solution`, :563-577). That is a
-real faithfulness gap, **but defect 1 confounds any measurement of it** — fix 1 first, then re-measure.
+- [x] **The `best_sol_aux` faithfulness gap** (the ⚠️ note below, folded in once defect 1 stopped
+      confounding it). `best_fallback` was renamed `best_aux`, gated on convergence, and given
+      XPlace's accept rule; the missing `best_sol_rollback` was added with its
+      free-on-first-convergence lifetime. The inverted `OVFW_EPSILON = 0.005` rule is gone.
 
-→ [[_NEW_HANDOFF_24_best_solution_buffer_20260810.md]]
+**Still open:**
+- [ ] **Fix (B)'s scope — blocks an MMS re-run either way.** `restoreBestPlacement` also fires
+      mid-run at the phase-2 macro freeze, so (B) perturbs every mixed-size run (`mms_adaptec1`:
+      1325→1288 iterations, HPWL +0.24%, overflow +2.8% — chaotic amplification of a ~0.04%
+      step/λ nudge, not a quality change). **(a)** keep it everywhere (committed) and re-run +
+      re-baseline MMS, or **(b)** confine the probe reset to the final restore, leaving MMS
+      bit-identical. **Recommended: (b)**, one line. (a) is committed only because it is what was
+      literally asked for. See report §6a.
+      ⚠️ MMS was excluded from `full44_v2` because #23 provably could not affect it. (B) **can**.
+- [ ] **Widen the A/B (n=2).** Only `bigblue2` and `mgc_superblue19` both flipped and produced DP
+      numbers. Needs ~8–10 more designs run blind — the trace projection **cannot** identify
+      flippers near the budget (4-sig-fig HPWL; `adaptec3`'s ratio straddles 1.005), so do not
+      re-derive them offline.
+- [ ] **Our overflow metric vs XPlace's disagree on direction for `mgc_superblue19`** — ours says
+      the 1.010 placement is 35% better spread, XPlace's exact overflow on the same `.def` says
+      slightly worse. Not a reporting artifact. Own investigation before our overflow number is
+      used to argue placement quality.
+- [ ] **Move the A/B data out of `/tmp`** into `.claude/2_ARTIFACTS/` if it is ever to be cited:
+      `/tmp/lgdp_ab/results_{1005,101}.tsv`.
+
+<details><summary>Superseded: the ⚠️ "Related but SEPARATE" note — now folded in and done</summary>
+
+> ⚠️ **Related but SEPARATE — do not conflate.** sw_only has no equivalent of XPlace's `best_sol_aux`,
+> and `best_fallback`'s accept rule is *inverted* against XPlace's: ours tolerates overflow degrading
+> by `OVFW_EPSILON = 0.005` to gain HPWL, XPlace's requires overflow to strictly improve and tolerates
+> 0.5% HPWL loss (`param_scheduler.py:432-441`), then prefers it over the HPWL-driven pick when
+> `aux_hpwl < best_hpwl*1.005 and aux_ovfl*1.1 < best_ovfl` (`get_best_solution`, :563-577). That is a
+> real faithfulness gap, **but defect 1 confounds any measurement of it** — fix 1 first, then re-measure.
+
+Correct as written, and the sequencing advice was right — defect 1 *was* confounding it. Both were
+fixed in one change once defect 1 landed, since the rename and the gate touch the same lines.
+</details>
+
+→ [[_NEW_REPORT_24_best_solution_trackers_20260810.md]],
+  [[_NEW_HANDOFF_24_best_solution_buffer_20260810.md]]
 
 ---
 

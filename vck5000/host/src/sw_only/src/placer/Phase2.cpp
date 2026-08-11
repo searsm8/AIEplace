@@ -65,10 +65,12 @@ bool Placer::beginFixedMacroPhase()
     reportPhaseSummary();   // record + print phase 1 BEFORE anything is mutated
 
     // Phase 1's deliverable is where the macros ended up, and best-solution tracking usually holds
-    // a better placement than the last iteration's. Guard the restore: best_solution_pos is only
-    // meaningful once snapshotBestPlacement() has run, and a run that stopped before any best was
-    // recorded would otherwise be "restored" to uninitialised positions.
-    if (bestReference().valid) restoreBestPlacement();
+    // a better placement than the last iteration's. Same selection rule as the final restore, so
+    // the macros get frozen at the placement the run would have shipped. Guard it: the snapshot
+    // buffers are only meaningful once snapshotBestPlacement() has run, and a run that stopped
+    // before any best was recorded would otherwise be "restored" to uninitialised positions.
+    BestChoice phase1_best = selectBestSolution();
+    if (phase1_best.sol) restoreBestPlacement(phase1_best.slot);
     else Logger::log_warning("Phase 2: no best placement recorded in phase 1; "
                              "freezing the macros at their last iterated positions");
 
@@ -193,7 +195,9 @@ void Placer::resetSolverState()
     convergence_iterations_remaining = -1;
     last_density_jolt_iter           = -1000;
     best_primary                     = BestSolution{};
-    best_fallback                    = BestSolution{};
+    best_aux                         = BestSolution{};
+    best_rollback                    = BestSolution{};
+    ever_converged                   = false;
     m_stop_reason                    = StopReason::RUNNING;
 
     // gamma restarts high (overflow is ~1 again after the re-seed) so the WA surrogate is smooth
