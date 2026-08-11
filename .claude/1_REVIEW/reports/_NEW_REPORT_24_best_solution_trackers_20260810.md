@@ -285,7 +285,61 @@ n=2 is thin for a default that governs every design. Getting more usable flipper
 
 ---
 
-## 7. Files
+## 7. Is best-solution tracking now faithful to XPlace?
+
+**The rule is. The inputs to it are not, in two places.**
+
+Faithful, verified against source: the three trackers and their gates; the aux accept rule
+(`ovfl < stop`, `hpwl < aux_hpwl*1.005`, `ovfl < aux_ovfl`, `:431-441`); the rollback band
+(`stop ≤ ovfl < 5*stop`, never-converged, `hpwl < rb_hpwl*1.01`, `:407-428`) and its
+free-on-first-convergence lifetime (`:396-405`); and `get_best_solution`'s priority and preference
+test (`:540-577`). The inverted `OVFW_EPSILON` rule is gone.
+
+Two remaining divergences, both **outside** the rule:
+
+**7a. XPlace snapshots the lookahead; we snapshot the committed position.** In
+`nesterov_optimizer.py:71` the optimized parameter *is* `v_k` — *"directly use p as v_k to save
+memory"*. So `ps.step(hpwl, overflow, mov_node_pos, ...)` stores **v_k**, and `evaluator_fn`
+measures HPWL **and** overflow at **v_k**. One position, self-consistent.
+
+We snapshot `node_pos` (u), measure HPWL at u and overflow at v. Fix (B) made our side
+self-consistent **at u**; XPlace is self-consistent **at v**. Neither is broken now, but they are
+not the same placement. Deciding u-vs-v changes the shipped `.def`, so it is its own call.
+
+**7b. `BEST_SOL_MIN_ITER` is absolute; XPlace's is phase-relative.** Ours skips `iteration < 50`;
+XPlace skips `self.iter - self.init_iter < 50` (`:393`). After the phase-2 restart we begin tracking
+immediately while XPlace waits 50 iterations. Mixed-size only.
+
+(Our `life` is also a different quantity from XPlace's — a divergence-guard budget, not a
+post-threshold countdown. Pre-existing and unrelated to #24; noted so it is not re-discovered.)
+
+## 8. Do the overflow metrics agree? — only where `target_density` does
+
+Measured on byte-identical `.def` files: our `Final Overflow (exact, no fillers)` vs XPlace's
+`get_obj_overflow` on that same placement.
+
+| design | ours | XPlace | ratio | target_density ours / XPlace |
+|---|---|---|---|---|
+| `adaptec1` | 1.093e-01 | 0.1094 | **0.9991** | 1.0 / 1.0 |
+| `mgc_fft_b` | 1.395e-01 | 0.1247 | 1.119 | **0.6** / 1.0 |
+| `mgc_des_perf_1` | 9.932e-02 | 0.0113 | **8.79** | **0.906** / 1.0 |
+
+**The metric itself is right** — adaptec1 agrees to 0.1%, and it is the design where both sides use
+`target_density = 1.0`. The ISPD2015 disagreement is entirely that we take `target_density` from the
+DEF's `placement.constraints` while XPlace leaves it at the 1.0 default for every `mgc_*` design
+(`setup_dataset.py:54-85` has no matching branch; `placement.constraints` reaches only the external
+DP engine, `detail_placement.py:670`). Smaller capacity, higher overflow.
+
+The ratio is wildly non-linear in the target gap (0.906 → 8.79×, 0.6 → 1.12×) because overflow is a
+*clamped* sum: moving the threshold through the bulk of the density distribution converts a large
+amount of previously-zero excess into counted excess.
+
+**This also resolves §5's `mgc_superblue19` anomaly** — that was not an overflow bug, it was two
+different metrics being compared. Full write-up and consequences: **TODO #25**. The headline is that
+`target_density` also drives convergence, filler area and the macro density weight, so on ISPD2015
+we are *optimizing* to a different target, not merely reporting one.
+
+## 9. Files
 
 Code: `Node.h`, `AIEplace.h`, `AIEplace.cpp`, `Output.cpp`, `Phase2.cpp`, `Schedule.cpp`,
 `Setup.cpp`, `default_config.toml`, `tools/dse.py` (adds `DSE_RUN_SET=best_sol_ab`).

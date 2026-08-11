@@ -460,7 +460,11 @@ else covers ISPD2015.
 - [ ] **pl_algo's mirror is compile-verified only.** `Driver.cpp::estimate_initial_step` now scales
       by `cfg.site_width` (set in `main.cpp` from `db.getSiteWidth()`), and `make host HOST=pl_algo`
       builds — but it has never been run against the golden. Needs Geert's card or sw_emu.
-- [ ] **Re-run the 4 excluded designs** once fixed; they are marked `nan_metrics` in the snapshot.
+- [x] **Re-run the 4 excluded designs** — DONE, all 5 previously-`nan_metrics` designs re-run:
+      `mgc_superblue11_a/12/14/16_a` converge; `mgc_des_perf_b` places but stops on
+      `divergence_guard`. ⚠️ Surfaced a *new* defect: `mgc_matrix_mult_a` at **3.03×** (GP dies at
+      iteration 290) — the single worst design in the tier, and what destroys the mean.
+      → [[_NEW_REPORT_performance_snapshot_20260810.md]]
 
 **Do NOT "fix" the snapshot by re-running these with a hand-tuned seed** — that is a per-design
 hyperparameter, not comparable to the other 40, and it hides the defect.
@@ -575,10 +579,20 @@ Two defects, ranked:
       numbers. Needs ~8–10 more designs run blind — the trace projection **cannot** identify
       flippers near the budget (4-sig-fig HPWL; `adaptec3`'s ratio straddles 1.005), so do not
       re-derive them offline.
-- [ ] **Our overflow metric vs XPlace's disagree on direction for `mgc_superblue19`** — ours says
-      the 1.010 placement is 35% better spread, XPlace's exact overflow on the same `.def` says
-      slightly worse. Not a reporting artifact. Own investigation before our overflow number is
-      used to argue placement quality.
+- [x] **Our overflow metric vs XPlace's disagree on direction for `mgc_superblue19`** — ROOT-CAUSED
+      2026-08-11, and it is not an overflow-metric bug: the two sides use **different
+      `target_density`** on ISPD2015. Promoted to **#25**, which is the real issue.
+- [ ] **Best-solution tracking still diverges from XPlace in two places** (found while answering
+      "is it faithful?", 2026-08-11 — the *rule* is faithful, these are not):
+      - **XPlace snapshots the LOOKAHEAD, we snapshot the COMMITTED position.** `mov_node_pos` IS
+        `v_k` (`nesterov_optimizer.py:71`, *"directly use p as v_k to save memory"*), so
+        `update_best_sol(mov_node_pos)` stores v_k and `evaluator_fn(mov_node_pos)` measures HPWL
+        **and** overflow at v_k — one position, self-consistent. We snapshot `node_pos` (u), measure
+        HPWL at u and overflow at v. Fix (B) made *our* side self-consistent at u; XPlace is
+        self-consistent at v. Deciding u-vs-v is a separate call — it changes the shipped `.def`.
+      - **`BEST_SOL_MIN_ITER` is absolute, XPlace's is phase-relative.** Ours: `iteration < 50`.
+        XPlace: `self.iter - self.init_iter < 50` (`param_scheduler.py:393`). After the phase-2
+        restart ours tracks immediately; XPlace waits 50 iterations. Affects mixed-size only.
 - [ ] **Move the A/B data out of `/tmp`** into `.claude/2_ARTIFACTS/` if it is ever to be cited:
       `/tmp/lgdp_ab/results_{1005,101}.tsv`.
 
@@ -597,6 +611,53 @@ fixed in one change once defect 1 landed, since the rename and the gate touch th
 
 → [[_NEW_REPORT_24_best_solution_trackers_20260810.md]],
   [[_NEW_HANDOFF_24_best_solution_buffer_20260810.md]]
+
+---
+
+## #25 — We and XPlace use DIFFERENT `target_density` on ISPD2015 (opened 2026-08-11)
+
+**Our ISPD2015 overflow numbers are not comparable to XPlace's, and it is not only a reporting
+problem — we are optimizing to a different density target on 20 of 28 ISPD designs.**
+
+Measured on identical `.def` files (byte-identical, verified), our `Final Overflow (exact, no
+fillers)` vs XPlace's `get_obj_overflow` on the same placement:
+
+| design | ours | XPlace | ratio | target_density (ours / XPlace) |
+|---|---|---|---|---|
+| `adaptec1` | 1.093e-01 | 0.1094 | **0.9991** | 1.0 / 1.0 |
+| `mgc_fft_b` | 1.395e-01 | 0.1247 | 1.119 | **0.6** / 1.0 |
+| `mgc_des_perf_1` | 9.932e-02 | 0.0113 | **8.79** | **0.906** / 1.0 |
+
+**Root cause.** XPlace's overflow is `((density_map - args.target_density) * bin_area).clamp(min=0)
+/ total_mov_area_without_filler` (`evaluator.py:48`). `args.target_density` is set **per design** by
+`setup_design_args` (`utils/setup_dataset.py:54-85`) — whose branches cover only ISPD2005 and the
+*classic* superblue names. **No branch matches `mgc_*`, so ISPD2015 keeps the default 1.0.** The
+only other write is `database.py:679-682`, which can only raise it. `placement.constraints` is
+passed to the external **DP engine** (`detail_placement.py:670,707`), never into the objective.
+
+We instead take it from the DEF: `maximum_utilization ... Overridden by benchmark's
+placement.constraints if present` (`default_config.toml`). Hence 0.6 / 0.906 above, and hence a
+smaller per-bin capacity and a higher overflow. adaptec1 (bookshelf, no constraint) agrees to 0.1%,
+which is the control proving the metric itself is right.
+
+**Why this is bigger than a metric mismatch** — `target_density` also feeds:
+- the **convergence signal** (smoothed overflow drives the stop), so we stop on a different criterion;
+- **filler area** (`initializer.py:72` ↔ our `rebuildFillers`);
+- the **movable-macro density weight** (`database.py:921-923`, the #11b `target_density` override).
+
+So on ISPD2015 we spread to a tighter target than XPlace does. **Hypothesis worth testing: this is
+part of the ISPD2015 HPWL gap** — a tighter density target buys spread with wirelength.
+
+- [ ] **Decide which is right, and document it as deliberate either way.** Ours is arguably the more
+      physical reading (the DEF states a utilization the design must respect, and XPlace *does*
+      honour it at DP time). XPlace's is what our numbers must match to be comparable. These can be
+      reconciled — e.g. optimize at 1.0 to match, and report the DEF-constrained number separately.
+- [ ] **A/B it on ISPD2015**: `maximum_utilization` forced to 1.0 vs DEF-derived, GP HPWL + post-DP.
+      Cheap via `DSE_RUN_SET`; `mgc_des_perf_1` (0.906) and `mgc_fft_b` (0.6) bracket the range.
+- [ ] **Until then, do not quote our ISPD2015 exact overflow against XPlace's.** The smoothed
+      overflow has the same defect. `adaptec1`-style bookshelf designs are unaffected.
+
+→ [[_NEW_REPORT_24_best_solution_trackers_20260810.md]] §8 (measurement + XPlace source trail)
 
 ---
 
