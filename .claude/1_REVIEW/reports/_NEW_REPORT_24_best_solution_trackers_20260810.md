@@ -351,5 +351,5 @@ Data, not committed (`/tmp`, will not survive): sweep at
 `vck5000/results/DSE_20260810_173906/`, LG+DP at `/tmp/lgdp_ab/results_{1005,101}.tsv`.
 **If the A/B is to be cited later, move those two TSVs into `.claude/2_ARTIFACTS/`.**
 
-Related: [[_NEW_HANDOFF_24_best_solution_buffer_20260810.md]] (the handoff that opened this),
+Related: [[HANDOFF_24_best_solution_buffer_20260810.md]] (the handoff that opened this),
 [[_NEW_REPORT_performance_snapshot_20260810.md]] (the re-baseline these numbers sit alongside).

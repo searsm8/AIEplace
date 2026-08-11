@@ -610,7 +610,7 @@ fixed in one change once defect 1 landed, since the rename and the gate touch th
 </details>
 
 → [[_NEW_REPORT_24_best_solution_trackers_20260810.md]],
-  [[_NEW_HANDOFF_24_best_solution_buffer_20260810.md]]
+  [[HANDOFF_24_best_solution_buffer_20260810.md]]
 
 ---
 

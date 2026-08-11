@@ -53,7 +53,7 @@
 - **#24 — the `Restored … from iteration N` log line names a placement that is not the one
   shipped** (opened 2026-08-10). One snapshot buffer, two trackers writing it. Headline numbers are
   unaffected (recomputed on the restored geometry); the provenance line is false and it already
-  caused one wrong diagnosis. → [[_NEW_HANDOFF_24_best_solution_buffer_20260810.md]]
+  caused one wrong diagnosis. → [[HANDOFF_24_best_solution_buffer_20260810.md]]
 - **#22 — 8 ISPD2015 designs have no XPlace reference** (fence regions; `--dataset ispd2015` is
   silently rewritten to `ispd2015_fix`). Blocked on obtaining that dataset.
 

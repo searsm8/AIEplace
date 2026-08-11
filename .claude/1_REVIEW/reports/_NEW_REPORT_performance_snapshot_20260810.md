@@ -147,7 +147,7 @@ Suite-wide stop reasons: **20 converged, 8 `divergence_guard`** (was 14/14 on 08
 2. **TODO #24 — `best_solution_pos` is one buffer shared by two trackers.** The
    `Restored … from iteration N` log line names a placement that is not the one shipped. Headline
    numbers above are unaffected (they are recomputed on the restored geometry), but the provenance
-   line is false. → [[_NEW_HANDOFF_24_best_solution_buffer_20260810.md]]
+   line is false. → [[HANDOFF_24_best_solution_buffer_20260810.md]]
 3. **8 of 28 stop on `divergence_guard`, not `converged`** — and did so on 08-07 too, so it is not
    a #23 artifact. Unexplained. A bigger question mark over ISPD2015 scores than the dead designs
    were.
