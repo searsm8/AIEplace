@@ -82,6 +82,22 @@ void DataBase::readPlacementConstraints()
             } else {
                 m_maximum_utilization = std::stof(value_str);
             }
+            // A utilization outside (0, 1] is a malformed file, not a design choice. Refuse to run:
+            // mgc_matrix_mult_a's file ended `maximum_utilization=60% ` -- one trailing space, which
+            // defeats the '%' test above, so std::stof("60% ") stopped at the '%' and returned 60.0.
+            // The design placed at 100x its target density for weeks (29,779,040 fillers against
+            // ~144,900 expected, a filler area 20x the die) and scored 3.27x XPlace. TODO #27.
+            //
+            // This exits rather than warns ON PURPOSE. The old code already printed the evidence --
+            // "maximum_utilization=6000%" -- on every run, and a log line nobody reads is not a
+            // guard. The benchmark dir is gitignored, so a fresh clone or re-download reintroduces
+            // the bad file; this is what makes that recoverable instead of silently wrong.
+            if (m_maximum_utilization <= 0.0f || m_maximum_utilization > 1.0f) {
+                Logger::log_error("Malformed placement constraint in " + constraints_path.string()
+                    + ": maximum_utilization parsed as " + std::to_string(m_maximum_utilization)
+                    + ", expected a fraction in (0, 1]. Offending line: '" + line + "'");
+                exit(1);
+            }
             Logger::log_info("Read placement constraint: maximum_utilization=" +
                             std::to_string((int)(m_maximum_utilization * 100)) + "%");
             break;

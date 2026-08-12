@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-08-11 22:34 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-11 23:41 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 
 ## Two threads
 - **sw_only** — CPU golden reference; goal is to match XPlace. The active thread.
@@ -16,9 +16,12 @@
   | **ISPD2015 (11)** | 1.0232 → 1.0273 | 1.2023 → 1.2268 |
   | **all 19** | 1.0113 → **1.0095** | 1.1218 → 1.1335 |
 
-  **The mean is not quotable**: `mgc_matrix_mult_a` alone carries it (3.27×). Excluding that one
-  design the mean is **1.0150**. `divergence_guard` 10/28 → 8/28. 9 designs unscored (#26).
-  → [[_NEW_REPORT_26_precond_always_on_20260811.md]]
+  ⚠️ The `mgc_matrix_mult_a` row above is **superseded** — #27 fixed it the same day (3.2669 →
+  1.0171). With that row corrected the numbers are **median 1.0095, mean 1.0151** (14/19 within ±2%,
+  `divergence_guard` 7/28), and **the mean is quotable for the first time**. ISPD2015 alone becomes
+  median 1.0171, mean **1.0223**. The v3 TSVs deliberately still hold the broken row — see #27.
+  9 designs unscored (#26).
+  → [[_NEW_REPORT_26_precond_always_on_20260811.md]], [[_NEW_REPORT_27_matrix_mult_a_stray_space_20260811.md]]
   <details><summary>Superseded: "median 1.0113, mean 1.1218" (2026-08-10, pre-`3c70b38`)</summary>
 
   > **Median HPWL ratio 1.0113 vs XPlace** over **19 scored ISPD designs** (legal-vs-legal, re-run
@@ -93,6 +96,21 @@
 - `make host HOST=pl_algo` needs one `make clean HOST=pl_algo` first (stale `.d`, not a source break).
 
 ## Closed 2026-08-11
+- **#27 — `mgc_matrix_mult_a` was a stray space, not an algorithm failure.** Its
+  `placement.constraints` was 25 bytes — `maximum_utilization=60% \n`, one trailing space more than
+  every other design's. `readPlacementConstraints` tests `back() == '%'` to decide whether to divide
+  by 100; the space defeats it, `stof("60% ")` returns **60.0**, and the design placed at
+  `target_density = 60`: **29,779,040 fillers** for 149,650 movable cells, a filler area ~20× the
+  die. **Fixed by deleting the space** (file now byte-identical to `mgc_matrix_mult_b`'s), and
+  `readPlacementConstraints` now hard-errors on any value outside (0, 1].
+  **3.2669 → 1.0171**; `divergence_guard` at 271 → **converged** at 715.
+  ⚠️ **The benchmark fix is NOT tracked** — `benchmarks/.gitignore` ignores `ispd2015`, so a fresh
+  clone or re-download reintroduces the bad file. Check:
+  `wc -c vck5000/host/benchmarks/ispd2015/mgc_matrix_mult_a/placement.constraints` must be **24**.
+  The new hard-error is what makes that recoverable rather than silently wrong.
+  ⚠️ Its apparent +7.71% response to the preconditioner change was **noise** — a broken landscape
+  reshuffling. Check a design's inputs before reading its response to an algorithm change.
+  → [[_NEW_REPORT_27_matrix_mult_a_stray_space_20260811.md]]
 - **Preconditioner always on + escalation unthrottled** (`3c70b38`). Two coupled faithfulness fixes,
   both about `precond_coef` — which feeds the per-node `precond_weight` **and** `precond_kappa`, and
   κ gates the every-3rd-iteration γ/λ throttle for every design.
@@ -141,16 +159,6 @@
   the `floorplan.def` hardcoding stands.
 
 ## Newly open
-- **#27 — `mgc_matrix_mult_a` is a one-byte parser bug, not an algorithm failure.** Its
-  `placement.constraints` is 25 bytes — `maximum_utilization=60% \n`, **one trailing space** longer
-  than every other design's. `readPlacementConstraints` tests `back() == '%'` to decide whether to
-  divide by 100; the space defeats it, `stof("60% ")` returns **60.0**, and the design runs at
-  `target_density = 60`. Result: **29,779,040 fillers** for 149,650 movable cells (~144,900
-  expected) — filler area ~20× the die. GP dies at iteration 271; post-DP **3.27× XPlace**.
-  `mgc_fft_b`/`matrix_mult_b`/`matrix_mult_c` carry the same `60%` in 24-byte files and parse fine;
-  all 20 ISPD2015 files checked byte-wise, **exactly one is affected**. Fix the parser, not the
-  benchmark. **This one design is the entire suite mean** (1.0150 over the other 18), and its
-  response to any algorithm change is noise until fixed.
 - **#26 — fence regions** (see *Where sw_only stands*). Supersedes #22.
 - **#25 — we and XPlace use different `target_density` on ISPD2015.** On byte-identical `.def`s our
   exact overflow vs XPlace's: `adaptec1` **0.9991** (both 1.0), `mgc_fft_b` 1.119 (ours 0.6),
