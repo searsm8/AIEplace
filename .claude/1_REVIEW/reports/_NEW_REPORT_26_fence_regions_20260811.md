@@ -238,7 +238,13 @@ Artifacts (all in `.claude/2_ARTIFACTS/`, untracked): `lgdp44_v4_results.tsv`,
 
 ## 7. Step 4 — should we implement fence regions?
 
-**Recommendation: no. Document it and move on.** Three reasons, in order of weight:
+> **DECIDED 2026-08-12 (Mark): no — document it.** We ignore fence regions, as XPlace does, and say
+> so wherever the numbers appear. The rule is recorded in **`CLAUDE.md`** rather than only here,
+> because an archived tasks.md entry is not loaded next session — which is exactly how #22's
+> analysis went stale and #26 re-derived it four days later.
+
+**Recommendation as written before that decision: no. Document it and move on.** Three reasons, in
+order of weight:
 
 1. **XPlace has no formulation to copy.** It raises `NotImplementedError` and its paper removes the
    constraint (footnote 2: *"We will address the fence region constraint in our future version"*).
@@ -267,6 +273,28 @@ sentence the TCAD paper uses.
 - **`fence_check.py` is not wired into any suite.** `--expect-legal` on the 9 contest solutions is a
   ~20 s tripwire that would catch a DEF-parsing regression; it belongs in `make test-regress` if
   anyone touches the region/group parsing again.
+
+## 9. Keeping this closed (added 2026-08-12)
+
+The failure this ticket is most likely to repeat is not conceptual — it is **`ispd2015_fix` going
+missing or stale** on a fresh box or after a benchmark re-download, after which the harnesses skip
+9 designs and someone starts the investigation over. That is the exact shape of the #22 → #26 loop.
+Both harnesses now **fail loudly on stdout** naming the regeneration command, and warn when the raw
+`floorplan.def` is newer than the derived `_fix` DEF. Exercised against a synthetic missing-`_fix`
+tree, not merely read.
+
+**Keep the fenced originals — deleting them was considered and rejected.** They are the input
+`fix_ispd2015_route.py` reads, so `_fix` becomes unregenerable without them, and they hold the only
+copy of `after_legalized.ntup.fix.def`: the contest's own legal placement, which is the control for
+every violation number in §4 and the only fence-legal reference we have. `_fix` carries neither that
+file nor `design.v`. Deleting the raw data would additionally break both frozen regress configs, the
+run and DSE configs, four `vck5000/tools/*.sh`, and XPlace's `data/raw/ispd2015` symlink — to
+reclaim 1.8 GB that is already gitignored and re-downloadable.
+
+One trap if anyone later tries to standardise on `_fix` alone: it nudges 6 fixed macros onto the
+manufacturing grid in `edit_dist_a` and `fft_b` (≤3 DBU), so those designs would **not** reproduce
+their current placements. `mgc_pci_bridge32_b` is bit-identical across the two variants (§4a) only
+because it has no such nudges.
 - **The scoring harnesses are untracked** (`.claude/2_ARTIFACTS/` is gitignored) even though they
   produce every headline number in this repo. `run_lgdp44.sh` still carried a stale default output
   path from the 2026-08-07 `.claude/` move, and so did `analyze_full44.py` — both fixed here, both

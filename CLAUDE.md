@@ -101,6 +101,27 @@ plus the prebuilt Limbo parser libs in `common/lib/`. Landed 2026-08-04 (TODO #9
 silent fork between the two hosts. Fix a parser or geometry bug **there**, once. Nothing in
 `common/` may include `AIEplace.h`, `Visualizer.h`, or anything from `pl/`; see its README.
 
+## Fence regions on ISPD2015: we ignore them ON PURPOSE (decided 2026-08-12, TODO #26)
+
+9 of the 20 ISPD2015 designs carry DEF `REGIONS`/`GROUPS` — cells of an RTL module confined to a
+sub-area of the die. **We discard them** (`DataBase::add_def_region`/`add_def_group` are deliberately
+empty; `readDEF()` warns on every such run), and so does XPlace: it raises `NotImplementedError`
+rather than place them, and the TCAD paper marks those same 9 designs † *"with fence-region
+constraints removed"*. **Both sides of every ratio use the fence-stripped variant, so the comparison
+is fair — but our ISPD2015 results are NOT legal contest solutions**: we place 59–94% of the
+constrained cells outside their region. Say "ISPD2015 with fence regions removed, as in XPlace"
+in any writeup. Do not implement fences without re-reading [[#26]] first — XPlace has no
+formulation to copy, so anything built here is *our* design decision, not faithfulness work.
+
+- **`ispd2015_fix` is GENERATED, not downloaded.** If it is missing or older than the raw data
+  (fresh box, re-downloaded benchmarks), the scoring harnesses cannot score those 9 designs:
+  ```bash
+  cd ~/phd/Xplace/data && python3 fix_ispd2015_route.py
+  ```
+- **Keep the fenced originals.** They are the input that command reads, and they hold the only copy
+  of `after_legalized.ntup.fix.def` — the contest's own legal placement, which is the control for
+  `vck5000/tools/fence_check.py` and the only fence-legal reference we have.
+
 ## Algorithm goal: mimic XPlace as closely as possible
 sw_only's placement algorithm should track the XPlace reference (`~/phd/Xplace/src/`) as
 faithfully as possible. Prefer matching XPlace's formulation over ad-hoc heuristics or

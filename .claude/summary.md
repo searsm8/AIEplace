@@ -79,9 +79,10 @@
   shipped** (opened 2026-08-10). One snapshot buffer, two trackers writing it. Headline numbers are
   unaffected (recomputed on the restored geometry); the provenance line is false and it already
   caused one wrong diagnosis. → [[HANDOFF_24_best_solution_buffer_20260810.md]]
-- **#26 — fence regions: scored, measured, and priced** (opened + steps 1/2/3/5 done 2026-08-11).
-  All 9 are scored; **one decision is left for Mark** (implement fence regions, or document?
-  → report §7 recommends *document*). Three things worth carrying forward:
+- **#26 — fence regions: scored, measured, priced, and CLOSED** (2026-08-12). **Decision (Mark): we
+  do NOT implement fence regions — we ignore them, as XPlace does, and say so.** The rule now lives
+  in `CLAUDE.md`, which is loaded every session; this bullet is a pointer, not the source.
+  Three things worth carrying forward:
   - **`ispd2015_fix` is GENERATED, not downloaded** — `cd ~/phd/Xplace/data && python3
     fix_ispd2015_route.py` builds all 20 from the raw data (a symlink to our own benchmarks).
     The regenerated `mgc_pci_bridge32_b` DEF is byte-identical to the copy its reference came from.
@@ -102,6 +103,12 @@
 - `top.cpp` is still a mode-switch bring-up scaffold; the host owns the γ/λ schedule, one
   round-trip per iteration.
 - `make host HOST=pl_algo` needs one `make clean HOST=pl_algo` first (stale `.d`, not a source break).
+
+## Closed 2026-08-12
+- **#26 — fence regions** (details above). Decision: ignore them, document it, keep both benchmark
+  variants. Guards against re-deriving this: the rule in `CLAUDE.md`, a warning in every run log,
+  and both scoring harnesses now failing loudly (with the regeneration command) when `ispd2015_fix`
+  is missing or older than the raw data.
 
 ## Closed 2026-08-11
 - **#22 — the 8 designs with no XPlace reference.** Resolved by #26: neither of that entry's two
@@ -170,8 +177,6 @@
   the `floorplan.def` hardcoding stands.
 
 ## Newly open
-- **#26 — fence regions** (see *Where sw_only stands*). Supersedes #22, which is now **resolved**.
-  Only step 4 is open, and it is a decision, not work.
 - **#25 — we and XPlace use different `target_density` on ISPD2015.** On byte-identical `.def`s our
   exact overflow vs XPlace's: `adaptec1` **0.9991** (both 1.0), `mgc_fft_b` 1.119 (ours 0.6),
   `mgc_des_perf_1` **8.79** (ours 0.906). We read the DEF's `placement.constraints`; XPlace leaves
