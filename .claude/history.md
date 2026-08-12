@@ -22,6 +22,50 @@ routability) is **out of scope** — Mark's call.
 
 **Closed 2026-08-11:** **#27** — `mgc_matrix_mult_a`, the suite's 3.27x outlier, was a stray space in its `placement.constraints`, parsed as target density 60 instead of 0.6 (29.8M fillers, 20x the die area). One byte; ratio now 1.0171 and the suite mean is quotable for the first time. Not an algorithm defect — and its apparent +7.71% response to #26 was noise.
 
+**Closed 2026-08-11:** **#22** — the 8 ISPD2015 designs with no XPlace reference. Resolved by **#26**, and neither of this entry's two options was the answer: `ispd2015_fix` is *generated* by XPlace's own `data/fix_ispd2015_route.py`, not downloaded and not hand-built. Its construction-validation demand was honoured anyway (the regenerated `mgc_pci_bridge32_b` DEF is byte-identical), and its standing caveat — that design's reference being `_fix` while sw_only places the region-bearing DEF — is now measured and void: sw_only produces a bit-identical placement from either variant. The ISPD suite is 28 of 28.
+
+---
+
+## #22 — 8 ISPD2015 designs have no XPlace reference (opened 2026-08-07, CLOSED via #26 2026-08-11)
+
+**RESOLVED via [[#26]] on 2026-08-11 — all 8 now have a reference.** Neither option below was the
+answer: `ispd2015_fix` is **generated** by XPlace's own `data/fix_ispd2015_route.py`, not downloaded
+and not hand-built. The construction-validation argument was right and was honoured anyway — the
+regenerated `mgc_pci_bridge32_b` is byte-identical to the copy its reference was measured on. The ⚠️
+caveat at the bottom is now **measured and void**: sw_only produces a bit-identical placement from
+either variant, because it discards the regions. Kept below for the retraction trail.
+
+<details><summary>Original entry (superseded)</summary>
+
+**Work [[#26]], not this.** The root cause is now exact (XPlace raises `NotImplementedError` in
+`init_filler`, before legalization), the affected set is proven identical to the paper's †-marked
+designs, and `mgc_pci_bridge32_b` is scoreable today. #26 also raises the part this entry never
+mentioned: our own parser discards `REGIONS`/`GROUPS`, so we place these designs unconstrained.
+Kept below for its retraction trail and the construction-validation argument, which still holds.
+
+**Decided 2026-08-07 (Mark): SKIP for now.** The 44-design snapshot ships with 36 of 44 carrying a
+reference; these 8 appear with our own numbers and no ratio. This entry exists so the analysis is not
+re-derived.
+
+`Xplace/main.py:94-96` silently rewrites `--dataset ispd2015` → `ispd2015_fix`, and that directory
+holds exactly **one** design. `--custom_path` is checked *before* the dispatch and bypasses the
+rewrite — that got us the other 11. The remaining 8 carry `REGIONS`/`GROUPS` that XPlace says it
+cannot handle, so they are recorded `blocked_fence_region` rather than given a **silently wrong**
+reference.
+
+If revisited: **Option 1 (preferred)** obtain the official `ispd2015_fix` — no code change needed.
+**Option 2** construct it (merge tech+cells LEF, strip REGIONS/GROUPS) — but it is *not* a plain
+concatenation, and the validation is free and must come first: we hold both variants of
+`mgc_pci_bridge32_b`, so a constructed `_fix` must reproduce its known numbers or none of the 8 can
+be trusted.
+
+⚠️ **Caveat that applies even today:** `mgc_pci_bridge32_b`'s reference came from the `_fix` data
+(fence regions stripped) while sw_only places the region-bearing DEF. For that one design the two
+tools solved slightly different problems.
+</details>
+
+---
+
 ---
 
 ## #27 — `mgc_matrix_mult_a`: one trailing space parses 60% as 6000% (opened 2026-08-11, CLOSED 2026-08-11)

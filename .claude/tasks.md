@@ -373,36 +373,6 @@ selection — the answer changes `common.mk`.
 
 ---
 
-## #22 — 8 ISPD2015 designs have no XPlace reference (opened 2026-08-07, SUPERSEDED by #26 2026-08-11)
-
-**Work [[#26]], not this.** The root cause is now exact (XPlace raises `NotImplementedError` in
-`init_filler`, before legalization), the affected set is proven identical to the paper's †-marked
-designs, and `mgc_pci_bridge32_b` is scoreable today. #26 also raises the part this entry never
-mentioned: our own parser discards `REGIONS`/`GROUPS`, so we place these designs unconstrained.
-Kept below for its retraction trail and the construction-validation argument, which still holds.
-
-**Decided 2026-08-07 (Mark): SKIP for now.** The 44-design snapshot ships with 36 of 44 carrying a
-reference; these 8 appear with our own numbers and no ratio. This entry exists so the analysis is not
-re-derived.
-
-`Xplace/main.py:94-96` silently rewrites `--dataset ispd2015` → `ispd2015_fix`, and that directory
-holds exactly **one** design. `--custom_path` is checked *before* the dispatch and bypasses the
-rewrite — that got us the other 11. The remaining 8 carry `REGIONS`/`GROUPS` that XPlace says it
-cannot handle, so they are recorded `blocked_fence_region` rather than given a **silently wrong**
-reference.
-
-If revisited: **Option 1 (preferred)** obtain the official `ispd2015_fix` — no code change needed.
-**Option 2** construct it (merge tech+cells LEF, strip REGIONS/GROUPS) — but it is *not* a plain
-concatenation, and the validation is free and must come first: we hold both variants of
-`mgc_pci_bridge32_b`, so a constructed `_fix` must reproduce its known numbers or none of the 8 can
-be trusted.
-
-⚠️ **Caveat that applies even today:** `mgc_pci_bridge32_b`'s reference came from the `_fix` data
-(fence regions stripped) while sw_only places the region-bearing DEF. For that one design the two
-tools solved slightly different problems.
-
----
-
 ## #23 — `init_step_seed = 0.01` underflows: 5 ISPD2015 designs are dead on arrival (opened 2026-08-07)
 
 `mgc_superblue{11_a,12,14,16_a}` and `mgc_des_perf_b` **never move a cell**. `estimateInitialStep()`
@@ -667,7 +637,49 @@ part of the ISPD2015 HPWL gap** — a tighter density target buys spread with wi
 
 ---
 
-## #26 — Fence regions: 9 ISPD2015 designs unscored, and we place them wrong (opened 2026-08-11)
+## #26 — Fence regions (opened 2026-08-11; steps 1,2,3,5 DONE 2026-08-11 — ONE DECISION LEFT)
+
+**All 9 designs are scored; the ISPD suite is 28 of 28.** Their ratios are unremarkable — median
+**1.0154**, 7 of 9 within 2%, `mgc_pci_bridge32_b` better than XPlace. ISPD median 1.0095 → **1.0106**.
+→ [[_NEW_REPORT_26_fence_regions_20260811.md]]
+
+**Step 2 was never an acquisition problem.** `ispd2015_fix` is *generated*, not downloaded:
+`cd ~/phd/Xplace/data && python3 fix_ispd2015_route.py` builds all 20 designs from the same raw
+files (which are a symlink to our own benchmarks). The regenerated `mgc_pci_bridge32_b` DEF is
+**byte-identical** to the 2026-07-13 copy, so #22's "a hand-built _fix cannot be trusted" caveat is
+retired — this is XPlace's own script.
+
+**Ignoring the fence is a real gap and it is now measured: 59–94% of fence-constrained cells sit
+outside their region** in our placements (`vck5000/tools/fence_check.py`). Controlled against the
+contest's own legalized solutions, which report **0 of 190,010** outside. Against those legal
+solutions we are 2.6% better on the 11 unfenced designs and 12.5% better on the fenced 9 —
+**a 9.9 pp difference-in-differences**, i.e. ~10% of our margin there is the constraint, not the placer.
+
+⚠️ **None of this touches the XPlace comparison** — XPlace strips fences too, and the 9 are scored
+on the stripped variant on both sides. What it invalidates is any claim these are legal ISPD2015
+solutions.
+
+- [x] **1. Score `mgc_pci_bridge32_b`** — done, and the other 8 with it. Both harnesses now split on
+      `^REGIONS` and record the data variant in a `variant` column; `analyze_full44.py` marks
+      fence-stripped designs **†**, the paper's own convention.
+- [x] **2. Obtain `ispd2015_fix` for the other 8** — regenerated (20 designs, 702 MB, ~90 s).
+      8 new XPlace references added to `tools/benchmarks.py`, cross-checked against TCAD Table III:
+      within 0.2% on 5 of 9, worst 5.4%, all on the better side (the paper's HPWL is NTUplace4dr's
+      measurement of XPlace's placement, not XPlace's own).
+- [x] **3. Measure what ignoring the fence costs** — above. Note the ticket's literal form of this
+      step has a **null answer, proved**: placing the fence-carrying vs fence-stripped DEF with
+      sw_only gives a **bit-identical** `iterations.dat` and output DEF, because the constraint is
+      discarded either way.
+- [ ] **4. Decide whether to implement fence regions.** **Mark's call — this is the only item left.**
+      Report §7 recommends **no**: XPlace has no formulation to copy (it raises; the paper removes
+      the constraint), implementing it cannot improve any number we report, and the gap is now
+      visible rather than silent. The counter-argument is in the same section and is not weak — the
+      contest scored these designs *with* the constraint, and §4b prices it at ~10%.
+- [x] **5. Stop reporting fence-carrying designs as if unconstrained** — `readDEF()` warns on every
+      run ("…the result is NOT a legal ISPD2015 solution…"), the TSVs carry `variant`, the scorecard
+      daggers the 9, and `benchmarks.py` documents which reference came from which variant.
+
+<details><summary>Original entry, as opened 2026-08-11 (diagnosis, still accurate)</summary>
 
 **Supersedes #22's "SKIP for now".** Same root cause, but the diagnosis is now exact and one design
 is scoreable today with a one-line harness change. #22 stays for its retraction trail; work here.
@@ -744,9 +756,10 @@ against XPlace's own 3.477053e+06 — we are ~5% *ahead* on this design.
       pretending otherwise. If it is large, it is a real gap in the placer.
 - [ ] **5. Either way, stop reporting fence-carrying designs as if unconstrained.** Whatever step 4
       decides, the run log should say which variant was placed.
+</details>
 
 Related: [[#22]] (same root cause, superseded decision), [[#25]] (the other ISPD2015 comparability
-defect — different `target_density`).
+defect — different `target_density`, and it applies to all 20 ISPD2015 designs including these 9).
 
 ---
 

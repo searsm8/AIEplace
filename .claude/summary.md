@@ -1,27 +1,29 @@
 # Summary — project status at a glance
-*Updated 2026-08-11 23:41 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-11 23:52 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 
 ## Two threads
 - **sw_only** — CPU golden reference; goal is to match XPlace. The active thread.
 - **pl_algo** — move the whole placement iteration onto the PL. Blocked behind #20, deliberately.
 
 ## Where sw_only stands
-- **Median HPWL ratio 1.0095 vs XPlace** over **19 scored ISPD designs** (legal-vs-legal, re-run
-  2026-08-11 on commit `3c70b38`). 13/19 within ±2%, better than XPlace on 3. **Quote the median,
-  and say which tier** — the two tiers disagree and a single number hides it:
+- **Median HPWL ratio 1.0106, mean 1.0149, over ALL 28 ISPD designs** (legal-vs-legal; GP from the
+  2026-08-11 v3 run on `3c70b38`, `matrix_mult_a` substituted post-#27). 21/28 within ±2%, better
+  than XPlace on 4. **Nothing is unscored any more** — #26 closed the 9-design fence-region hole,
+  and they held no surprise: median 1.0154, 7 of 9 within ±2%.
 
-  | | median before → after | mean before → after |
+  | | 19 designs (pre-#26) | **28 designs (now)** |
   |---|---|---|
-  | **ISPD2005 (8)** | 1.0065 → **1.0053** | 1.0111 → **1.0052** |
-  | **ISPD2015 (11)** | 1.0232 → 1.0273 | 1.2023 → 1.2268 |
-  | **all 19** | 1.0113 → **1.0095** | 1.1218 → 1.1335 |
+  | **ISPD2005 (8)** | 1.0053 / 1.0052 | 1.0053 / 1.0052 |
+  | **ISPD2015** | 1.0171 / 1.0223 (11) | **1.0163 / 1.0189 (20)** |
+  | **all ISPD** | 1.0095 / 1.0151 (19) | **1.0106 / 1.0149 (28)** |
 
-  ⚠️ The `mgc_matrix_mult_a` row above is **superseded** — #27 fixed it the same day (3.2669 →
-  1.0171). With that row corrected the numbers are **median 1.0095, mean 1.0151** (14/19 within ±2%,
-  `divergence_guard` 7/28), and **the mean is quotable for the first time**. ISPD2015 alone becomes
-  median 1.0171, mean **1.0223**. The v3 TSVs deliberately still hold the broken row — see #27.
-  9 designs unscored (#26).
-  → [[_NEW_REPORT_26_precond_always_on_20260811.md]], [[_NEW_REPORT_27_matrix_mult_a_stray_space_20260811.md]]
+  *(median / mean.)* **The mean is quotable** as of #27's fix. ⚠️ **The 9 fence designs are scored on
+  the fence-STRIPPED variant on both sides** (as the XPlace paper's †-marked table is) — a fair
+  tool-vs-tool comparison, but **not** legal ISPD2015 solutions: we place 59–94% of their constrained
+  cells outside their fence. ⚠️ The v3/v4 TSVs deliberately still hold the broken `matrix_mult_a`
+  row — see #27.
+  → [[_NEW_REPORT_26_fence_regions_20260811.md]], [[REPORT_26_precond_always_on_20260811.md]],
+  [[REPORT_27_matrix_mult_a_stray_space_20260811.md]]
   <details><summary>Superseded: "median 1.0113, mean 1.1218" (2026-08-10, pre-`3c70b38`)</summary>
 
   > **Median HPWL ratio 1.0113 vs XPlace** over **19 scored ISPD designs** (legal-vs-legal, re-run
@@ -77,12 +79,18 @@
   shipped** (opened 2026-08-10). One snapshot buffer, two trackers writing it. Headline numbers are
   unaffected (recomputed on the restored geometry); the provenance line is false and it already
   caused one wrong diagnosis. → [[HANDOFF_24_best_solution_buffer_20260810.md]]
-- **#26 — fence regions, and it is worse than a scoring gap** (opened 2026-08-11, supersedes #22).
-  The 9 unscored designs are **exactly** the paper's 9 †-marked ones. XPlace does not fail at DP —
-  it raises `NotImplementedError` in `init_filler`, before legalization. And **our own parser
-  discards `REGIONS`/`GROUPS`** (`DataBase::add_def_region`/`add_def_group` are empty stubs), so we
-  place those 9 unconstrained and report an optimistically low HPWL. One design
-  (`mgc_pci_bridge32_b`) is scoreable **today** via `--dataset ispd2015_fix`; verified end-to-end.
+- **#26 — fence regions: scored, measured, and priced** (opened + steps 1/2/3/5 done 2026-08-11).
+  All 9 are scored; **one decision is left for Mark** (implement fence regions, or document?
+  → report §7 recommends *document*). Three things worth carrying forward:
+  - **`ispd2015_fix` is GENERATED, not downloaded** — `cd ~/phd/Xplace/data && python3
+    fix_ispd2015_route.py` builds all 20 from the raw data (a symlink to our own benchmarks).
+    The regenerated `mgc_pci_bridge32_b` DEF is byte-identical to the copy its reference came from.
+  - **We violate the fences badly: 59–94% of constrained cells land outside their region.** The
+    contest's own legalized solutions score 0 of 190,010 through the same checker
+    (`vck5000/tools/fence_check.py --expect-legal`), which is what makes that a measurement.
+  - **~10 pp of our margin on those 9 is the constraint, not the placer** — we beat the contest's
+    legal solutions by 2.6% on the 11 unfenced designs and 12.5% on the fenced 9.
+  → [[_NEW_REPORT_26_fence_regions_20260811.md]]
 
 ## Where pl_algo stands
 - All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
@@ -96,6 +104,9 @@
 - `make host HOST=pl_algo` needs one `make clean HOST=pl_algo` first (stale `.d`, not a source break).
 
 ## Closed 2026-08-11
+- **#22 — the 8 designs with no XPlace reference.** Resolved by #26: neither of that entry's two
+  options was the answer — `ispd2015_fix` is generated by XPlace's own `data/fix_ispd2015_route.py`,
+  not downloaded and not hand-built. All 8 now have a reference; the suite is 28 of 28.
 - **#27 — `mgc_matrix_mult_a` was a stray space, not an algorithm failure.** Its
   `placement.constraints` was 25 bytes — `maximum_utilization=60% \n`, one trailing space more than
   every other design's. `readPlacementConstraints` tests `back() == '%'` to decide whether to divide
@@ -159,7 +170,8 @@
   the `floorplan.def` hardcoding stands.
 
 ## Newly open
-- **#26 — fence regions** (see *Where sw_only stands*). Supersedes #22.
+- **#26 — fence regions** (see *Where sw_only stands*). Supersedes #22, which is now **resolved**.
+  Only step 4 is open, and it is a decision, not work.
 - **#25 — we and XPlace use different `target_density` on ISPD2015.** On byte-identical `.def`s our
   exact overflow vs XPlace's: `adaptec1` **0.9991** (both 1.0), `mgc_fft_b` 1.119 (ours 0.6),
   `mgc_des_perf_1` **8.79** (ours 0.906). We read the DEF's `placement.constraints`; XPlace leaves

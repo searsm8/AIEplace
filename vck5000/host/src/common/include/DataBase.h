@@ -89,6 +89,10 @@ private:
     int m_total_net_degree;
     float m_maximum_utilization = 0.0f; // 0 = not specified by benchmark
     MacroClass* m_current_lef_macro = nullptr; // tracks current macro during LEF parsing for pin callbacks
+    // Fence regions are PARSED AND DISCARDED -- we place the design unconstrained, exactly as
+    // XPlace does. Counted only so readDEF() can warn that it happened (TODO #26).
+    int m_num_def_regions = 0;
+    int m_num_def_groups = 0;
     float m_total_component_area = 0.0f; // all components (movable + fixed), cached after construction
     float m_total_fixed_area = 0.0f;     // fixed components only
     float m_total_movable_area = 0.0f;   // movable components only (= total - fixed)

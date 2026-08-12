@@ -173,13 +173,19 @@ _XPLACE_MMS_FINAL = {
 # comparing to a sw_only HPWL. site_width is NOT uniform: 200 for the 15 mgc_* designs, 100 for
 # the 5 mgc_superblue* -- a blanket x200 is wrong by 2x on those five.
 #
-# ispd2015 is 12 of 20: `--dataset ispd2015` is silently rewritten to `ispd2015_fix` by
-# Xplace/main.py:94-96 and we hold only one design in that variant, so these came via
-# `--custom_path`, which bypasses the rewrite. That workaround is only valid where XPlace's stated
-# objection (fence regions) does not apply, so the 8 designs whose floorplan.def has REGIONS/GROUPS
-# have NO reference rather than a number XPlace cannot compute correctly. See TODO #22.
-# `mgc_pci_bridge32_b` is the exception: its reference came from the official `_fix` data (regions
-# STRIPPED) while sw_only places the region-bearing floorplan.def -- flagged, not comparable.
+# ispd2015 is now 20 of 20, from TWO DATA VARIANTS, and the split is not cosmetic (TODO #26):
+#   11 designs, no fence regions -- run on our raw files via `--custom_path`, which bypasses the
+#       `--dataset ispd2015` -> `ispd2015_fix` rewrite at Xplace/main.py:94-96.
+#    9 designs WITH REGIONS/GROUPS -- run on `ispd2015_fix`, XPlace's own fence-stripped variant,
+#       regenerated 2026-08-11 by `cd ~/phd/Xplace/data && python3 fix_ispd2015_route.py`. XPlace
+#       raises NotImplementedError in compute_filler_with_fence on the raw data, so this variant is
+#       the only one on which it produces a number at all -- and it is the variant the TCAD paper's
+#       dagger-marked designs use (Table III/V, footnote 2). Regeneration was validated against the
+#       2026-07-13 copy of mgc_pci_bridge32_b: the DEF is BYTE-IDENTICAL.
+# The 9 are therefore fence-stripped on BOTH sides of the ratio (sw_only discards REGIONS/GROUPS at
+# parse time regardless), which is what makes them comparable. It does NOT make either placement
+# fence-legal: ours puts 59-94% of the constrained cells outside their region. See
+# tools/fence_check.py and TODO #26.
 _XPLACE_ISPD_FINAL = {
     # --- ispd2005 (8 of 8) ---
     "ispd2005/adaptec1": (7.068107e+07, 0.1099, 7.421337e+07, 7.310315e+07),
@@ -190,7 +196,7 @@ _XPLACE_ISPD_FINAL = {
     "ispd2005/bigblue2": (1.309736e+08, 0.1112, 1.394881e+08, 1.369654e+08),
     "ispd2005/bigblue3": (2.910774e+08, 0.1125, 3.090403e+08, 3.029441e+08),
     "ispd2005/bigblue4": (7.256538e+08, 0.1126, 7.482465e+08, 7.425524e+08),
-    # --- ispd2015 (12 of 20; the other 8 are TODO #22) ---
+    # --- ispd2015, no fence regions: raw data via --custom_path (11) ---
     "ispd2015/mgc_des_perf_1":     (5.453202e+06, 0.1167, 5.842434e+06, 5.632567e+06),
     "ispd2015/mgc_fft_1":          (1.917159e+06, 0.1325, 2.059146e+06, 2.024385e+06),
     "ispd2015/mgc_fft_2":          (1.707055e+06, 0.1565, 1.843155e+06, 1.810411e+06),
@@ -199,10 +205,23 @@ _XPLACE_ISPD_FINAL = {
     "ispd2015/mgc_matrix_mult_1":  (1.001578e+07, 0.1780, 1.068492e+07, 1.050204e+07),
     "ispd2015/mgc_matrix_mult_2":  (1.020299e+07, 0.1782, 1.088948e+07, 1.070034e+07),
     "ispd2015/mgc_matrix_mult_a":  (1.466008e+07, 0.1742, 1.538942e+07, 1.516973e+07),
-    "ispd2015/mgc_pci_bridge32_b": (3.432114e+06, 0.2431, 3.495595e+06, 3.477053e+06),
     "ispd2015/mgc_superblue12":    (2.527073e+08, 0.1436, 2.590678e+08, 2.571014e+08),
     "ispd2015/mgc_superblue14":    (2.263669e+08, 0.1300, 2.306337e+08, 2.282981e+08),
     "ispd2015/mgc_superblue19":    (1.544428e+08, 0.1323, 1.573560e+08, 1.555965e+08),
+    # --- ispd2015, FENCE REGIONS STRIPPED: `--dataset ispd2015_fix` (9; the paper's dagger set) ---
+    # Captured 2026-08-11 apart from mgc_pci_bridge32_b, which is the 2026-08-07 run on the
+    # byte-identical earlier copy of the same data. Cross-checked against TCAD Table III (which is
+    # in microns: multiply by SITE_WIDTH, divide by the DEF's 1000 DBU/micron) -- agreement is
+    # within 1% on 5 of the 9 and never worse than 5.4%.
+    "ispd2015/mgc_des_perf_a":     (9.819075e+06, 0.1460, 1.003364e+07, 9.897489e+06),
+    "ispd2015/mgc_des_perf_b":     (7.769324e+06, 0.1447, 7.966295e+06, 7.865749e+06),
+    "ispd2015/mgc_edit_dist_a":    (2.065261e+07, 0.1498, 2.098810e+07, 2.079566e+07),
+    "ispd2015/mgc_matrix_mult_b":  (1.337186e+07, 0.1702, 1.402243e+07, 1.383469e+07),
+    "ispd2015/mgc_matrix_mult_c":  (1.292231e+07, 0.1672, 1.358381e+07, 1.338843e+07),
+    "ispd2015/mgc_pci_bridge32_a": (1.647415e+06, 0.2169, 1.738537e+06, 1.707594e+06),
+    "ispd2015/mgc_pci_bridge32_b": (3.432114e+06, 0.2431, 3.495595e+06, 3.477053e+06),
+    "ispd2015/mgc_superblue11_a":  (3.316791e+08, 0.1374, 3.402111e+08, 3.354093e+08),
+    "ispd2015/mgc_superblue16_a":  (2.534746e+08, 0.1412, 2.584717e+08, 2.554021e+08),
 }
 
 # LEF site width in DBU: SITE SIZE x (microns) * UNITS DATABASE MICRONS, read from each design's

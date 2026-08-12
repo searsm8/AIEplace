@@ -241,6 +241,13 @@ bool DataBase::readDEF()
     bool success = runParserSilenced([&]() { return DefParser::read(*this, def_file); });
 
     if (success) {
+        if (m_num_def_regions > 0 || m_num_def_groups > 0) {
+            Logger::log_warning("DEF declares " + std::to_string(m_num_def_regions) + " REGIONS and "
+                + std::to_string(m_num_def_groups) + " GROUPS (fence regions). These are IGNORED: "
+                "the design is placed unconstrained, so the result is NOT a legal ISPD2015 solution "
+                "and is comparable only against another tool that also ignores them (XPlace does). "
+                "Measure the violation with tools/fence_check.py. TODO #26.");
+        }
         // Marks the transition from "reading input files" to "reporting on the parsed design" —
         // everything logged from here on describes the design that was just read.
         Table section;
@@ -675,10 +682,20 @@ float DataBase::computeTotalComponentArea()
 
         void DataBase::resize_def_blockage(int) {}
         void DataBase::add_def_placement_blockage(std::vector<std::vector<int> > const&) {}
-        void DataBase::resize_def_region(int) {}
+        // Fence regions (DEF REGIONS + GROUPS) are DISCARDED, not implemented. The 9 ISPD2015
+        // designs that carry them are placed unconstrained, and on those our placement puts
+        // 59-94% of the constrained cells outside their fence (vck5000/tools/fence_check.py).
+        // XPlace does the same -- it refuses the constraint outright and its released
+        // `ispd2015_fix` data strips it -- so a comparison against XPlace stays fair, but the
+        // result is NOT a legal ISPD2015 solution. Counted here so the run log says which
+        // designs it happened on (TODO #26).
+        void DataBase::resize_def_region(int n) { m_num_def_regions = n; }
         void DataBase::add_def_region(DefParser::Region const& r) {}
-        void DataBase::resize_def_group(int) {}
+        void DataBase::resize_def_group(int n) { m_num_def_groups = n; }
         void DataBase::add_def_group(DefParser::Group const& g) {}
+        // The warning itself is emitted by readDEF(), NOT here: every callback runs inside
+        // runParserSilenced(), which redirects stdout for the duration of the parse and would
+        // swallow it.
         void DataBase::end_def_design() {}
         
 
