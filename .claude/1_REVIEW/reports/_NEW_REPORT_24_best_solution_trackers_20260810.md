@@ -189,6 +189,15 @@ spread — deliberately.
 with `value_or` so the frozen regress configs keep working) and swept via
 `DSE_RUN_SET=best_sol_ab`, 8 designs × 2 arms.
 
+> **Annotation 2026-08-12 (TODO #28).** `DSE_RUN_SET` and the `_best_sol_ab()` run-set were
+> deleted in the `dse.py` refactor. The equivalent today:
+> ```
+> python3 tools/dse.py --set best_aux_max_hpwl_ratio=1.005,1.010 --designs \
+>   mgc_fft_b,mgc_des_perf_1,mgc_matrix_mult_c,ispd2005/adaptec1,\
+> mgc_superblue19,mgc_superblue16_a,ispd2005/adaptec3,ispd2005/bigblue2
+> ```
+> Grids now come from `benchmarks.py` and match the ones this sweep used (512/1024 per design).
+
 Subset: 4 designs projected to flip at 1.010 plus 4 controls that must not move — including
 `mgc_des_perf_1`, which holds still because it fails the *overflow* gate rather than the HPWL one,
 pinning the other condition. **All four controls came back byte-identical across arms.**

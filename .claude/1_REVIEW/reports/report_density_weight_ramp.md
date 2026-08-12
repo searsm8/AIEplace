@@ -90,6 +90,17 @@ the 1024 designs carry the gap, and that is exactly where slowing the ramp pays 
   1.05} × {init_mult 4e-5, 8e-5} with adaptec1/bigblue1@512 controls, `convergence_overflow_threshold`
   0.04, `random_seed` 42 — mirror `_gamma_ab`, select with `DSE_RUN_SET=dwramp_ab`.
 
+  > **Annotation 2026-08-12 (TODO #28).** `DSE_RUN_SET`, `_RUN_SETS` and `_gamma_ab` were deleted
+  > in the `dse.py` refactor; no run-set needs adding any more. This sweep is now one command:
+  > ```
+  > python3 tools/dse.py --designs ispd2005/adaptec2,ispd2005/bigblue2,ispd2005/adaptec1,ispd2005/bigblue1 \
+  >     --set density_weight_max_step=1.045,1.05 \
+  >     --set density_weight_init_multiplier=4e-5,8e-5 \
+  >     --set convergence_overflow_threshold=0.04
+  > ```
+  > Grids come from `benchmarks.py` (adaptec2/bigblue2 → 1024, adaptec1/bigblue1 → 512), which is
+  > exactly the pairing described above.
+
 ## No source/behavior change / no commit
 This task changed **no** placer source (the update rule already matched the handoff) and made no
 repo change, so there is nothing to commit for it. All results above are observational; the

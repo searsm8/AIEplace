@@ -59,8 +59,8 @@ Supporting converters, all **live** (called by step 4):
 
 | file | status | what |
 |---|---|---|
-| `dse.py` | **live** | The sweep runner. `DSE_RUN_SET=<name>`, `--resume`. ⚠️ **see Known issues.** |
-| `analyze_dse.py` | **live** | Reads a sweep's `results.csv`. Currently the **only** correct reader of that CSV — see Known issues. |
+| `dse.py` | **live** | **The launch point for running many benchmarks / many configs** (`make dse`). `--designs tier1+tier2`, `--set K=v1,v2`, `--grid`, `--runset`, `--resume`, `--dry-run`; `--help` is the reference. Grid + target_density come from `benchmarks.py`. Every sweep writes `sweep.json` — the manifest of exactly what was launched. |
+| `analyze_dse.py` | **live** | Re-renders a finished sweep's table (`analyze_dse.py results/DSE_<ts>`). A 10-line wrapper around `dse.py::summarize`, so there is one renderer, not two that drift. |
 | `morris.py`, `morris_factors.py`, `analyze_morris.py` | **live** | Morris elementary-effects screen. `morris_factors.py` is the editable source of truth for factor ranges; the other two import it. |
 | `sobol.py`, `analyze_sobol.py` | **live** | Sobol variance decomposition, same runner path. |
 
@@ -106,25 +106,26 @@ Working, but nothing on a current path calls them. Listed so they read as *parke
 
 ## Known issues
 
-**`dse.py`'s results table is stale against the exe's CSV schema** (found 2026-08-12, not yet
-fixed — a `dse.py` refactor is queued separately). It filters result columns with a hardcoded
-`fixed_cols` **denylist** that no longer matches `Output.cpp`, which now emits `Best GP HPWL`,
-`XPlace GP HPWL`, `Final HPWL Exact` and the `Phase1 *` columns. dse.py still looks for
-`Best HPWL` / `XPlace HPWL`. It does not crash — it degrades silently:
+**The `XPlace GP HPWL` / `Ratio` columns are N/A on 22 of the 28 designs.** Not a `dse.py`
+problem — `Placer::lookupXplaceReferenceHPWL` (`Output.cpp:227`) is a hardcoded 6-entry map.
+The references exist (`benchmarks.py`, `.claude/2_ARTIFACTS/xplace_ref_ispd.tsv`) and the pairing
+has two traps: masked-vs-masked, and tier 2's per-design `site_width`. **TODO #29** moves both
+into the placer.
 
-- the `Best HPWL` column is **blank on every row** of `results.md` and the console table;
-- the HPWL-range footer silently disappears;
-- result columns are listed as *swept parameters* (`Swept parameters: Best GP HPWL, Phase1 Iters, …`).
+**A `Ratio` next to an unconverged `Best OVFW` is not a result.** `mgc_pci_bridge32_a/b` stop at
+0.27/0.32 overflow; an under-spread placement flatters its own HPWL (TODO #3). The summary footer
+says so, but the per-row number does not.
 
-Confirmed in `results/DSE_20260810_173906/results.md`. **Until it is fixed, read a sweep with
-`analyze_dse.py <results.csv>`, not `results.md`.** The fix is to select result columns with a
-positive list, so a new `Output.cpp` column can never again be silently reinterpreted.
+<details><summary>Fixed 2026-08-12 by the #28 refactor (846 → 371 lines)</summary>
 
-**`dse.py::_full_suite()` duplicates `benchmarks.py`.** Its 28-design grid table is an exact
-duplicate of the manifest's `grid` column (verified 2026-08-12). It also never sets
-`target_density`, which the manifest carries — harmless today (ISPD2015 takes it from
-`placement.constraints`, ISPD2005 is 1.0) but the exact trap `gen_suite_configs.py` was written to
-close, and it bites silently the moment an MMS design enters a sweep.
+`dse.py` selected result columns with a hardcoded `fixed_cols` **denylist** that no longer matched
+`Output.cpp`, so `results.md` had a blank `Best HPWL` column on every row, no HPWL-range footer,
+and result columns listed as *swept parameters*. Column selection is now a positive list
+(`RESULT_COLS`) that warns loudly on a schema change, swept parameters come from `sweep.json`
+rather than being inferred from the CSV header, and `analyze_dse.py` is a wrapper around the same
+renderer. `_full_suite()`'s duplicate 28-design grid table is gone — grid and `target_density` now
+come from `benchmarks.py`, closing the silent-`target_density` trap on MMS designs.
+</details>
 
 ## Removed 2026-08-12
 

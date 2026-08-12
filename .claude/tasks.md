@@ -671,55 +671,106 @@ Algorithmic ideas beyond faithfulness cleanup — hypotheses, not yet scoped.
 
 ---
 
-## #28 — `dse.py` refactor: generic launch point, and two live defects (opened 2026-08-12)
+## #29 — The XPlace reference belongs in the placer, apples-to-apples (opened 2026-08-12)
 
-Mark: *"Refine dse.py to be the generic launch point for any number of runs. It should be easy to
-understand and configure by LLM agent or human hands. It's currently functional, but suffering from
-bloat."* Deferred from the 2026-08-12 `tools/` cleanup (#1) — that session did `tools/` only.
+Mark, 2026-08-12: *"Yes, pair masked with masked. We should always try to pair apples to apples.
+Same thing for tier 2 — the site_width normalization and the masking should be taken into account
+when computing final HPWL numbers, but the correct place to do that is in the placer, not the
+batch script."*
 
-**Two defects found while surveying, both still live. Fix with the refactor, not before.**
+**Symptom:** `XPlace GP HPWL` and `Ratio` are `N/A` on **22 of 28** designs in every sweep
+(falsifiable: `results/DSE_20260812_143722/results.csv`). `dse.py` is not at fault and must not
+compensate — a batch script that applies frame conversions is a second place for them to be wrong.
 
-- [ ] **The sweep summary is stale against the exe's CSV schema — it degrades SILENTLY.**
-      `dse.py` selects result columns with a hardcoded `fixed_cols` **denylist** (`dse.py:779`) that
-      no longer matches `Output.cpp`. The exe emits `Best GP HPWL`, `XPlace GP HPWL`,
-      `Final HPWL Exact`, `Phase1 *`; dse.py still looks for `Best HPWL` / `XPlace HPWL`. Result:
-      the `Best HPWL` column is **blank on every row** of `results.md` and the console table, the
-      HPWL-range footer vanishes, and result columns get listed as *swept parameters*
-      (`Swept parameters: Best GP HPWL, XPlace GP HPWL, Phase1 Iters, …`).
-      **Falsifiable:** `head -12 results/DSE_20260810_173906/results.md` — the blank column and the
-      nonsense header line are both visible there.
-      **Fix:** select result columns with a **positive list**, so a new `Output.cpp` column can
-      never again be silently reinterpreted as a swept parameter.
-      ⚠️ **Until then read a sweep with `python3 tools/analyze_dse.py <results.csv>`, not
-      `results.md`.** `analyze_dse.py` is on the current schema; despite being the older file it is
-      the *correct* reader — the opposite of what the dates suggest.
+**Root cause:** `Placer::lookupXplaceReferenceHPWL` (`Output.cpp:227`) is a hardcoded
+`std::map` with **six** entries (ispd2005 adaptec1-4, bigblue1-2) from the 2026-07-10 XPlace
+batch. Everything else returns `0.0f` → `N/A`. Its own doc-block already flags that it duplicates
+`tools/benchmarks.py`.
 
-- [ ] **`_full_suite()` duplicates `benchmarks.py`.** Its 28-design grid table is an **exact**
-      duplicate of the manifest's `grid` column (verified design-by-design 2026-08-12). It also
-      never sets `target_density`, which the manifest carries. Harmless *today* — ISPD2015 takes it
-      from `placement.constraints` and ISPD2005 is 1.0 — but this is precisely the trap
-      `gen_suite_configs.py` was written to close (#25), and it bites silently the moment an MMS
-      design enters a sweep. **Fix:** query `benchmarks.py`; delete the table.
+**The data exists — all 28, recovered 2026-08-12, nothing needs re-running:**
 
-**Bloat inventory (846 lines).** Dead on arrival: `modify_config_parameter` (73 lines) and
-`run_AIEplace` (14 lines) have **no callers anywhere**. `dse_sweep` is 57 lines of entirely
-commented-out entries. The 7 historical A/B run-sets in `_RUN_SETS` (~190 lines) are experiment
-*records*, not tools.
+- **20 ispd2015** — `.claude/2_ARTIFACTS/xplace_ref_ispd.tsv`, column `gp_masked_hpwl`.
+- **8 ispd2005** — `NA` in that TSV because `run_xplace_ref.sh:43` scrapes with a
+  **variable-length PCRE lookbehind** (`(?<=GP Stop!.*masked_hpwl: )`), which PCRE rejects, so the
+  field came back empty and nobody noticed. The 2026-08-07 logs survive in `/tmp/xref/logs/`:
+  ```
+  for f in /tmp/xref/logs/ispd2005_*.log; do echo "$(basename $f .log) $(grep -o 'GP Stop!.*' $f | tail -1)"; done
+  ```
+  | design | masked GP HPWL | design | masked GP HPWL |
+  |---|---|---|---|
+  | adaptec1 | 7.063986e7 | bigblue1 | 8.721272e7 |
+  | adaptec2 | 7.851941e7 | bigblue2 | 1.298882e8 |
+  | adaptec3 | 1.862087e8 | bigblue3 | 2.909645e8 |
+  | adaptec4 | 1.676566e8 | bigblue4 | 7.231753e8 |
 
-**Design decided with Mark (2026-08-12), not yet built:** CLI flags + JSON runsets as the single
-mechanism — `--designs tier1+tier2`, `--designs adaptec1,adaptec2 --set enable_preconditioning=true,false`
-(product expanded automatically), `--runset foo.json` (the path `morris.py`/`sobol.py` already
-emit), `--resume DIR`. Retires the `DSE_RUN_SET` / `MORRIS_RUNSET` env vars and all 9 run-set
-functions; grid and target_density come from `benchmarks.py`. Target ~250 lines.
+  ⚠️ These are the **2026-08-07** batch; the exe's six entries are from **2026-07-10** (adaptec1
+  7.060218e7 vs 7.063986e7, 0.05% apart). Two batches are currently mixed in one table — pick one
+  and say which in the comment. Fix the lookbehind (`grep -oP 'masked_hpwl: \K[0-9.E+-]+'`) in the
+  same change so a future re-run does not lose the column again.
 
-⚠️ **Mark's call on the 7 historical A/Bs: delete them, and record the equivalent one-line CLI in
-the report that cites each.** `DSE_RUN_SET=best_sol_ab` is quoted in the #24 report and `_gamma_ab`
-in `report_density_weight_ramp.md`; those citations must not become dangling.
-`morris.py:89` and `sobol.py:83` print the old launch command and must be updated in the same change.
+**Two pairing rules, both of which the current column would get wrong:**
+
+- [ ] **Masked pairs with masked.** `Best GP HPWL` is masked (`ignore_net_degree = 100`);
+      `benchmarks.py::_XPLACE_ISPD_FINAL[0]` is the **exact/unmasked** post-GP number. Usually
+      ~0.1% apart — but on `mgc_superblue12` masked is 2.342350e8 and exact is 2.527073e8, a
+      **7.9%** difference. Taking the convenient number puts a 7.9% error straight into the
+      headline column. Symmetrically, `Final HPWL Exact` pairs with `_XPLACE_ISPD_FINAL[0]`.
+- [ ] **Tier 2 is in site units.** XPlace divides by `site_width` (`database.py:602`), so an
+      ispd2015 reference must be multiplied back before it means anything next to our DBU. It is
+      **not uniform**: 200 for the 15 `mgc_*`, **100** for the five `mgc_superblue*`. A blanket
+      ×200 is wrong by 2× on those five. `benchmarks.py::xplace_hpwl_in_sw_frame()` and
+      `SITE_WIDTH` already encode this correctly; the placer needs the same knowledge.
+
+**Fix:** the placer owns it. Populate the reference for all 28 (+ the 16 MMS via
+`_XPLACE_MMS_MIXED_GP`), keyed `"<suite>/<design>"` (already correct — do not regress to bare
+names, that bug cost every MMS `Ratio` ~15%), in **sw_only's frame**, and emit both a masked and
+an exact ratio against their like-for-like references. Whether the table lives in `Output.cpp` or
+is generated from `benchmarks.py` at build time is open — but **one** table, and the site-width
+factor applied once, at the layer that knows the design.
+
+- [ ] **A `Ratio` next to an unconverged `Best OVFW` is not a result.** `mgc_pci_bridge32_a/b`
+      stop at 0.273/0.321 exact overflow and still print a ~1.0 ratio, because an under-spread
+      placement flatters its own HPWL (TODO #3). Gate or flag the per-row number; `dse.py`'s
+      summary footer says it in prose, which nobody reads next to a number.
+
+**Falsifies this task:** every row of a fresh `python3 tools/dse.py` has a non-`N/A` `Ratio`, and
+`mgc_superblue12`'s is computed against 2.342350e8 × 100, not 2.527073e8 × 100.
 
 ---
 
-## #28 — `dse.py` refactor: generic launch point, and two live defects (opened 2026-08-12)
+## #30 — Legalization + detailed placement inside `dse.py` (opened 2026-08-12)
 
-Mark: *"Refine dse.py to be the generic launch point for any number of runs. It should be easy to
-understand and configure by LLM agent or human hands. Its
+Mark, 2026-08-12: *"As a future goal, we also need to incorporate legalization and Detailed
+placement, which Xplace handles for us."*
+
+**Why it matters, not just tidiness:** GP-vs-GP is the *flattering* comparison — legalization costs
+1–8% HPWL and an under-spread GP pays more of it (TODO #3). Post-DP is the number the XPlace paper
+reports and the only one that settles whether we are actually better or worse. Today it takes a
+separate multi-step pipeline that a sweep does not touch, so most sweeps are scored on the metric
+that hides the defect.
+
+**Everything needed already exists — this is wiring, not new capability:**
+
+| piece | where | note |
+|---|---|---|
+| XPlace post-LG / post-DP reference, all 28 + 16 | `benchmarks.py::_XPLACE_ISPD_FINAL[2:4]`, `_XPLACE_MMS_FINAL[2:4]` | already in the manifest |
+| LG+DP on **our** placement | `tools/run_lgdp44.sh` (ispd2005+2015), `run_lgdp_suite.sh` + `gen_lgdp_inputs.py` (mms) | runs XPlace's own legalizer, `main.py --global_placement False` |
+| our DEF/`.pl` → legalizer input | `def_patch_placement.py` (LEF/DEF), `def_to_bookshelf_pl.py` (bookshelf) | frame is bit-perfect |
+| scorecard | `analyze_full44.py`, `analyze_lgdp_suite.py` | the tables we quote |
+
+- [ ] **`dse.py --lgdp`**: after the GP loop, feed each run's placement through the LG+DP stage and
+      add `Our LG HPWL` / `Our DP HPWL` / `DP Ratio` to the summary. Off by default — it is slow
+      and needs the XPlace environment (CUDA, `~/anaconda3/bin/python`), so a plain sweep must not
+      acquire that dependency.
+- [ ] **Then collapse the two suite runners.** `gen_suite_configs.py` + `run_suite.sh` exist only
+      because `dse.py` could not do a scored full-suite run; once `--lgdp` lands they are a second
+      implementation of the same sweep, with their own config generation and their own TSV schema.
+      Retire them, or state why they stay. ⚠️ Don't do this *before* `--lgdp` — every headline
+      number in `summary.md` currently comes through that path.
+- [ ] **Pair like-for-like here too** (#29's rule): XPlace's LG/DP HPWLs are **unmasked**, so they
+      pair with our `Final HPWL Exact` lineage, not `Best GP HPWL`. Tier 2 still needs ×site_width.
+
+**Blocked on:** nothing, but doing #29 first means the ratio machinery is written once.
+
+
+

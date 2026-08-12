@@ -229,10 +229,13 @@ run-place: $(XCLBIN) $(HOST_EXE)              # Stage 5c.5/5c.6: full placement 
 	$(call EMU_RUN,--place $(BENCH),$(PLACE_ITERS))
 
 
-# make dse
-# launch python script to perform Design Space Exploration
+# make dse                                  -> the 28-design suite at XPlace grids
+# make dse DSE_ARGS="--designs tier3"       -> the 16 MMS designs
+# make dse DSE_ARGS="--designs ispd2005/adaptec1 --set enable_preconditioning=true,false"
+# `python3 tools/dse.py --help` lists every option; --dry-run shows the runs without launching.
+DSE_ARGS ?=
 dse:
-	python3 dse.py
+	python3 tools/dse.py $(DSE_ARGS)
 
 runemu:
 	@clear

@@ -26,6 +26,70 @@ routability) is **out of scope** — Mark's call.
 
 **Closed 2026-08-12:** **#26** — fence regions. The 9 ISPD2015 designs carrying DEF `REGIONS`/`GROUPS` are now scored (suite: 19 -> **28 of 28**, median 1.0106) against XPlace references generated from `ispd2015_fix`, which turned out to be **built locally by XPlace's own `data/fix_ispd2015_route.py`** rather than downloaded — closing #22 as well. The other half is a correctness finding: we place **59-94%** of those designs' fence-constrained cells outside their region (controlled against the contest's own legal solutions, 0 of 190,010 outside), and ~10 percentage points of our margin there is the missing constraint rather than the placer. **Mark's decision: do NOT implement fence regions — document that we ignore them, as XPlace does.** That decision lives in `CLAUDE.md`, because an archived entry like this one is not loaded next session.
 
+**Closed 2026-08-12:** **#28** — `dse.py` is now the single launch point for multi-benchmark runs,
+846 → 371 lines. `DSE_RUN_SET`/`MORRIS_RUNSET` env vars, the nine `_RUN_SETS` functions, the
+entirely-commented-out `dse_sweep` dict and its Cartesian machinery, two dead functions
+(`modify_config_parameter`, `run_AIEplace`) and the Popen worker pool for `MAX_PARALLEL=1` are all
+gone, replaced by `--designs / --set / --grid / --runset / --resume / --dry-run`. Both surveyed
+defects are fixed: result columns are now a positive list that warns on an `Output.cpp` schema
+change (the denylist had been silently blanking `Best HPWL` on every row), and grid +
+`target_density` come from `benchmarks.py` instead of a duplicate table. Every sweep now writes
+`sweep.json` — the manifest of exactly what was launched — which is also what makes `--resume`
+label-keyed and what the summary joins swept parameters from. The two live defects it *found* and
+did not fix are now **#29** (the XPlace reference belongs in the placer, masked-vs-masked and
+site-width-correct) and **#30** (LG+DP inside `dse.py`).
+
+---
+
+## #28 — `dse.py` refactor: generic launch point, and two live defects (opened 2026-08-12, CLOSED 2026-08-12)
+
+Mark: *"Refine dse.py to be the generic launch point for any number of runs. It should be easy to
+understand and configure by LLM agent or human hands. It's currently functional, but suffering from
+bloat."* Deferred from the 2026-08-12 `tools/` cleanup (#1) — that session did `tools/` only.
+
+**Two defects found while surveying, both fixed by the refactor.**
+
+- [x] **The sweep summary is stale against the exe's CSV schema — it degrades SILENTLY.**
+      `dse.py` selected result columns with a hardcoded `fixed_cols` **denylist** that no longer
+      matched `Output.cpp`. The exe emits `Best GP HPWL`, `XPlace GP HPWL`, `Final HPWL Exact`,
+      `Phase1 *`; dse.py still looked for `Best HPWL` / `XPlace HPWL`. Result: the `Best HPWL`
+      column blank on every row of `results.md` and the console table, the HPWL-range footer gone,
+      and result columns listed as *swept parameters*.
+      **Was falsifiable at:** `head -12 results/DSE_20260810_173906/results.md`.
+      **Fixed:** `RESULT_COLS` / `PHASE1_COLS` positive lists; a name missing from results.csv
+      prints `[warn] … Output.cpp schema changed`. Swept parameters come from `sweep.json`, so a
+      result column can no longer be mistaken for one. Verified by re-rendering
+      `results/DSE_20260812_143722` — `Best GP HPWL` populated on all 28 rows, footer restored.
+
+- [x] **`_full_suite()` duplicates `benchmarks.py`.** Its 28-design grid table was an **exact**
+      duplicate of the manifest's `grid` column, and it never set `target_density` — the trap
+      `gen_suite_configs.py` was written to close (#25), which would have bitten the moment an MMS
+      design entered a sweep. **Fixed:** both come from `benchmarks.BENCHMARKS[path]`; the table
+      is deleted.
+
+**Bloat inventory (846 lines), all resolved.** Dead on arrival: `modify_config_parameter` (73
+lines) and `run_AIEplace` (14 lines) had **no callers anywhere**. `dse_sweep` was 57 lines of
+entirely commented-out entries. The 7 historical A/B run-sets in `_RUN_SETS` (~190 lines) were
+experiment *records*, not tools — deleted per Mark's call, with the equivalent one-line CLI
+annotated into the two reports that cite them (`_NEW_REPORT_24_best_solution_trackers_20260810.md`
+for `best_sol_ab`, `report_density_weight_ramp.md` for `_gamma_ab`/`_dwramp_ab`).
+`morris.py` and `sobol.py` now print `--runset`.
+
+**Old → new, for reading any dated record that quotes `DSE_RUN_SET`:**
+
+| was | is |
+|---|---|
+| `DSE_RUN_SET=full_suite` | `python3 tools/dse.py` (the default) |
+| `DSE_RUN_SET=full_suite_autogrid` | `--designs tier1+tier2 --grid auto` |
+| `DSE_RUN_SET=grid_ab` | `--designs mgc_pci_bridge32_b,mgc_fft_2,mgc_matrix_mult_1 --grid 512,256,128` |
+| `DSE_RUN_SET=precond_ab` | `--set enable_preconditioning=true,false --set convergence_overflow_threshold=0.04` |
+| `DSE_RUN_SET=gamma_ab` | `--set gamma_ref_grid=512,1024 --set convergence_overflow_threshold=0.04` |
+| `DSE_RUN_SET=best_sol_ab` | `--set best_aux_max_hpwl_ratio=1.005,1.010` |
+| `DSE_RUN_SET=morris MORRIS_RUNSET=X` | `--runset X` |
+
+`_nonconverge_ab`'s four arms are `--set density_weight_worsening_hpwl_norm=<default>,-1.0
+--set ignore_net_degree=100,1000000000` — the product, with each default passed explicitly.
+
 ---
 
 ## #26 — Fence regions (opened 2026-08-11, CLOSED 2026-08-12)

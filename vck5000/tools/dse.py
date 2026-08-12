@@ -1,846 +1,371 @@
-# dse.py
-# Design Space Exploration python script
-# Runs bin/AIEplace.exe while modifying host/default_config.toml between runs
+#!/usr/bin/env python3
+"""dse.py — the launch point for running sw_only over many benchmarks / many configs.
 
+    cd vck5000
+    python3 tools/dse.py                                   # the 28-design suite, XPlace grids
+    python3 tools/dse.py --designs tier3                   # the 16 MMS designs
+    python3 tools/dse.py --designs ispd2005/adaptec1,mgc_fft_a \
+                         --set enable_preconditioning=true,false      # a 2x2 A/B
+    python3 tools/dse.py --designs mgc_fft_2 --grid 512,256,128
+    python3 tools/dse.py --runset results/morris_<ts>/runset.json
+    python3 tools/dse.py --resume results/DSE_<ts>
+    python3 tools/dse.py --designs tier1 --dry-run         # list the runs, launch nothing
+
+Three ways to say what to run, and no others:
+  --designs   a design list; grid and target_density come from tools/benchmarks.py (XPlace's
+              own per-design tuned values). Accepts "all", "tier1".."tier3", "+"-joined
+              (tier1+tier2), or comma-separated design names / "suite/design" paths.
+  --set K=V   a config override. Comma-separated values sweep it; several --set flags take
+              the Cartesian product. K may be dotted ("output.dump_positions=true") to pick
+              the TOML section; a bare key means [params], and "benchmark" means [input].
+  --runset    a JSON list of run dicts, {"label":..., "benchmark":..., <overrides>}. This is
+              what tools/morris.py and tools/sobol.py emit.
+
+What a sweep leaves behind, in results/DSE_<timestamp>/:
+  sweep.json    the manifest — every run's label, config path and exact overrides. THIS is
+                the record of what was launched; read it, not the configs, to see a sweep.
+  configs/      one TOML per run, exactly as the exe read it
+  logs/         one stdout/stderr capture per run
+  results.csv   appended by the exe, one row per run (schema owned by Output.cpp)
+  results.md    the collated table, same one printed at the end
+
+The only thing dse.py writes into a run's DSE_info is `run=<label>`, so results.csv has one
+fixed schema forever and swept values are joined back from sweep.json at summary time.
+
+SEQUENTIAL on purpose: the placer is OpenMP-threaded across all cores, and concurrent runs
+were measured (9bea10e, 2026-07-31) to give the same total wall clock with more ways to go
+wrong. Designs run smallest-first so a bad config fails in seconds, not after bigblue4.
+"""
+
+import argparse
 import copy
 import datetime
 import itertools
 import json
 import os
 import subprocess
-import sys
 import time
 from collections import OrderedDict
-from typing import Any, Union, List, Tuple
 
 import tomlkit
 
-import benchmarks  # master benchmark manifest (rejects out-of-scope designs at launch)
+import benchmarks  # master manifest: design list, XPlace grid + target_density
 
-# Number of concurrent AIEplace processes. The placer is multithreaded now (TODO #12) and
-# takes every core but one when left alone, so this stays at 1: measured empirically
-# (2026-07-31, 8-design mix, ISPD2005+2015) that 1 threaded run at a time and 8 concurrent
-# single-threaded runs come out the same on total wall clock -- per-run thread scaling is
-# sublinear (~1.67x at 7 threads) and concurrent single-threaded runs give some of that back
-# to L3/memory-bandwidth contention, so the two effects roughly cancel. Sequential is simpler
-# (no core-budget arithmetic, no memory-tiered concurrency, no oversubscription risk) for the
-# same throughput, so it's the one setting used everywhere. Raise only if a future box has
-# enough cores that per-run threading stops scaling before it saturates them.
-MAX_PARALLEL = 1
-
-# OpenMP threads per run: left to the placer's own default (every core but one) by not setting
-# OMP_NUM_THREADS at all. An OMP_NUM_THREADS already in the environment still wins.
-
-# Compiled placer binary (current sw_only build) and the base config it reads.
-# Both paths are relative to vck5000/, which is where this script must be run from.
 EXE_PATH = "build/hw/host/sw_only/aieplace_sw_only.exe"
-CONFIG_PATH = "host/src/sw_only/default_config.toml"
+TEMPLATE_PATH = "host/src/sw_only/default_config.toml"
+BENCH_ROOT = "host/benchmarks"
+
+# Result columns rendered in the summary, as a POSITIVE list. A denylist here is what let the
+# table silently blank out when Output.cpp renamed its columns (TODO #28); a name that is not
+# in results.csv now warns loudly instead.
+RESULT_COLS = ["Iters", "Best Iter", "Best OVFW", "Best GP HPWL", "XPlace GP HPWL", "Ratio",
+               "Final HPWL Exact", "Total Runtime (sec)"]
+PHASE1_COLS = ["Phase1 Iters", "Phase1 HPWL", "Phase1 OVFW Exact", "Phase1 Stop Reason"]
 
 
 # =============================================================================
-# DSE Sweep Configuration
-# =============================================================================
-# Each entry maps a parameter name to (section_path, [values_to_sweep]).
-# The Cartesian product of all value lists is computed automatically.
-# To add a new parameter sweep, add one line. To remove, delete or comment out.
+# Building the run list
 # =============================================================================
 
-
-dse_sweep = OrderedDict([
-    # Full list of benchmarks, ordered largest-first (by node count) so the
-    # longest-running jobs start first and smaller ones fill in around them.
-    #("benchmark", (["input"], [
-        #"ispd2005/bigblue4",            # 2.2M nodes
-        #"ispd2015/mgc_superblue12",     # 1.3M nodes
-        #"ispd2005/bigblue3",            # 1.1M nodes
-        #"ispd2015/mgc_superblue11_a",   #  927K nodes
-        #"ispd2015/mgc_superblue16_a",   #  681K nodes
-        #"ispd2015/mgc_superblue14",     #  613K nodes
-        #"ispd2005/bigblue2",            #  535K nodes
-        #"ispd2015/mgc_superblue19",     #  506K nodes
-        #"ispd2005/adaptec4",            #  495K nodes
-        #"ispd2005/adaptec3",            #  451K nodes
-        #"ispd2005/bigblue1",            #  278K nodes
-        #"ispd2005/adaptec2",            #  254K nodes
-        #"ispd2005/adaptec1",            #  211K nodes
-        #"ispd2015/mgc_matrix_mult_1",   #  155K nodes
-        #"ispd2015/mgc_matrix_mult_a",   #  150K nodes
-        #"ispd2015/mgc_matrix_mult_b",   #  146K nodes
-        #"ispd2015/mgc_matrix_mult_c",   #  146K nodes
-        #"ispd2015/mgc_matrix_mult_2",   #  155K nodes
-        #"ispd2015/mgc_edit_dist_a",     #  127K nodes
-        #"ispd2015/mgc_des_perf_1",      #  113K nodes
-        #"ispd2015/mgc_des_perf_a",      #  108K nodes
-        #"ispd2015/mgc_des_perf_b",      #  113K nodes
-        #"ispd2015/mgc_fft_1",           #   32K nodes
-        #"ispd2015/mgc_fft_2",           #   32K nodes
-        #"ispd2015/mgc_fft_a",           #   31K nodes
-        #"ispd2015/mgc_fft_b",           #   31K nodes
-        #"ispd2015/mgc_pci_bridge32_a",  #   30K nodes
-        #"ispd2015/mgc_pci_bridge32_b",  #   29K nodes
-    #])),
-
-    # (empty) — γ-ref-grid verification runs the per-design grids via explicit_runs below.
-
-    # Uncomment to sweep additional parameters:
-    # (<param_name>, ([section_path], [values_to_sweep]))
-    ################################################################
-    #("density_weight_init_multiplier", (["params"], [8e-6, 8e-5])),
-    #("enable_backtracking",     (["params"], [True, False])),
-    #("enable_momentum",  (["params"], [True, False])),
-    #("enable_preconditioning",  (["params"], [True, False])),
-    #("enable_filler",     (["params"], [True, False])),
-    #("gamma_schedule",     (["params"], [True, False])),
-    #("init_gamma",         (["params"], [1, 2, 4, 8, 16])),  # wa_coeff multiplier (with gamma_bin_scaled)
-    #("init_method",        (["params"], ["uniform_box", "random_center"])),
-
-    #("init_method",             (["params"], ["uniform_box", "random_center"])),
-    #("init_step_seed",          (["params"], [0.001, 0.01, 0.1, 1.0])),
-    #("init_spread",              (["params"], [0.5, 0.4, 0.3, 0.25])),
-    #("convergence_min_iterations", (["params"], [50, 100, 200])),
-    #("density_weight_max_step", (["params"], [1.02, 1.05, 1.1])),
-    #("bins_per_row",            (["params"], [64, 128, 256])),
-    #("partials_compute_method", (["params"], ["cpu", "simple"])),
-
-])
+def coerce(text):
+    """'true'/'42'/'1e-5'/'cpu' -> the TOML value it should become."""
+    low = text.strip().lower()
+    if low in ("true", "false"):
+        return low == "true"
+    for cast in (int, float):
+        try:
+            return cast(text)
+        except ValueError:
+            pass
+    return text.strip()
 
 
-# =============================================================================
-# Explicit one-off runs (in ADDITION to the Cartesian product above)
-# =============================================================================
-# Each dict is one run: a set of {param: value} overrides applied to the base
-# default_config.toml. Use this for specific configs the product can't express — e.g.
-# per-benchmark grids, or a hand-picked combination. "benchmark" goes in the
-# "input" section (and is prefixed with host/benchmarks/); every other key goes in
-# "params". Add an optional "label" to name the run in the results table.
-#
-# Example — each benchmark at its own XPlace grid, in a single sweep:
-#   explicit_runs = [
-#     {"label": "adaptec1@512", "benchmark": "ispd2005/adaptec1", "bins_per_row": 512},
-#     {"label": "adaptec2@1024","benchmark": "ispd2005/adaptec2", "bins_per_row": 1024},
-#     {"label": "bigblue4@2048","benchmark": "ispd2005/bigblue4", "bins_per_row": 2048},
-#   ]
-def _full_suite():
-    """Full 28-benchmark snapshot: every design with a known XPlace reference, each at
-    its XPlace grid (setup_dataset.py). seed 42, stop smoothed-overflow 0.04. Ordered
-    largest-first (by node count) so the long jobs start first (LPT makespan)."""
-    grid = {  # design -> (benchmark path, XPlace num_bin)
-        "bigblue4":        ("ispd2005/bigblue4",           2048),
-        "mgc_superblue12": ("ispd2015/mgc_superblue12",    1024),
-        "bigblue3":        ("ispd2005/bigblue3",           2048),
-        "mgc_superblue11_a":("ispd2015/mgc_superblue11_a",  512),
-        "mgc_superblue16_a":("ispd2015/mgc_superblue16_a",  512),
-        "mgc_superblue14": ("ispd2015/mgc_superblue14",     512),
-        "bigblue2":        ("ispd2005/bigblue2",           1024),
-        "mgc_superblue19": ("ispd2015/mgc_superblue19",     512),
-        "adaptec4":        ("ispd2005/adaptec4",           1024),
-        "adaptec3":        ("ispd2005/adaptec3",           1024),
-        "bigblue1":        ("ispd2005/bigblue1",            512),
-        "adaptec2":        ("ispd2005/adaptec2",           1024),
-        "adaptec1":        ("ispd2005/adaptec1",            512),
-        "mgc_matrix_mult_1":("ispd2015/mgc_matrix_mult_1",  512),
-        "mgc_matrix_mult_2":("ispd2015/mgc_matrix_mult_2",  512),
-        "mgc_matrix_mult_a":("ispd2015/mgc_matrix_mult_a",  512),
-        "mgc_matrix_mult_b":("ispd2015/mgc_matrix_mult_b",  512),
-        "mgc_matrix_mult_c":("ispd2015/mgc_matrix_mult_c",  512),
-        "mgc_edit_dist_a": ("ispd2015/mgc_edit_dist_a",     512),
-        "mgc_des_perf_1":  ("ispd2015/mgc_des_perf_1",      512),
-        "mgc_des_perf_b":  ("ispd2015/mgc_des_perf_b",      512),
-        "mgc_des_perf_a":  ("ispd2015/mgc_des_perf_a",      512),
-        "mgc_fft_1":       ("ispd2015/mgc_fft_1",           512),
-        "mgc_fft_2":       ("ispd2015/mgc_fft_2",           512),
-        "mgc_fft_a":       ("ispd2015/mgc_fft_a",           512),
-        "mgc_fft_b":       ("ispd2015/mgc_fft_b",           512),
-        "mgc_pci_bridge32_a":("ispd2015/mgc_pci_bridge32_a",512),
-        "mgc_pci_bridge32_b":("ispd2015/mgc_pci_bridge32_b",512),
-    }
-    # No convergence_overflow_threshold override -> uses default_config.toml's 0.07 (XPlace-matched).
-    return [
-        {"label": f"{name}@{n}", "benchmark": path, "bins_per_row": n, "random_seed": 42}
-        for name, (path, n) in grid.items()
-    ]
+def expand_designs(spec):
+    """'tier1+tier2' / 'all' / 'adaptec1,ispd2015/mgc_fft_a' -> ['suite/design', ...]."""
+    tiers = {"tier1": 1, "tier2": 2, "tier3": 3}
+    paths = []
+    for token in spec.replace("+", ",").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if token == "all":
+            paths += benchmarks.all_paths()
+        elif token in tiers:
+            paths += benchmarks.by_tier(tiers[token])
+        else:
+            paths.append(benchmarks.resolve(token))   # rejects typos at launch
+    return list(dict.fromkeys(paths))                 # dedupe, order preserved
 
-def _precond_ab():
-    """A/B: enable_preconditioning OFF vs ON, each design at its XPlace grid.
-    Verifies the BB-clamp removal: ON must converge (was stalling), OFF must
-    match its pre-change baseline."""
-    grid = {
-        "adaptec1": ("ispd2005/adaptec1",  512),
-        "adaptec2": ("ispd2005/adaptec2", 1024),
-        "bigblue1": ("ispd2005/bigblue1",  512),
-    }
+
+def design_bytes(path):
+    """Input size, used only to order the sweep smallest-first."""
+    directory = os.path.join(BENCH_ROOT, path)
+    if not os.path.isdir(directory):
+        return 0
+    return sum(entry.stat().st_size for entry in os.scandir(directory) if entry.is_file())
+
+
+def parse_sets(set_args):
+    """['k=v1,v2', 'a.b=x'] -> OrderedDict{k: [v1, v2], 'a.b': [x]}."""
+    sets = OrderedDict()
+    for arg in set_args:
+        key, sep, values = arg.partition("=")
+        if not sep:
+            raise SystemExit(f"--set needs KEY=VALUE, got '{arg}'")
+        sets[key.strip()] = [coerce(v) for v in values.split(",")]
+    return sets
+
+
+def grid_values(spec, meta):
+    """--grid xplace | auto | 512,256 -> the bins_per_row values to run (None = auto-size)."""
+    if spec == "auto":
+        return [None]
+    if spec == "xplace":
+        return [meta["grid"]]
+    return [int(v) for v in spec.split(",")]
+
+
+def build_runs(args):
+    """-> [(label, {param: value})], one entry per run. Labels are unique within a sweep."""
+    if args.runset:
+        with open(args.runset) as f:
+            specs = json.load(f)
+        runs = []
+        for i, spec in enumerate(specs):
+            spec = dict(spec)
+            label = str(spec.pop("label", f"r{i:04d}"))
+            spec["benchmark"] = benchmarks.resolve(spec["benchmark"])
+            runs.append((label, spec))
+        return runs
+
+    sets = parse_sets(args.set)
+    swept = [k for k, v in sets.items() if len(v) > 1]   # only these earn a place in the label
+    designs = sorted(expand_designs(args.designs), key=design_bytes)
+
     runs = []
-    for name, (path, n) in grid.items():
-        for precond in (False, True):
-            runs.append({
-                "label": f"{name}@{n}_{'ON' if precond else 'OFF'}",
-                "benchmark": path,
-                "bins_per_row": n,
-                "enable_preconditioning": precond,
-                "convergence_overflow_threshold": 0.04,
-                "random_seed": 42,
-            })
+    for path in designs:
+        meta = benchmarks.BENCHMARKS[path]
+        grids = grid_values(args.grid, meta)
+        for grid in grids:
+            for combo in itertools.product(*sets.values()):
+                overrides = {"benchmark": path,
+                             "maximum_utilization": meta["target_density"],
+                             "random_seed": args.seed}
+                if grid is not None:
+                    overrides["bins_per_row"] = grid
+                overrides.update(zip(sets.keys(), combo))
+
+                label = f"{meta['name']}@{grid if grid else 'auto'}"
+                label += "".join(f"_{k.rsplit('.', 1)[-1]}={overrides[k]}" for k in swept)
+                runs.append((label, overrides))
     return runs
-
-def _precond_on_subset():
-    """Preconditioning ON across a representative size-spanning subset, each design at
-    its XPlace grid. Pairs against the full-suite OFF baseline (same seed/grid/threshold)
-    for a direct A/B. Includes the three adaptec/bigblue designs from _precond_ab plus a
-    large superblue and a standard-cell des_perf for coverage."""
-    grid = {
-        "adaptec1":        ("ispd2005/adaptec1",         512),
-        "adaptec2":        ("ispd2005/adaptec2",        1024),
-        "bigblue1":        ("ispd2005/bigblue1",         512),
-        "mgc_superblue19": ("ispd2015/mgc_superblue19",  512),
-        "mgc_des_perf_1":  ("ispd2015/mgc_des_perf_1",   512),
-    }
-    return [
-        {"label": f"{name}@{n}_precondON", "benchmark": path, "bins_per_row": n,
-         "enable_preconditioning": True,
-         "convergence_overflow_threshold": 0.04, "random_seed": 42}
-        for name, (path, n) in grid.items()
-    ]
-
-def _gamma_ab():
-    """gamma_ref_grid A/B on the 1024-grid designs: 512 (current, grid-independent) vs 1024
-    (= num_bins, matching XPlace's bin-tied base_gamma = 4*(bin_w+bin_h)). Isolates the one
-    remaining gamma mismatch vs XPlace. @512 designs are unaffected (512==num_bins) so they
-    are not included. Compare Best HPWL against the measured XPlace GP numbers, not the
-    legalized reference in Output.cpp."""
-    grid = {  # all 1024-grid designs we have (or are getting) XPlace GP numbers for
-        "adaptec2": ("ispd2005/adaptec2", 1024),
-        "bigblue2": ("ispd2005/bigblue2", 1024),
-        "adaptec3": ("ispd2005/adaptec3", 1024),
-        "adaptec4": ("ispd2005/adaptec4", 1024),
-    }
-    runs = []
-    for name, (path, n) in grid.items():
-        for ref in (512, 1024):
-            runs.append({
-                "label": f"{name}@{n}_gref{ref}",
-                "benchmark": path, "bins_per_row": n,
-                "gamma_ref_grid": ref,
-                "convergence_overflow_threshold": 0.04, "random_seed": 42,
-            })
-    return runs
-
-def _nonconverge_ab():
-    """Why do the mgc standard-cell designs stall at high overflow (ovfw ~0.8, 1200-iter cap)?
-    Diagnosis: init density-weight lambda starts ~1e-15 (vs ~1e-9 on converging adaptec1) and the
-    multiplicative ramp can't recover in 1200 iters. Suspects: (1) the XPlace-faithful field frame
-    (dct_normalize_inverse=false etc.) inflates the density gradient on tiny std cells, crushing
-    init lambda = |wl_grad|/|den_grad| * mult; (2) the 8e-5 init multiplier. 2x2 on two stalled
-    std-cell designs. 'default' = current committed defaults (the stalled baseline)."""
-    designs = {"mgc_des_perf_1": "ispd2015/mgc_des_perf_1",
-               "mgc_pci_bridge32_b": "ispd2015/mgc_pci_bridge32_b"}
-    # Round 1 (field frame, init lambda) refuted -- all four stayed at ~0.82/0.32. Round 2 tests
-    # the fixed-K lambda worsening-branch schedule (98772d9) and net-mask (8025644). Hypothesis:
-    # the fixed K=350000 is mis-scaled for these std-cell HPWL magnitudes, crushing the lambda ramp.
-    variants = {
-        "default":          {},                                    # current defaults (stalled)
-        "relsched":         {"density_weight_worsening_hpwl_norm": -1.0},   # legacy relative form
-        "nomask":           {"ignore_net_degree": 1000000000},             # disable net masking
-        "relsched_nomask":  {"density_weight_worsening_hpwl_norm": -1.0,
-                             "ignore_net_degree": 1000000000},
-    }
-    runs = []
-    for dname, path in designs.items():
-        for vname, over in variants.items():
-            runs.append({"label": f"{dname}_{vname}", "benchmark": path, "bins_per_row": 512,
-                         "convergence_overflow_threshold": 0.04, "random_seed": 42, **over})
-    return runs
-
-def _full_suite_autogrid():
-    """Same 28 designs as full_suite but WITHOUT bins_per_row -> the exe auto-sizes the grid via the
-    ePlace formula (AIEplace.cpp). Re-baseline for the grid-sizing change; compare per-design against
-    the fixed-XPlace-grid baseline DSE_20260713_105516 (same seed 42, stop 0.04)."""
-    runs = _full_suite()
-    for r in runs:
-        r.pop("bins_per_row", None)
-        r["label"] = r["label"].split("@")[0] + "@auto"
-    return runs
-
-def _grid_ab():
-    """Bucket-2 (mild) stall test: are the low-row std-cell designs stalling because 512x512 is
-    FINER than the row structure? XPlace caps num_bin to <= num_rows (pci_bridge32_b: 400 rows ->
-    XPlace uses 256, converges @725; our suite forced 512 -> stalls 0.32, lambda runs away to 3e11
-    with no spreading). Sweep bins_per_row on three low-row bucket-2 designs."""
-    designs = {"mgc_pci_bridge32_b": "ispd2015/mgc_pci_bridge32_b",
-               "mgc_fft_2":          "ispd2015/mgc_fft_2",
-               "mgc_matrix_mult_1":  "ispd2015/mgc_matrix_mult_1"}
-    runs = []
-    for dname, path in designs.items():
-        for grid in (512, 256, 128):
-            runs.append({"label": f"{dname}_grid{grid}", "benchmark": path, "bins_per_row": grid,
-                         "convergence_overflow_threshold": 0.04, "random_seed": 42})
-    return runs
-
-def _best_sol_ab():
-    """A/B: best_aux_max_hpwl_ratio 1.005 (XPlace's literal) vs 1.010, on the TODO #24 selection
-    rule. The two arms have IDENTICAL trajectories -- the ratio is read only by
-    selectBestSolution(), at the end -- so the difference is purely which stored placement gets
-    shipped, and therefore what LG+DP is handed.
-
-    Subset picked from the 2026-08-10 full44_v2 traces (projection in the #24 report), 4 designs
-    that FLIP at 1.01 plus 4 controls that must NOT move:
-      flips   mgc_superblue19 1.0070 | mgc_superblue16_a 1.0052 | adaptec3 1.0053 | bigblue2 1.0053
-      stays AUX  adaptec1 1.0030, mgc_matrix_mult_c 1.0043   (cost already inside 0.5%)
-      stays PRI  mgc_fft_b 1.0210                            (cost outside both budgets)
-      stays PRI  mgc_des_perf_1                              (fails the *overflow* gate, not HPWL
-                                                              -- the control for the other condition)
-    A control that moves means the ratio is reaching something it should not.
-
-    NOT covered: the mixed-size phase-2 path, where selectBestSolution() also picks the placement
-    the macros are frozen at and the arms genuinely diverge in trajectory. Needs its own MMS run.
-    ~21 min per arm, sequential."""
-    grid = {
-        "mgc_fft_b":         ("ispd2015/mgc_fft_b",          512),
-        "mgc_des_perf_1":    ("ispd2015/mgc_des_perf_1",     512),
-        "mgc_matrix_mult_c": ("ispd2015/mgc_matrix_mult_c",  512),
-        "adaptec1":          ("ispd2005/adaptec1",           512),
-        "mgc_superblue19":   ("ispd2015/mgc_superblue19",    512),
-        "mgc_superblue16_a": ("ispd2015/mgc_superblue16_a",  512),
-        "adaptec3":          ("ispd2005/adaptec3",          1024),
-        "bigblue2":          ("ispd2005/bigblue2",          1024),
-    }
-    runs = []
-    for name, (path, n) in grid.items():
-        for ratio in (1.005, 1.010):
-            runs.append({
-                "label": f"{name}@{n}_aux{ratio}",
-                "benchmark": path, "bins_per_row": n,
-                "best_aux_max_hpwl_ratio": ratio,
-                "random_seed": 42,
-            })
-    return runs
-
-
-# Run-set selected by the DSE_RUN_SET env var so a follow-up sweep can be queued without
-# editing this file between runs. Defaults to the full 28-design suite.
-def _morris():
-    """Morris sensitivity screen: load a run-set generated by tools/morris.py.
-    Path comes from the MORRIS_RUNSET env var (a JSON list of explicit-run dicts)."""
-    path = os.environ.get("MORRIS_RUNSET")
-    if not path:
-        raise SystemExit("DSE_RUN_SET=morris requires MORRIS_RUNSET=<path to runset.json>")
-    with open(path) as f:
-        return json.load(f)
-
-_RUN_SETS = {
-    "full_suite": _full_suite,
-    "full_suite_autogrid": _full_suite_autogrid,
-    "precond_ab": _precond_ab,
-    "precond_on": _precond_on_subset,
-    "gamma_ab": _gamma_ab,
-    "nonconverge_ab": _nonconverge_ab,
-    "grid_ab": _grid_ab,
-    "best_sol_ab": _best_sol_ab,
-    "morris": _morris,
-}
-explicit_runs = _RUN_SETS[os.environ.get("DSE_RUN_SET", "full_suite")]()
 
 
 # =============================================================================
-# Utility Functions
+# Writing configs
 # =============================================================================
 
-def load_config(path: str) -> tomlkit.TOMLDocument:
-    """Load a TOML config file."""
-    with open(path, 'r') as f:
-        return tomlkit.load(f)
+def section_for(key):
+    """Which TOML table an override lands in. Dotted key wins; 'benchmark' is [input]."""
+    if "." in key:
+        return key.rsplit(".", 1)
+    return ("input" if key == "benchmark" else "params"), key
 
-def write_run_config(config: dict, config_path: str, run_num: int, total_runs: int,
-                     columns: list, section_for, label=None) -> None:
-    """
-    Write a run's config with a DSE_info block, then save the file.
 
-    The exe turns DSE_info lines 3+ into results.csv columns, and results.csv is
-    append-mode with a single shared header — so EVERY run must emit the same column
-    set in the same order or the CSV misaligns. `columns` is that shared set (the union
-    of all params that vary across the whole sweep, incl. explicit runs); each run fills
-    in its own value (blank if the param isn't present). Line 1 = progress, line 2 =
-    benchmark (skipped by the exe; the Design column already carries it). If `label` is
-    not None a "run" column is emitted for every run (empty for unlabeled product runs).
-    """
-    if "output" not in config:
-        return
+def write_config(template, overrides, path, label, run_num, total):
+    config = copy.deepcopy(template)
+    for key, value in overrides.items():
+        section, param = section_for(key)
+        if section not in config:
+            config[section] = tomlkit.table()
+        config[section][param] = f"{BENCH_ROOT}/{value}" if param == "benchmark" else value
 
-    bench = str(config.get("input", {}).get("benchmark", "")).rsplit('/', 1)[-1]
-    parts = [f"DSE sweep progress={run_num} of {total_runs}", f"benchmark={bench}"]
-    if label is not None:
-        parts.append(f"run={label}")
-    for param in columns:
-        if param == "benchmark":
-            continue  # represented by the Design column, not a data column
-        section = config
-        for key in section_for(param):
-            section = section.get(key, {}) if isinstance(section, dict) else {}
-        val = section[param] if isinstance(section, dict) and param in section else ""
-        parts.append(f"{param}={val}")
-
-    config["output"]["DSE_info"] = "\n".join(parts)
-
-    with open(config_path, 'w') as f:
+    # The exe drops the first two DSE_info lines and turns the rest into results.csv columns
+    # (Output.cpp::parseDSEParams), so this emits exactly one extra column: `run`.
+    config["output"]["DSE_info"] = (f"DSE sweep progress={run_num} of {total}\n"
+                                    f"benchmark={overrides['benchmark']}\n"
+                                    f"run={label}")
+    with open(path, "w") as f:
         tomlkit.dump(config, f)
 
 
-def modify_config_parameter(
-    config_path: str,
-    param_name: str,
-    new_value: Any,
-    output_path: Union[str, None] = None,
-    section_path: Union[str, List[str], None] = None,
-    quiet: bool = False
-) -> None:
-    """
-    Modify a parameter in a TOML config file at any nested level.
+def prepare(runs, sweep_dir):
+    """Write configs/ + sweep.json. Returns the manifest entries, in launch order."""
+    with open(TEMPLATE_PATH) as f:
+        template = tomlkit.load(f)
+    template["output"]["quiet"] = True
+    template["output"]["interactive"] = False
+    template["output"]["dump_positions"] = False   # tens of GB across a sweep (TODO #16)
+    template["output"]["results_dir"] = sweep_dir
 
-    Args:
-        config_path (str): Path to the input config file
-        param_name (str): Name of the parameter to modify
-        new_value (Any): New value to set for the parameter
-        output_path (str, optional): Path to save modified config. If None, overwrites input file.
-        section_path (str or List[str], optional): Path to the section containing the parameter.
-                                                 Can be a string like "params" or "settings.database"
-                                                 or a list like ["settings", "database"].
-                                                 If None, defaults to "params" for backward compatibility.
-        quiet (bool): If True, suppress print output. Default False.
-    """
-    try:
-        config = load_config(config_path)
+    os.makedirs(os.path.join(sweep_dir, "configs"), exist_ok=True)
+    os.makedirs(os.path.join(sweep_dir, "logs"), exist_ok=True)
 
-        # Handle section path
-        if section_path is None:
-            section_path = ["params"]
-        elif isinstance(section_path, str):
-            if section_path == "":
-                section_path = []
-            else:
-                section_path = section_path.split('.')
-        elif not isinstance(section_path, list):
-            raise ValueError("section_path must be a string, list, or None")
-
-        # Navigate to the target section
-        current_section = config
-        section_path_str = "root"
-
-        for i, section_name in enumerate(section_path):
-            if not isinstance(current_section, dict):
-                raise KeyError(f"Cannot navigate to section '{section_name}' - parent is not a dictionary")
-            if section_name not in current_section:
-                raise KeyError(f"Section '{section_name}' not found in {section_path_str}")
-            current_section = current_section[section_name]
-            section_path_str = f"{section_path_str}.{section_name}" if section_path_str != "root" else section_name
-
-        if not isinstance(current_section, dict):
-            raise KeyError(f"Target section '{section_path_str}' is not a dictionary and cannot contain parameters")
-
-        if param_name not in current_section:
-            raise KeyError(f"Parameter '{param_name}' not found in section '{section_path_str}'")
-
-        current_section[param_name] = new_value
-        save_path = output_path if output_path else config_path
-
-        with open(save_path, 'w') as f:
-            tomlkit.dump(config, f)
-
-        if not quiet:
-            display_path = ".".join(section_path) if section_path else "root"
-            print(f"DSE: Updated '{param_name}' in '{display_path}' to {new_value}")
-
-    except FileNotFoundError:
-        print(f"Error: Config file '{config_path}' not found")
-        sys.exit(1)
-    except tomlkit.exceptions.ParseError:
-        print(f"Error: '{config_path}' is not a valid TOML file")
-        sys.exit(1)
-    except (KeyError, ValueError) as e:
-        print(f"Error: {str(e)}")
-        sys.exit(1)
-
-
-def run_AIEplace(args=None):
-    """Run the compiled program using a subprocess."""
-    if args is None:
-        args = []
-
-    command = [EXE_PATH] + args
-    print(f"DSE: Running {command}")
-
-    result = subprocess.run(command)
-
-    if result.returncode != 0:
-        print(f"DSE: ERROR — process exited with code {result.returncode}")
-        return False
-    return True
-
-
-class ParallelRun:
-    """Tracks a single AIEplace subprocess."""
-    def __init__(self, run_num, combo_str, config_path):
-        self.run_num = run_num
-        self.combo_str = combo_str
-        self.config_path = config_path
-        self.process = None
-        self.t0 = None
-
-    def start(self):
-        """Launch the subprocess with stdout/stderr discarded."""
-        self.t0 = time.time()
-        self.process = subprocess.Popen(
-            [EXE_PATH, self.config_path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-    def poll(self):
-        """Check if process has finished. Returns None if still running."""
-        return self.process.poll()
-
-    def finish(self):
-        """Clean up and return (run_num, combo_str, success, elapsed)."""
-        elapsed = time.time() - self.t0
-        success = self.process.returncode == 0
-        return (self.run_num, self.combo_str, success, elapsed)
-
-
-def write_markdown_summary(sweep_dir, rows, dse_cols):
-    """
-    Write results.md — a GitHub-flavored markdown table of the sweep, sorted by
-    design then best HPWL. Persisted alongside results.csv so a human or an LLM can
-    read the collated outcome after the run without re-parsing per-run files.
-    """
-    # Include the XPlace-comparison columns when the exe emitted them (we are chasing
-    # XPlace, so ratio-to-XPlace is the headline metric when available).
-    optional = [c for c in ("XPlace HPWL", "Ratio") if rows and c in rows[0]]
-    cols = ["Design"] + dse_cols + ["Iters", "Best HPWL", "Best OVFW", "Best Iter"] + optional
-
-    lines = [
-        f"# DSE sweep results",
-        "",
-        f"Swept parameters: {', '.join(dse_cols) if dse_cols else '(none)'}  |  {len(rows)} runs",
-        "",
-        "| " + " | ".join(cols) + " |",
-        "| " + " | ".join("---" for _ in cols) + " |",
-    ]
-    for r in rows:
-        lines.append("| " + " | ".join(str(r.get(c, "")) for c in cols) + " |")
-
-    hpwls = [float(r["Best HPWL"]) for r in rows if r.get("Best HPWL") not in (None, "", "N/A")]
-    if hpwls:
-        lines += ["", f"**HPWL range:** {min(hpwls):.3e} — {max(hpwls):.3e} "
-                      f"({max(hpwls)/min(hpwls):.2f}x spread)"]
-
-    md_path = os.path.join(sweep_dir, "results.md")
-    with open(md_path, "w") as f:
-        f.write("\n".join(lines) + "\n")
-    print(f"  Markdown summary:   {md_path}")
+    manifest = []
+    for n, (label, overrides) in enumerate(runs, 1):
+        config_path = os.path.join(sweep_dir, "configs", f"run_{n:03d}.toml")
+        write_config(template, overrides, config_path, label, n, len(runs))
+        manifest.append({"n": n, "label": label, "config": config_path,
+                         "log": os.path.join(sweep_dir, "logs", f"run_{n:03d}.log"),
+                         "overrides": overrides})
+    with open(os.path.join(sweep_dir, "sweep.json"), "w") as f:
+        json.dump({"created": datetime.datetime.now().isoformat(timespec="seconds"),
+                   "exe": EXE_PATH, "runs": manifest}, f, indent=2)
+    return manifest
 
 
 # =============================================================================
-# DSE Main Loop
+# Running
 # =============================================================================
 
-def _norm(value) -> str:
-    """Normalize a config value and a results.csv cell to one comparable string.
+def run_all(entries, total):
+    t0 = time.time()
+    failed = 0
+    for done, entry in enumerate(entries, 1):
+        t_run = time.time()
+        with open(entry["log"], "w") as log:
+            result = subprocess.run([EXE_PATH, entry["config"]], stdout=log, stderr=log)
+        ok = result.returncode == 0
+        failed += not ok
+        print(f"DSE: [{done}/{total}] {'DONE' if ok else 'FAIL'} "
+              f"{time.time() - t_run:7.1f}s  {entry['label']}"
+              f"{'' if ok else '  -> ' + entry['log']}", flush=True)
+    return failed, time.time() - t0
 
-    The exe round-trips values through TOML and back out as CSV text, so the same
-    setting can read `0.5` on one side and `0.500000` on the other. Compare numbers
-    numerically and everything else as a case-folded string.
-    """
-    text = str(value).strip()
-    try:
-        return repr(float(text))
-    except ValueError:
-        return text.casefold()
 
+# =============================================================================
+# Summary
+# =============================================================================
 
-def completed_run_keys(sweep_dir: str, columns: list, has_labels: bool) -> set:
-    """Keys of the runs already recorded in a sweep's results.csv.
-
-    A run's identity is its design plus the value it gave every swept column — the
-    same tuple write_run_config() emits into DSE_info, which is where those CSV
-    columns come from. Rows with no Design (a truncated final line from an
-    interrupted sweep) are ignored, so the run they came from is redone.
-    """
+def summarize(sweep_dir):
+    """Print and write results.md: sweep.json's swept params joined onto the exe's results.csv."""
     csv_path = os.path.join(sweep_dir, "results.csv")
     if not os.path.exists(csv_path):
-        return set()
+        print(f"  (no {csv_path} — every run failed?)")
+        return
     import csv
-    keys = set()
-    with open(csv_path) as f:
-        for row in csv.DictReader(f):
-            design = (row.get("Design") or "").strip()
-            if not design:
-                continue
-            key = [_norm(design)]
-            if has_labels:
-                key.append(_norm(row.get("run", "")))
-            key += [_norm(row.get(p, "")) for p in columns if p != "benchmark"]
-            keys.add(tuple(key))
-    return keys
-
-
-def run_key(overrides: dict, label, columns: list, has_labels: bool, section_for) -> tuple:
-    """The completed_run_keys() key for a run that has not happened yet."""
-    bench = str(overrides.get("benchmark", "")).rsplit("/", 1)[-1]
-    key = [_norm(bench)]
-    if has_labels:
-        key.append(_norm(label or ""))
-    key += [_norm(overrides.get(p, "")) for p in columns if p != "benchmark"]
-    return tuple(key)
-
-
-def dse(resume: str = None):
-    """
-    Design Space Exploration — exhaustive sweep over all parameter combinations.
-
-    Computes the Cartesian product of all value lists in dse_sweep and runs
-    AIEplace once for each configuration. Runs up to MAX_PARALLEL processes
-    concurrently, each with its own config file copy and log file.
-
-    `resume` reuses an existing results/DSE_* directory and skips every run already
-    recorded in its results.csv, so an interrupted sweep continues instead of
-    restarting. The sweep definition must be the same one the directory was created
-    with — a run is matched on its parameter values, so editing dse_sweep between the
-    original launch and the resume silently re-runs whatever no longer matches.
-    """
-    # Load the single base config file
-    base_config = load_config(CONFIG_PATH)
-
-    # Section lookup for any parameter: sweep dims carry their own section; explicit-run
-    # params default to "input" for benchmark and "params" for everything else.
-    sweep_sections = {p: dse_sweep[p][0] for p in dse_sweep}
-    def section_for(param):
-        if param in sweep_sections:
-            return sweep_sections[param]
-        return ["input"] if param == "benchmark" else ["params"]
-
-    # Build the full run list: Cartesian product of dse_sweep + explicit one-off runs.
-    # Each run is (overrides {param: value}, label); product runs are unlabeled (None).
-    param_names = list(dse_sweep.keys())
-    value_lists = [dse_sweep[p][1] for p in param_names]
-    runs = []
-    if param_names:
-        for combo in itertools.product(*value_lists):
-            runs.append((dict(zip(param_names, combo)), None))
-    for spec in explicit_runs:
-        spec = dict(spec)
-        label = str(spec.pop("label", "explicit"))
-        runs.append((spec, label))
-    total_runs = len(runs)
-
-    if total_runs == 0:
-        print("DSE: nothing to run (dse_sweep and explicit_runs are both empty).")
+    with open(csv_path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    if not rows:
         return
 
-    # Reject out-of-scope / mistyped designs at launch. Any run that overrides
-    # "benchmark" must name a design in the master manifest (tools/benchmarks.py);
-    # normalize bare names to their canonical "suite/design" form.
-    for overrides, _label in runs:
-        if "benchmark" in overrides:
-            overrides["benchmark"] = benchmarks.resolve(overrides["benchmark"])
+    # Which overrides actually varied across the sweep -> those are the sweep's parameters.
+    # Taken from sweep.json, never inferred from the CSV header: inferring is what made result
+    # columns show up as "swept parameters" and blanked the HPWL column (TODO #28).
+    swept, by_label = [], {}
+    manifest_path = os.path.join(sweep_dir, "sweep.json")
+    if os.path.exists(manifest_path):
+        with open(manifest_path) as f:
+            entries = json.load(f)["runs"]
+        by_label = {e["label"]: e["overrides"] for e in entries}
+        keys = {k for e in entries for k in e["overrides"]}
+        swept = sorted(k for k in keys - {"benchmark"}
+                       if len({str(e["overrides"].get(k)) for e in entries}) > 1)
 
-    # Shared column set so the appended results.csv stays aligned: sweep params first
-    # (order preserved), then any explicit-only params (first-seen). "run" label column
-    # is emitted for all runs when any run is labeled (i.e. when there are explicit runs).
-    columns = list(param_names)
-    for overrides, _ in runs:
-        for p in overrides:
-            if p not in columns:
-                columns.append(p)
-    has_labels = any(lbl is not None for _, lbl in runs)
+    present = [c for c in RESULT_COLS if c in rows[0]]
+    for missing in [c for c in RESULT_COLS if c not in rows[0]]:
+        print(f"  [warn] results.csv has no column '{missing}' — Output.cpp schema changed; "
+              f"update RESULT_COLS in tools/dse.py")
+    if any(r.get("Phase1 Iters", "N/A") not in ("N/A", "", None) for r in rows):
+        present += [c for c in PHASE1_COLS if c in rows[0]]
 
-    n_product = total_runs - len(explicit_runs)
-    print(f"DSE: {len(param_names)} swept param(s) -> {n_product} product run(s) "
-          f"+ {len(explicit_runs)} explicit run(s) = {total_runs} total")
+    cols = ["Design"] + (["run"] if "run" in rows[0] else []) + swept + present
+    rows.sort(key=lambda r: (r.get("Design", ""), r.get("run", "")))
 
-    # Give every DSE sweep its own subdirectory so runs never collide — unless we are
-    # resuming, in which case we re-enter the original one and append to its results.csv.
-    if resume:
-        sweep_dir = resume.rstrip("/")
-        if not os.path.isdir(sweep_dir):
-            raise SystemExit(f"DSE: --resume {sweep_dir} is not a directory")
-        done = completed_run_keys(sweep_dir, columns, has_labels)
-        runs = [(o, l) for (o, l) in runs
-                if run_key(o, l, columns, has_labels, section_for) not in done]
-        skipped = total_runs - len(runs)
-        total_runs = len(runs)
-        print(f"DSE: resuming {sweep_dir} — {skipped} run(s) already recorded, "
-              f"{total_runs} remaining")
-        if total_runs == 0:
-            print("DSE: nothing left to run.")
-            return
-    else:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        sweep_dir = f"results/DSE_{timestamp}"
+    def cell(row, col):
+        if col in swept:
+            return str(by_label.get(row.get("run", ""), {}).get(col, ""))
+        return str(row.get(col, ""))
 
-    parallel = min(MAX_PARALLEL, total_runs)
-    print(f"DSE: Running with {parallel} parallel worker(s), "
-          f"OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS', '(placer default)')} each")
+    width = {c: max(len(c), max(len(cell(r, c)) for r in rows)) for c in cols}
+    lines = ["  ".join(f"{c:<{width[c]}}" for c in cols)]
+    lines.append("  ".join("-" * width[c] for c in cols))
+    lines += ["  ".join(f"{cell(r, c):<{width[c]}}" for c in cols) for r in rows]
 
-    # Prepare per-run config files and ParallelRun objects
-    pending = []
-    config_dir = os.path.join(sweep_dir, "configs")
-    os.makedirs(config_dir, exist_ok=True)
+    def numbers(col):
+        return [float(r[col]) for r in rows if r.get(col) not in (None, "", "N/A")]
 
-    # DSE overrides applied to every run (quiet + headless mode, DSE_info placeholder)
-    base_config["output"]["quiet"] = True
-    base_config["output"]["dump_positions"] = False  # sweeps are headless; a position dump per
-                                                      # sweep point would be tens of GB (TODO #16)
-    base_config.setdefault("output", {})
-    base_config["output"]["results_dir"] = sweep_dir
-    base_config.setdefault("output", {}).setdefault("DSE_info", "")
+    footer = []
+    hpwl, ratios = numbers("Best GP HPWL"), numbers("Ratio")
+    if hpwl:
+        footer.append(f"Best GP HPWL: {min(hpwl):.3e} - {max(hpwl):.3e} "
+                      f"({max(hpwl) / min(hpwl):.2f}x spread)")
+    if ratios:
+        footer.append(f"Ratio vs XPlace GP: {min(ratios):.3f} - {max(ratios):.3f}, "
+                      f"mean {sum(ratios) / len(ratios):.3f} over {len(ratios)}/{len(rows)} designs")
+    footer.append("Ratio is only meaningful where Best OVFW converged — an under-spread run "
+                  "flatters its own HPWL (TODO #3).")
 
-    # A resumed sweep must not reuse config filenames — run numbering restarts at 1, so
-    # writing run_001.toml again would overwrite a different run's config and destroy the
-    # record of what actually ran. Start past the highest number already in configs/.
-    existing = [f for f in os.listdir(config_dir) if f.startswith("run_") and f.endswith(".toml")]
-    first_run_num = 1 + max((int(f[4:-5]) for f in existing if f[4:-5].isdigit()), default=0)
+    print("\n".join("  " + ln for ln in lines + [""] + footer))
 
-    print(f"DSE: Preparing {total_runs} config files...")
-    benchmark_path = "host/benchmarks/"
-    for progress, (overrides, label) in enumerate(runs, 1):
-        run_num = first_run_num + progress - 1
-        # Deep-copy the base config for this run
-        config = copy.deepcopy(base_config)
+    md = [f"# DSE sweep — {os.path.basename(sweep_dir)}", "",
+          f"{len(rows)} runs.  Swept: {', '.join(swept) if swept else '(designs only)'}", "",
+          "| " + " | ".join(cols) + " |",
+          "|" + "|".join("---" for _ in cols) + "|"]
+    md += ["| " + " | ".join(cell(r, c) for c in cols) + " |" for r in rows]
+    md += [""] + [f"- {line}" for line in footer]
+    with open(os.path.join(sweep_dir, "results.md"), "w") as f:
+        f.write("\n".join(md) + "\n")
 
-        # Apply this run's parameter overrides
-        for param, value in overrides.items():
-            actual_value = benchmark_path + value if param == "benchmark" else value
-            target = config
-            for key in section_for(param):
-                target = target[key]
-            target[param] = actual_value
 
-        # Write this run's TOML config
-        run_config_path = os.path.join(config_dir, f"run_{run_num:03d}.toml")
-        write_run_config(config, run_config_path, progress, total_runs, columns,
-                         section_for, label=(label or "") if has_labels else None)
-
-        combo_str = "  ".join(f"{p}={v}" for p, v in overrides.items())
-        if label is not None:
-            combo_str += f"  [{label}]"
-        pending.append(ParallelRun(run_num, combo_str, run_config_path))
-
-    # Launch runs with a simple Popen worker pool
-    t0_sweep = time.time()
-    active = []     # currently running
-    completed = 0
-    failed = 0
-
-    print(f"DSE: Launching {total_runs} runs ({parallel} parallel)...\n")
-
-    while pending or active:
-        # Fill up to max_parallel active slots
-        while pending and len(active) < parallel:
-            run = pending.pop(0)
-            run.start()
-            active.append(run)
-
-        # Poll active processes for completion
-        still_active = []
-        for run in active:
-            if run.poll() is not None:
-                run_num, combo_str, success, elapsed = run.finish()
-                completed += 1
-                status = "DONE" if success else "FAIL"
-                if not success:
-                    failed += 1
-                print(f"DSE: ({(completed/total_runs)*100:4.1f}%) [{completed}/{total_runs}] {status} -- {elapsed:6.1f}s  {combo_str}")
-            else:
-                still_active.append(run)
-        active = still_active
-
-        # Avoid busy-waiting
-        if active:
-            time.sleep(0.5)
-
-    elapsed_total = time.time() - t0_sweep
-
-    # =========================================================================
-    # Summary Banner
-    # =========================================================================
-    print()
-    print("=" * 80)
-    print(f"  DSE COMPLETE — {completed - failed}/{total_runs} succeeded, {failed} failed  ({elapsed_total:.1f}s)")
-    print("=" * 80)
-
-    # Try to read results CSV for a detailed summary table
-    csv_path = os.path.join(sweep_dir, "results.csv")
-    if os.path.exists(csv_path):
-        import csv
-        with open(csv_path) as f:
-            reader = csv.DictReader(f)
-            rows = sorted(list(reader), key=lambda r: (r.get("Design", ""), r.get("Final HPWL", "")))
-
-        if rows:
-            # Detect which DSE parameter columns exist (dynamic — works for any sweep)
-            fixed_cols = {"Design", "Iters", "Final HPWL", "Best Iter", "Best HPWL", "Best OVFW",
-                          "XPlace HPWL", "Ratio",
-                          "Gamma", "Net Count", "Node Count", "HPWL_Graph", "Combined_Graph",
-                          "Placement_GIF", "Total Runtime (sec)", "DB IO Time (sec)",
-                          "Algorithm Time (sec)", "Iteration Avg (sec)", "Partials AIE Time (sec)",
-                          "Memory Usage (MB)", "Output Dir", "Timestamp"}
-            dse_cols = [k for k in rows[0].keys() if k and k not in fixed_cols]
-            # XPlace-comparison columns (emitted by the exe when a reference HPWL is known);
-            # shown last since ratio-to-XPlace is the headline metric while chasing XPlace.
-            xplace_cols = [c for c in ("XPlace HPWL", "Ratio") if c in rows[0]]
-            table_cols = ["Design"] + dse_cols + ["Iters", "Best HPWL", "Best Iter", "Best OVFW"] + xplace_cols
-
-            # Build format string dynamically
-            col_widths = {"Design": 22, "Iters": 5, "Best HPWL": 10, "Best Iter": 8,
-                          "Best OVFW": 8}
-            for dc in dse_cols + xplace_cols:
-                col_widths[dc] = max(len(dc), max(len(str(r.get(dc, ""))) for r in rows)) + 1
-
-            # Header
-            header_parts = []
-            for col in table_cols:
-                w = col_widths.get(col, 12)
-                header_parts.append(f"{col:<{w}}")
-            header_line = "  ".join(header_parts)
-            print()
-            print(f"  {header_line}")
-            print(f"  {'-' * len(header_line)}")
-
-            # Data rows
-            for r in rows:
-                parts = []
-                for col in table_cols:
-                    w = col_widths.get(col, 12)
-                    val = r.get(col, "")
-                    parts.append(f"{val:<{w}}")
-                print(f"  {'  '.join(parts)}")
-
-            # Quick stats
-            hpwls = [float(r["Best HPWL"]) for r in rows if r.get("Best HPWL") not in (None, "", "N/A")]
-            ovfws = [float(r["Best OVFW"]) for r in rows if r.get("Best OVFW") not in (None, "", "N/A")]
-            if hpwls:
-                print()
-                print(f"  HPWL range:     {min(hpwls):.3e} — {max(hpwls):.3e}  ({max(hpwls)/min(hpwls):.1f}x spread)")
-            if ovfws:
-                print(f"  Overflow range:  {min(ovfws):.3f} — {max(ovfws):.3f}")
-
-            # Persist the same collated data as markdown for later human/LLM review.
-            write_markdown_summary(sweep_dir, rows, dse_cols)
-    else:
-        print(f"\n  (No results.csv found — all runs may have failed)")
-
-    print()
-    print(f"  Results directory: {sweep_dir}/")
-    print("=" * 80)
-    print()
-
+# =============================================================================
 
 def main():
-    import argparse
-    ap = argparse.ArgumentParser(description="AIEplace design-space exploration sweep")
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter,
+                                 epilog="\n".join(__doc__.split("\n")[1:]))
+    ap.add_argument("--designs", default="tier1+tier2",
+                    help="all | tier1..tier3 | comma/plus list of designs (default: the 28-design suite)")
+    ap.add_argument("--set", action="append", default=[], metavar="KEY=V[,V...]",
+                    help="config override; comma-separated values sweep it, repeatable (Cartesian product)")
+    ap.add_argument("--grid", default="xplace", metavar="SPEC",
+                    help="xplace (per-design, from benchmarks.py) | auto (ePlace formula) | 512,256")
+    ap.add_argument("--seed", type=int, default=42, help="params.random_seed (default 42)")
+    ap.add_argument("--runset", metavar="JSON", help="run list from morris.py / sobol.py")
     ap.add_argument("--resume", metavar="DSE_DIR",
-                    help="re-enter an existing results/DSE_* directory and run only the "
-                         "configurations missing from its results.csv")
+                    help="re-enter a sweep dir and run only what its results.csv is missing")
+    ap.add_argument("--dry-run", action="store_true", help="list the runs and exit")
     args = ap.parse_args()
-    dse(resume=args.resume)
+
+    if args.resume:
+        sweep_dir = args.resume.rstrip("/")
+        with open(os.path.join(sweep_dir, "sweep.json")) as f:
+            manifest = json.load(f)["runs"]
+        # The manifest is the authority on resume, so --designs/--set cannot silently redefine
+        # a run mid-sweep. Identity is the label, and the config it names already exists.
+        done = set()
+        csv_path = os.path.join(sweep_dir, "results.csv")
+        if os.path.exists(csv_path):
+            import csv
+            with open(csv_path, newline="") as f:
+                done = {(r.get("run") or "").strip() for r in csv.DictReader(f)}
+        entries = [e for e in manifest if e["label"] not in done]
+        print(f"DSE: resuming {sweep_dir} — {len(manifest) - len(entries)} of {len(manifest)} "
+              f"already recorded, {len(entries)} to go")
+    else:
+        runs = build_runs(args)
+        if not runs:
+            raise SystemExit("DSE: nothing to run")
+        sweep_dir = "results/DSE_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        if args.dry_run:
+            for n, (label, overrides) in enumerate(runs, 1):
+                print(f"  {n:3d}  {label:<40}  "
+                      f"{'  '.join(f'{k}={v}' for k, v in overrides.items())}")
+            print(f"\nDSE: {len(runs)} run(s); --dry-run, nothing launched")
+            return
+        entries = prepare(runs, sweep_dir)
+        print(f"DSE: {len(entries)} run(s) -> {sweep_dir}/")
+
+    if not entries:
+        print("DSE: nothing left to run")
+        return
+
+    failed, elapsed = run_all(entries, len(entries))
+    print(f"\n{'=' * 78}\n  DSE COMPLETE — {len(entries) - failed}/{len(entries)} succeeded, "
+          f"{failed} failed  ({elapsed / 60:.1f} min)\n{'=' * 78}\n")
+    summarize(sweep_dir)
+    print(f"\n  {sweep_dir}/  (sweep.json = what ran, results.md = this table)\n")
+
 
 if __name__ == "__main__":
     main()

@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-08-12 16:47 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-12 17:34 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 
 ## Two threads
 - **sw_only** — CPU golden reference; goal is to match XPlace. The active thread.
@@ -196,15 +196,30 @@
   the `floorplan.def` hardcoding stands.
 
 ## Newly open
-- **#28 — `dse.py` refactor, plus two live defects found while triaging `tools/`.**
-  ⚠️ **`dse.py`'s sweep summary is stale against the exe's CSV schema and degrades silently** — it
-  filters result columns with a hardcoded denylist that predates `Best GP HPWL` / `Phase1 *`, so
-  `results.md` has a **blank `Best HPWL` column on every row**, no HPWL-range footer, and result
-  columns listed as swept parameters. Visible in `results/DSE_20260810_173906/results.md`.
-  **Until it is fixed, read a sweep with `tools/analyze_dse.py`, not `results.md`** — the older file
-  is the correct reader here. Second defect: `_full_suite()` duplicates `benchmarks.py`'s grids
-  exactly and omits `target_density` (latent, would bite on MMS). Refactor design agreed with Mark
-  (CLI flags + JSON runsets, ~250 lines); not started.
+- **#29 — the XPlace reference column is N/A on 22 of 28 designs, and belongs in the placer.**
+  `Placer::lookupXplaceReferenceHPWL` (`Output.cpp:227`) is a hardcoded **six-entry** map. All 28
+  masked GP references were recovered 2026-08-12 (20 in `xplace_ref_ispd.tsv`; the 8 ispd2005 ones
+  re-scraped from `/tmp/xref/logs/` — the TSV's `gp_masked_hpwl` column is empty because
+  `run_xplace_ref.sh:43` uses a variable-length PCRE lookbehind that never matches). Two pairing
+  rules to get right, per Mark: **masked pairs with masked** (`mgc_superblue12` masked 2.342e8 vs
+  exact 2.527e8 — **7.9%** apart, so the convenient number is a 7.9% error), and **tier 2 needs
+  ×site_width**, which is 200 for `mgc_*` but **100** for the five `mgc_superblue*`. Both belong in
+  the placer, not the batch script.
+- **#30 — legalization + detailed placement inside `dse.py`.** GP-vs-GP is the flattering
+  comparison (LG costs 1–8% HPWL, an under-spread GP pays more — TODO #3); post-DP is what the
+  XPlace paper reports. Every piece exists (`run_lgdp44.sh`, the LG/DP references in
+  `benchmarks.py`); it is wiring. Doing it also retires the second suite runner
+  (`gen_suite_configs.py` + `run_suite.sh`) — **but not before `--lgdp` lands**, since every
+  headline number above still comes through that path.
+- **#28 — `dse.py` refactor — CLOSED 2026-08-12**, archived to `history.md`. 846 → 371 lines;
+  `make dse` (optionally `DSE_ARGS="…"`) is now the single launch point for multi-benchmark runs:
+  `--designs tier1+tier2 | --set K=v1,v2 | --grid | --runset | --resume | --dry-run`. Grid and
+  `target_density` come from `benchmarks.py`. Every sweep writes **`sweep.json`** — the manifest of
+  exactly what was launched, and what the summary joins swept parameters from. The silent
+  blank-column defect is fixed (positive `RESULT_COLS`, loud warning on schema drift); the old
+  ⚠️ "read `analyze_dse.py`, not `results.md`" caveat is void — `analyze_dse.py` is now a 10-line
+  wrapper around the same renderer. `DSE_RUN_SET`/`MORRIS_RUNSET` are gone; `history.md` carries the
+  old→new command table for any dated report that quotes them.
 - **#25 — we and XPlace use different `target_density` on ISPD2015.** On byte-identical `.def`s our
   exact overflow vs XPlace's: `adaptec1` **0.9991** (both 1.0), `mgc_fft_b` 1.119 (ours 0.6),
   `mgc_des_perf_1` **8.79** (ours 0.906). We read the DEF's `placement.constraints`; XPlace leaves

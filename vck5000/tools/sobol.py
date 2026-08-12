@@ -7,13 +7,12 @@
 # sigma only flagged.
 #
 # Mirrors morris.py: reuses the SAME factor spec (morris_factors.py) and the SAME
-# dse.py runner (DSE_RUN_SET=morris MORRIS_RUNSET=<runset.json> — the loader is
-# format-agnostic). Only the sampler differs (Saltelli sequence, not Morris
-# trajectories).
+# dse.py runner (--runset <runset.json>; the loader is format-agnostic). Only the
+# sampler differs (Saltelli sequence, not Morris trajectories).
 #
 #   python3 tools/sobol.py --benchmark ispd2015/mgc_fft_a -N 128
 #     -> results/sobol_<ts>/{problem.json, X.npy, runset.json, meta.json}
-#   DSE_RUN_SET=morris MORRIS_RUNSET=<runset.json> python3 tools/dse.py
+#   python3 tools/dse.py --runset <runset.json>
 #   python3 tools/analyze_sobol.py <DSE_dir> <sobol_dir>
 #
 # Cost = N*(k+2) with calc_second_order=False, or N*(2k+2) with second-order.
@@ -80,7 +79,7 @@ def main():
     print(f"Sobol sample: N={args.base_samples}, {k} factors, second_order={args.second_order} "
           f"-> {total} runs")
     print(f"Wrote: {out}/")
-    print(f"\nLaunch:\n  DSE_RUN_SET=morris MORRIS_RUNSET={rs} python3 tools/dse.py")
+    print(f"\nLaunch:\n  python3 tools/dse.py --runset {rs}")
     print(f"Analyze:\n  python3 tools/analyze_sobol.py <results/DSE_...dir> {out}")
 
 

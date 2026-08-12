@@ -4,15 +4,15 @@
 #
 # Generates a Morris sample over the factors in morris_factors.py, maps each
 # sampled row to a run_config override dict, and writes a run-set JSON that the
-# existing dse.py runner consumes (DSE_RUN_SET=morris + MORRIS_RUNSET=<path>).
-# We reuse dse.py wholesale for config templating / parallel execution / CSV
-# collation — this script only does the SALib sampling + the X->config mapping.
+# existing dse.py runner consumes (dse.py --runset <path>).
+# We reuse dse.py wholesale for config templating / execution / CSV collation —
+# this script only does the SALib sampling + the X->config mapping.
 #
 # Flow:
 #   1. python3 tools/morris.py --benchmark ispd2015/mgc_fft_a -r 10   (this file)
 #        -> writes results/morris_<ts>/{problem.json, X.npy, runset.json, meta.json}
-#      and prints the DSE_RUN_SET / MORRIS_RUNSET command to launch the sweep.
-#   2. DSE_RUN_SET=morris MORRIS_RUNSET=<runset.json> python3 tools/dse.py
+#      and prints the --runset command to launch the sweep.
+#   2. python3 tools/dse.py --runset <runset.json>
 #        -> runs every row, produces results/DSE_<ts>/results.csv
 #   3. python3 tools/analyze_morris.py <DSE_dir> <morris_dir>
 #        -> mu*/sigma ranking + plot, per objective.
@@ -86,7 +86,7 @@ def main():
     print(f"Morris sample: {k} factors x {args.trajectories} trajectories = {total} runs")
     print(f"Wrote: {out}/  (X.npy, problem.json, runset.json, meta.json)")
     print(f"\nLaunch the sweep:")
-    print(f"  DSE_RUN_SET=morris MORRIS_RUNSET={runset_path} python3 tools/dse.py\n")
+    print(f"  python3 tools/dse.py --runset {runset_path}\n")
     print(f"Then analyze:")
     print(f"  python3 tools/analyze_morris.py <results/DSE_...dir> {out}")
 
