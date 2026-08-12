@@ -1,16 +1,35 @@
 # Summary — project status at a glance
-*Updated 2026-08-10 23:04 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-11 22:34 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 
 ## Two threads
 - **sw_only** — CPU golden reference; goal is to match XPlace. The active thread.
 - **pl_algo** — move the whole placement iteration onto the PL. Blocked behind #20, deliberately.
 
 ## Where sw_only stands
-- **Median HPWL ratio 1.0113 vs XPlace** over **19 scored ISPD designs** (legal-vs-legal, re-run
-  2026-08-10 on the post-#23 binary). 12/19 within ±2%, better than XPlace on 4. **Quote the
-  median** — the mean (1.1218) is one broken design, `mgc_matrix_mult_a` at 3.03× (GP dies at
-  iteration 290); excluding it the mean is 1.0159. 9 designs unscored (#22 fence regions).
-  → [[_NEW_REPORT_performance_snapshot_20260810.md]]
+- **Median HPWL ratio 1.0095 vs XPlace** over **19 scored ISPD designs** (legal-vs-legal, re-run
+  2026-08-11 on commit `3c70b38`). 13/19 within ±2%, better than XPlace on 3. **Quote the median,
+  and say which tier** — the two tiers disagree and a single number hides it:
+
+  | | median before → after | mean before → after |
+  |---|---|---|
+  | **ISPD2005 (8)** | 1.0065 → **1.0053** | 1.0111 → **1.0052** |
+  | **ISPD2015 (11)** | 1.0232 → 1.0273 | 1.2023 → 1.2268 |
+  | **all 19** | 1.0113 → **1.0095** | 1.1218 → 1.1335 |
+
+  **The mean is not quotable**: `mgc_matrix_mult_a` alone carries it (3.27×). Excluding that one
+  design the mean is **1.0150**. `divergence_guard` 10/28 → 8/28. 9 designs unscored (#26).
+  → [[_NEW_REPORT_26_precond_always_on_20260811.md]]
+  <details><summary>Superseded: "median 1.0113, mean 1.1218" (2026-08-10, pre-`3c70b38`)</summary>
+
+  > **Median HPWL ratio 1.0113 vs XPlace** over **19 scored ISPD designs** (legal-vs-legal, re-run
+  > 2026-08-10 on the post-#23 binary). 12/19 within ±2%, better than XPlace on 4. **Quote the
+  > median** — the mean (1.1218) is one broken design, `mgc_matrix_mult_a` at 3.03× (GP dies at
+  > iteration 290); excluding it the mean is 1.0159. 9 designs unscored (#22 fence regions).
+  > → [[_NEW_REPORT_performance_snapshot_20260810.md]]
+
+  Not withdrawn — **directly comparable**, same 19 designs, same two-stage method, same references.
+  The delta is exactly one commit. That report's §2 method section still governs.
+  </details>
   <details><summary>Superseded: "1.0090 over 33 scored designs" (2026-08-07)</summary>
 
   > **Median HPWL ratio 1.0090 vs XPlace** over 33 scored designs (44-design suite, legal-vs-legal,
@@ -28,6 +47,10 @@
 - Landed: two-phase mixed-size flow + LP macro legalization; #19's two XPlace faithfulness fixes
   (overflow excludes fillers; the γ/λ throttle gates on preconditioner κ). Both toggles retired
   2026-08-07 — faithful behaviour is now unconditional.
+- **The preconditioner is ON for every design as of `3c70b38`** — `auto_enable_preconditioning` is
+  gone. It had been OFF on all 28 ISPD designs since 638b9a8, which also froze `precond_coef` at
+  1.0, which is the *only* thing that carries κ out of the γ/λ throttle window. Setting
+  `enable_preconditioning = false` is now a diagnostic only, and a trap.
 - **#23 — FIXED 2026-08-10: `init_step_seed` is in SITE WIDTHS, not raw DBU.** Committed `ba0ce6a`.
   **4 of the 5 dead ISPD2015 designs now converge** (`mgc_superblue11_a` 842 it, `12` 921, `14` 782,
   `16_a` 772 — all previously frozen at ~2135 iterations of `nan_metrics`). The 5th,
@@ -42,9 +65,6 @@
   → [[_NEW_REPORT_performance_snapshot_20260810.md]]
   <details><summary>Superseded: "`mgc_des_perf_b` converges in 825 iters, `mgc_superblue11_a` in 849"</summary>
 
-  > The 5 dead ISPD2015 designs place now — `mgc_des_perf_b` converges in 825 iters,
-  > `mgc_superblue11_a` in 849 (HPWL −56%, overflow 0.972→0.047), where both never moved a cell.
-
   `mgc_des_perf_b` **does not reproduce** as converging: under the manifest's own config
   (`gen_suite_configs.py`, seed 42) it reaches `divergence_guard` at 889 iterations. Verified twice
   — standalone and in the 28-design suite. Which config produced the 825-iteration claim is
@@ -54,8 +74,12 @@
   shipped** (opened 2026-08-10). One snapshot buffer, two trackers writing it. Headline numbers are
   unaffected (recomputed on the restored geometry); the provenance line is false and it already
   caused one wrong diagnosis. → [[HANDOFF_24_best_solution_buffer_20260810.md]]
-- **#22 — 8 ISPD2015 designs have no XPlace reference** (fence regions; `--dataset ispd2015` is
-  silently rewritten to `ispd2015_fix`). Blocked on obtaining that dataset.
+- **#26 — fence regions, and it is worse than a scoring gap** (opened 2026-08-11, supersedes #22).
+  The 9 unscored designs are **exactly** the paper's 9 †-marked ones. XPlace does not fail at DP —
+  it raises `NotImplementedError` in `init_filler`, before legalization. And **our own parser
+  discards `REGIONS`/`GROUPS`** (`DataBase::add_def_region`/`add_def_group` are empty stubs), so we
+  place those 9 unconstrained and report an optimistically low HPWL. One design
+  (`mgc_pci_bridge32_b`) is scoreable **today** via `--dataset ispd2015_fix`; verified end-to-end.
 
 ## Where pl_algo stands
 - All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
@@ -67,6 +91,24 @@
 - `top.cpp` is still a mode-switch bring-up scaffold; the host owns the γ/λ schedule, one
   round-trip per iteration.
 - `make host HOST=pl_algo` needs one `make clean HOST=pl_algo` first (stale `.d`, not a source break).
+
+## Closed 2026-08-11
+- **Preconditioner always on + escalation unthrottled** (`3c70b38`). Two coupled faithfulness fixes,
+  both about `precond_coef` — which feeds the per-node `precond_weight` **and** `precond_kappa`, and
+  κ gates the every-3rd-iteration γ/λ throttle for every design.
+  **(A)** `precond_coef` escalation hoisted out of `updateDensityWeight()` into `updatePrecondCoef()`,
+  called outside the `perform_update` gate. XPlace's `step_precond_coef` is the one member of its
+  `step()` trio with **no** `skip_update` guard — deliberately, since it is what ends the throttle.
+  Gated, our `%20` grid could only fire where it met `%3`: **every 60 iterations, not 20**.
+  **(B)** `auto_enable_preconditioning` removed (above).
+  Suite effect: median **1.0113 → 1.0095**, ISPD2005 mean 1.0111 → **1.0052**, ISPD2015 ~0.4% worse,
+  `divergence_guard` 10/28 → 8/28. `bigblue3` **−4.30%** (1.0565 → 1.0111, and it now *converges*);
+  `mgc_des_perf_1` also recovered and now beats XPlace by 1.9%.
+  ⚠️ **Not a uniform win.** Three designs moved the wrong way — `mgc_matrix_mult_a` +7.71% (but see
+  #27, it is a parser bug), `mgc_superblue19` +2.26%, `mgc_superblue14` +0.79%.
+  ⚠️ (A) is provably a **no-op** when the preconditioner is off — verified by reproducing a frozen
+  baseline bit-for-bit with `enable_preconditioning = false` on the new binary.
+  → [[_NEW_REPORT_26_precond_always_on_20260811.md]]
 
 ## Closed 2026-08-10
 - **#24 code DONE** — best-solution tracking rebuilt to match XPlace: three trackers
@@ -99,6 +141,17 @@
   the `floorplan.def` hardcoding stands.
 
 ## Newly open
+- **#27 — `mgc_matrix_mult_a` is a one-byte parser bug, not an algorithm failure.** Its
+  `placement.constraints` is 25 bytes — `maximum_utilization=60% \n`, **one trailing space** longer
+  than every other design's. `readPlacementConstraints` tests `back() == '%'` to decide whether to
+  divide by 100; the space defeats it, `stof("60% ")` returns **60.0**, and the design runs at
+  `target_density = 60`. Result: **29,779,040 fillers** for 149,650 movable cells (~144,900
+  expected) — filler area ~20× the die. GP dies at iteration 271; post-DP **3.27× XPlace**.
+  `mgc_fft_b`/`matrix_mult_b`/`matrix_mult_c` carry the same `60%` in 24-byte files and parse fine;
+  all 20 ISPD2015 files checked byte-wise, **exactly one is affected**. Fix the parser, not the
+  benchmark. **This one design is the entire suite mean** (1.0150 over the other 18), and its
+  response to any algorithm change is noise until fixed.
+- **#26 — fence regions** (see *Where sw_only stands*). Supersedes #22.
 - **#25 — we and XPlace use different `target_density` on ISPD2015.** On byte-identical `.def`s our
   exact overflow vs XPlace's: `adaptec1` **0.9991** (both 1.0), `mgc_fft_b` 1.119 (ours 0.6),
   `mgc_des_perf_1` **8.79** (ours 0.906). We read the DEF's `placement.constraints`; XPlace leaves
