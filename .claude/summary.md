@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-08-12 15:20 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-12 16:47 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 
 ## Two threads
 - **sw_only** — CPU golden reference; goal is to match XPlace. The active thread.
@@ -106,6 +106,15 @@
 - `make host HOST=pl_algo` needs one `make clean HOST=pl_algo` first (stale `.d`, not a source break).
 
 ## Closed 2026-08-12
+- **`tools/` triaged; every survivor now carries a status** (`331f1df`, closes a #1 bullet). The dir
+  had grown past the point where useful and stale were distinguishable by inspection. 5 stale tools
+  deleted — `xplace_gp_ref.py`, `collate_mms.py`, `make_scorecard.py`, `legalize_swonly_mms.sh`,
+  `bench_swonly.sh` — each with zero references from any code, Makefile or skill, and each
+  superseded by a named replacement. 2.1 MB of `adaptec1_*.png` run output was **moved, not
+  destroyed**, to `.claude/2_ARTIFACTS/legacy_density_heatmaps/`. `tools/README.md` now has a
+  **live / dormant** row for all 38 survivors, checked mechanically, so an unlisted tool is a
+  visible defect. Kept as *dormant* rather than deleted: the OpenROAD opendp island (independent
+  legalizer, binary still installed), `eval_overflow_xplace.sh`, `vcd_to_svg.py`.
 - **#26 — fence regions** (details above). Decision: ignore them, document it, keep both benchmark
   variants. Guards against re-deriving this: the operational rules in `CLAUDE.md`, a warning in every
   run log, and both ISPD2015 harnesses now failing loudly (with the regeneration command) when
@@ -187,6 +196,15 @@
   the `floorplan.def` hardcoding stands.
 
 ## Newly open
+- **#28 — `dse.py` refactor, plus two live defects found while triaging `tools/`.**
+  ⚠️ **`dse.py`'s sweep summary is stale against the exe's CSV schema and degrades silently** — it
+  filters result columns with a hardcoded denylist that predates `Best GP HPWL` / `Phase1 *`, so
+  `results.md` has a **blank `Best HPWL` column on every row**, no HPWL-range footer, and result
+  columns listed as swept parameters. Visible in `results/DSE_20260810_173906/results.md`.
+  **Until it is fixed, read a sweep with `tools/analyze_dse.py`, not `results.md`** — the older file
+  is the correct reader here. Second defect: `_full_suite()` duplicates `benchmarks.py`'s grids
+  exactly and omits `target_density` (latent, would bite on MMS). Refactor design agreed with Mark
+  (CLI flags + JSON runsets, ~250 lines); not started.
 - **#25 — we and XPlace use different `target_density` on ISPD2015.** On byte-identical `.def`s our
   exact overflow vs XPlace's: `adaptec1` **0.9991** (both 1.0), `mgc_fft_b` 1.119 (ours 0.6),
   `mgc_des_perf_1` **8.79** (ours 0.906). We read the DEF's `placement.constraints`; XPlace leaves

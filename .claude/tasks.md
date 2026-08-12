@@ -22,8 +22,24 @@ tree committed, **67 GB freed** from `results/` (helper: `tools/prune_run_artifa
 - [ ] **Per-run `viz/` dumps are reproducible output** (~96 MB per adaptec1 run, ~480 MB per
       bigblue4). Already swept by the default slim. Given the size, consider making viz output
       **opt-in for sweeps** rather than default.
-- [~] `tools/eval_overflow_xplace.sh` left untracked per Mark (2026-07-27). Revisit whether it
-      belongs in `tools/`.
+- [x] **`tools/` triaged and every survivor given a status (2026-08-12, `331f1df`).** 5 stale tools
+      deleted (`xplace_gp_ref.py`, `collate_mms.py`, `make_scorecard.py`, `legalize_swonly_mms.sh`,
+      `bench_swonly.sh`) — each verified to have zero references from code, Makefile or skill, and
+      each superseded by a named replacement. 2.1 MB of `adaptec1_*.png` run output was **moved**
+      (not destroyed) out of the code dir to `.claude/2_ARTIFACTS/legacy_density_heatmaps/`.
+      `tools/README.md` now carries a **live / dormant** status row for all 38 survivors, so an
+      unlisted tool is a visible defect rather than an unknown. The OpenROAD opendp island,
+      `eval_overflow_xplace.sh` and `vcd_to_svg.py` were kept and marked **dormant** — they work
+      and are independent of the XPlace path, they are just off it.
+      <details><summary>Superseded: "`tools/eval_overflow_xplace.sh` left untracked per Mark (2026-07-27)"</summary>
+
+      > - [~] `tools/eval_overflow_xplace.sh` left untracked per Mark (2026-07-27). Revisit whether it
+      >       belongs in `tools/`.
+
+      Stale on two counts as of 2026-08-12: the file **is** tracked (and has been since the
+      2026-08-12 `5b52f50` scoring-pipeline move), and the question is now answered — it stays,
+      marked dormant, because it evaluates overflow *without* invoking the fragile legalizer.
+      </details>
 - [~] The stale `run_config.json` re-baseline comment is fixed but **uncommitted** — bundled with
       #2's comment pruning.
 - [~] `~/phd/Xplace` carries **3 uncommitted local edits** (a real `calculator.py` bug fix under
@@ -652,3 +668,58 @@ Algorithmic ideas beyond faithfulness cleanup — hypotheses, not yet scoped.
       reduce toward sharp as GP progresses, so late convergence tracks true physical density instead of
       declaring victory early. **Don't implement yet** — first diagnose *why* those designs won't
       spread.
+
+---
+
+## #28 — `dse.py` refactor: generic launch point, and two live defects (opened 2026-08-12)
+
+Mark: *"Refine dse.py to be the generic launch point for any number of runs. It should be easy to
+understand and configure by LLM agent or human hands. It's currently functional, but suffering from
+bloat."* Deferred from the 2026-08-12 `tools/` cleanup (#1) — that session did `tools/` only.
+
+**Two defects found while surveying, both still live. Fix with the refactor, not before.**
+
+- [ ] **The sweep summary is stale against the exe's CSV schema — it degrades SILENTLY.**
+      `dse.py` selects result columns with a hardcoded `fixed_cols` **denylist** (`dse.py:779`) that
+      no longer matches `Output.cpp`. The exe emits `Best GP HPWL`, `XPlace GP HPWL`,
+      `Final HPWL Exact`, `Phase1 *`; dse.py still looks for `Best HPWL` / `XPlace HPWL`. Result:
+      the `Best HPWL` column is **blank on every row** of `results.md` and the console table, the
+      HPWL-range footer vanishes, and result columns get listed as *swept parameters*
+      (`Swept parameters: Best GP HPWL, XPlace GP HPWL, Phase1 Iters, …`).
+      **Falsifiable:** `head -12 results/DSE_20260810_173906/results.md` — the blank column and the
+      nonsense header line are both visible there.
+      **Fix:** select result columns with a **positive list**, so a new `Output.cpp` column can
+      never again be silently reinterpreted as a swept parameter.
+      ⚠️ **Until then read a sweep with `python3 tools/analyze_dse.py <results.csv>`, not
+      `results.md`.** `analyze_dse.py` is on the current schema; despite being the older file it is
+      the *correct* reader — the opposite of what the dates suggest.
+
+- [ ] **`_full_suite()` duplicates `benchmarks.py`.** Its 28-design grid table is an **exact**
+      duplicate of the manifest's `grid` column (verified design-by-design 2026-08-12). It also
+      never sets `target_density`, which the manifest carries. Harmless *today* — ISPD2015 takes it
+      from `placement.constraints` and ISPD2005 is 1.0 — but this is precisely the trap
+      `gen_suite_configs.py` was written to close (#25), and it bites silently the moment an MMS
+      design enters a sweep. **Fix:** query `benchmarks.py`; delete the table.
+
+**Bloat inventory (846 lines).** Dead on arrival: `modify_config_parameter` (73 lines) and
+`run_AIEplace` (14 lines) have **no callers anywhere**. `dse_sweep` is 57 lines of entirely
+commented-out entries. The 7 historical A/B run-sets in `_RUN_SETS` (~190 lines) are experiment
+*records*, not tools.
+
+**Design decided with Mark (2026-08-12), not yet built:** CLI flags + JSON runsets as the single
+mechanism — `--designs tier1+tier2`, `--designs adaptec1,adaptec2 --set enable_preconditioning=true,false`
+(product expanded automatically), `--runset foo.json` (the path `morris.py`/`sobol.py` already
+emit), `--resume DIR`. Retires the `DSE_RUN_SET` / `MORRIS_RUNSET` env vars and all 9 run-set
+functions; grid and target_density come from `benchmarks.py`. Target ~250 lines.
+
+⚠️ **Mark's call on the 7 historical A/Bs: delete them, and record the equivalent one-line CLI in
+the report that cites each.** `DSE_RUN_SET=best_sol_ab` is quoted in the #24 report and `_gamma_ab`
+in `report_density_weight_ramp.md`; those citations must not become dangling.
+`morris.py:89` and `sobol.py:83` print the old launch command and must be updated in the same change.
+
+---
+
+## #28 — `dse.py` refactor: generic launch point, and two live defects (opened 2026-08-12)
+
+Mark: *"Refine dse.py to be the generic launch point for any number of runs. It should be easy to
+understand and configure by LLM agent or human hands. Its
