@@ -326,7 +326,37 @@ Check with `wc -c vck5000/host/benchmarks/ispd2015/mgc_matrix_mult_a/placement.c
 be 24, not 25. **The kept implausibility check is what makes that recoverable**: a machine without
 the repair now stops with an error naming the file instead of silently producing a 3.27x result.
 
-→ [[_NEW_REPORT_27_matrix_mult_a_stray_space_20260811.md]]
+→ [[REPORT_27_matrix_mult_a_stray_space_20260811.md]]
+
+### Annotation (2026-08-12) — the last open risk is measured, and there is only ONE copy of the file
+
+Two facts found after this entry was archived. Neither changes its conclusion; both were unstated
+assumptions in it.
+
+**1. XPlace's reference for this design was ALSO computed from the malformed file — and it did not
+matter.** `~/phd/Xplace/data/raw/ispd2015` is a **symlink to `vck5000/host/benchmarks/ispd2015`**,
+so the two tools never had separate copies: the reference run of 2026-08-07 read the same 25-byte
+file. XPlace does not parse it in Python — `detail_placement.py:670,707` passes the path to its
+external DP binary — so whether it was affected had to be measured, not reasoned. Re-running
+XPlace's full flow on the corrected file:
+
+```
+stored reference (2026-08-07, malformed input)  1.516973E+07
+re-run 2026-08-12 (corrected input)             1.516485E+07   -0.03%
+```
+
+Negligible; its DP engine is insensitive to the bad value. **The 3.2669 → 1.0171 result stands**
+(1.0175 against the fresh reference). This was the one way the headline could still have been
+apples-to-oranges, and it is now closed by measurement.
+
+**2. The symlink means a re-download poisons everything at once**, including `ispd2015_fix` — which
+#26 established is *generated* from the raw data, not downloaded. `ispd2015_fix/mgc_matrix_mult_a/
+placement.constraints` is 24 bytes today only because it was regenerated (2026-08-11 23:06) after
+the repair. So there is exactly one file to protect and exactly one thing protecting it: the
+hard-error in `readPlacementConstraints`. That check is load-bearing, not belt-and-braces.
+
+**Still true and still accepted:** no automated test exercises that guard (a harness was written and
+withdrawn as too much machinery), and the corrected benchmark file remains untracked.
 
 ---
 
