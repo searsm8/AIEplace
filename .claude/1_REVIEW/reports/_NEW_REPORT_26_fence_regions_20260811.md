@@ -221,14 +221,19 @@ expected result for a change that only adds a log line.
 
 ## 6. Reproduce
 
+⚠️ **Paths updated 2026-08-12**: the scoring harnesses moved from `.claude/2_ARTIFACTS/` to the
+tracked `vck5000/tools/` (§9). Commands below are the current ones.
+
 ```bash
 cd ~/phd/Xplace/data && python3 fix_ispd2015_route.py          # regenerate ispd2015_fix (~90 s)
-cd ~/phd/AIEplace/.claude/2_ARTIFACTS && XREF_OUT=/tmp/xref26 bash run_xplace_ref_2015.sh
+cd ~/phd/AIEplace/vck5000
+XREF_OUT=/tmp/xref26 bash tools/run_xplace_ref_2015.sh
 LGDP44_GP=/tmp/full44_v3/results LGDP44_OUT=/tmp/lgdp26 \
-  LGDP44_RES=$PWD/lgdp44_v4_results.tsv bash run_lgdp44.sh
-python3 analyze_full44.py --gp full44_v3_suite_results.tsv --lgdp lgdp44_v4_results.tsv
-python3 analyze_fence_cost.py lgdp44_v4_results.tsv contest_legal_lgdp_20260811.tsv
-cd ~/phd/AIEplace/vck5000 && python3 tools/fence_check.py \
+  LGDP44_RES=~/phd/AIEplace/.claude/2_ARTIFACTS/lgdp44_v4_results.tsv bash tools/run_lgdp44.sh
+python3 tools/analyze_full44.py --gp full44_v3_suite_results.tsv --lgdp lgdp44_v4_results.tsv
+python3 tools/analyze_fence_cost.py \
+  ~/phd/AIEplace/.claude/2_ARTIFACTS/{lgdp44_v4_results.tsv,contest_legal_lgdp_20260811.tsv}
+python3 tools/fence_check.py \
   host/benchmarks/ispd2015/mgc_pci_bridge32_b/floorplan.def \
   host/benchmarks/ispd2015/mgc_pci_bridge32_b/after_legalized.ntup.fix.def --expect-legal
 ```
@@ -295,8 +300,25 @@ One trap if anyone later tries to standardise on `_fix` alone: it nudges 6 fixed
 manufacturing grid in `edit_dist_a` and `fft_b` (≤3 DBU), so those designs would **not** reproduce
 their current placements. `mgc_pci_bridge32_b` is bit-identical across the two variants (§4a) only
 because it has no such nudges.
-- **The scoring harnesses are untracked** (`.claude/2_ARTIFACTS/` is gitignored) even though they
-  produce every headline number in this repo. `run_lgdp44.sh` still carried a stale default output
-  path from the 2026-08-07 `.claude/` move, and so did `analyze_full44.py` — both fixed here, both
-  invisible to git. Moving them next to `vck5000/tools/def_patch_placement.py`, which they call and
-  which *is* tracked, is a 3-file change worth doing.
+
+### The guards had to be tracked to be guards
+
+They were written into `.claude/2_ARTIFACTS/`, which is **gitignored** — so they existed on this box
+and nowhere else, which is not a guard, it is a local habit. **The scoring pipeline moved to
+`vck5000/tools/` on 2026-08-12** (10 files: `run_suite.sh`, `gen_suite_configs.py`, `run_lgdp44.sh`,
+`run_lgdp_suite.sh`, `gen_lgdp_inputs.py`, `run_xplace_ref{,_2015}.sh`,
+`analyze_full44.py`, `analyze_lgdp_suite.py`, `analyze_fence_cost.py`), joining
+`def_patch_placement.py` and `benchmarks.py`, which they already call and which were already tracked.
+`vck5000/tools/README.md` documents the run order and where the boundary sits; the one-off
+experiment runners stayed behind, because they are output.
+
+Code moved, **results did not**: every runner now writes to `$ARTIFACTS`, defaulting to
+`.claude/2_ARTIFACTS/`. Two stale absolute paths surfaced in the process and are fixed — `run_suite.sh`
+and `run_lgdp_suite.sh` still defaulted to `vck5000/2_ARTIFACTS/`, a directory that stopped existing
+on 2026-08-07, and `run_xplace_ref.sh` wrote its ISPD2005 references to a *different file* than
+`run_xplace_ref_2015.sh` wrote the ISPD2015 ones. `analyze_full44.py` now exits loudly on a missing
+artifacts directory instead of printing a table of dashes, which is how that class of bug hid.
+
+Verified after the move: both runners resolve all 28 / 20 designs from `tools/` and honour
+`$ARTIFACTS`; all three analyzers reproduce byte-identical output from the new location.
+- ~~**The scoring harnesses are untracked**~~ — **done 2026-08-12**, see §9.

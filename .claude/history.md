@@ -30,6 +30,14 @@ routability) is **out of scope** — Mark's call.
 
 ## #26 — Fence regions (opened 2026-08-11, CLOSED 2026-08-12)
 
+> **Annotation, 2026-08-12 (after archiving):** item 6's guards were written into
+> `.claude/2_ARTIFACTS/`, which is gitignored — so they protected this box and nothing else. The
+> **scoring pipeline was moved to the tracked `vck5000/tools/`** (10 scripts, `tools/README.md`),
+> which is what makes them guards. Two further stale paths surfaced in the move: `run_suite.sh` and
+> `run_lgdp_suite.sh` still defaulted to `vck5000/2_ARTIFACTS/`, gone since 2026-08-07, and
+> `run_xplace_ref.sh` wrote its references to a different file than `run_xplace_ref_2015.sh`.
+> Report §9.
+
 **All 9 designs are scored; the ISPD suite is 28 of 28.** Their ratios are unremarkable — median
 **1.0154**, 7 of 9 within 2%, `mgc_pci_bridge32_b` better than XPlace. ISPD median 1.0095 → **1.0106**.
 → [[_NEW_REPORT_26_fence_regions_20260811.md]]

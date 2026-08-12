@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-08-11 23:52 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-12 15:20 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 
 ## Two threads
 - **sw_only** — CPU golden reference; goal is to match XPlace. The active thread.
@@ -80,9 +80,10 @@
   unaffected (recomputed on the restored geometry); the provenance line is false and it already
   caused one wrong diagnosis. → [[HANDOFF_24_best_solution_buffer_20260810.md]]
 - **#26 — fence regions: scored, measured, priced, and CLOSED** (2026-08-12). **Decision (Mark): we
-  do NOT implement fence regions — we ignore them, as XPlace does, and say so.** The rule now lives
-  in `CLAUDE.md`, which is loaded every session; this bullet is a pointer, not the source.
-  Three things worth carrying forward:
+  do NOT implement fence regions — we ignore them, as XPlace does, and say so.** ⚠️ `CLAUDE.md`
+  carries only the two *operational* rules (how to regenerate `ispd2015_fix`, keep the fenced
+  originals); the **decision and its reasoning live in `history.md` #26 and the report**, so this
+  bullet is the always-loaded statement of it. Three things worth carrying forward:
   - **`ispd2015_fix` is GENERATED, not downloaded** — `cd ~/phd/Xplace/data && python3
     fix_ispd2015_route.py` builds all 20 from the raw data (a symlink to our own benchmarks).
     The regenerated `mgc_pci_bridge32_b` DEF is byte-identical to the copy its reference came from.
@@ -106,9 +107,18 @@
 
 ## Closed 2026-08-12
 - **#26 — fence regions** (details above). Decision: ignore them, document it, keep both benchmark
-  variants. Guards against re-deriving this: the rule in `CLAUDE.md`, a warning in every run log,
-  and both scoring harnesses now failing loudly (with the regeneration command) when `ispd2015_fix`
-  is missing or older than the raw data.
+  variants. Guards against re-deriving this: the operational rules in `CLAUDE.md`, a warning in every
+  run log, and both ISPD2015 harnesses now failing loudly (with the regeneration command) when
+  `ispd2015_fix` is missing or older than the raw data.
+- **The scoring pipeline is now TRACKED, in `vck5000/tools/`** — 10 scripts moved out of the
+  gitignored `.claude/2_ARTIFACTS/`, where the guards above would have protected exactly one machine.
+  `tools/README.md` has the run order and the rule for what belongs there: *anything that produces a
+  number we quote is tracked; one-off experiment runners stay with the output.* Code moved, results
+  did not — every runner writes to `$ARTIFACTS`, still defaulting to `.claude/2_ARTIFACTS/`.
+  The move surfaced three live path bugs, all fixed: `run_suite.sh` and `run_lgdp_suite.sh` defaulted
+  to `vck5000/2_ARTIFACTS/` (gone since 08-07), and `run_xplace_ref.sh` wrote ISPD2005 references to
+  a **different file** than `run_xplace_ref_2015.sh` wrote the ISPD2015 ones. `analyze_full44.py` now
+  exits loudly on a missing artifacts dir instead of printing a table of dashes.
 
 ## Closed 2026-08-11
 - **#22 — the 8 designs with no XPlace reference.** Resolved by #26: neither of that entry's two

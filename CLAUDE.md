@@ -101,18 +101,6 @@ plus the prebuilt Limbo parser libs in `common/lib/`. Landed 2026-08-04 (TODO #9
 silent fork between the two hosts. Fix a parser or geometry bug **there**, once. Nothing in
 `common/` may include `AIEplace.h`, `Visualizer.h`, or anything from `pl/`; see its README.
 
-## Fence regions on ISPD2015: we ignore them ON PURPOSE (decided 2026-08-12, TODO #26)
-
-9 of the 20 ISPD2015 designs carry DEF `REGIONS`/`GROUPS` — cells of an RTL module confined to a
-sub-area of the die. **We discard them** (`DataBase::add_def_region`/`add_def_group` are deliberately
-empty; `readDEF()` warns on every such run), and so does XPlace: it raises `NotImplementedError`
-rather than place them, and the TCAD paper marks those same 9 designs † *"with fence-region
-constraints removed"*. **Both sides of every ratio use the fence-stripped variant, so the comparison
-is fair — but our ISPD2015 results are NOT legal contest solutions**: we place 59–94% of the
-constrained cells outside their region. Say "ISPD2015 with fence regions removed, as in XPlace"
-in any writeup. Do not implement fences without re-reading [[#26]] first — XPlace has no
-formulation to copy, so anything built here is *our* design decision, not faithfulness work.
-
 - **`ispd2015_fix` is GENERATED, not downloaded.** If it is missing or older than the raw data
   (fresh box, re-downloaded benchmarks), the scoring harnesses cannot score those 9 designs:
   ```bash
@@ -264,6 +252,13 @@ refreshed the baseline" leaves a trace.
 - `make run` — builds if needed, then runs `HOST=sw_only` with `host/src/sw_only/run_config.toml`.
 - `make test` — the tier-1 suite above.
 - `make help` — current variable settings and every build target.
+
+**The scoring pipeline lives in `vck5000/tools/` and is TRACKED** (moved there 2026-08-12 from the
+gitignored `.claude/2_ARTIFACTS/`, where three stale paths had been silently producing empty or
+misfiled results). `tools/README.md` has the run order — configs → our GP → XPlace reference →
+LG+DP → scorecard — and the rule that decides where a script belongs: **anything that produces a
+number we quote is tracked; one-off experiment runners stay with the output.** Results still land in
+`.claude/2_ARTIFACTS/` via `$ARTIFACTS`; override it to keep a throwaway run off the standing tables.
 
 ## Coding style for this repo
 General style rules are in `~/.claude/CLAUDE.md`; this is the hardware-specific addition.

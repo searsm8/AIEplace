@@ -77,7 +77,7 @@ dse_sweep = OrderedDict([
         #"ispd2015/mgc_fft_a",           #   31K nodes
         #"ispd2015/mgc_fft_b",           #   31K nodes
         #"ispd2015/mgc_pci_bridge32_a",  #   30K nodes
-    #    "ispd2015/mgc_pci_bridge32_b",  #   29K nodes
+        #"ispd2015/mgc_pci_bridge32_b",  #   29K nodes
     #])),
 
     # (empty) — γ-ref-grid verification runs the per-design grids via explicit_runs below.
