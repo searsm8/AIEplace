@@ -758,19 +758,37 @@ that hides the defect.
 | our DEF/`.pl` → legalizer input | `def_patch_placement.py` (LEF/DEF), `def_to_bookshelf_pl.py` (bookshelf) | frame is bit-perfect |
 | scorecard | `analyze_full44.py`, `analyze_lgdp_suite.py` | the tables we quote |
 
-- [ ] **`dse.py --lgdp`**: after the GP loop, feed each run's placement through the LG+DP stage and
-      add `Our LG HPWL` / `Our DP HPWL` / `DP Ratio` to the summary. Off by default — it is slow
-      and needs the XPlace environment (CUDA, `~/anaconda3/bin/python`), so a plain sweep must not
-      acquire that dependency.
-- [ ] **Then collapse the two suite runners.** `gen_suite_configs.py` + `run_suite.sh` exist only
-      because `dse.py` could not do a scored full-suite run; once `--lgdp` lands they are a second
-      implementation of the same sweep, with their own config generation and their own TSV schema.
-      Retire them, or state why they stay. ⚠️ Don't do this *before* `--lgdp` — every headline
-      number in `summary.md` currently comes through that path.
-- [ ] **Pair like-for-like here too** (#29's rule): XPlace's LG/DP HPWLs are **unmasked**, so they
-      pair with our `Final HPWL Exact` lineage, not `Best GP HPWL`. Tier 2 still needs ×site_width.
+- [x] **LG+DP in `dse.py` — done 2026-08-13, and ON BY DEFAULT** (Mark's call, overriding the
+      opened-as "off by default" plan: *"I'd like dse to call the legalization and DP to run on our
+      GP solution by default. Add a param --gp-only as a way to NOT run LG+DP."*). Each GP result is
+      legalized + detailed-placed through XPlace; `--gp-only` stops after GP. Summary gains
+      `Our LG HPWL` / `Our DP HPWL` / `XPlace DP HPWL` / `DP Ratio`, with a median/mean/within-2%
+      footer. The per-design core is a new `tools/lgdp.py` (`legalize(bench_path, gp_def, work_dir)
+      -> {lg, dp, variant, status}`), porting the `run_one()` of both bash runners — all three
+      format paths (bookshelf, ispd2015 `--custom_path`, ispd2015_fix fence). Each run→DEF is mapped
+      via results.csv's `Output Dir` column (robust across A/B sweeps), and the `.def` basename is
+      globbed (`RowBasedPlacement.def` vs `fft.def` vs …). LG is decoupled from GP so `--resume`
+      backfills a run whose GP finished but LG did not; results persist in `lgdp.json`.
+      **Verified** end-to-end on all three paths against known refs: adaptec1 **1.001** (the
+      anchor), mgc_fft_2 1.028, fenced mgc_des_perf_a 1.018. **Frame handled correctly:** post-DP
+      HPWL is scraped from XPlace's own log so it is already in XPlace's frame — the ratio against
+      `xplace_dp_hpwl` needs **no** ×site_width (the opposite of #29's raw-DBU GP number; this is
+      analyze_full44.py's frame rule, and it is why LG/DP was the easy half).
+- [ ] **Full-suite cross-check, then collapse the two suite runners.** A `make dse` over all 28
+      (now GP+LG+DP in one command) has NOT yet been diffed against the standing pipeline
+      (`gen_suite_configs.py` → `run_suite.sh` → `run_lgdp44.sh` → `analyze_full44.py`) that
+      produces `summary.md`'s median 1.0106. Run it, confirm the per-design DP ratios agree, THEN
+      retire `gen_suite_configs.py` + `run_suite.sh` + the two `run_lgdp*.sh` (fold their remaining
+      bits — the smallest-first ordering, the MMS `--mixed_size` arm — into `dse.py`/`lgdp.py`).
+      ⚠️ Do not retire before the cross-check: every headline number in `summary.md` still comes
+      through that path. `~2 h` for the 28-design GP+LG+DP run.
+      **Falsifies the collapse:** `dse.py`'s per-design DP ratio == `analyze_full44.py`'s within
+      rounding, on all 28.
 
-**Blocked on:** nothing, but doing #29 first means the ratio machinery is written once.
+**Note for #29 (still open):** the LG/DP ratio pairs like-for-like *for free* because both sides
+come out of XPlace's log in the same frame. The GP-side ratio (#29) is the hard one precisely
+because our GP number is raw-DBU/masked while XPlace's is site-unit/its-own-mask — that asymmetry
+does not exist here.
 
 
 

@@ -9,6 +9,7 @@
     python3 tools/dse.py --designs mgc_fft_2 --grid 512,256,128
     python3 tools/dse.py --runset results/morris_<ts>/runset.json
     python3 tools/dse.py --resume results/DSE_<ts>
+    python3 tools/dse.py --gp-only                         # GP only, skip the LG+DP score
     python3 tools/dse.py --designs tier1 --dry-run         # list the runs, launch nothing
 
 Three ways to say what to run, and no others:
@@ -21,12 +22,18 @@ Three ways to say what to run, and no others:
   --runset    a JSON list of run dicts, {"label":..., "benchmark":..., <overrides>}. This is
               what tools/morris.py and tools/sobol.py emit.
 
+By default each GP run is then legalized + detailed-placed through XPlace's OWN LG+DP, so the
+headline is legal-vs-legal (post-DP HPWL, the metric the XPlace paper reports — a GP-vs-GP number
+flatters whichever placer spread less, TODO #3). Pass --gp-only to stop after GP. LG+DP needs
+XPlace's environment (CUDA + its conda python); see tools/lgdp.py.
+
 What a sweep leaves behind, in results/DSE_<timestamp>/:
   sweep.json    the manifest — every run's label, config path and exact overrides. THIS is
                 the record of what was launched; read it, not the configs, to see a sweep.
   configs/      one TOML per run, exactly as the exe read it
   logs/         one stdout/stderr capture per run
   results.csv   appended by the exe, one row per run (schema owned by Output.cpp)
+  lgdp.json     per-run LG+DP result (unless --gp-only); XPlace logs under lgdp/<label>/
   results.md    the collated table, same one printed at the end
 
 The only thing dse.py writes into a run's DSE_info is `run=<label>`, so results.csv has one
@@ -40,6 +47,7 @@ wrong. Designs run smallest-first so a bad config fails in seconds, not after bi
 import argparse
 import copy
 import datetime
+import glob
 import itertools
 import json
 import os
@@ -50,6 +58,7 @@ from collections import OrderedDict
 import tomlkit
 
 import benchmarks  # master manifest: design list, XPlace grid + target_density
+import lgdp        # per-design legalization + detailed placement via XPlace (TODO #30)
 
 EXE_PATH = "build/hw/host/sw_only/aieplace_sw_only.exe"
 TEMPLATE_PATH = "host/src/sw_only/default_config.toml"
@@ -61,11 +70,21 @@ BENCH_ROOT = "host/benchmarks"
 RESULT_COLS = ["Iters", "Best Iter", "Best OVFW", "Best GP HPWL", "XPlace GP HPWL", "Ratio",
                "Final HPWL Exact", "Total Runtime (sec)"]
 PHASE1_COLS = ["Phase1 Iters", "Phase1 HPWL", "Phase1 OVFW Exact", "Phase1 Stop Reason"]
+# Post-LG/DP columns, computed by dse.py (not in results.csv) from lgdp.json + benchmarks.py.
+LGDP_COLS = ["Our LG HPWL", "Our DP HPWL", "XPlace DP HPWL", "DP Ratio"]
 
 
 # =============================================================================
 # Building the run list
 # =============================================================================
+
+def _is_float(text):
+    try:
+        float(text)
+        return True
+    except (TypeError, ValueError):
+        return False
+
 
 def coerce(text):
     """'true'/'42'/'1e-5'/'cpu' -> the TOML value it should become."""
@@ -218,7 +237,54 @@ def prepare(runs, sweep_dir):
 # Running
 # =============================================================================
 
-def run_all(entries, total):
+def gp_output_dir(sweep_dir, label):
+    """The run directory the exe wrote for `label`, from results.csv's Output Dir column.
+    Robust across A/B sweeps (two runs of one design) where a newest-file heuristic is not."""
+    import csv
+    with open(os.path.join(sweep_dir, "results.csv"), newline="") as f:
+        for row in csv.DictReader(f):
+            if (row.get("run") or "").strip() == label:
+                return row.get("Output Dir")
+    return None
+
+
+def legalize_run(sweep_dir, label, bench_path, store):
+    """Legalize one completed GP run and record it in `store` (persisted to lgdp.json)."""
+    out_dir = gp_output_dir(sweep_dir, label)
+    # The DEF's basename varies by tier (RowBasedPlacement.def, fft.def, ...), so glob it rather
+    # than hardcode a name — same reason run_lgdp44.sh's newest_def() does.
+    defs = glob.glob(os.path.join(out_dir, "*.def")) if out_dir else []
+    if not defs:
+        store[label] = {"status": "fail_no_gp_def"}
+    else:
+        store[label] = lgdp.legalize(bench_path, defs[0], os.path.join(sweep_dir, "lgdp", label))
+    with open(os.path.join(sweep_dir, "lgdp.json"), "w") as f:
+        json.dump(store, f, indent=2)
+    r = store[label]
+    print(f"DSE:      LG+DP {r['status']:<14} DP={r.get('dp') or '-':>12}  {label}"
+          f"{('  ' + r['hint']) if 'hint' in r else ''}", flush=True)
+
+
+def run_all(entries, total, sweep_dir, gp_only):
+    # Legalization is decoupled from the GP loop: it legalizes any completed GP run not yet in
+    # lgdp.json. On a fresh sweep results.csv is empty so this backfill is a no-op; on --resume it
+    # picks up runs whose GP finished but whose LG did not (an interruption between the two).
+    lgdp_store, bench_of = {}, {}
+    if not gp_only:
+        lgdp_path = os.path.join(sweep_dir, "lgdp.json")
+        if os.path.exists(lgdp_path):
+            with open(lgdp_path) as f:
+                lgdp_store = json.load(f)
+        with open(os.path.join(sweep_dir, "sweep.json")) as f:
+            bench_of = {e["label"]: e["overrides"]["benchmark"] for e in json.load(f)["runs"]}
+        if os.path.exists(os.path.join(sweep_dir, "results.csv")):
+            import csv
+            with open(os.path.join(sweep_dir, "results.csv"), newline="") as f:
+                for row in csv.DictReader(f):
+                    lbl = (row.get("run") or "").strip()
+                    if lbl and lbl in bench_of and lbl not in lgdp_store:
+                        legalize_run(sweep_dir, lbl, bench_of[lbl], lgdp_store)
+
     t0 = time.time()
     failed = 0
     for done, entry in enumerate(entries, 1):
@@ -230,6 +296,8 @@ def run_all(entries, total):
         print(f"DSE: [{done}/{total}] {'DONE' if ok else 'FAIL'} "
               f"{time.time() - t_run:7.1f}s  {entry['label']}"
               f"{'' if ok else '  -> ' + entry['log']}", flush=True)
+        if ok and not gp_only:
+            legalize_run(sweep_dir, entry["label"], entry["overrides"]["benchmark"], lgdp_store)
     return failed, time.time() - t0
 
 
@@ -262,6 +330,25 @@ def summarize(sweep_dir):
         swept = sorted(k for k in keys - {"benchmark"}
                        if len({str(e["overrides"].get(k)) for e in entries}) > 1)
 
+    # Post-LG/DP cells, computed here from lgdp.json + the manifest's benchmark path. DP HPWL is
+    # already in XPlace's frame (scraped from its log), so the ratio against benchmarks.py needs
+    # NO site_width conversion — the opposite of the raw-DBU GP number (lgdp.py's frame note).
+    lgdp_cell, fenced = {}, []
+    lgdp_path = os.path.join(sweep_dir, "lgdp.json")
+    if os.path.exists(lgdp_path):
+        with open(lgdp_path) as f:
+            lgdp_store = json.load(f)
+        for label, r in lgdp_store.items():
+            path = by_label.get(label, {}).get("benchmark", "")
+            ref = benchmarks.BENCHMARKS.get(path, {}).get("xplace_dp_hpwl")
+            dp = r.get("dp")
+            ratio = f"{float(dp) / ref:.4f}" if (dp and ref) else ("no-ref" if dp else r["status"])
+            lgdp_cell[label] = {"Our LG HPWL": r.get("lg") or "", "Our DP HPWL": dp or "",
+                                "XPlace DP HPWL": f"{ref:.4e}" if ref else "N/A",
+                                "DP Ratio": ratio}
+            if r.get("variant") == "ispd2015_fix":
+                fenced.append(path.split("/")[-1])
+
     present = [c for c in RESULT_COLS if c in rows[0]]
     for missing in [c for c in RESULT_COLS if c not in rows[0]]:
         print(f"  [warn] results.csv has no column '{missing}' — Output.cpp schema changed; "
@@ -270,11 +357,14 @@ def summarize(sweep_dir):
         present += [c for c in PHASE1_COLS if c in rows[0]]
 
     cols = ["Design"] + (["run"] if "run" in rows[0] else []) + swept + present
+    cols += LGDP_COLS if lgdp_cell else []
     rows.sort(key=lambda r: (r.get("Design", ""), r.get("run", "")))
 
     def cell(row, col):
         if col in swept:
             return str(by_label.get(row.get("run", ""), {}).get(col, ""))
+        if col in LGDP_COLS:
+            return lgdp_cell.get(row.get("run", ""), {}).get(col, "")
         return str(row.get(col, ""))
 
     width = {c: max(len(c), max(len(cell(r, c)) for r in rows)) for c in cols}
@@ -295,6 +385,24 @@ def summarize(sweep_dir):
                       f"mean {sum(ratios) / len(ratios):.3f} over {len(ratios)}/{len(rows)} designs")
     footer.append("Ratio is only meaningful where Best OVFW converged — an under-spread run "
                   "flatters its own HPWL (TODO #3).")
+    dp_ratios = [float(c["DP Ratio"]) for c in lgdp_cell.values()
+                 if c["DP Ratio"] not in ("no-ref",) and _is_float(c["DP Ratio"])]
+    if dp_ratios:
+        dp_ratios.sort()
+        median = dp_ratios[len(dp_ratios) // 2]
+        footer.append(f"DP Ratio vs XPlace post-DP: median {median:.4f}, "
+                      f"mean {sum(dp_ratios) / len(dp_ratios):.4f}, "
+                      f"{sum(abs(x - 1) <= 0.02 for x in dp_ratios)}/{len(dp_ratios)} within 2%, "
+                      f"better on {sum(x < 1 for x in dp_ratios)} "
+                      f"(legal-vs-legal, the headline metric).")
+    if fenced:
+        footer.append(f"Fence regions STRIPPED on both sides ({len(fenced)}, TODO #26): "
+                      + ", ".join(sorted(fenced)))
+    unscored = [lbl for lbl, c in lgdp_cell.items() if not _is_float(c["DP Ratio"])
+                and c["DP Ratio"] != "no-ref"]
+    if unscored:
+        footer.append(f"No post-DP ({len(unscored)}): "
+                      + ", ".join(f"{lbl} ({lgdp_cell[lbl]['DP Ratio']})" for lbl in sorted(unscored)))
 
     print("\n".join("  " + ln for ln in lines + [""] + footer))
 
@@ -321,6 +429,8 @@ def main():
     ap.add_argument("--grid", default="xplace", metavar="SPEC",
                     help="xplace (per-design, from benchmarks.py) | auto (ePlace formula) | 512,256")
     ap.add_argument("--seed", type=int, default=42, help="params.random_seed (default 42)")
+    ap.add_argument("--gp-only", action="store_true",
+                    help="stop after global placement; skip the XPlace LG+DP legal-vs-legal score")
     ap.add_argument("--runset", metavar="JSON", help="run list from morris.py / sobol.py")
     ap.add_argument("--resume", metavar="DSE_DIR",
                     help="re-enter a sweep dir and run only what its results.csv is missing")
@@ -356,15 +466,19 @@ def main():
         entries = prepare(runs, sweep_dir)
         print(f"DSE: {len(entries)} run(s) -> {sweep_dir}/")
 
-    if not entries:
+    # Empty entries + not gp_only is a fully-GP'd resume: still fall through so run_all can
+    # legalize any GP runs whose LG did not finish.
+    if not entries and args.gp_only:
         print("DSE: nothing left to run")
         return
 
-    failed, elapsed = run_all(entries, len(entries))
-    print(f"\n{'=' * 78}\n  DSE COMPLETE — {len(entries) - failed}/{len(entries)} succeeded, "
-          f"{failed} failed  ({elapsed / 60:.1f} min)\n{'=' * 78}\n")
+    failed, elapsed = run_all(entries, len(entries), sweep_dir, args.gp_only)
+    if entries:
+        print(f"\n{'=' * 78}\n  DSE COMPLETE — {len(entries) - failed}/{len(entries)} succeeded, "
+              f"{failed} failed  ({elapsed / 60:.1f} min)\n{'=' * 78}\n")
     summarize(sweep_dir)
-    print(f"\n  {sweep_dir}/  (sweep.json = what ran, results.md = this table)\n")
+    print(f"\n  {sweep_dir}/  (sweep.json = what ran, results.md = this table"
+          f"{'' if args.gp_only else ', lgdp.json = LG+DP'})\n")
 
 
 if __name__ == "__main__":

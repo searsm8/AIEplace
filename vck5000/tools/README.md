@@ -45,7 +45,13 @@ dict is what the analyzers read.
 Legalization runs through **XPlace's own legalizer** (`main.py --global_placement False`), not
 OpenROAD — see *Dormant* for the opendp island.
 
-Supporting converters, all **live** (called by step 4):
+> **`dse.py` now does steps 1+2+4 in one command** (`make dse`, TODO #30): it generates configs,
+> runs GP, and legalizes each result through `lgdp.py`, emitting `Our DP HPWL` / `DP Ratio` in its
+> own summary. This standing pipeline (`gen_suite_configs.py` → `run_suite.sh` → `run_lgdp44.sh` →
+> `analyze_full44.py`) is still the source of the committed `summary.md` numbers and stays until a
+> full-suite `dse.py` run is cross-checked against it, then folds in (TODO #30 step 2).
+
+Supporting converters, all **live** (called by step 4 and by `lgdp.py`):
 
 | file | what |
 |---|---|
@@ -59,7 +65,8 @@ Supporting converters, all **live** (called by step 4):
 
 | file | status | what |
 |---|---|---|
-| `dse.py` | **live** | **The launch point for running many benchmarks / many configs** (`make dse`). `--designs tier1+tier2`, `--set K=v1,v2`, `--grid`, `--runset`, `--resume`, `--dry-run`; `--help` is the reference. Grid + target_density come from `benchmarks.py`. Every sweep writes `sweep.json` — the manifest of exactly what was launched. |
+| `dse.py` | **live** | **The launch point for running many benchmarks / many configs** (`make dse`). `--designs tier1+tier2`, `--set K=v1,v2`, `--grid`, `--runset`, `--resume`, `--dry-run`; `--help` is the reference. Grid + target_density come from `benchmarks.py`. **Legalizes + detailed-places each GP result through XPlace by default** (TODO #30) so the headline is legal-vs-legal; `--gp-only` skips it. Every sweep writes `sweep.json` — the manifest of exactly what was launched — and (unless `--gp-only`) `lgdp.json`. |
+| `lgdp.py` | **live** | Legalize + detailed-place ONE sw_only GP `.def` through XPlace's own LG+DP, returning `{lg, dp, variant, status}`. Called per-run by `dse.py`; also runnable standalone (`lgdp.py <suite/design> <gp.def> <workdir>`). Handles the three format paths (bookshelf, ispd2015 custom_path, ispd2015_fix fence). Needs XPlace's CUDA env. The reusable core the monolithic `run_lgdp44.sh` / `run_lgdp_suite.sh` will fold into. |
 | `analyze_dse.py` | **live** | Re-renders a finished sweep's table (`analyze_dse.py results/DSE_<ts>`). A 10-line wrapper around `dse.py::summarize`, so there is one renderer, not two that drift. |
 | `morris.py`, `morris_factors.py`, `analyze_morris.py` | **live** | Morris elementary-effects screen. `morris_factors.py` is the editable source of truth for factor ranges; the other two import it. |
 | `sobol.py`, `analyze_sobol.py` | **live** | Sobol variance decomposition, same runner path. |

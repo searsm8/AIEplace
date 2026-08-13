@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-08-12 17:34 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-13 17:40 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 
 ## Two threads
 - **sw_only** — CPU golden reference; goal is to match XPlace. The active thread.
@@ -205,12 +205,14 @@
   exact 2.527e8 — **7.9%** apart, so the convenient number is a 7.9% error), and **tier 2 needs
   ×site_width**, which is 200 for `mgc_*` but **100** for the five `mgc_superblue*`. Both belong in
   the placer, not the batch script.
-- **#30 — legalization + detailed placement inside `dse.py`.** GP-vs-GP is the flattering
-  comparison (LG costs 1–8% HPWL, an under-spread GP pays more — TODO #3); post-DP is what the
-  XPlace paper reports. Every piece exists (`run_lgdp44.sh`, the LG/DP references in
-  `benchmarks.py`); it is wiring. Doing it also retires the second suite runner
-  (`gen_suite_configs.py` + `run_suite.sh`) — **but not before `--lgdp` lands**, since every
-  headline number above still comes through that path.
+- **#30 — LG+DP inside `dse.py` — LANDED 2026-08-13, on by default** (Mark's call; `--gp-only`
+  skips). `make dse` now runs GP then legalizes + detailed-places each result through XPlace,
+  reporting `Our DP HPWL` / `DP Ratio` (legal-vs-legal, the headline metric). Core is the new
+  `tools/lgdp.py`; all three format paths verified (adaptec1 **1.001**, mgc_fft_2 1.028, fenced
+  mgc_des_perf_a 1.018). Post-DP pairs like-for-like *for free* — both sides come from XPlace's log,
+  so no ×site_width (unlike the GP number, #29). **Still open:** a full 28-design `make dse` has not
+  yet been diffed against the standing pipeline that produces the median-1.0106 numbers below; do
+  that before retiring `run_suite.sh`/`run_lgdp44.sh`.
 - **#28 — `dse.py` refactor — CLOSED 2026-08-12**, archived to `history.md`. 846 → 371 lines;
   `make dse` (optionally `DSE_ARGS="…"`) is now the single launch point for multi-benchmark runs:
   `--designs tier1+tier2 | --set K=v1,v2 | --grid | --runset | --resume | --dry-run`. Grid and
