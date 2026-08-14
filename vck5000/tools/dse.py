@@ -32,16 +32,18 @@ What a sweep leaves behind, in results/DSE_<timestamp>/:
                 the record of what was launched; read it, not the configs, to see a sweep.
   configs/      one TOML per run, exactly as the exe read it
   logs/         one stdout/stderr capture per run
-  results.csv   one row per run: the exe writes the raw measured columns; dse.py then enriches
-                it with every XPlace-reference comparison (XPlace GP HPWL + GP Ratio, and the
-                LG/DP columns) — all looked up from tools/benchmarks.py, the one manifest.
+  gp_only.csv   the exe's own raw GP record, one appended row per run (schema owned by Output.cpp)
+  results.csv   dse.py's product: gp_only.csv's columns with every XPlace comparison slotted in
+                after Best GP HPWL (XPlace GP HPWL + GP Ratio, and the LG/DP columns) — all looked
+                up from tools/benchmarks.py, the one manifest. Rewritten from gp_only.csv each time.
   lgdp.json     per-run LG+DP result (unless --gp-only); XPlace logs under lgdp/<label>/
   results.md    the collated table, same one printed at the end
 
-A run's identity is (Suite, Design, grid, swept-param values) — every one a visible results.csv
-column. dse.py emits `grid` + each swept parameter into the exe's DSE_info, so the CSV columns ARE
-the identity; sweep.json rows and results.csv rows join on that tuple, and --resume skips a run
-whose identity is already in the CSV. No opaque run-label column.
+Two CSVs, two owners: the exe only ever appends to gp_only.csv, dse.py only ever writes results.csv,
+so neither clashes with the other's schema across a --resume. A run's identity is (Suite, Design,
+grid, swept-param values) — every one a visible column. dse.py emits `grid` + each swept parameter
+into the exe's DSE_info, so the columns ARE the identity; sweep.json and gp_only.csv rows join on
+that tuple, and --resume skips a run whose identity is already in gp_only.csv. No run-label column.
 
 SEQUENTIAL on purpose: the placer is OpenMP-threaded across all cores, and concurrent runs
 were measured (9bea10e, 2026-07-31) to give the same total wall clock with more ways to go
@@ -259,9 +261,12 @@ def row_ident(row, col_keys):
             tuple(str(row.get(k, "")) for k in col_keys))
 
 
-def read_results(sweep_dir):
+def read_gp(sweep_dir):
+    """The exe's raw per-run GP records (gp_only.csv). dse.py enriches these into results.csv but
+    never writes gp_only.csv, so the exe can keep appending to it across --resume without a schema
+    clash."""
     import csv
-    path = os.path.join(sweep_dir, "results.csv")
+    path = os.path.join(sweep_dir, "gp_only.csv")
     if not os.path.exists(path):
         return []
     with open(path, newline="") as f:
@@ -270,7 +275,7 @@ def read_results(sweep_dir):
 
 def gp_output_dir(sweep_dir, want_ident, col_keys):
     """The run dir the exe wrote for a run, matched by identity to results.csv's Output Dir."""
-    for row in read_results(sweep_dir):
+    for row in read_gp(sweep_dir):
         if row_ident(row, col_keys) == want_ident:
             return row.get("Output Dir")
     return None
@@ -297,7 +302,7 @@ def legalize_run(sweep_dir, entry, col_keys, store):
 
 def run_all(entries, total, sweep_dir, gp_only, col_keys):
     # Legalization is decoupled from the GP loop: it legalizes any completed GP run not yet in
-    # lgdp.json. On a fresh sweep results.csv is empty so this backfill is a no-op; on --resume it
+    # lgdp.json. On a fresh sweep gp_only.csv is empty so this backfill is a no-op; on --resume it
     # picks up runs whose GP finished but whose LG did not (an interruption between the two).
     lgdp_store = {}
     if not gp_only:
@@ -307,7 +312,7 @@ def run_all(entries, total, sweep_dir, gp_only, col_keys):
                 lgdp_store = json.load(f)
         with open(os.path.join(sweep_dir, "sweep.json")) as f:
             by_ident = {entry_ident(e, col_keys): e for e in json.load(f)["runs"]}
-        for row in read_results(sweep_dir):
+        for row in read_gp(sweep_dir):
             entry = by_ident.get(row_ident(row, col_keys))
             if entry and entry["label"] not in lgdp_store:
                 legalize_run(sweep_dir, entry, col_keys, lgdp_store)
@@ -336,14 +341,14 @@ ENRICHED = ["XPlace GP HPWL", "GP Ratio", "Our LG HPWL", "Our DP HPWL", "XPlace 
 
 
 def summarize(sweep_dir):
-    """Enrich the exe's results.csv with every XPlace-reference comparison (GP + DP, all from
-    tools/benchmarks.py) and re-render it. The GP number is masked and raw-DBU, so its reference
+    """Read the exe's gp_only.csv and write results.csv, adding every XPlace-reference comparison
+    (GP + DP, all from tools/benchmarks.py). The GP number is masked and raw-DBU, so its reference
     goes through xplace_gp_masked_in_sw_frame(); the DP number comes from XPlace's own log so it
     needs no conversion (lgdp.py's frame note). Idempotent — safe to re-run."""
     import csv
-    rows = read_results(sweep_dir)
+    rows = read_gp(sweep_dir)
     if not rows:
-        print(f"  (no results.csv in {sweep_dir} — every run failed?)")
+        print(f"  (no gp_only.csv in {sweep_dir} — every run failed?)")
         return
 
     col_keys, by_ident = [], {}
@@ -384,10 +389,14 @@ def summarize(sweep_dir):
     rows.sort(key=lambda r: (r.get("Suite", ""), r.get("Design", ""),
                              tuple(r.get(k, "") for k in col_keys)))
 
-    # Rewrite results.csv: exe columns (minus any stale enrichment) + the fresh enriched columns.
+    # Write results.csv from gp_only.csv's columns, with the enriched columns slotted in right after
+    # "Best GP HPWL" so every XPlace comparison sits next to the number it compares. Safe to insert
+    # mid-row: results.csv is dse.py's alone (the exe only appends to gp_only.csv), rewritten whole
+    # each time.
     base = [c for c in rows[0] if c not in ENRICHED]
     enriched = ENRICHED if have_dp else ENRICHED[:2]   # GP ratio always; DP cols only if legalized
-    fields = base + enriched
+    at = base.index("Best GP HPWL") + 1 if "Best GP HPWL" in base else len(base)
+    fields = base[:at] + enriched + base[at:]
     with open(os.path.join(sweep_dir, "results.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         w.writeheader()
@@ -465,7 +474,7 @@ def main():
         manifest, col_keys = sweep["runs"], sweep.get("col_keys", [])
         # The manifest is the authority on resume, so --designs/--set cannot silently redefine a
         # run mid-sweep. A run is done when its identity (benchmark + column values) is in the CSV.
-        done = {row_ident(r, col_keys) for r in read_results(sweep_dir)}
+        done = {row_ident(r, col_keys) for r in read_gp(sweep_dir)}
         entries = [e for e in manifest if entry_ident(e, col_keys) not in done]
         print(f"DSE: resuming {sweep_dir} — {len(manifest) - len(entries)} of {len(manifest)} "
               f"already recorded, {len(entries)} to go")

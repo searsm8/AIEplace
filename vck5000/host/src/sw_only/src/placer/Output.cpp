@@ -183,7 +183,9 @@ void Placer::writeResultsCSV(float final_hpwl, float final_hpwl_exact, float fin
     if (!fs::exists(results_dir))
         fs::create_directories(results_dir);
 
-    fs::path csv_path = results_dir / "results.csv";
+    // gp_only.csv: the exe's own raw GP record. A DSE sweep reads it and writes the consolidated
+    // results.csv (GP metrics + every XPlace comparison, GP and DP); see tools/dse.py.
+    fs::path csv_path = results_dir / "gp_only.csv";
     bool need_header = !fs::exists(csv_path);
 
     std::ofstream out_file;
