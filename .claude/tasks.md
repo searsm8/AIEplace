@@ -725,3 +725,43 @@ that hides the defect.
       go-ahead since these produced every headline number until today. MMS/tier-3 via `make dse
       --designs tier3` should be spot-checked against `_XPLACE_MMS_FINAL` first (this run was
       tier1+tier2 only).
+
+---
+
+## #31 — Investigate designs that stall at overflow > 0.1 (opened 2026-08-14)
+
+Mark, 2026-08-14, on the 28-design `make dse` (`results/DSE_20260814_133037`): *"The few designs
+with overflow above 0.1 should be flagged for investigation. … wait until the MMS designs are run."*
+
+**⚠️ BLOCKED until the tier-3 (MMS) `make dse` lands** — deliberately. MMS is a different regime and
+the 0.1 threshold does NOT transfer to it (see below); flag the MMS stragglers off their own XPlace
+reference once that run exists, then start the investigation with the full ISPD+MMS picture.
+
+**ISPD flagged (Best OVFW > 0.1, from the 28-design run):**
+
+| design | Best OVFW | GP Ratio | DP Ratio |
+|---|---|---|---|
+| `mgc_pci_bridge32_b` | 0.321 | 1.0090 | 0.9843 |
+| `mgc_pci_bridge32_a` | 0.273 | 1.0983 | 1.0540 |
+| `mgc_fft_2`          | 0.146 | 1.0988 | 1.0278 |
+| `mgc_des_perf_b`     | 0.105 | 1.0324 | 1.0154 |
+
+These stop above the 0.07 XPlace-matched threshold at the 1200-iter cap (or a divergence guard),
+i.e. GP never fully spread. Two observations to carry in:
+- **The high-overflow designs have inflated GP ratios that LG+DP partly repairs** (Mark's note):
+  `fft_2`/`pci_bridge32_a` are ~1.098 at GP but 1.028/1.054 after DP — legalization re-spreads the
+  under-converged placement and closes the gap. So the *GP* ratio on these is not a QoR verdict; the
+  DP ratio is. `pci_bridge32_b` even beats XPlace post-DP (0.9843) despite the worst overflow.
+- `pci_bridge32_a/b` are the **low-row std-cell** designs where our forced 512 grid is finer than the
+  row structure — the old #(grid_ab) diagnosis (XPlace caps num_bin ≤ num_rows; pci_bridge32_b has
+  ~400 rows, XPlace uses 256 and converges at 725). That lead was never closed; start here.
+
+**MMS caveat — do NOT flag MMS on the flat 0.1 rule.** XPlace's own Mixed-GP reference stops at
+**0.10–0.18 exact overflow on nearly every MMS design** (`benchmarks._XPLACE_MMS_MIXED_GP`;
+newblue3 is the lone 0.040 outlier) — that is normal for macros-movable, not a stall. For tier-3,
+flag a design only where OUR macro-excluded overflow materially exceeds its Mixed-GP reference, not
+where it merely exceeds 0.1.
+
+**Deliverable:** one report — per flagged design, whether the stall is a grid/schedule/step issue
+and whether it costs post-DP QoR (the metric that matters). Cheap to reproduce per design via
+`make dse --designs <name>`; convergence history in the run's `iterations.dat` (`plot_histories.py`).
