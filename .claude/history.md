@@ -26,6 +26,17 @@ routability) is **out of scope** — Mark's call.
 
 **Closed 2026-08-12:** **#26** — fence regions. The 9 ISPD2015 designs carrying DEF `REGIONS`/`GROUPS` are now scored (suite: 19 -> **28 of 28**, median 1.0106) against XPlace references generated from `ispd2015_fix`, which turned out to be **built locally by XPlace's own `data/fix_ispd2015_route.py`** rather than downloaded — closing #22 as well. The other half is a correctness finding: we place **59-94%** of those designs' fence-constrained cells outside their region (controlled against the contest's own legal solutions, 0 of 190,010 outside), and ~10 percentage points of our margin there is the missing constraint rather than the placer. **Mark's decision: do NOT implement fence regions — document that we ignore them, as XPlace does.** That decision lives in `CLAUDE.md`, because an archived entry like this one is not loaded next session.
 
+**Closed 2026-08-14:** **#29** — the XPlace GP reference (N/A on 22 of 28) is fixed, and by Mark's
+redirection it lives in **dse.py from `benchmarks.py`**, not the placer: the exe now writes only raw
+measured columns and `Placer::lookupXplaceReferenceHPWL`'s hardcoded 6-entry map is gone.
+`benchmarks.py` gained `_XPLACE_GP_MASKED` (all 28, recovered from `/tmp/xref/logs` + the TSV) and
+`xplace_gp_masked_in_sw_frame()`; dse.py enriches results.csv with `XPlace GP HPWL` + `GP Ratio`,
+**masked-paired** (not the exact number — they differ 7.9% on superblue12) and **site-width-correct**
+(200 mgc_*, 100 superblue). Same enrichment carries the DP columns, so GP and DP comparisons share one
+file (part of #30). The "ratio next to an unconverged overflow" sub-item is addressed as a footer
+caveat ("meaningful only where Best OVFW converged"); a per-row gate stays deferred to #3. This also
+closed the "two tables that can disagree" duplication the old map's own doc-block flagged.
+
 **Closed 2026-08-12:** **#28** — `dse.py` is now the single launch point for multi-benchmark runs,
 846 → 371 lines. `DSE_RUN_SET`/`MORRIS_RUNSET` env vars, the nine `_RUN_SETS` functions, the
 entirely-commented-out `dse_sweep` dict and its Cartesian machinery, two dead functions
@@ -40,6 +51,31 @@ did not fix are now **#29** (the XPlace reference belongs in the placer, masked-
 site-width-correct) and **#30** (LG+DP inside `dse.py`).
 
 ---
+
+## #29 — The XPlace reference: apples-to-apples (opened 2026-08-12, CLOSED 2026-08-14)
+
+> **Resolution, 2026-08-14.** Done, but NOT "in the placer" as this entry's title/opening assumed —
+> Mark redirected during the results.csv cleanup: the exe writes only raw measured columns and
+> **dse.py owns every XPlace-reference comparison**, from the one manifest. Both pairing rules below
+> were implemented: `benchmarks._XPLACE_GP_MASKED` (all 28) + `xplace_gp_masked_in_sw_frame()` apply
+> masked-with-masked and the per-design site_width; dse.py's `summarize()` emits `XPlace GP HPWL` +
+> `GP Ratio`. The batch numbers were taken from the **2026-08-07** log batch consistently (not the
+> exe's old 2026-07-10 six). Per-row unconverged-overflow gate deferred to #3 (footer caveat instead).
+> Commit `edd268f`.
+
+Mark, 2026-08-12: *"Yes, pair masked with masked. We should always try to pair apples to apples.
+Same thing for tier 2 — the site_width normalization and the masking should be taken into account
+when computing final HPWL numbers, but the correct place to do that is in the placer, not the
+batch script."*
+
+**Symptom:** `XPlace GP HPWL` and `Ratio` were `N/A` on **22 of 28** designs. **Root cause:**
+`Placer::lookupXplaceReferenceHPWL` was a hardcoded 6-entry `std::map` (ispd2005 adaptec1-4,
+bigblue1-2); everything else returned 0.0f. **Pairing rules that a naive fix gets wrong:** masked
+pairs with masked (`Best GP HPWL` is masked; the exact post-GP number differs 7.9% on superblue12),
+and tier 2 is in site units (×200 mgc_*, ×100 superblue — a blanket ×200 is 2× wrong on the five
+superblues). The masked GP data was recovered from `/tmp/xref/logs` (ispd2005) + `xplace_ref_ispd.tsv`
+(ispd2015). Resolved in dse.py rather than the placer, which also killed the "two tables that can
+disagree" duplication the old map's doc-block flagged.
 
 ## #28 — `dse.py` refactor: generic launch point, and two live defects (opened 2026-08-12, CLOSED 2026-08-12)
 

@@ -671,73 +671,6 @@ Algorithmic ideas beyond faithfulness cleanup — hypotheses, not yet scoped.
 
 ---
 
-## #29 — The XPlace reference belongs in the placer, apples-to-apples (opened 2026-08-12)
-
-Mark, 2026-08-12: *"Yes, pair masked with masked. We should always try to pair apples to apples.
-Same thing for tier 2 — the site_width normalization and the masking should be taken into account
-when computing final HPWL numbers, but the correct place to do that is in the placer, not the
-batch script."*
-
-**Symptom:** `XPlace GP HPWL` and `Ratio` are `N/A` on **22 of 28** designs in every sweep
-(falsifiable: `results/DSE_20260812_143722/results.csv`). `dse.py` is not at fault and must not
-compensate — a batch script that applies frame conversions is a second place for them to be wrong.
-
-**Root cause:** `Placer::lookupXplaceReferenceHPWL` (`Output.cpp:227`) is a hardcoded
-`std::map` with **six** entries (ispd2005 adaptec1-4, bigblue1-2) from the 2026-07-10 XPlace
-batch. Everything else returns `0.0f` → `N/A`. Its own doc-block already flags that it duplicates
-`tools/benchmarks.py`.
-
-**The data exists — all 28, recovered 2026-08-12, nothing needs re-running:**
-
-- **20 ispd2015** — `.claude/2_ARTIFACTS/xplace_ref_ispd.tsv`, column `gp_masked_hpwl`.
-- **8 ispd2005** — `NA` in that TSV because `run_xplace_ref.sh:43` scrapes with a
-  **variable-length PCRE lookbehind** (`(?<=GP Stop!.*masked_hpwl: )`), which PCRE rejects, so the
-  field came back empty and nobody noticed. The 2026-08-07 logs survive in `/tmp/xref/logs/`:
-  ```
-  for f in /tmp/xref/logs/ispd2005_*.log; do echo "$(basename $f .log) $(grep -o 'GP Stop!.*' $f | tail -1)"; done
-  ```
-  | design | masked GP HPWL | design | masked GP HPWL |
-  |---|---|---|---|
-  | adaptec1 | 7.063986e7 | bigblue1 | 8.721272e7 |
-  | adaptec2 | 7.851941e7 | bigblue2 | 1.298882e8 |
-  | adaptec3 | 1.862087e8 | bigblue3 | 2.909645e8 |
-  | adaptec4 | 1.676566e8 | bigblue4 | 7.231753e8 |
-
-  ⚠️ These are the **2026-08-07** batch; the exe's six entries are from **2026-07-10** (adaptec1
-  7.060218e7 vs 7.063986e7, 0.05% apart). Two batches are currently mixed in one table — pick one
-  and say which in the comment. Fix the lookbehind (`grep -oP 'masked_hpwl: \K[0-9.E+-]+'`) in the
-  same change so a future re-run does not lose the column again.
-
-**Two pairing rules, both of which the current column would get wrong:**
-
-- [ ] **Masked pairs with masked.** `Best GP HPWL` is masked (`ignore_net_degree = 100`);
-      `benchmarks.py::_XPLACE_ISPD_FINAL[0]` is the **exact/unmasked** post-GP number. Usually
-      ~0.1% apart — but on `mgc_superblue12` masked is 2.342350e8 and exact is 2.527073e8, a
-      **7.9%** difference. Taking the convenient number puts a 7.9% error straight into the
-      headline column. Symmetrically, `Final HPWL Exact` pairs with `_XPLACE_ISPD_FINAL[0]`.
-- [ ] **Tier 2 is in site units.** XPlace divides by `site_width` (`database.py:602`), so an
-      ispd2015 reference must be multiplied back before it means anything next to our DBU. It is
-      **not uniform**: 200 for the 15 `mgc_*`, **100** for the five `mgc_superblue*`. A blanket
-      ×200 is wrong by 2× on those five. `benchmarks.py::xplace_hpwl_in_sw_frame()` and
-      `SITE_WIDTH` already encode this correctly; the placer needs the same knowledge.
-
-**Fix:** the placer owns it. Populate the reference for all 28 (+ the 16 MMS via
-`_XPLACE_MMS_MIXED_GP`), keyed `"<suite>/<design>"` (already correct — do not regress to bare
-names, that bug cost every MMS `Ratio` ~15%), in **sw_only's frame**, and emit both a masked and
-an exact ratio against their like-for-like references. Whether the table lives in `Output.cpp` or
-is generated from `benchmarks.py` at build time is open — but **one** table, and the site-width
-factor applied once, at the layer that knows the design.
-
-- [ ] **A `Ratio` next to an unconverged `Best OVFW` is not a result.** `mgc_pci_bridge32_a/b`
-      stop at 0.273/0.321 exact overflow and still print a ~1.0 ratio, because an under-spread
-      placement flatters its own HPWL (TODO #3). Gate or flag the per-row number; `dse.py`'s
-      summary footer says it in prose, which nobody reads next to a number.
-
-**Falsifies this task:** every row of a fresh `python3 tools/dse.py` has a non-`N/A` `Ratio`, and
-`mgc_superblue12`'s is computed against 2.342350e8 × 100, not 2.527073e8 × 100.
-
----
-
 ## #30 — Legalization + detailed placement inside `dse.py` (opened 2026-08-12)
 
 Mark, 2026-08-12: *"As a future goal, we also need to incorporate legalization and Detailed
@@ -774,21 +707,19 @@ that hides the defect.
       HPWL is scraped from XPlace's own log so it is already in XPlace's frame — the ratio against
       `xplace_dp_hpwl` needs **no** ×site_width (the opposite of #29's raw-DBU GP number; this is
       analyze_full44.py's frame rule, and it is why LG/DP was the easy half).
+- [x] **DP results in the SAME results.csv — done 2026-08-14** (`edd268f`). The exe can't know DP
+      (it finishes before legalization), so dse.py enriches results.csv after LG+DP with
+      `Our LG HPWL` / `Our DP HPWL` / `XPlace DP HPWL` / `DP Ratio`, alongside the GP comparison
+      (#29). One file, one reference table (`benchmarks.py`).
 - [ ] **Full-suite cross-check, then collapse the two suite runners.** A `make dse` over all 28
       (now GP+LG+DP in one command) has NOT yet been diffed against the standing pipeline
       (`gen_suite_configs.py` → `run_suite.sh` → `run_lgdp44.sh` → `analyze_full44.py`) that
-      produces `summary.md`'s median 1.0106. Run it, confirm the per-design DP ratios agree, THEN
-      retire `gen_suite_configs.py` + `run_suite.sh` + the two `run_lgdp*.sh` (fold their remaining
-      bits — the smallest-first ordering, the MMS `--mixed_size` arm — into `dse.py`/`lgdp.py`).
+      produces `summary.md`'s median 1.0106. **Mark's call 2026-08-14: keep the standing pipeline
+      one more cycle for exactly this verification.** Run it, confirm the per-design DP ratios agree,
+      THEN retire `gen_suite_configs.py` + `run_suite.sh` + the two `run_lgdp*.sh` (fold their
+      remaining bits — the smallest-first ordering, the MMS `--mixed_size` arm — into
+      `dse.py`/`lgdp.py`; the per-design LG+DP engine `lgdp.py` already subsumes their `run_one()`).
       ⚠️ Do not retire before the cross-check: every headline number in `summary.md` still comes
       through that path. `~2 h` for the 28-design GP+LG+DP run.
       **Falsifies the collapse:** `dse.py`'s per-design DP ratio == `analyze_full44.py`'s within
       rounding, on all 28.
-
-**Note for #29 (still open):** the LG/DP ratio pairs like-for-like *for free* because both sides
-come out of XPlace's log in the same frame. The GP-side ratio (#29) is the hard one precisely
-because our GP number is raw-DBU/masked while XPlace's is site-unit/its-own-mask — that asymmetry
-does not exist here.
-
-
-

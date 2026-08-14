@@ -113,15 +113,17 @@ Working, but nothing on a current path calls them. Listed so they read as *parke
 
 ## Known issues
 
-**The `XPlace GP HPWL` / `Ratio` columns are N/A on 22 of the 28 designs.** Not a `dse.py`
-problem — `Placer::lookupXplaceReferenceHPWL` (`Output.cpp:227`) is a hardcoded 6-entry map.
-The references exist (`benchmarks.py`, `.claude/2_ARTIFACTS/xplace_ref_ispd.tsv`) and the pairing
-has two traps: masked-vs-masked, and tier 2's per-design `site_width`. **TODO #29** moves both
-into the placer.
-
-**A `Ratio` next to an unconverged `Best OVFW` is not a result.** `mgc_pci_bridge32_a/b` stop at
+**A `GP Ratio` next to an unconverged `Best OVFW` is not a result.** `mgc_pci_bridge32_a/b` stop at
 0.27/0.32 overflow; an under-spread placement flatters its own HPWL (TODO #3). The summary footer
-says so, but the per-row number does not.
+says so, but the per-row number does not (per-row gate deferred to #3).
+
+<details><summary>Fixed 2026-08-14 (#29): XPlace GP HPWL was N/A on 22 of 28</summary>
+
+`Placer::lookupXplaceReferenceHPWL` was a hardcoded 6-entry map. Now the exe writes raw columns
+only and dse.py enriches results.csv with `XPlace GP HPWL` + `GP Ratio` from
+`benchmarks._XPLACE_GP_MASKED` (all 28), masked-paired and site-width-correct. The DP comparison
+lands in the same file the same way.
+</details>
 
 <details><summary>Fixed 2026-08-12 by the #28 refactor (846 → 371 lines)</summary>
 

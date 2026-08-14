@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-08-13 17:40 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-14 12:35 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 
 ## Two threads
 - **sw_only** — CPU golden reference; goal is to match XPlace. The active thread.
@@ -196,23 +196,21 @@
   the `floorplan.def` hardcoding stands.
 
 ## Newly open
-- **#29 — the XPlace reference column is N/A on 22 of 28 designs, and belongs in the placer.**
-  `Placer::lookupXplaceReferenceHPWL` (`Output.cpp:227`) is a hardcoded **six-entry** map. All 28
-  masked GP references were recovered 2026-08-12 (20 in `xplace_ref_ispd.tsv`; the 8 ispd2005 ones
-  re-scraped from `/tmp/xref/logs/` — the TSV's `gp_masked_hpwl` column is empty because
-  `run_xplace_ref.sh:43` uses a variable-length PCRE lookbehind that never matches). Two pairing
-  rules to get right, per Mark: **masked pairs with masked** (`mgc_superblue12` masked 2.342e8 vs
-  exact 2.527e8 — **7.9%** apart, so the convenient number is a 7.9% error), and **tier 2 needs
-  ×site_width**, which is 200 for `mgc_*` but **100** for the five `mgc_superblue*`. Both belong in
-  the placer, not the batch script.
+- **#29 — XPlace GP reference (was N/A on 22 of 28) — CLOSED 2026-08-14** (`edd268f`), archived to
+  `history.md`. Fixed **in dse.py from `benchmarks.py`**, not the placer (Mark redirected): the exe
+  now writes raw measured columns only, its hardcoded 6-entry map is gone, and dse.py enriches
+  results.csv with `XPlace GP HPWL` + `GP Ratio` — **masked-paired** (superblue12 masked vs exact
+  differ 7.9%) and **site-width-correct** (200 mgc_*, 100 superblue). `benchmarks._XPLACE_GP_MASKED`
+  holds all 28 (2026-08-07 batch).
 - **#30 — LG+DP inside `dse.py` — LANDED 2026-08-13, on by default** (Mark's call; `--gp-only`
-  skips). `make dse` now runs GP then legalizes + detailed-places each result through XPlace,
-  reporting `Our DP HPWL` / `DP Ratio` (legal-vs-legal, the headline metric). Core is the new
-  `tools/lgdp.py`; all three format paths verified (adaptec1 **1.001**, mgc_fft_2 1.028, fenced
-  mgc_des_perf_a 1.018). Post-DP pairs like-for-like *for free* — both sides come from XPlace's log,
-  so no ×site_width (unlike the GP number, #29). **Still open:** a full 28-design `make dse` has not
-  yet been diffed against the standing pipeline that produces the median-1.0106 numbers below; do
-  that before retiring `run_suite.sh`/`run_lgdp44.sh`.
+  skips). `make dse` runs GP then legalizes + detailed-places each result through XPlace, and dse.py
+  enriches results.csv with `Our DP HPWL` / `XPlace DP HPWL` / `DP Ratio` (legal-vs-legal, the
+  headline) **in the same file as the GP comparison** (#29). Core is `tools/lgdp.py`; all three
+  format paths verified (adaptec1 **1.001**, mgc_fft_2 1.028, fenced mgc_des_perf_a 1.018). Post-DP
+  needs no ×site_width (from XPlace's own log). **Still open:** a full 28-design `make dse` has not
+  yet been diffed against the standing pipeline that produces the median-1.0106 numbers below —
+  Mark's call is to keep that pipeline (`run_suite.sh`/`run_lgdp44.sh`) one more cycle for exactly
+  that cross-check, then retire it.
 - **#28 — `dse.py` refactor — CLOSED 2026-08-12**, archived to `history.md`. 846 → 371 lines;
   `make dse` (optionally `DSE_ARGS="…"`) is now the single launch point for multi-benchmark runs:
   `--designs tier1+tier2 | --set K=v1,v2 | --grid | --runset | --resume | --dry-run`. Grid and
