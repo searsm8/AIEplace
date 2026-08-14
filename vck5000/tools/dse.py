@@ -45,12 +45,15 @@ grid, swept-param values) — every one a visible column. dse.py emits `grid` + 
 into the exe's DSE_info, so the columns ARE the identity; sweep.json and gp_only.csv rows join on
 that tuple, and --resume skips a run whose identity is already in gp_only.csv. No run-label column.
 
-SEQUENTIAL on purpose: the placer is OpenMP-threaded across all cores, and concurrent runs
-were measured (9bea10e, 2026-07-31) to give the same total wall clock with more ways to go
-wrong. Designs run smallest-first so a bad config fails in seconds, not after bigblue4.
+GP runs one design at a time (the placer is OpenMP-threaded across all cores, so concurrent GPs
+were measured — 9bea10e, 2026-07-31 — to give the same wall clock with more ways to go wrong), but
+each design's LG+DP is pipelined: it runs on a background worker (GPU, XPlace) while the NEXT
+design's GP runs (CPU, sw_only), hiding the GPU time. Designs run smallest-first so a bad config
+fails in seconds, not after bigblue4.
 """
 
 import argparse
+import concurrent.futures
 import copy
 import datetime
 import glob
@@ -281,17 +284,24 @@ def gp_output_dir(sweep_dir, want_ident, col_keys):
     return None
 
 
-def legalize_run(sweep_dir, entry, col_keys, store):
-    """Legalize one completed GP run and record it in `store` (persisted to lgdp.json)."""
-    label = entry["label"]
+def resolve_gp_def(sweep_dir, entry, col_keys):
+    """The GP `.def` this run wrote, from gp_only.csv's Output Dir. Called on the MAIN thread right
+    after the GP subprocess exits — no concurrent writer — so the LG+DP worker never races the exe
+    appending the next run's row. Basename varies by tier (RowBasedPlacement.def, fft.def, …), so
+    glob it, same as run_lgdp44.sh's newest_def()."""
     out_dir = gp_output_dir(sweep_dir, entry_ident(entry, col_keys), col_keys)
-    # The DEF's basename varies by tier (RowBasedPlacement.def, fft.def, ...), so glob it rather
-    # than hardcode a name — same reason run_lgdp44.sh's newest_def() does.
     defs = glob.glob(os.path.join(out_dir, "*.def")) if out_dir else []
-    if not defs:
+    return defs[0] if defs else None
+
+
+def legalize_run(sweep_dir, entry, gp_def, store):
+    """Legalize one GP run (its `.def` already resolved) and record it in `store` -> lgdp.json.
+    Runs on the background worker so its GPU LG+DP overlaps the next run's CPU GP."""
+    label = entry["label"]
+    if not gp_def:
         store[label] = {"status": "fail_no_gp_def"}
     else:
-        store[label] = lgdp.legalize(entry["overrides"]["benchmark"], defs[0],
+        store[label] = lgdp.legalize(entry["overrides"]["benchmark"], gp_def,
                                      os.path.join(sweep_dir, "lgdp", label))
     with open(os.path.join(sweep_dir, "lgdp.json"), "w") as f:
         json.dump(store, f, indent=2)
@@ -315,21 +325,33 @@ def run_all(entries, total, sweep_dir, gp_only, col_keys):
         for row in read_gp(sweep_dir):
             entry = by_ident.get(row_ident(row, col_keys))
             if entry and entry["label"] not in lgdp_store:
-                legalize_run(sweep_dir, entry, col_keys, lgdp_store)
+                legalize_run(sweep_dir, entry, resolve_gp_def(sweep_dir, entry, col_keys), lgdp_store)
 
     t0 = time.time()
     failed = 0
-    for done, entry in enumerate(entries, 1):
-        t_run = time.time()
-        with open(entry["log"], "w") as log:
-            result = subprocess.run([EXE_PATH, entry["config"]], stdout=log, stderr=log)
-        ok = result.returncode == 0
-        failed += not ok
-        print(f"DSE: [{done}/{total}] {'DONE' if ok else 'FAIL'} "
-              f"{time.time() - t_run:7.1f}s  {entry['label']}"
-              f"{'' if ok else '  -> ' + entry['log']}", flush=True)
-        if ok and not gp_only:
-            legalize_run(sweep_dir, entry, col_keys, lgdp_store)
+    # Pipeline the sweep: GP(n) (CPU, sw_only OpenMP) runs while LG+DP(n-1) (GPU, XPlace) finishes
+    # on ONE background worker, hiding the GPU time behind the next design's placement. The worker's
+    # result is collected before the next is submitted, so lgdp.json writes stay serial and the
+    # main thread resolves each `.def` while no GP subprocess is touching gp_only.csv.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        pending = None
+        for done, entry in enumerate(entries, 1):
+            t_run = time.time()
+            with open(entry["log"], "w") as log:
+                result = subprocess.run([EXE_PATH, entry["config"]], stdout=log, stderr=log)
+            ok = result.returncode == 0
+            failed += not ok
+            print(f"DSE: [{done}/{total}] {'DONE' if ok else 'FAIL'} "
+                  f"{time.time() - t_run:7.1f}s  {entry['label']}"
+                  f"{'' if ok else '  -> ' + entry['log']}", flush=True)
+            if pending is not None:
+                pending.result()          # prev LG+DP (overlapped this GP) — recorded itself
+                pending = None
+            if ok and not gp_only:
+                gp_def = resolve_gp_def(sweep_dir, entry, col_keys)
+                pending = pool.submit(legalize_run, sweep_dir, entry, gp_def, lgdp_store)
+        if pending is not None:
+            pending.result()
     return failed, time.time() - t0
 
 
