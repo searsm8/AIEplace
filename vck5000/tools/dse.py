@@ -69,7 +69,6 @@ BENCH_ROOT = "host/benchmarks"
 # in results.csv now warns loudly instead.
 RESULT_COLS = ["Iters", "Best Iter", "Best OVFW", "Best GP HPWL", "XPlace GP HPWL", "Ratio",
                "Final HPWL Exact", "Total Runtime (sec)"]
-PHASE1_COLS = ["Phase1 Iters", "Phase1 HPWL", "Phase1 OVFW Exact", "Phase1 Stop Reason"]
 # Post-LG/DP columns, computed by dse.py (not in results.csv) from lgdp.json + benchmarks.py.
 LGDP_COLS = ["Our LG HPWL", "Our DP HPWL", "XPlace DP HPWL", "DP Ratio"]
 
@@ -353,8 +352,6 @@ def summarize(sweep_dir):
     for missing in [c for c in RESULT_COLS if c not in rows[0]]:
         print(f"  [warn] results.csv has no column '{missing}' — Output.cpp schema changed; "
               f"update RESULT_COLS in tools/dse.py")
-    if any(r.get("Phase1 Iters", "N/A") not in ("N/A", "", None) for r in rows):
-        present += [c for c in PHASE1_COLS if c in rows[0]]
 
     cols = ["Design"] + (["run"] if "run" in rows[0] else []) + swept + present
     cols += LGDP_COLS if lgdp_cell else []

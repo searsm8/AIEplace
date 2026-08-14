@@ -178,7 +178,7 @@ void Placer::createRunOutputStructure()
 }
 
 void Placer::writeResultsCSV(float final_hpwl, float final_hpwl_exact, float final_overflow,
-                              float total_runtime, float iteration_avg,
+                              float total_runtime,
                               float hpwl_improvement, const std::string& run_id)
 {
     if (!fs::exists(results_dir))
@@ -197,7 +197,7 @@ void Placer::writeResultsCSV(float final_hpwl, float final_hpwl_exact, float fin
     if (need_header)
         writeResultsCSVHeader(out_file, dse_params);
 
-    writeResultsCSVRow(out_file, final_hpwl_exact, total_runtime, iteration_avg, dse_params, xplace_ref);
+    writeResultsCSVRow(out_file, final_hpwl_exact, total_runtime, dse_params, xplace_ref);
 
     out_file.close();
 }
@@ -280,18 +280,7 @@ void Placer::writeResultsCSVHeader(std::ofstream& out_file,
     out_file << "Net Count,";
     out_file << "Node Count,";
     out_file << "Final HPWL Exact,";   // final HPWL over ALL nets (no net-degree mask)
-    // Phase 1 endpoint (TODO #13 two-phase runs only; N/A on a single-phase run) -- otherwise
-    // a two-phase sweep shows only the phase-2 endpoint and the macro-placement quality phase 1
-    // is responsible for is invisible.
-    out_file << "Phase1 Iters,";
-    out_file << "Phase1 HPWL,";
-    out_file << "Phase1 OVFW Smoothed,";
-    out_file << "Phase1 OVFW Exact,";
-    out_file << "Phase1 Stop Reason,";
     out_file << "Total Runtime (sec),";
-    out_file << "DB IO Time (sec),";
-    out_file << "Algorithm Time (sec),";
-    out_file << "Iteration Avg (sec),";
     out_file << "Memory Usage (MB),";
     out_file << "Output Dir,";
     out_file << "Timestamp";
@@ -300,7 +289,6 @@ void Placer::writeResultsCSVHeader(std::ofstream& out_file,
 
 /// @brief Write one results.csv data row for this run.
 void Placer::writeResultsCSVRow(std::ofstream& out_file, float final_hpwl_exact, float total_runtime,
-                                 float iteration_avg,
                                  const std::vector<std::pair<std::string, std::string>>& dse_params,
                                  float xplace_ref)
 {
@@ -334,20 +322,8 @@ void Placer::writeResultsCSVRow(std::ofstream& out_file, float final_hpwl_exact,
     out_file << db.getNetsVector().size() << ",";
     out_file << db.getComponents().size() << ",";
     out_file << std::scientific << SCI(final_hpwl_exact) << ",";   // Final HPWL Exact (all nets)
-    if (m_phase1_summary.valid) {
-        out_file << m_phase1_summary.iterations << ","
-                 << std::scientific << SCI(m_phase1_summary.hpwl) << ","
-                 << std::scientific << PREC(m_phase1_summary.overflow_smoothed) << ","
-                 << std::scientific << PREC(m_phase1_summary.overflow_exact) << ","
-                 << stopReasonName(m_phase1_summary.stop_reason) << ",";
-    } else {
-        out_file << "N/A,N/A,N/A,N/A,N/A,";
-    }
     out_file << std::fixed << std::setprecision(3);
     out_file << total_runtime << ",";
-    out_file << Logger::getFunctionTime("setupDesign") / 1.0e6 << ",";
-    out_file << algo_time << ",";
-    out_file << iteration_avg << ",";
     out_file << getMemoryUsageMB() << ",";
     out_file << "\"" << output_dir.string() << "\",";
     out_file << "\"" << timestamp.str() << "\"";
@@ -391,7 +367,7 @@ void Placer::printFinalResults()
 
     // Write run record to global results CSV
     writeResultsCSV(metrics.final_hpwl, metrics.final_hpwl_exact, metrics.final_overflow,
-                    metrics.total_runtime, metrics.iteration_avg, metrics.hpwl_improvement, run_id);
+                    metrics.total_runtime, metrics.hpwl_improvement, run_id);
 
     // The restored best placement, tagged so the offline tool can render the same picture the
     // cairo renderer writes as best_solution.png. That shared final frame is what step 2's

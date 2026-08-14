@@ -53,7 +53,7 @@ private:
     // Helper functions for DSE integration and output organization
     void createRunOutputStructure();
     void writeResultsCSV(float final_hpwl, float final_hpwl_exact, float final_overflow,
-                         float total_runtime, float iteration_avg,
+                         float total_runtime,
                          float hpwl_improvement, const std::string& run_id);
 
     // writeResultsCSV's steps, broken out for readability
@@ -62,7 +62,6 @@ private:
     void writeResultsCSVHeader(std::ofstream& out_file,
                                const std::vector<std::pair<std::string, std::string>>& dse_params);
     void writeResultsCSVRow(std::ofstream& out_file, float final_hpwl_exact, float total_runtime,
-                            float iteration_avg,
                             const std::vector<std::pair<std::string, std::string>>& dse_params,
                             float xplace_ref);
 
