@@ -178,8 +178,7 @@ void Placer::createRunOutputStructure()
 }
 
 void Placer::writeResultsCSV(float final_hpwl, float final_hpwl_exact, float final_overflow,
-                              float total_runtime,
-                              float hpwl_improvement, const std::string& run_id)
+                              float total_runtime, const std::string& run_id)
 {
     if (!fs::exists(results_dir))
         fs::create_directories(results_dir);
@@ -191,52 +190,14 @@ void Placer::writeResultsCSV(float final_hpwl, float final_hpwl_exact, float fin
     out_file.open(csv_path, std::ios_base::app);
     out_file.imbue(std::locale::classic());  // Prevent comma thousands separators
 
-    float xplace_ref = lookupXplaceReferenceHPWL(db.getBenchmarkPath());  // suite/design -- bare name collides across suites
     std::vector<std::pair<std::string, std::string>> dse_params = parseDSEParams();
 
     if (need_header)
         writeResultsCSVHeader(out_file, dse_params);
 
-    writeResultsCSVRow(out_file, final_hpwl_exact, total_runtime, dse_params, xplace_ref);
+    writeResultsCSVRow(out_file, final_hpwl_exact, total_runtime, dse_params);
 
     out_file.close();
-}
-
-/**
- * @brief XPlace GP-ONLY reference HPWL (masked_hpwl at "GP Stop", NOT legalized), so the Ratio
- *        column is an honest GP-vs-GP comparison instead of our-GP vs XPlace-GP+legalization.
- *        Values from local XPlace runs: ~/phd/Xplace/result/<ts>_<design>/log/test.log line
- *        "GP Stop! ... masked_hpwl: X".
- *
- * ### KEYED ON "<suite>/<design>", NOT the bare design name (fixed 2026-08-07)
- * adaptec1-4 and bigblue1-4 exist in BOTH `ispd2005` and `mms`, and their references differ by
- * ~15% (ispd2005/adaptec1 7.060e7 vs mms/adaptec1 6.453e7). Keyed on the bare name this returned
- * the ISPD2005 number for an MMS run, silently, and the Ratio column of every MMS results.csv
- * row was wrong by that much. `tools/xplace_gp_ref.py` had the same defect.
- *
- * Only ISPD2005 is populated: XPlace's ispd2005 HPWL shares sw_only's raw-DBU frame. ISPD2015
- * (mgc_*) XPlace HPWL is site-width-normalized (~ /site_width, e.g. /200) -- a DIFFERENT frame --
- * so it must NOT be mixed in here; populate mgc as masked_hpwl*site_width once measured.
- * ispd2005 bigblue3/bigblue4 still need a local XPlace GP run.
- *
- * NOTE this is a second copy of data that also lives in `tools/benchmarks.py` (which carries the
- * richer post-GP/LG/DP reference, but only for MMS). Two tables that can disagree is exactly the
- * pattern this fix was cleaning up; collapsing them is worth doing once benchmarks.py covers all
- * three suites.
- * @return the reference HPWL, or 0.0f if this benchmark has no recorded reference.
- */
-float Placer::lookupXplaceReferenceHPWL(const std::string& bench_path)
-{
-    static const std::map<std::string, float> xplace_hpwl = {
-        {"ispd2005/adaptec1",  7.060218e+07f},
-        {"ispd2005/adaptec2",  7.893496e+07f},
-        {"ispd2005/adaptec3",  1.858436e+08f},
-        {"ispd2005/adaptec4",  1.675808e+08f},
-        {"ispd2005/bigblue1",  8.721903e+07f},
-        {"ispd2005/bigblue2",  1.298895e+08f},
-    };
-    auto it = xplace_hpwl.find(bench_path);
-    return (it != xplace_hpwl.end()) ? it->second : 0.0f;
 }
 
 /**
@@ -266,17 +227,20 @@ std::vector<std::pair<std::string, std::string>> Placer::parseDSEParams()
 void Placer::writeResultsCSVHeader(std::ofstream& out_file,
                                     const std::vector<std::pair<std::string, std::string>>& dse_params)
 {
+    // Raw measured quantities only. Every XPlace-reference comparison (GP ratio, DP ratio) is
+    // added afterward by tools/dse.py from the one manifest (tools/benchmarks.py) -- the exe no
+    // longer carries a hardcoded reference table (TODO #29). Best Iter/OVFW/GP HPWL describe the
+    // placement written to the .def: restoreBestSolution() restored exactly this solution's
+    // geometry before writeDEF, and this row reports that same selectBestSolution() choice.
+    out_file << "Suite,";
     out_file << "Design,";
     out_file << "Iters,";
     out_file << "Best Iter,";
     out_file << "Best OVFW,";
     out_file << "Best GP HPWL,";
-    out_file << "XPlace GP HPWL,";
-    out_file << "Ratio,";
-    // DSE sweep parameter columns (one per swept parameter)
+    // DSE sweep parameter columns (grid + one per swept parameter)
     for (const auto& [key, val] : dse_params)
         out_file << key << ",";
-    out_file << "Gamma,";
     out_file << "Net Count,";
     out_file << "Node Count,";
     out_file << "Final HPWL Exact,";   // final HPWL over ALL nets (no net-degree mask)
@@ -289,36 +253,29 @@ void Placer::writeResultsCSVHeader(std::ofstream& out_file,
 
 /// @brief Write one results.csv data row for this run.
 void Placer::writeResultsCSVRow(std::ofstream& out_file, float final_hpwl_exact, float total_runtime,
-                                 const std::vector<std::pair<std::string, std::string>>& dse_params,
-                                 float xplace_ref)
+                                 const std::vector<std::pair<std::string, std::string>>& dse_params)
 {
     auto now = std::chrono::system_clock::now();
     auto time_t = std::chrono::system_clock::to_time_t(now);
     std::stringstream timestamp;
     timestamp << std::put_time(std::gmtime(&time_t), "%Y-%m-%d %H:%M:%S");
 
+    out_file << "\"" << db.getSuiteName() << "\",";
     out_file << "\"" << db.getBenchmarkName() << "\",";
     out_file << iteration << ",";
-    // Best solution info -- the same rule that picked the shipped placement, or N/A
+    // Best solution info -- the same rule that picked the shipped placement (restored into the DB
+    // before writeDEF), or N/A. So Best Iter/OVFW/GP HPWL describe the .def this run wrote.
     const BestChoice best = selectBestSolution();
     if (best.sol) {
         out_file << best.sol->iteration << ","
                  << std::scientific << PREC(best.sol->overflow) << ","
                  << std::scientific << SCI(best.sol->hpwl) << ",";
-        // XPlace reference and ratio
-        if (xplace_ref > 0.0f) {
-            out_file << std::scientific << SCI(xplace_ref) << ","
-                     << std::fixed << std::setprecision(2) << (best.sol->hpwl / xplace_ref) << ",";
-        } else {
-            out_file << "N/A,N/A,";
-        }
     } else {
-        out_file << "N/A,N/A,N/A,N/A,N/A,";
+        out_file << "N/A,N/A,N/A,";
     }
     // DSE sweep parameter values (matches header columns)
     for (const auto& [key, val] : dse_params)
         out_file << val << ",";
-    out_file << PREC(gamma) << ",";
     out_file << db.getNetsVector().size() << ",";
     out_file << db.getComponents().size() << ",";
     out_file << std::scientific << SCI(final_hpwl_exact) << ",";   // Final HPWL Exact (all nets)
@@ -367,7 +324,7 @@ void Placer::printFinalResults()
 
     // Write run record to global results CSV
     writeResultsCSV(metrics.final_hpwl, metrics.final_hpwl_exact, metrics.final_overflow,
-                    metrics.total_runtime, metrics.hpwl_improvement, run_id);
+                    metrics.total_runtime, run_id);
 
     // The restored best placement, tagged so the offline tool can render the same picture the
     // cairo renderer writes as best_solution.png. That shared final frame is what step 2's
@@ -429,14 +386,6 @@ Placer::FinalMetrics Placer::computeFinalMetrics()
 
     m.total_runtime = getInterval(pgrm_start_time, getTime());
     m.iteration_avg = (iteration > 0) ? m.total_runtime / iteration : 0.0f;
-
-    // HPWL improvement, if an initial HPWL was recorded
-    m.hpwl_improvement = 0.0f;
-    m.has_improvement = false;
-    if (m_initial_hpwl > 0) {
-        m.hpwl_improvement = ((m_initial_hpwl - m.final_hpwl) / m_initial_hpwl) * 100.0f;
-        m.has_improvement = true;
-    }
     return m;
 }
 
@@ -504,10 +453,6 @@ void Placer::exportSummaryReports(const BestChoice& chosen, const FinalMetrics& 
     results.add_row(RowStream{} << "Avg iteration time (s)" << std::fixed << std::setprecision(3) << metrics.iteration_avg);
     results.add_row(RowStream{} << "Final HPWL" << std::scientific << std::setprecision(3) << metrics.final_hpwl);
     results.add_row(RowStream{} << "Final HPWL (exact, all nets)" << std::scientific << std::setprecision(3) << metrics.final_hpwl_exact);
-    if (metrics.has_improvement) {
-        results.add_row(RowStream{} << "Initial HPWL" << std::scientific << std::setprecision(3) << m_initial_hpwl);
-        results.add_row(RowStream{} << "HPWL improvement (%)" << std::fixed << std::setprecision(2) << metrics.hpwl_improvement);
-    }
     results.add_row(RowStream{} << "Final Overflow (smoothed, no fillers)"
                                 << std::scientific << std::setprecision(3) << metrics.final_smoothed_overflow);
     results.add_row(RowStream{} << "Final Overflow (exact, no fillers)" << std::scientific << std::setprecision(3) << metrics.final_overflow);
@@ -600,13 +545,6 @@ float Placer::getMemoryUsageMB()
     return 0.0f;  // Not found
 }
 #endif
-
-// Additional function to track initial HPWL (call this at the start of placement)
-void Placer::recordInitialHPWL()
-{
-    m_initial_hpwl = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), cfg["params"]["ignore_net_degree"].value_or(100));
-    Logger::log_detail("Initial HPWL recorded: " + std::to_string(m_initial_hpwl));
-}
 
 void Placer::recordIterationResults()
 {

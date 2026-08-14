@@ -252,6 +252,38 @@ def xplace_hpwl_in_sw_frame(path, hpwl):
     return None if hpwl is None else hpwl * SITE_WIDTH.get(path, 1)
 
 
+# XPlace GP-only MASKED HPWL -- the "GP Stop! ... masked_hpwl:" line, nets > ignore_net_degree
+# dropped. This is the reference that pairs with sw_only's masked "Best GP HPWL" (both mask), and
+# it is NOT the exact post-GP number in _XPLACE_ISPD_FINAL[0] -- on mgc_superblue12 the two differ
+# 7.9% (masked 2.342e8 vs exact 2.527e8), so pairing exact-with-masked would inject that error.
+# ispd2005 values are raw DBU (bookshelf frame == ours); ispd2015 values are XPlace's SITE-UNIT
+# frame and must go through xplace_hpwl_in_sw_frame(). Sources: ispd2005 + mgc_pci_bridge32_b from
+# the 2026-08-07 local GP logs; the other 19 ispd2015 from .claude/2_ARTIFACTS/xplace_ref_ispd.tsv
+# (gp_masked_hpwl). MMS has no masked-GP reference (its two-phase flow is a different comparison).
+_XPLACE_GP_MASKED = {
+    "ispd2005/adaptec1": 7.063986e7, "ispd2005/adaptec2": 7.851941e7,
+    "ispd2005/adaptec3": 1.862087e8, "ispd2005/adaptec4": 1.676566e8,
+    "ispd2005/bigblue1": 8.721272e7, "ispd2005/bigblue2": 1.298882e8,
+    "ispd2005/bigblue3": 2.909645e8, "ispd2005/bigblue4": 7.231753e8,
+    "ispd2015/mgc_des_perf_1": 5.448811e6, "ispd2015/mgc_des_perf_a": 9.810134e6,
+    "ispd2015/mgc_des_perf_b": 7.763363e6, "ispd2015/mgc_edit_dist_a": 2.064468e7,
+    "ispd2015/mgc_fft_1": 1.914535e6, "ispd2015/mgc_fft_2": 1.703669e6,
+    "ispd2015/mgc_fft_a": 2.960441e6, "ispd2015/mgc_fft_b": 4.026938e6,
+    "ispd2015/mgc_matrix_mult_1": 1.001032e7, "ispd2015/mgc_matrix_mult_2": 1.019749e7,
+    "ispd2015/mgc_matrix_mult_a": 1.464677e7, "ispd2015/mgc_matrix_mult_b": 1.335916e7,
+    "ispd2015/mgc_matrix_mult_c": 1.290962e7, "ispd2015/mgc_pci_bridge32_a": 1.643455e6,
+    "ispd2015/mgc_pci_bridge32_b": 3.424154e6, "ispd2015/mgc_superblue11_a": 3.249247e8,
+    "ispd2015/mgc_superblue12": 2.342350e8, "ispd2015/mgc_superblue14": 2.214621e8,
+    "ispd2015/mgc_superblue16_a": 2.463811e8, "ispd2015/mgc_superblue19": 1.493887e8,
+}
+
+
+def xplace_gp_masked_in_sw_frame(path):
+    """XPlace's masked GP-stop HPWL for `path`, converted into sw_only's frame; None if unknown.
+    Pairs with sw_only's masked 'Best GP HPWL'."""
+    return xplace_hpwl_in_sw_frame(path, _XPLACE_GP_MASKED.get(path))
+
+
 # Canonical path is "suite/design" (matches host/benchmarks/<suite>/<design> and
 # the dse.py benchmark-override format).
 BENCHMARKS = {

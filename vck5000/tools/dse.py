@@ -32,12 +32,16 @@ What a sweep leaves behind, in results/DSE_<timestamp>/:
                 the record of what was launched; read it, not the configs, to see a sweep.
   configs/      one TOML per run, exactly as the exe read it
   logs/         one stdout/stderr capture per run
-  results.csv   appended by the exe, one row per run (schema owned by Output.cpp)
+  results.csv   one row per run: the exe writes the raw measured columns; dse.py then enriches
+                it with every XPlace-reference comparison (XPlace GP HPWL + GP Ratio, and the
+                LG/DP columns) — all looked up from tools/benchmarks.py, the one manifest.
   lgdp.json     per-run LG+DP result (unless --gp-only); XPlace logs under lgdp/<label>/
   results.md    the collated table, same one printed at the end
 
-The only thing dse.py writes into a run's DSE_info is `run=<label>`, so results.csv has one
-fixed schema forever and swept values are joined back from sweep.json at summary time.
+A run's identity is (Suite, Design, grid, swept-param values) — every one a visible results.csv
+column. dse.py emits `grid` + each swept parameter into the exe's DSE_info, so the CSV columns ARE
+the identity; sweep.json rows and results.csv rows join on that tuple, and --resume skips a run
+whose identity is already in the CSV. No opaque run-label column.
 
 SEQUENTIAL on purpose: the placer is OpenMP-threaded across all cores, and concurrent runs
 were measured (9bea10e, 2026-07-31) to give the same total wall clock with more ways to go
@@ -64,13 +68,10 @@ EXE_PATH = "build/hw/host/sw_only/aieplace_sw_only.exe"
 TEMPLATE_PATH = "host/src/sw_only/default_config.toml"
 BENCH_ROOT = "host/benchmarks"
 
-# Result columns rendered in the summary, as a POSITIVE list. A denylist here is what let the
-# table silently blank out when Output.cpp renamed its columns (TODO #28); a name that is not
-# in results.csv now warns loudly instead.
-RESULT_COLS = ["Iters", "Best Iter", "Best OVFW", "Best GP HPWL", "XPlace GP HPWL", "Ratio",
-               "Final HPWL Exact", "Total Runtime (sec)"]
-# Post-LG/DP columns, computed by dse.py (not in results.csv) from lgdp.json + benchmarks.py.
-LGDP_COLS = ["Our LG HPWL", "Our DP HPWL", "XPlace DP HPWL", "DP Ratio"]
+# Raw exe columns summarize depends on. Checked as a POSITIVE list: a name missing from
+# results.csv warns loudly, rather than the table silently blanking as it did when Output.cpp
+# renamed its columns (TODO #28).
+RESULT_COLS = ["Best Iter", "Best OVFW", "Best GP HPWL", "Final HPWL Exact"]
 
 
 # =============================================================================
@@ -144,27 +145,36 @@ def grid_values(spec, meta):
 
 
 def build_runs(args):
-    """-> [(label, {param: value})], one entry per run. Labels are unique within a sweep."""
+    """-> (runs, col_keys). runs = [(label, overrides, columns)]; columns is the {grid + swept}
+    dict emitted into results.csv (via DSE_info) and forming each run's identity. col_keys is that
+    column order, shared across the sweep."""
     if args.runset:
         with open(args.runset) as f:
-            specs = json.load(f)
+            specs = [dict(s) for s in json.load(f)]
+        # A runset's "swept" columns are whatever varies across it (grid covers bins_per_row). The
+        # `run` label is kept as a column here (unlike the CLI path): analyze_morris/analyze_sobol
+        # join the results back to their sample matrix by it (label m0000 == X row 0).
+        keys = {k for s in specs for k in s} - {"label", "benchmark", "bins_per_row"}
+        swept = sorted(k for k in keys if len({str(s.get(k)) for s in specs}) > 1)
+        col_keys = ["run", "grid"] + swept
         runs = []
         for i, spec in enumerate(specs):
-            spec = dict(spec)
             label = str(spec.pop("label", f"r{i:04d}"))
             spec["benchmark"] = benchmarks.resolve(spec["benchmark"])
-            runs.append((label, spec))
-        return runs
+            columns = {"run": label, "grid": spec.get("bins_per_row", "auto")}
+            columns.update({k: spec.get(k, "") for k in swept})
+            runs.append((label, spec, columns))
+        return runs, col_keys
 
     sets = parse_sets(args.set)
-    swept = [k for k, v in sets.items() if len(v) > 1]   # only these earn a place in the label
+    swept = [k for k, v in sets.items() if len(v) > 1]   # only these get a column / label suffix
+    col_keys = ["grid"] + [k.rsplit(".", 1)[-1] for k in swept]
     designs = sorted(expand_designs(args.designs), key=design_bytes)
 
     runs = []
     for path in designs:
         meta = benchmarks.BENCHMARKS[path]
-        grids = grid_values(args.grid, meta)
-        for grid in grids:
+        for grid in grid_values(args.grid, meta):
             for combo in itertools.product(*sets.values()):
                 overrides = {"benchmark": path,
                              "maximum_utilization": meta["target_density"],
@@ -173,10 +183,12 @@ def build_runs(args):
                     overrides["bins_per_row"] = grid
                 overrides.update(zip(sets.keys(), combo))
 
-                label = f"{meta['name']}@{grid if grid else 'auto'}"
-                label += "".join(f"_{k.rsplit('.', 1)[-1]}={overrides[k]}" for k in swept)
-                runs.append((label, overrides))
-    return runs
+                columns = {"grid": grid if grid is not None else "auto"}
+                columns.update({k.rsplit(".", 1)[-1]: overrides[k] for k in swept})
+                label = f"{meta['name']}@{columns['grid']}"
+                label += "".join(f"_{k}={columns[k]}" for k in col_keys[1:])
+                runs.append((label, overrides, columns))
+    return runs, col_keys
 
 
 # =============================================================================
@@ -190,7 +202,7 @@ def section_for(key):
     return ("input" if key == "benchmark" else "params"), key
 
 
-def write_config(template, overrides, path, label, run_num, total):
+def write_config(template, overrides, columns, path, run_num, total):
     config = copy.deepcopy(template)
     for key, value in overrides.items():
         section, param = section_for(key)
@@ -199,15 +211,16 @@ def write_config(template, overrides, path, label, run_num, total):
         config[section][param] = f"{BENCH_ROOT}/{value}" if param == "benchmark" else value
 
     # The exe drops the first two DSE_info lines and turns the rest into results.csv columns
-    # (Output.cpp::parseDSEParams), so this emits exactly one extra column: `run`.
-    config["output"]["DSE_info"] = (f"DSE sweep progress={run_num} of {total}\n"
-                                    f"benchmark={overrides['benchmark']}\n"
-                                    f"run={label}")
+    # (Output.cpp::parseDSEParams). We emit `grid` + each swept parameter, so the CSV columns
+    # ARE the run's identity (Suite, Design, grid, swept-values) -- no opaque run label needed.
+    lines = [f"DSE sweep progress={run_num} of {total}", f"benchmark={overrides['benchmark']}"]
+    lines += [f"{k}={v}" for k, v in columns.items()]
+    config["output"]["DSE_info"] = "\n".join(lines)
     with open(path, "w") as f:
         tomlkit.dump(config, f)
 
 
-def prepare(runs, sweep_dir):
+def prepare(runs, col_keys, sweep_dir):
     """Write configs/ + sweep.json. Returns the manifest entries, in launch order."""
     with open(TEMPLATE_PATH) as f:
         template = tomlkit.load(f)
@@ -220,15 +233,15 @@ def prepare(runs, sweep_dir):
     os.makedirs(os.path.join(sweep_dir, "logs"), exist_ok=True)
 
     manifest = []
-    for n, (label, overrides) in enumerate(runs, 1):
+    for n, (label, overrides, columns) in enumerate(runs, 1):
         config_path = os.path.join(sweep_dir, "configs", f"run_{n:03d}.toml")
-        write_config(template, overrides, config_path, label, n, len(runs))
+        write_config(template, overrides, columns, config_path, n, len(runs))
         manifest.append({"n": n, "label": label, "config": config_path,
                          "log": os.path.join(sweep_dir, "logs", f"run_{n:03d}.log"),
-                         "overrides": overrides})
+                         "overrides": overrides, "columns": columns})
     with open(os.path.join(sweep_dir, "sweep.json"), "w") as f:
         json.dump({"created": datetime.datetime.now().isoformat(timespec="seconds"),
-                   "exe": EXE_PATH, "runs": manifest}, f, indent=2)
+                   "exe": EXE_PATH, "col_keys": col_keys, "runs": manifest}, f, indent=2)
     return manifest
 
 
@@ -236,27 +249,45 @@ def prepare(runs, sweep_dir):
 # Running
 # =============================================================================
 
-def gp_output_dir(sweep_dir, label):
-    """The run directory the exe wrote for `label`, from results.csv's Output Dir column.
-    Robust across A/B sweeps (two runs of one design) where a newest-file heuristic is not."""
+# A run's identity is (benchmark, its column values) — the same tuple whether read from a sweep.json
+# entry or a results.csv row, so the two join without an opaque label column.
+def entry_ident(entry, col_keys):
+    return (entry["overrides"]["benchmark"], tuple(str(entry["columns"][k]) for k in col_keys))
+
+def row_ident(row, col_keys):
+    return (f"{row.get('Suite', '')}/{row.get('Design', '')}",
+            tuple(str(row.get(k, "")) for k in col_keys))
+
+
+def read_results(sweep_dir):
     import csv
-    with open(os.path.join(sweep_dir, "results.csv"), newline="") as f:
-        for row in csv.DictReader(f):
-            if (row.get("run") or "").strip() == label:
-                return row.get("Output Dir")
+    path = os.path.join(sweep_dir, "results.csv")
+    if not os.path.exists(path):
+        return []
+    with open(path, newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def gp_output_dir(sweep_dir, want_ident, col_keys):
+    """The run dir the exe wrote for a run, matched by identity to results.csv's Output Dir."""
+    for row in read_results(sweep_dir):
+        if row_ident(row, col_keys) == want_ident:
+            return row.get("Output Dir")
     return None
 
 
-def legalize_run(sweep_dir, label, bench_path, store):
+def legalize_run(sweep_dir, entry, col_keys, store):
     """Legalize one completed GP run and record it in `store` (persisted to lgdp.json)."""
-    out_dir = gp_output_dir(sweep_dir, label)
+    label = entry["label"]
+    out_dir = gp_output_dir(sweep_dir, entry_ident(entry, col_keys), col_keys)
     # The DEF's basename varies by tier (RowBasedPlacement.def, fft.def, ...), so glob it rather
     # than hardcode a name — same reason run_lgdp44.sh's newest_def() does.
     defs = glob.glob(os.path.join(out_dir, "*.def")) if out_dir else []
     if not defs:
         store[label] = {"status": "fail_no_gp_def"}
     else:
-        store[label] = lgdp.legalize(bench_path, defs[0], os.path.join(sweep_dir, "lgdp", label))
+        store[label] = lgdp.legalize(entry["overrides"]["benchmark"], defs[0],
+                                     os.path.join(sweep_dir, "lgdp", label))
     with open(os.path.join(sweep_dir, "lgdp.json"), "w") as f:
         json.dump(store, f, indent=2)
     r = store[label]
@@ -264,25 +295,22 @@ def legalize_run(sweep_dir, label, bench_path, store):
           f"{('  ' + r['hint']) if 'hint' in r else ''}", flush=True)
 
 
-def run_all(entries, total, sweep_dir, gp_only):
+def run_all(entries, total, sweep_dir, gp_only, col_keys):
     # Legalization is decoupled from the GP loop: it legalizes any completed GP run not yet in
     # lgdp.json. On a fresh sweep results.csv is empty so this backfill is a no-op; on --resume it
     # picks up runs whose GP finished but whose LG did not (an interruption between the two).
-    lgdp_store, bench_of = {}, {}
+    lgdp_store = {}
     if not gp_only:
         lgdp_path = os.path.join(sweep_dir, "lgdp.json")
         if os.path.exists(lgdp_path):
             with open(lgdp_path) as f:
                 lgdp_store = json.load(f)
         with open(os.path.join(sweep_dir, "sweep.json")) as f:
-            bench_of = {e["label"]: e["overrides"]["benchmark"] for e in json.load(f)["runs"]}
-        if os.path.exists(os.path.join(sweep_dir, "results.csv")):
-            import csv
-            with open(os.path.join(sweep_dir, "results.csv"), newline="") as f:
-                for row in csv.DictReader(f):
-                    lbl = (row.get("run") or "").strip()
-                    if lbl and lbl in bench_of and lbl not in lgdp_store:
-                        legalize_run(sweep_dir, lbl, bench_of[lbl], lgdp_store)
+            by_ident = {entry_ident(e, col_keys): e for e in json.load(f)["runs"]}
+        for row in read_results(sweep_dir):
+            entry = by_ident.get(row_ident(row, col_keys))
+            if entry and entry["label"] not in lgdp_store:
+                legalize_run(sweep_dir, entry, col_keys, lgdp_store)
 
     t0 = time.time()
     failed = 0
@@ -296,7 +324,7 @@ def run_all(entries, total, sweep_dir, gp_only):
               f"{time.time() - t_run:7.1f}s  {entry['label']}"
               f"{'' if ok else '  -> ' + entry['log']}", flush=True)
         if ok and not gp_only:
-            legalize_run(sweep_dir, entry["label"], entry["overrides"]["benchmark"], lgdp_store)
+            legalize_run(sweep_dir, entry, col_keys, lgdp_store)
     return failed, time.time() - t0
 
 
@@ -304,110 +332,106 @@ def run_all(entries, total, sweep_dir, gp_only):
 # Summary
 # =============================================================================
 
+ENRICHED = ["XPlace GP HPWL", "GP Ratio", "Our LG HPWL", "Our DP HPWL", "XPlace DP HPWL", "DP Ratio"]
+
+
 def summarize(sweep_dir):
-    """Print and write results.md: sweep.json's swept params joined onto the exe's results.csv."""
-    csv_path = os.path.join(sweep_dir, "results.csv")
-    if not os.path.exists(csv_path):
-        print(f"  (no {csv_path} — every run failed?)")
-        return
+    """Enrich the exe's results.csv with every XPlace-reference comparison (GP + DP, all from
+    tools/benchmarks.py) and re-render it. The GP number is masked and raw-DBU, so its reference
+    goes through xplace_gp_masked_in_sw_frame(); the DP number comes from XPlace's own log so it
+    needs no conversion (lgdp.py's frame note). Idempotent — safe to re-run."""
     import csv
-    with open(csv_path, newline="") as f:
-        rows = list(csv.DictReader(f))
+    rows = read_results(sweep_dir)
     if not rows:
+        print(f"  (no results.csv in {sweep_dir} — every run failed?)")
         return
 
-    # Which overrides actually varied across the sweep -> those are the sweep's parameters.
-    # Taken from sweep.json, never inferred from the CSV header: inferring is what made result
-    # columns show up as "swept parameters" and blanked the HPWL column (TODO #28).
-    swept, by_label = [], {}
-    manifest_path = os.path.join(sweep_dir, "sweep.json")
-    if os.path.exists(manifest_path):
-        with open(manifest_path) as f:
-            entries = json.load(f)["runs"]
-        by_label = {e["label"]: e["overrides"] for e in entries}
-        keys = {k for e in entries for k in e["overrides"]}
-        swept = sorted(k for k in keys - {"benchmark"}
-                       if len({str(e["overrides"].get(k)) for e in entries}) > 1)
-
-    # Post-LG/DP cells, computed here from lgdp.json + the manifest's benchmark path. DP HPWL is
-    # already in XPlace's frame (scraped from its log), so the ratio against benchmarks.py needs
-    # NO site_width conversion — the opposite of the raw-DBU GP number (lgdp.py's frame note).
-    lgdp_cell, fenced = {}, []
-    lgdp_path = os.path.join(sweep_dir, "lgdp.json")
-    if os.path.exists(lgdp_path):
-        with open(lgdp_path) as f:
+    col_keys, by_ident = [], {}
+    if os.path.exists(os.path.join(sweep_dir, "sweep.json")):
+        with open(os.path.join(sweep_dir, "sweep.json")) as f:
+            sweep = json.load(f)
+        col_keys = sweep.get("col_keys", [])
+        by_ident = {entry_ident(e, col_keys): e for e in sweep["runs"]}
+    lgdp_store = {}
+    if os.path.exists(os.path.join(sweep_dir, "lgdp.json")):
+        with open(os.path.join(sweep_dir, "lgdp.json")) as f:
             lgdp_store = json.load(f)
-        for label, r in lgdp_store.items():
-            path = by_label.get(label, {}).get("benchmark", "")
-            ref = benchmarks.BENCHMARKS.get(path, {}).get("xplace_dp_hpwl")
-            dp = r.get("dp")
-            ratio = f"{float(dp) / ref:.4f}" if (dp and ref) else ("no-ref" if dp else r["status"])
-            lgdp_cell[label] = {"Our LG HPWL": r.get("lg") or "", "Our DP HPWL": dp or "",
-                                "XPlace DP HPWL": f"{ref:.4e}" if ref else "N/A",
-                                "DP Ratio": ratio}
-            if r.get("variant") == "ispd2015_fix":
-                fenced.append(path.split("/")[-1])
+    have_dp = bool(lgdp_store)
 
-    present = [c for c in RESULT_COLS if c in rows[0]]
     for missing in [c for c in RESULT_COLS if c not in rows[0]]:
         print(f"  [warn] results.csv has no column '{missing}' — Output.cpp schema changed; "
               f"update RESULT_COLS in tools/dse.py")
 
-    cols = ["Design"] + (["run"] if "run" in rows[0] else []) + swept + present
-    cols += LGDP_COLS if lgdp_cell else []
-    rows.sort(key=lambda r: (r.get("Design", ""), r.get("run", "")))
+    fenced = []
+    for row in rows:
+        path = f"{row.get('Suite', '')}/{row.get('Design', '')}"
+        xgp = benchmarks.xplace_gp_masked_in_sw_frame(path)
+        best_gp = float(row["Best GP HPWL"]) if _is_float(row.get("Best GP HPWL")) else None
+        row["XPlace GP HPWL"] = f"{xgp:.4e}" if xgp else "N/A"
+        row["GP Ratio"] = f"{best_gp / xgp:.4f}" if (best_gp and xgp) else "N/A"
 
-    def cell(row, col):
-        if col in swept:
-            return str(by_label.get(row.get("run", ""), {}).get(col, ""))
-        if col in LGDP_COLS:
-            return lgdp_cell.get(row.get("run", ""), {}).get(col, "")
-        return str(row.get(col, ""))
+        r = lgdp_store.get(by_ident.get(row_ident(row, col_keys), {}).get("label"), {})
+        dp, lg = r.get("dp"), r.get("lg")
+        xdp = benchmarks.BENCHMARKS.get(path, {}).get("xplace_dp_hpwl")
+        row["Our LG HPWL"] = lg or ""
+        row["Our DP HPWL"] = dp or ""
+        row["XPlace DP HPWL"] = f"{xdp:.4e}" if xdp else "N/A"
+        row["DP Ratio"] = (f"{float(dp) / xdp:.4f}" if (dp and xdp)
+                           else ("no-ref" if dp else r.get("status", "")))
+        if r.get("variant") == "ispd2015_fix":
+            fenced.append(row["Design"])
 
-    width = {c: max(len(c), max(len(cell(r, c)) for r in rows)) for c in cols}
-    lines = ["  ".join(f"{c:<{width[c]}}" for c in cols)]
-    lines.append("  ".join("-" * width[c] for c in cols))
-    lines += ["  ".join(f"{cell(r, c):<{width[c]}}" for c in cols) for r in rows]
+    rows.sort(key=lambda r: (r.get("Suite", ""), r.get("Design", ""),
+                             tuple(r.get(k, "") for k in col_keys)))
 
-    def numbers(col):
-        return [float(r[col]) for r in rows if r.get(col) not in (None, "", "N/A")]
+    # Rewrite results.csv: exe columns (minus any stale enrichment) + the fresh enriched columns.
+    base = [c for c in rows[0] if c not in ENRICHED]
+    enriched = ENRICHED if have_dp else ENRICHED[:2]   # GP ratio always; DP cols only if legalized
+    fields = base + enriched
+    with open(os.path.join(sweep_dir, "results.csv"), "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+
+    # Curated view for the console + results.md (the CSV holds the full column set).
+    view = (["Suite", "Design"] + col_keys +
+            ["Best Iter", "Best OVFW", "Best GP HPWL", "XPlace GP HPWL", "GP Ratio",
+             "Final HPWL Exact"] +
+            (["Our DP HPWL", "XPlace DP HPWL", "DP Ratio"] if have_dp else []))
+    width = {c: max(len(c), max(len(str(r.get(c, ""))) for r in rows)) for c in view}
+    table = ["  ".join(f"{c:<{width[c]}}" for c in view),
+             "  ".join("-" * width[c] for c in view)]
+    table += ["  ".join(f"{str(r.get(c, '')):<{width[c]}}" for c in view) for r in rows]
+
+    def col_floats(name):
+        return [float(r[name]) for r in rows if _is_float(r.get(name))]
 
     footer = []
-    hpwl, ratios = numbers("Best GP HPWL"), numbers("Ratio")
-    if hpwl:
-        footer.append(f"Best GP HPWL: {min(hpwl):.3e} - {max(hpwl):.3e} "
-                      f"({max(hpwl) / min(hpwl):.2f}x spread)")
-    if ratios:
-        footer.append(f"Ratio vs XPlace GP: {min(ratios):.3f} - {max(ratios):.3f}, "
-                      f"mean {sum(ratios) / len(ratios):.3f} over {len(ratios)}/{len(rows)} designs")
-    footer.append("Ratio is only meaningful where Best OVFW converged — an under-spread run "
-                  "flatters its own HPWL (TODO #3).")
-    dp_ratios = [float(c["DP Ratio"]) for c in lgdp_cell.values()
-                 if c["DP Ratio"] not in ("no-ref",) and _is_float(c["DP Ratio"])]
-    if dp_ratios:
-        dp_ratios.sort()
-        median = dp_ratios[len(dp_ratios) // 2]
-        footer.append(f"DP Ratio vs XPlace post-DP: median {median:.4f}, "
-                      f"mean {sum(dp_ratios) / len(dp_ratios):.4f}, "
-                      f"{sum(abs(x - 1) <= 0.02 for x in dp_ratios)}/{len(dp_ratios)} within 2%, "
-                      f"better on {sum(x < 1 for x in dp_ratios)} "
-                      f"(legal-vs-legal, the headline metric).")
+    gp = col_floats("GP Ratio")
+    if gp:
+        gp.sort()
+        footer.append(f"GP Ratio vs XPlace GP (masked): median {gp[len(gp) // 2]:.4f}, "
+                      f"mean {sum(gp) / len(gp):.4f}, over {len(gp)}/{len(rows)} designs. "
+                      f"Meaningful only where Best OVFW converged (TODO #3).")
+    dp = col_floats("DP Ratio")
+    if dp:
+        dp.sort()
+        footer.append(f"DP Ratio vs XPlace post-DP: median {dp[len(dp) // 2]:.4f}, "
+                      f"mean {sum(dp) / len(dp):.4f}, {sum(abs(x - 1) <= 0.02 for x in dp)}/{len(dp)} "
+                      f"within 2%, better on {sum(x < 1 for x in dp)} (legal-vs-legal, the headline).")
     if fenced:
         footer.append(f"Fence regions STRIPPED on both sides ({len(fenced)}, TODO #26): "
                       + ", ".join(sorted(fenced)))
-    unscored = [lbl for lbl, c in lgdp_cell.items() if not _is_float(c["DP Ratio"])
-                and c["DP Ratio"] != "no-ref"]
+    unscored = [f"{r['Design']} ({r['DP Ratio']})" for r in rows
+                if have_dp and not _is_float(r["DP Ratio"]) and r["DP Ratio"] != "no-ref"]
     if unscored:
-        footer.append(f"No post-DP ({len(unscored)}): "
-                      + ", ".join(f"{lbl} ({lgdp_cell[lbl]['DP Ratio']})" for lbl in sorted(unscored)))
+        footer.append(f"No post-DP ({len(unscored)}): " + ", ".join(sorted(unscored)))
 
-    print("\n".join("  " + ln for ln in lines + [""] + footer))
+    print("\n".join("  " + ln for ln in table + [""] + footer))
 
-    md = [f"# DSE sweep — {os.path.basename(sweep_dir)}", "",
-          f"{len(rows)} runs.  Swept: {', '.join(swept) if swept else '(designs only)'}", "",
-          "| " + " | ".join(cols) + " |",
-          "|" + "|".join("---" for _ in cols) + "|"]
-    md += ["| " + " | ".join(cell(r, c) for c in cols) + " |" for r in rows]
+    md = [f"# DSE sweep — {os.path.basename(sweep_dir)}", "", f"{len(rows)} runs.", "",
+          "| " + " | ".join(view) + " |", "|" + "|".join("---" for _ in view) + "|"]
+    md += ["| " + " | ".join(str(r.get(c, "")) for c in view) + " |" for r in rows]
     md += [""] + [f"- {line}" for line in footer]
     with open(os.path.join(sweep_dir, "results.md"), "w") as f:
         f.write("\n".join(md) + "\n")
@@ -437,30 +461,26 @@ def main():
     if args.resume:
         sweep_dir = args.resume.rstrip("/")
         with open(os.path.join(sweep_dir, "sweep.json")) as f:
-            manifest = json.load(f)["runs"]
-        # The manifest is the authority on resume, so --designs/--set cannot silently redefine
-        # a run mid-sweep. Identity is the label, and the config it names already exists.
-        done = set()
-        csv_path = os.path.join(sweep_dir, "results.csv")
-        if os.path.exists(csv_path):
-            import csv
-            with open(csv_path, newline="") as f:
-                done = {(r.get("run") or "").strip() for r in csv.DictReader(f)}
-        entries = [e for e in manifest if e["label"] not in done]
+            sweep = json.load(f)
+        manifest, col_keys = sweep["runs"], sweep.get("col_keys", [])
+        # The manifest is the authority on resume, so --designs/--set cannot silently redefine a
+        # run mid-sweep. A run is done when its identity (benchmark + column values) is in the CSV.
+        done = {row_ident(r, col_keys) for r in read_results(sweep_dir)}
+        entries = [e for e in manifest if entry_ident(e, col_keys) not in done]
         print(f"DSE: resuming {sweep_dir} — {len(manifest) - len(entries)} of {len(manifest)} "
               f"already recorded, {len(entries)} to go")
     else:
-        runs = build_runs(args)
+        runs, col_keys = build_runs(args)
         if not runs:
             raise SystemExit("DSE: nothing to run")
         sweep_dir = "results/DSE_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         if args.dry_run:
-            for n, (label, overrides) in enumerate(runs, 1):
+            for n, (label, overrides, columns) in enumerate(runs, 1):
                 print(f"  {n:3d}  {label:<40}  "
                       f"{'  '.join(f'{k}={v}' for k, v in overrides.items())}")
             print(f"\nDSE: {len(runs)} run(s); --dry-run, nothing launched")
             return
-        entries = prepare(runs, sweep_dir)
+        entries = prepare(runs, col_keys, sweep_dir)
         print(f"DSE: {len(entries)} run(s) -> {sweep_dir}/")
 
     # Empty entries + not gp_only is a fully-GP'd resume: still fall through so run_all can
@@ -469,7 +489,7 @@ def main():
         print("DSE: nothing left to run")
         return
 
-    failed, elapsed = run_all(entries, len(entries), sweep_dir, args.gp_only)
+    failed, elapsed = run_all(entries, len(entries), sweep_dir, args.gp_only, col_keys)
     if entries:
         print(f"\n{'=' * 78}\n  DSE COMPLETE — {len(entries) - failed}/{len(entries)} succeeded, "
               f"{failed} failed  ({elapsed / 60:.1f} min)\n{'=' * 78}\n")

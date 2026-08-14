@@ -75,7 +75,6 @@ void Placer::performIterationZero()
     computeElectricFields();    // ∇D from ρ → bin eFields
 
     initializeDensityWeight();
-    recordInitialHPWL();
 }
 
 Placer::Placer(std::string config_filepath)

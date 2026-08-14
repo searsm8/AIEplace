@@ -33,7 +33,6 @@ namespace ConfigUtils {
 class Placer
 {
 private:
-    float m_initial_hpwl = 0.0f;
     std::string m_config_filepath;
 
     // Constructor phases (see Placer::Placer)
@@ -53,17 +52,14 @@ private:
     // Helper functions for DSE integration and output organization
     void createRunOutputStructure();
     void writeResultsCSV(float final_hpwl, float final_hpwl_exact, float final_overflow,
-                         float total_runtime,
-                         float hpwl_improvement, const std::string& run_id);
+                         float total_runtime, const std::string& run_id);
 
     // writeResultsCSV's steps, broken out for readability
-    float lookupXplaceReferenceHPWL(const std::string& bench_name);
     std::vector<std::pair<std::string, std::string>> parseDSEParams();
     void writeResultsCSVHeader(std::ofstream& out_file,
                                const std::vector<std::pair<std::string, std::string>>& dse_params);
     void writeResultsCSVRow(std::ofstream& out_file, float final_hpwl_exact, float total_runtime,
-                            const std::vector<std::pair<std::string, std::string>>& dse_params,
-                            float xplace_ref);
+                            const std::vector<std::pair<std::string, std::string>>& dse_params);
 
     // Helper functions
     std::string generateRunId();
@@ -333,7 +329,6 @@ public:
 
     // Pre-run preparation
     void initializePlacement();
-    void recordInitialHPWL();
     void iterationReset();
     void initializeDensityWeight();
 
@@ -416,8 +411,6 @@ public:
                                                // deposit; the number comparable to XPlace's
                                                // Mixed-GP reference (_XPLACE_MMS_MIXED_GP).
         float total_runtime, iteration_avg;
-        float hpwl_improvement;
-        bool has_improvement;
     };
     BestChoice restoreBestSolution();    // applies selectBestSolution() and restores its geometry
     FinalMetrics computeFinalMetrics();

@@ -114,9 +114,8 @@ bool Placer::beginFixedMacroPhase()
                      std::to_string(db.getFillerStartIndex()) + " movable cells, stop overflow " +
                      PREC(overflow_threshold));
 
-    // Re-bootstrap the gradients and the density weight at the new positions. This is
-    // performIterationZero() minus recordInitialHPWL(), which must keep reporting the RUN's
-    // initial HPWL, not phase 2's.
+    // Re-bootstrap the gradients and the density weight at the new positions -- this is
+    // performIterationZero() without re-running iteration-zero bookkeeping.
     iterationReset();
     computeHpwlPartials();
     computeElectricFields();
