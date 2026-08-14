@@ -29,22 +29,17 @@ flatters whichever placer spread less, TODO #3). Pass --gp-only to stop after GP
 XPlace's environment (CUDA + its conda python); see tools/lgdp.py.
 
 What a sweep leaves behind, in results/DSE_<timestamp>/:
-  sweep.json    the manifest — every run's label, config path and exact overrides. THIS is
-                the record of what was launched; read it, not the configs, to see a sweep.
-  configs/      one TOML per run, exactly as the exe read it
-  logs/         one stdout/stderr capture per run
-  gp_only.csv   the exe's own raw GP record, one appended row per run (schema owned by Output.cpp)
-  results.csv   dse.py's product: gp_only.csv's columns with every XPlace comparison slotted in
-                after Best GP HPWL (XPlace GP HPWL + GP Ratio, and the LG/DP columns) — all looked
-                up from tools/benchmarks.py, the one manifest. Rewritten from gp_only.csv each time.
+  sweep.json    the manifest of what was launched — every run's label, config path, overrides
+  configs/, logs/   one TOML / one stdout+stderr capture per run
+  gp_only.csv   the exe's raw GP record, one appended row per run (schema owned by Output.cpp)
+  results.csv   dse.py's product: gp_only.csv plus every XPlace comparison (GP Ratio, LG/DP), from
+                tools/benchmarks.py; rewritten whole from gp_only.csv each time
   lgdp.json     per-run LG+DP result (unless --gp-only); XPlace logs under lgdp/<label>/
-  results.md    the collated table, same one printed at the end
 
-Two CSVs, two owners: the exe only ever appends to gp_only.csv, dse.py only ever writes results.csv,
-so neither clashes with the other's schema across a --resume. A run's identity is (Suite, Design,
-grid, swept-param values) — every one a visible column. dse.py emits `grid` + each swept parameter
-into the exe's DSE_info, so the columns ARE the identity; sweep.json and gp_only.csv rows join on
-that tuple, and --resume skips a run whose identity is already in gp_only.csv. No run-label column.
+Two CSVs, two owners: the exe only appends to gp_only.csv, dse.py only writes results.csv, so
+neither clashes with the other across a --resume. A run's identity is (Suite, Design, grid, swept
+values) — all visible columns (dse.py emits `grid` + each swept param into DSE_info), so gp_only.csv
+and sweep.json rows join on that tuple and --resume skips identities already in gp_only.csv.
 
 GP runs one design at a time (the placer is OpenMP-threaded across all cores, so concurrent GPs
 were measured — 9bea10e, 2026-07-31 — to give the same wall clock with more ways to go wrong), but
@@ -105,27 +100,6 @@ def coerce(text):
     return text.strip()
 
 
-# Whole-tier tokens for --designs, by tier number or suite name (case-insensitive): tier1/ispd2005,
-# tier2/ispd2015, tier3/mms.
-GROUPS = {"tier1": 1, "ispd2005": 1, "tier2": 2, "ispd2015": 2, "tier3": 3, "mms": 3}
-
-
-def expand_designs(spec):
-    """'tier1+tier2' / 'all' / 'mms' / 'ispd2005' / 'adaptec1,ispd2015/mgc_fft_a' -> ['suite/design']."""
-    paths = []
-    for token in spec.replace("+", ",").split(","):
-        token = token.strip()
-        if not token:
-            continue
-        if token.lower() == "all":
-            paths += benchmarks.all_paths()
-        elif token.lower() in GROUPS:
-            paths += benchmarks.by_tier(GROUPS[token.lower()])
-        else:
-            paths.append(benchmarks.resolve(token))   # rejects typos at launch (case-sensitive names)
-    return list(dict.fromkeys(paths))                 # dedupe, order preserved
-
-
 def design_bytes(path):
     """Input size, used only to order the sweep smallest-first."""
     directory = os.path.join(BENCH_ROOT, path)
@@ -179,7 +153,7 @@ def build_runs(args):
     sets = parse_sets(args.set)
     swept = [k for k, v in sets.items() if len(v) > 1]   # only these get a column / label suffix
     col_keys = ["grid"] + [k.rsplit(".", 1)[-1] for k in swept]
-    designs = sorted(expand_designs(args.designs), key=design_bytes)
+    designs = sorted(benchmarks.expand_designs(args.designs), key=design_bytes)
 
     runs = []
     for path in designs:
@@ -281,20 +255,14 @@ def read_gp(sweep_dir):
         return list(csv.DictReader(f))
 
 
-def gp_output_dir(sweep_dir, want_ident, col_keys):
-    """The run dir the exe wrote for a run, matched by identity to results.csv's Output Dir."""
-    for row in read_gp(sweep_dir):
-        if row_ident(row, col_keys) == want_ident:
-            return row.get("Output Dir")
-    return None
-
-
 def resolve_gp_def(sweep_dir, entry, col_keys):
-    """The GP `.def` this run wrote, from gp_only.csv's Output Dir. Called on the MAIN thread right
-    after the GP subprocess exits — no concurrent writer — so the LG+DP worker never races the exe
-    appending the next run's row. Basename varies by tier (RowBasedPlacement.def, fft.def, …), so
-    glob it, same as run_lgdp44.sh's newest_def()."""
-    out_dir = gp_output_dir(sweep_dir, entry_ident(entry, col_keys), col_keys)
+    """The GP `.def` this run wrote, matched by identity to gp_only.csv's Output Dir. Called on the
+    MAIN thread right after the GP subprocess exits — no concurrent writer — so the LG+DP worker
+    never races the exe appending the next run's row. Basename varies by tier (RowBasedPlacement.def,
+    fft.def, …), so glob it, same as run_lgdp44.sh's newest_def()."""
+    want = entry_ident(entry, col_keys)
+    out_dir = next((r.get("Output Dir") for r in read_gp(sweep_dir)
+                    if row_ident(r, col_keys) == want), None)
     defs = glob.glob(os.path.join(out_dir, "*.def")) if out_dir else []
     return defs[0] if defs else None
 
@@ -368,10 +336,10 @@ ENRICHED = ["XPlace GP HPWL", "GP Ratio", "Our LG HPWL", "Our DP HPWL", "XPlace 
 
 
 def summarize(sweep_dir):
-    """Read the exe's gp_only.csv and write results.csv, adding every XPlace-reference comparison
-    (GP + DP, all from tools/benchmarks.py). The GP number is masked and raw-DBU, so its reference
-    goes through xplace_gp_masked_in_sw_frame(); the DP number comes from XPlace's own log so it
-    needs no conversion (lgdp.py's frame note). Idempotent — safe to re-run."""
+    """(Re)write results.csv from the exe's gp_only.csv, adding every XPlace-reference comparison
+    from tools/benchmarks.py: GP Ratio (masked → xplace_gp_masked_in_sw_frame) and, once legalized,
+    the LG/DP columns (DP HPWL is already in XPlace's frame). Prints the aggregate ratios only — the
+    per-row table IS results.csv, not re-dumped here. Idempotent."""
     import csv
     rows = read_gp(sweep_dir)
     if not rows:
@@ -391,7 +359,7 @@ def summarize(sweep_dir):
     have_dp = bool(lgdp_store)
 
     for missing in [c for c in RESULT_COLS if c not in rows[0]]:
-        print(f"  [warn] results.csv has no column '{missing}' — Output.cpp schema changed; "
+        print(f"  [warn] gp_only.csv has no column '{missing}' — Output.cpp schema changed; "
               f"update RESULT_COLS in tools/dse.py")
 
     fenced = []
@@ -403,9 +371,8 @@ def summarize(sweep_dir):
         row["GP Ratio"] = f"{best_gp / xgp:.4f}" if (best_gp and xgp) else "N/A"
 
         r = lgdp_store.get(by_ident.get(row_ident(row, col_keys), {}).get("label"), {})
-        dp, lg = r.get("dp"), r.get("lg")
-        xdp = benchmarks.BENCHMARKS.get(path, {}).get("xplace_dp_hpwl")
-        row["Our LG HPWL"] = lg or ""
+        dp, xdp = r.get("dp"), benchmarks.BENCHMARKS.get(path, {}).get("xplace_dp_hpwl")
+        row["Our LG HPWL"] = r.get("lg") or ""
         row["Our DP HPWL"] = dp or ""
         row["XPlace DP HPWL"] = f"{xdp:.4e}" if xdp else "N/A"
         row["DP Ratio"] = (f"{float(dp) / xdp:.4f}" if (dp and xdp)
@@ -416,10 +383,8 @@ def summarize(sweep_dir):
     rows.sort(key=lambda r: (r.get("Suite", ""), r.get("Design", ""),
                              tuple(r.get(k, "") for k in col_keys)))
 
-    # Write results.csv from gp_only.csv's columns, with the enriched columns slotted in right after
-    # "Best GP HPWL" so every XPlace comparison sits next to the number it compares. Safe to insert
-    # mid-row: results.csv is dse.py's alone (the exe only appends to gp_only.csv), rewritten whole
-    # each time.
+    # results.csv is dse.py's alone (the exe only appends to gp_only.csv), rewritten whole each time,
+    # with the enriched columns slotted in after "Best GP HPWL" — next to the number they compare.
     base = [c for c in rows[0] if c not in ENRICHED]
     enriched = ENRICHED if have_dp else ENRICHED[:2]   # GP ratio always; DP cols only if legalized
     at = base.index("Best GP HPWL") + 1 if "Best GP HPWL" in base else len(base)
@@ -429,48 +394,22 @@ def summarize(sweep_dir):
         w.writeheader()
         w.writerows(rows)
 
-    # Curated view for the console + results.md (the CSV holds the full column set).
-    view = (["Suite", "Design"] + col_keys +
-            ["Best Iter", "Best OVFW", "Best GP HPWL", "XPlace GP HPWL", "GP Ratio",
-             "Final HPWL Exact"] +
-            (["Our DP HPWL", "XPlace DP HPWL", "DP Ratio"] if have_dp else []))
-    width = {c: max(len(c), max(len(str(r.get(c, ""))) for r in rows)) for c in view}
-    table = ["  ".join(f"{c:<{width[c]}}" for c in view),
-             "  ".join("-" * width[c] for c in view)]
-    table += ["  ".join(f"{str(r.get(c, '')):<{width[c]}}" for c in view) for r in rows]
-
-    def col_floats(name):
-        return [float(r[name]) for r in rows if _is_float(r.get(name))]
-
-    footer = []
-    gp = col_floats("GP Ratio")
+    def ratios(name):
+        return sorted(float(r[name]) for r in rows if _is_float(r.get(name)))
+    gp, dp = ratios("GP Ratio"), ratios("DP Ratio")
     if gp:
-        gp.sort()
-        footer.append(f"GP Ratio vs XPlace GP (masked): median {gp[len(gp) // 2]:.4f}, "
-                      f"mean {sum(gp) / len(gp):.4f}, over {len(gp)}/{len(rows)} designs. "
-                      f"Meaningful only where Best OVFW converged (TODO #3).")
-    dp = col_floats("DP Ratio")
+        print(f"  GP Ratio vs XPlace GP (masked): median {gp[len(gp)//2]:.4f} mean {sum(gp)/len(gp):.4f}"
+              f"  ({len(gp)}/{len(rows)} designs; meaningful only where Best OVFW converged, TODO #3)")
     if dp:
-        dp.sort()
-        footer.append(f"DP Ratio vs XPlace post-DP: median {dp[len(dp) // 2]:.4f}, "
-                      f"mean {sum(dp) / len(dp):.4f}, {sum(abs(x - 1) <= 0.02 for x in dp)}/{len(dp)} "
-                      f"within 2%, better on {sum(x < 1 for x in dp)} (legal-vs-legal, the headline).")
+        print(f"  DP Ratio vs XPlace post-DP:     median {dp[len(dp)//2]:.4f} mean {sum(dp)/len(dp):.4f}"
+              f"  ({sum(abs(x-1)<=.02 for x in dp)}/{len(dp)} within 2%, better on {sum(x<1 for x in dp)}"
+              f" — legal-vs-legal, the headline)")
     if fenced:
-        footer.append(f"Fence regions STRIPPED on both sides ({len(fenced)}, TODO #26): "
-                      + ", ".join(sorted(fenced)))
-    unscored = [f"{r['Design']} ({r['DP Ratio']})" for r in rows
+        print(f"  fence-stripped both sides ({len(fenced)}, TODO #26): {', '.join(sorted(fenced))}")
+    unscored = [f"{r['Design']}({r['DP Ratio']})" for r in rows
                 if have_dp and not _is_float(r["DP Ratio"]) and r["DP Ratio"] != "no-ref"]
     if unscored:
-        footer.append(f"No post-DP ({len(unscored)}): " + ", ".join(sorted(unscored)))
-
-    print("\n".join("  " + ln for ln in table + [""] + footer))
-
-    md = [f"# DSE sweep — {os.path.basename(sweep_dir)}", "", f"{len(rows)} runs.", "",
-          "| " + " | ".join(view) + " |", "|" + "|".join("---" for _ in view) + "|"]
-    md += ["| " + " | ".join(str(r.get(c, "")) for c in view) + " |" for r in rows]
-    md += [""] + [f"- {line}" for line in footer]
-    with open(os.path.join(sweep_dir, "results.md"), "w") as f:
-        f.write("\n".join(md) + "\n")
+        print(f"  no post-DP ({len(unscored)}): {', '.join(sorted(unscored))}")
 
 
 # =============================================================================
@@ -531,7 +470,7 @@ def main():
         print(f"\n{'=' * 78}\n  DSE COMPLETE — {len(entries) - failed}/{len(entries)} succeeded, "
               f"{failed} failed  ({elapsed / 60:.1f} min)\n{'=' * 78}\n")
     summarize(sweep_dir)
-    print(f"\n  {sweep_dir}/  (sweep.json = what ran, results.md = this table"
+    print(f"\n  {sweep_dir}/  (results.csv = the table, sweep.json = what ran"
           f"{'' if args.gp_only else ', lgdp.json = LG+DP'})\n")
 
 

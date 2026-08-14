@@ -1,26 +1,30 @@
 # Software Project notes for Claude
 
-## ⚠️ The Bash tool runs on Windows, not WSL — wrap every command in `wsl`
-The `Bash` tool executes in **Git Bash / MINGW64 on Windows**, but this project
-lives in WSL. 
-
-**Fix — run everything inside WSL by wrapping the command:**
-```bash
-wsl -e bash -c "cd /home/msears/phd/AIEplace && <your command>"
-```
+## ⚠️ Read the rules first: `.claude/0_WORKFLOW/rules.md`
+The hard rules — including the **WSL wrap** every `Bash` command needs, because the tool runs
+on Windows not WSL — live in [[rules.md]] and are injected each session by the SessionStart hook.
+Insurance if that hook ever fails: `wsl -e bash -c "cd /home/msears/phd/AIEplace && <cmd>"`.
 
 Filling your context with the right information is important.
+For all .md files, make each entry concise, and remove any stale entries that no longer apply.
 
 ## summary.md holds the living status of the project, summarized concisely. 
-It also holds references for diving deeper on the topic at hand.
 
-**The three project-notes files live in the repo-root `.claude/`** — `.claude/summary.md`,
-`.claude/tasks.md`, `.claude/history.md`. All three are tracked. They sit in a dotfolder so a
-newcomer browsing the repo sees the code first, not our workflow.
+**.claude/0_WORKFLOW/noteToSelf.md** is your scratchpad for this project — notes to your future
+self, problem→solution log. It also absorbs what MISTAKES.md used to hold (positive framing:
+"what I learned", not "what I got wrong"). I won't review it regularly, so structure it however
+you'd like.
+
+Log a problem once. When you rely on that note again, append a dated timestamp. Once a note
+collects **3+ timestamps**, promote it to [[rules.md]] and delete it from noteToSelf.
+
+**The workflow files live in `.claude/0_WORKFLOW/`** — `summary.md`, `tasks.md`, `history.md`,
+`rules.md` (all tracked), plus the untracked personal scratchpad `noteToSelf.md`. They sit in a
+dotfolder so a newcomer browsing the repo sees the code first, not our workflow.
 
 For a new session, follow these steps:
 
-1) Build context. Read `.claude/summary.md` to quickly gain current summarized status.
+1) Build context. Read `.claude/0_WORKFLOW/summary.md` to quickly gain current summarized status.
 2) From Mark's prompt and the summary, decide if you need to read tasks.md items and reports relevant to the task at hand.
 3) Do the task.
 4) If requested by Mark, write a report or generate an artifact.
@@ -37,7 +41,7 @@ Mark will also read it, so treat it as a report to both him and your future self
 Every session may load this file whole, so anything finished that stays in it is paid for again on
 every future session. Also, Mark needs to read it sometimes! Four rules:
 
-1. **When a task is completed, move the whole section to `.claude/history.md`**
+1. **When a task is completed, move the whole section to `.claude/0_WORKFLOW/history.md`**
    - Prepend history.md with a summary line: the task number "#n" and a brief description of what was accomplished. Reference other tasks as needed.
    - Insert the full text of the completed task after all the summary lines, so it keeps most-recently completed items first.
    - Don't leave a completed task open -- that's clutter. If uncertain, ask Mark.
@@ -51,7 +55,6 @@ If something does need amending, an annotation is better than hard edits.
 
 4. Place new reports in `.claude/1_REVIEW/reports`. These files should be text only, since it is git tracked.
 Large artifacts such as images or gifs should be placed in `.claude/2_ARTIFACTS` which is not git tracked (create if needed).
-
 
 ## 📄 Naming what you hand Mark — the filename carries the metadata
 Work here is asynchronous and multi-session, so filenames are an efficient channel to communicate across different coding sessions, and to me when I am reviewing files.
@@ -263,6 +266,8 @@ number we quote is tracked; one-off experiment runners stay with the output.** R
 ## Coding style for this repo
 General style rules are in `~/.claude/CLAUDE.md`; this is the hardware-specific addition.
 
+**When you author a new comment
+
 **HLS code reads differently from pure software.** Annotate the datapath: pragmas,
 memory-resource intent (`_URAM`/`_BRAM`/`_DDR` suffixes), and a short note on why a loop is
 pipelined/unrolled the way it is. The hardware structure is not obvious from the C, so make it
@@ -293,7 +298,7 @@ function.** The κ bug sat under a doc-block that said it was computing `weighte
 next line assigned something else. Prefer to make the claim checkable (see *A test asserts*) over
 asserting it in prose.
 
-## Keeping `.claude/tasks.md` true
+## Keeping `.claude/0_WORKFLOW/tasks.md` true
 tasks.md is the **source of truth for project state** — `summary.md` points at it and every
 session reads that first. It was 1621 lines of corrections layered on corrections until the
 2026-08-07 compaction, and on 2026-08-06 four checkboxes were still open on work that had already
@@ -319,3 +324,19 @@ believed. The procedure:
 6. **A number in tasks.md carries its basis or it is not a number.** Which phase, masked or exact,
    which sw_only row, td and grid — see the `xplace-compare` skill. Numbers without that have
    needed retracting three times.
+
+## Verify anything
+```bash
+cd vck5000 && make test          # pl_algo tier-1, seconds, no Vitis
+cd vck5000 && make test-regress   # sw_only vs committed baselines, ~12 s
+```
+
+## Deeper
+`.claude/0_WORKFLOW/tasks.md` (open items); `.claude/0_WORKFLOW/rules.md` (the non-negotiables)
+`.claude/1_REVIEW/reports/` (evidence) 
+`vck5000/pl/src/pl_algo/DATAFLOW.md` (authoritative for pl_algo)
+`.claude/2_ARTIFACTS/papers/xplace/` (XPlace paper: text per section, **all 24 equations
+  hand-transcribed** in `eqs/transcriptions.md`, figure/table crops. README indexes which
+  section holds what — §II objective, §IV-B filler/overflow split, §V ω and the γ/λ throttle.
+  Numbers stay in `2_ARTIFACTS/xplace_results/`.)
+`.claude/skills/paper-extract/` (does the above for any paper PDF; tracked)

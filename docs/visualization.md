@@ -6,7 +6,7 @@ ways as you like, without re-running the placement. This replaced an earlier des
 placer itself rendered PNGs with cairo in-loop (`Visualizer.{h,cpp}`, config `output.visualize` /
 `output.zoom*`) — removed entirely 2026-08-05 (TODO #16 step 5). Background and the full design
 history: `.claude/1_REVIEW/handoffs/_NEW_HANDOFF_viz_offline_tool_20260805.md` (tracked
-in git) and `.claude/tasks.md` TODO #16 / #18 (tracked, the durable record).
+in git) and `.claude/0_WORKFLOW/tasks.md` TODO #16 / #18 (tracked, the durable record).
 
 ## 1. Turning the dump on
 

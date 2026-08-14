@@ -69,6 +69,12 @@ vck5000/host/benchmarks/mms/
 # ...except archive/, which is 161 MB of placement GIFs and visualizations, not reports.
 /.claude/1_REVIEW/archive/
 
+# /.claude/0_WORKFLOW/ -- summary/tasks/history/rules ARE TRACKED (2026-08-14). Same rule as
+# 1_REVIEW above: re-include the directory so git descends, then re-exclude noteToSelf.md, the
+# personal scratchpad Mark doesn't review.
+!/.claude/0_WORKFLOW/
+/.claude/0_WORKFLOW/noteToSelf.md
+
 # /.claude/2_ARTIFACTS/ is NOT tracked -- 1.9 GB of GIFs, PNGs and DEFs, all regenerable output
 # (`tools/generate_viz.py`, the viz-gif skill). Already ignored by the catch-all; stated here so
 # nobody "fixes" the asymmetry with 1_REVIEW by adding a negation. Git blobs are forever: a commit

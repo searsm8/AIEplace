@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Re-render a finished sweep's table without re-running it.
+"""Re-process a finished sweep without re-running it: rebuild results.csv from gp_only.csv +
+lgdp.json + the current tools/benchmarks.py references, and print the aggregate ratios.
 
     python3 tools/analyze_dse.py results/DSE_<ts>          # or .../results.csv
 
-The renderer itself lives in dse.py::summarize -- one implementation, so the table you get
-here is the one the sweep printed. A sweep dir from before 2026-08-12 has no sweep.json;
-the result columns still render, only the swept-parameter columns are missing.
+Useful after a benchmarks.py reference changes — the per-design table is results.csv itself.
+Calls dse.py::summarize, the one implementation.
 """
 import os
 import sys

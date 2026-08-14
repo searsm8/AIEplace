@@ -341,6 +341,28 @@ def by_tier(tier):
     return [p for p, m in BENCHMARKS.items() if m["tier"] == tier]
 
 
+# Whole-tier tokens for a design spec, by tier number or suite name (case-insensitive).
+_GROUPS = {"tier1": 1, "ispd2005": 1, "tier2": 2, "ispd2015": 2, "tier3": 3, "mms": 3}
+
+
+def expand_designs(spec):
+    """A design spec -> ['suite/design', ...]. Accepts "all"; a whole tier by number or suite name
+    (tier1/ispd2005, tier2/ispd2015, tier3/mms); "+"-joined groups (tier1+tier2, ispd2005+mms); or
+    comma-separated design names / "suite/design" paths. Typos raise via resolve()."""
+    paths = []
+    for token in spec.replace("+", ",").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if token.lower() == "all":
+            paths += all_paths()
+        elif token.lower() in _GROUPS:
+            paths += by_tier(_GROUPS[token.lower()])
+        else:
+            paths.append(resolve(token))          # case-sensitive design names
+    return list(dict.fromkeys(paths))             # dedupe, order preserved
+
+
 def to_markdown():
     lines = [
         "# Benchmark manifest",
