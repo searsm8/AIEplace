@@ -711,15 +711,17 @@ that hides the defect.
       (it finishes before legalization), so dse.py enriches results.csv after LG+DP with
       `Our LG HPWL` / `Our DP HPWL` / `XPlace DP HPWL` / `DP Ratio`, alongside the GP comparison
       (#29). One file, one reference table (`benchmarks.py`).
-- [ ] **Full-suite cross-check, then collapse the two suite runners.** A `make dse` over all 28
-      (now GP+LG+DP in one command) has NOT yet been diffed against the standing pipeline
-      (`gen_suite_configs.py` → `run_suite.sh` → `run_lgdp44.sh` → `analyze_full44.py`) that
-      produces `summary.md`'s median 1.0106. **Mark's call 2026-08-14: keep the standing pipeline
-      one more cycle for exactly this verification.** Run it, confirm the per-design DP ratios agree,
-      THEN retire `gen_suite_configs.py` + `run_suite.sh` + the two `run_lgdp*.sh` (fold their
-      remaining bits — the smallest-first ordering, the MMS `--mixed_size` arm — into
-      `dse.py`/`lgdp.py`; the per-design LG+DP engine `lgdp.py` already subsumes their `run_one()`).
-      ⚠️ Do not retire before the cross-check: every headline number in `summary.md` still comes
-      through that path. `~2 h` for the 28-design GP+LG+DP run.
-      **Falsifies the collapse:** `dse.py`'s per-design DP ratio == `analyze_full44.py`'s within
-      rounding, on all 28.
+- [x] **Full-suite cross-check — PASSED 2026-08-14.** A single `make dse` (GP+LG+DP+pipeline overlap)
+      over all 28, `results/DSE_20260814_133037`, reproduces the standing pipeline's committed
+      numbers **exactly** (to 4 decimals), per tier: ispd2005 1.0053/1.0052, ispd2015 1.0163/1.0189,
+      **all 28 median 1.0106 / mean 1.0149, 21/28 within 2%, better on 4** — identical to
+      `summary.md`. Expected: GP is deterministic (seed 42), the Output.cpp changes were schema-only
+      (test-regress bit-identical), XPlace's legalizer is unchanged. The falsification criterion
+      ("dse.py's per-design DP ratio == analyze_full44.py's within rounding") is met.
+- [ ] **Collapse the two suite runners — now UNBLOCKED.** With the cross-check passed, retire
+      `gen_suite_configs.py` + `run_suite.sh` + `run_lgdp44.sh` + `run_lgdp_suite.sh` + the two
+      `analyze_*` scorecards (folding the last bits — smallest-first ordering, the MMS `--mixed_size`
+      arm — into `dse.py`/`lgdp.py`; `lgdp.py` already subsumes their `run_one()`). Needs Mark's
+      go-ahead since these produced every headline number until today. MMS/tier-3 via `make dse
+      --designs tier3` should be spot-checked against `_XPLACE_MMS_FINAL` first (this run was
+      tier1+tier2 only).

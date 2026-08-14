@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-08-14 12:35 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-14 14:05 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 
 ## Two threads
 - **sw_only** — CPU golden reference; goal is to match XPlace. The active thread.
@@ -207,10 +207,12 @@
   enriches results.csv with `Our DP HPWL` / `XPlace DP HPWL` / `DP Ratio` (legal-vs-legal, the
   headline) **in the same file as the GP comparison** (#29). Core is `tools/lgdp.py`; all three
   format paths verified (adaptec1 **1.001**, mgc_fft_2 1.028, fenced mgc_des_perf_a 1.018). Post-DP
-  needs no ×site_width (from XPlace's own log). **Still open:** a full 28-design `make dse` has not
-  yet been diffed against the standing pipeline that produces the median-1.0106 numbers below —
-  Mark's call is to keep that pipeline (`run_suite.sh`/`run_lgdp44.sh`) one more cycle for exactly
-  that cross-check, then retire it.
+  needs no ×site_width (from XPlace's own log). **Cross-check PASSED 2026-08-14:** a single
+  `make dse` (`results/DSE_20260814_133037`, GP+LG+DP with the CPU/GPU pipeline overlap) reproduced
+  the standing pipeline's committed numbers **exactly** — ispd2005 1.0053/1.0052, ispd2015
+  1.0163/1.0189, all 28 **median 1.0106 / mean 1.0149**. So `make dse` is now the one command that
+  produces the headline; retiring `run_suite.sh`/`run_lgdp44.sh` is unblocked (awaiting Mark's
+  go-ahead, tier-3/MMS spot-check first).
 - **#28 — `dse.py` refactor — CLOSED 2026-08-12**, archived to `history.md`. 846 → 371 lines;
   `make dse` (optionally `DSE_ARGS="…"`) is now the single launch point for multi-benchmark runs:
   `--designs tier1+tier2 | --set K=v1,v2 | --grid | --runset | --resume | --dry-run`. Grid and
