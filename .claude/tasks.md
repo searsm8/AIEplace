@@ -757,11 +757,29 @@ i.e. GP never fully spread. Two observations to carry in:
   ~400 rows, XPlace uses 256 and converges at 725). That lead was never closed; start here.
 
 **MMS caveat — do NOT flag MMS on the flat 0.1 rule.** XPlace's own Mixed-GP reference stops at
-**0.10–0.18 exact overflow on nearly every MMS design** (`benchmarks._XPLACE_MMS_MIXED_GP`;
-newblue3 is the lone 0.040 outlier) — that is normal for macros-movable, not a stall. For tier-3,
-flag a design only where OUR macro-excluded overflow materially exceeds its Mixed-GP reference, not
-where it merely exceeds 0.1.
+**0.10–0.18 exact overflow on nearly every MMS design** — that is normal for macros-movable, not a
+stall. Flag a tier-3 design only where OUR macro-excluded overflow materially exceeds its Mixed-GP
+reference, not where it merely exceeds 0.1. Reference (`benchmarks._XPLACE_MMS_MIXED_GP`, exact,
+filler+macro-excluded overflow):
 
-**Deliverable:** one report — per flagged design, whether the stall is a grid/schedule/step issue
-and whether it costs post-DP QoR (the metric that matters). Cheap to reproduce per design via
-`make dse --designs <name>`; convergence history in the run's `iterations.dat` (`plot_histories.py`).
+| design | ref ovfw | design | ref ovfw | design | ref ovfw | design | ref ovfw |
+|---|---|---|---|---|---|---|---|
+| adaptec1 | 0.131 | adaptec5 | 0.149 | bigblue4 | 0.130 | newblue4 | 0.182 |
+| adaptec2 | 0.096 | bigblue1 | 0.174 | newblue1 | 0.136 | newblue5 | 0.170 |
+| adaptec3 | 0.125 | bigblue2 | 0.105 | newblue2 | 0.143 | newblue6 | 0.142 |
+| adaptec4 | 0.135 | bigblue3 | 0.124 | newblue3 | **0.040** | newblue7 | 0.152 |
+
+Compare against sw_only's **macro-excluded** overflow (`[OVFW-DIAG] macro-excluded=`, or the
+"Macro-Excluded Overflow (exact, no fillers)" summary row on mixed-size runs) — NOT the
+filler+macro-included "Final Overflow (exact, +fillers)".
+
+**MMS run: IN PROGRESS** — `results/DSE_20260814_152306`, launched 2026-08-14 (tier-3 is the
+two-phase mixed-size flow, ~10× slower per design than ISPD: adaptec1 GP 141 s, newblue1 214 s).
+**Fill the tier-3 flagged designs here on completion** — those whose macro-excluded overflow exceeds
+the reference above (and newblue3, whose 0.040 reference makes it the one MMS design a modest
+overflow WOULD flag).
+
+**Deliverable:** one report — per flagged design (ISPD + MMS), whether the stall is a
+grid/schedule/step issue and whether it costs post-DP QoR (the metric that matters). Cheap to
+reproduce per design via `make dse --designs <name>`; convergence history in the run's
+`iterations.dat` (`plot_histories.py`).

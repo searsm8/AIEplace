@@ -14,8 +14,9 @@
 
 Three ways to say what to run, and no others:
   --designs   a design list; grid and target_density come from tools/benchmarks.py (XPlace's
-              own per-design tuned values). Accepts "all", "tier1".."tier3", "+"-joined
-              (tier1+tier2), or comma-separated design names / "suite/design" paths.
+              own per-design tuned values). Accepts "all"; a whole tier by number or suite name
+              (tier1/ispd2005, tier2/ispd2015, tier3/mms, case-insensitive); "+"-joined
+              (tier1+tier2, ispd2005+mms); or comma-separated design names / "suite/design" paths.
   --set K=V   a config override. Comma-separated values sweep it; several --set flags take
               the Cartesian product. K may be dotted ("output.dump_positions=true") to pick
               the TOML section; a bare key means [params], and "benchmark" means [input].
@@ -104,20 +105,24 @@ def coerce(text):
     return text.strip()
 
 
+# Whole-tier tokens for --designs, by tier number or suite name (case-insensitive): tier1/ispd2005,
+# tier2/ispd2015, tier3/mms.
+GROUPS = {"tier1": 1, "ispd2005": 1, "tier2": 2, "ispd2015": 2, "tier3": 3, "mms": 3}
+
+
 def expand_designs(spec):
-    """'tier1+tier2' / 'all' / 'adaptec1,ispd2015/mgc_fft_a' -> ['suite/design', ...]."""
-    tiers = {"tier1": 1, "tier2": 2, "tier3": 3}
+    """'tier1+tier2' / 'all' / 'mms' / 'ispd2005' / 'adaptec1,ispd2015/mgc_fft_a' -> ['suite/design']."""
     paths = []
     for token in spec.replace("+", ",").split(","):
         token = token.strip()
         if not token:
             continue
-        if token == "all":
+        if token.lower() == "all":
             paths += benchmarks.all_paths()
-        elif token in tiers:
-            paths += benchmarks.by_tier(tiers[token])
+        elif token.lower() in GROUPS:
+            paths += benchmarks.by_tier(GROUPS[token.lower()])
         else:
-            paths.append(benchmarks.resolve(token))   # rejects typos at launch
+            paths.append(benchmarks.resolve(token))   # rejects typos at launch (case-sensitive names)
     return list(dict.fromkeys(paths))                 # dedupe, order preserved
 
 
@@ -475,7 +480,8 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter,
                                  epilog="\n".join(__doc__.split("\n")[1:]))
     ap.add_argument("--designs", default="tier1+tier2",
-                    help="all | tier1..tier3 | comma/plus list of designs (default: the 28-design suite)")
+                    help="all | tier1/ispd2005 | tier2/ispd2015 | tier3/mms | comma/plus list of "
+                         "designs (default: the 28-design suite)")
     ap.add_argument("--set", action="append", default=[], metavar="KEY=V[,V...]",
                     help="config override; comma-separated values sweep it, repeatable (Cartesian product)")
     ap.add_argument("--grid", default="xplace", metavar="SPEC",
