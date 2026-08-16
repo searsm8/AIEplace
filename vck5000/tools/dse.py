@@ -56,6 +56,7 @@ import glob
 import itertools
 import json
 import os
+import re
 import subprocess
 import time
 from collections import OrderedDict
@@ -333,6 +334,31 @@ def run_all(entries, total, sweep_dir, gp_only, col_keys):
 # =============================================================================
 
 ENRICHED = ["XPlace GP HPWL", "GP Ratio", "Our LG HPWL", "Our DP HPWL", "XPlace DP HPWL", "DP Ratio"]
+# Two overflow columns slotted next to our own smoothed "Best OVFW", so every design carries three
+# verdicts on the SAME shipped geometry (TODO #3/#31): our EXACT overflow, and XPlace's exact
+# overflow on the .def we handed it (lgdp.py `in_ovfl`, TODO #3's gp_ovfl_in). "Best OVFW" is our
+# *smoothed* convergence signal and under-reads exact overflow by up to ~3x, so the exact column is
+# the one to compare against XPlace's. (Confound to keep in mind: XPlace evaluates at its own
+# target_density = 1.0 for mgc_*, TODO #25, and on its own row-capped grid, TODO #31.)
+EXACT_COL = "Our Exact OVFW"
+OVFL_COL = "XPlace In OVFW"
+
+
+def _our_exact_overflow(out_dir):
+    """Our exact (filler-excluded) overflow on the shipped placement, scraped from the run's
+    summary. Post-#24 restore, this is measured on the same geometry the .def holds — the geometry
+    XPlace re-evaluates for its `in_ovfl`. Not in gp_only.csv (only smoothed Best OVFW is), so it is
+    read from run_summary.md here rather than adding an exe column."""
+    if not out_dir:
+        return None
+    for name in ("run_summary.md", "run.log"):
+        path = os.path.join(out_dir, name)
+        if os.path.exists(path):
+            with open(path) as f:
+                m = re.search(r"Final Overflow \(exact, no fillers\)\s*\|\s*([0-9.eE+-]+)", f.read())
+            if m:
+                return m.group(1)
+    return None
 
 
 def summarize(sweep_dir):
@@ -370,8 +396,11 @@ def summarize(sweep_dir):
         row["XPlace GP HPWL"] = f"{xgp:.4e}" if xgp else "N/A"
         row["GP Ratio"] = f"{best_gp / xgp:.4f}" if (best_gp and xgp) else "N/A"
 
+        exact = _our_exact_overflow(row.get("Output Dir"))
+        row[EXACT_COL] = f"{float(exact):.4f}" if _is_float(exact) else ""
         r = lgdp_store.get(by_ident.get(row_ident(row, col_keys), {}).get("label"), {})
         dp, xdp = r.get("dp"), benchmarks.BENCHMARKS.get(path, {}).get("xplace_dp_hpwl")
+        row[OVFL_COL] = f"{float(r['in_ovfl']):.4f}" if _is_float(r.get("in_ovfl")) else ""
         row["Our LG HPWL"] = r.get("lg") or ""
         row["Our DP HPWL"] = dp or ""
         row["XPlace DP HPWL"] = f"{xdp:.4e}" if xdp else "N/A"
@@ -385,10 +414,19 @@ def summarize(sweep_dir):
 
     # results.csv is dse.py's alone (the exe only appends to gp_only.csv), rewritten whole each time,
     # with the enriched columns slotted in after "Best GP HPWL" — next to the number they compare.
-    base = [c for c in rows[0] if c not in ENRICHED]
+    base = [c for c in rows[0] if c not in ENRICHED and c not in (EXACT_COL, OVFL_COL)]
     enriched = ENRICHED if have_dp else ENRICHED[:2]   # GP ratio always; DP cols only if legalized
     at = base.index("Best GP HPWL") + 1 if "Best GP HPWL" in base else len(base)
     fields = base[:at] + enriched + base[at:]
+    # The two exact-overflow columns sit beside our smoothed "Best OVFW", in the order
+    # smoothed | our-exact | XPlace-on-ours. Our exact is our own measurement (always present);
+    # XPlace's comes from the LG run (only once legalized). Inserted after `enriched` (which lands
+    # later in the row) so "Best OVFW"'s index is unshifted, and OVFL before EXACT so the final
+    # left-to-right order is EXACT then OVFL.
+    if "Best OVFW" in fields:
+        if have_dp:
+            fields.insert(fields.index("Best OVFW") + 1, OVFL_COL)
+        fields.insert(fields.index("Best OVFW") + 1, EXACT_COL)
     with open(os.path.join(sweep_dir, "results.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         w.writeheader()

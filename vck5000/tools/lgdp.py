@@ -123,10 +123,18 @@ def legalize(bench_path, gp_def, work_dir, seed=42):
     text = run_log.read_text()
     lg = _last(text, r"Finish Legalization, HPWL: ([0-9.E+-]+)")
     dp = _last(text, r"After DP, HPWL: ([0-9.E+-]+)")
+    # XPlace's OWN exact HPWL + overflow on the placement we handed it (given_solution), logged
+    # once before legalization begins (run_placement_nesterov.py:24). in_ovfl is `gp_ovfl_in` from
+    # TODO #3 -- XPlace's overflow-verdict on our exact geometry, filler-EXCLUDED and at XPlace's
+    # own target_density (1.0 for mgc_*, TODO #25). in_hpwl is a frame control: it should track our
+    # shipped GP HPWL if def_patch_placement read the coordinates correctly.
+    m = re.search(r"Input solution, exact HPWL: ([0-9.E+-]+) exact Overflow: ([0-9.]+)", text)
+    in_hpwl, in_ovfl = (m.group(1), m.group(2)) if m else (None, None)
     status = "done" if ec == 0 else f"exit{ec}"
     if not dp:
         status += "_nodp"
-    return {"lg": lg, "dp": dp, "variant": variant, "status": status}
+    return {"lg": lg, "dp": dp, "in_hpwl": in_hpwl, "in_ovfl": in_ovfl,
+            "variant": variant, "status": status}
 
 
 if __name__ == "__main__":

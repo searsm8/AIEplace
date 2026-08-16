@@ -1,53 +1,41 @@
 # Summary — project status at a glance
-*Updated 2026-08-14 14:05 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-15 16:35 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+> **Soft cap — one in, one out.** Current state only, ~2 screens. To add a line, remove one:
+> superseded snapshots & dated "Closed" narration → [[journal.md]]; finished task sections → [[history.md]].
+> If it's done and no longer live context, it isn't "where things stand" — evict it.
 
 ## Two threads
 - **sw_only** — CPU golden reference; goal is to match XPlace. The active thread.
 - **pl_algo** — move the whole placement iteration onto the PL. Blocked behind #20, deliberately.
 
 ## Where sw_only stands
-- **Median HPWL ratio 1.0106, mean 1.0149, over ALL 28 ISPD designs** (legal-vs-legal; GP from the
-  2026-08-11 v3 run on `3c70b38`, `matrix_mult_a` substituted post-#27). 21/28 within ±2%, better
-  than XPlace on 4. **Nothing is unscored any more** — #26 closed the 9-design fence-region hole,
-  and they held no surprise: median 1.0154, 7 of 9 within ±2%.
+- **Median HPWL ratio 1.0096, mean 1.0113, over ALL 28 ISPD designs** (legal-vs-legal; GP from the
+  2026-08-15 run `results/DSE_20260815_161306` on the #31 universal grid-cap fix). 22/28 within ±2%,
+  **better than XPlace on 6**. **Nothing is unscored any more** — #26 closed the 9-design fence hole.
 
-  | | 19 designs (pre-#26) | **28 designs (now)** |
+  | | pre-#31 (2026-08-14) | **28 designs (now, #31 grid cap)** |
   |---|---|---|
-  | **ISPD2005 (8)** | 1.0053 / 1.0052 | 1.0053 / 1.0052 |
-  | **ISPD2015** | 1.0171 / 1.0223 (11) | **1.0163 / 1.0189 (20)** |
-  | **all ISPD** | 1.0095 / 1.0151 (19) | **1.0106 / 1.0149 (28)** |
+  | **ISPD2005 (8)** | 1.0053 / 1.0052 | 1.0054 / 1.0052 |
+  | **ISPD2015 (20)** | 1.0163 / 1.0189 | **1.0129 / 1.0138** |
+  | **all ISPD (28)** | 1.0106 / 1.0149 | **1.0096 / 1.0113** |
 
-  *(median / mean.)* **The mean is quotable** as of #27's fix. ⚠️ **The 9 fence designs are scored on
+  *(median / mean.)* **The mean is quotable** as of #27's fix. **#31 grid cap (2026-08-15):** sw_only
+  now caps ANY grid at `num_rows` like XPlace (`Setup.cpp`; was applied only to the auto path). 13 of
+  20 ISPD2015 designs are row-capped and were running at 512 — now 128/256. Net: ISPD2015 mean
+  1.0189 → 1.0138, **GP-ratio mean 1.0223 → 1.0047**, and the overflow *signal* (which drives the γ/λ
+  schedule) now matches XPlace's on the std-cell designs. Mixed per-design (fft_a −2.7pp, fft_2
+  −1.4pp; des_perf_1 +1.8pp, fft_1 +0.6pp), net better. ISPD2005 bit-identical (no cap fires).
+  → [[_NEW_REPORT_31_overflow_stall_grid_20260815.md]] ⚠️ **The 9 fence designs are scored on
   the fence-STRIPPED variant on both sides** (as the XPlace paper's †-marked table is) — a fair
   tool-vs-tool comparison, but **not** legal ISPD2015 solutions: we place 59–94% of their constrained
   cells outside their fence. ⚠️ The v3/v4 TSVs deliberately still hold the broken `matrix_mult_a`
   row — see #27.
   → [[_NEW_REPORT_26_fence_regions_20260811.md]], [[REPORT_26_precond_always_on_20260811.md]],
   [[REPORT_27_matrix_mult_a_stray_space_20260811.md]]
-  <details><summary>Superseded: "median 1.0113, mean 1.1218" (2026-08-10, pre-`3c70b38`)</summary>
+  <details><summary>Superseded headline snapshots (1.0113/1.1218 · 1.0090/33-designs) → [[journal.md]]</summary>
 
-  > **Median HPWL ratio 1.0113 vs XPlace** over **19 scored ISPD designs** (legal-vs-legal, re-run
-  > 2026-08-10 on the post-#23 binary). 12/19 within ±2%, better than XPlace on 4. **Quote the
-  > median** — the mean (1.1218) is one broken design, `mgc_matrix_mult_a` at 3.03× (GP dies at
-  > iteration 290); excluding it the mean is 1.0159. 9 designs unscored (#22 fence regions).
-  > → [[_NEW_REPORT_performance_snapshot_20260810.md]]
-
-  Not withdrawn — **directly comparable**, same 19 designs, same two-stage method, same references.
-  The delta is exactly one commit. That report's §2 method section still governs.
-  </details>
-  <details><summary>Superseded: "1.0090 over 33 scored designs" (2026-08-07)</summary>
-
-  > **Median HPWL ratio 1.0090 vs XPlace** over 33 scored designs (44-design suite, legal-vs-legal,
-  > 2026-08-07). 25/33 within ±2%, better than XPlace on 7. **Quote the median** — the mean (1.087)
-  > is one broken design. → `[[_NEW_REPORT_performance_snapshot_20260807.md]]`
-
-  **Withdrawn, not corrected — the two are not comparable.** That figure spanned all three tiers
-  (33 of 44, including 16 MMS); the new one is ISPD-only (19 of 28). Two independent reasons it
-  could not stand: its cited report **never existed** in `1_REVIEW/reports/`, so which designs were
-  scored and which inflated its mean were unrecoverable; and its stage-1 GP inputs predated the #23
-  fix, with a third of the ISPD2015 tier frozen (`mgc_superblue12` carried a 7.05e+09 post-DP HPWL
-  — XPlace's legalizer fed cells stacked at die centre). **Do not average the old and new numbers.**
-  The MMS side still rests on `lgdp_suite_results.tsv`, valid but scored under a different harness.
+  Moved to [[journal.md]] to keep summary.md under its soft cap — the retraction trail is preserved
+  there verbatim, dated most-recent-first.
   </details>
 - Landed: two-phase mixed-size flow + LP macro legalization; #19's two XPlace faithfulness fixes
   (overflow excludes fillers; the γ/λ throttle gates on preconditioner κ). Both toggles retired
@@ -196,6 +184,22 @@
   the `floorplan.def` hardcoding stands.
 
 ## Newly open
+- **#31 — overflow-stall investigation 2026-08-15: it was ALL the grid cap; overflow metric is
+  correct.** → [[_NEW_REPORT_31_overflow_stall_grid_20260815.md]]. Three overflow columns now stand
+  per-sweep (`Best OVFW` smoothed / **`Our Exact OVFW`** / **`XPlace In OVFW`** = #3's `gp_ovfl_in`),
+  scraped in `lgdp.py`+`dse.py`, no exe change. **The whole story is one root cause:** XPlace caps
+  `num_bin` at `num_rows` (`database.py:161`); sw_only had the same cap (`Setup.cpp`) but applied it
+  only on the AUTO path, so `dse --grid xplace`'s explicit 512 bypassed it. **13 of 20 ISPD2015
+  designs run finer than XPlace** — this both caused the `Best OVFW > 0.1` stalls AND made our exact
+  overflow read up to 7× XPlace's (XPlace evaluates at the capped grid, e.g. fft_2 at 128; a naive
+  reference confirms our metric is correct at every grid — 512→0.161=ours, 128→0.020≈XPlace).
+  **FIX (Mark's call): sw_only now caps an explicit grid at `num_rows` too**, matching XPlace;
+  `benchmarks.py` holds XPlace's requested 512 and the code caps. `make test-regress` bit-identical
+  (auto path untouched). ⚠️ **td is NOT a factor** — it matches XPlace on all 20 (#25 RETRACTED; my
+  earlier "target_density gap" was a misread of a params-echo log line). **Full re-run done
+  (`DSE_20260815_161306`): headline 1.0096/1.0113, 22/28 within 2%**; the overflow columns now
+  reconcile on std-cell designs (fft_2 ours 0.227 / XPlace 0.228). Residual overflow gap on macro
+  designs = the fixed-density cap-vs-scale (`initializer.py:82` vs `Grid.cpp:139`), a separate #3 item.
 - **#29 — XPlace GP reference (was N/A on 22 of 28) — CLOSED 2026-08-14** (`edd268f`), archived to
   `history.md`. Fixed **in dse.py from `benchmarks.py`**, not the placer (Mark redirected): the exe
   now writes raw measured columns only, its hardcoded 6-entry map is gone, and dse.py enriches
@@ -222,32 +226,15 @@
   ⚠️ "read `analyze_dse.py`, not `results.md`" caveat is void — `analyze_dse.py` is now a 10-line
   wrapper around the same renderer. `DSE_RUN_SET`/`MORRIS_RUNSET` are gone; `history.md` carries the
   old→new command table for any dated report that quotes them.
-- **#25 — we and XPlace use different `target_density` on ISPD2015.** On byte-identical `.def`s our
-  exact overflow vs XPlace's: `adaptec1` **0.9991** (both 1.0), `mgc_fft_b` 1.119 (ours 0.6),
-  `mgc_des_perf_1` **8.79** (ours 0.906). We read the DEF's `placement.constraints`; XPlace leaves
-  `args.target_density` at 1.0 for every `mgc_*` design and feeds the constraint only to its DP
-  engine. adaptec1 is the control proving our metric is right. **Not just reporting** —
-  `target_density` also drives convergence, filler area and the macro density weight, so on
-  ISPD2015 we optimize to a tighter target. Possible contributor to the ISPD2015 HPWL gap.
-  **Do not quote our ISPD2015 overflow against XPlace's until this is settled.**
+- **#25 — RETRACTED 2026-08-15: our `target_density` MATCHES XPlace; there is no td gap.** The whole
+  premise was a misread of XPlace's log (a `target_density: 1.0` **params echo** vs the effective
+  `target density = 0.65`). Verified mechanically: our `benchmarks.py` td == XPlace's
+  `setup_dataset.py` td on all 20 ISPD2015 designs, **0 mismatches** (XPlace's `mgc_*` branches at
+  `setup_dataset.py:95+` set our exact values). The `8.79` etc. ratios were real but are the **td<1
+  overflow-metric divergence (#3)**, not a td-value difference. See #3 / [[_NEW_REPORT_31_overflow_stall_grid_20260815.md]].
 
 ## Also open
 - **#21 — repo restructure** (host to top level, one host binary). Proposal only, nothing started.
   **Merge `origin/geert` before anything else** — one `.gitignore` conflict today, 25 hand-moved
   files after.
 
-## Verify anything
-```bash
-cd vck5000 && make test          # pl_algo tier-1, seconds, no Vitis
-cd vck5000 && make test-regress   # sw_only vs committed baselines, ~12 s
-```
-
-## Deeper
-`.claude/tasks.md` (open items)
-`.claude/1_REVIEW/reports/` (evidence) 
-`vck5000/pl/src/pl_algo/DATAFLOW.md` (authoritative for pl_algo)
-`.claude/2_ARTIFACTS/papers/xplace/` (XPlace paper: text per section, **all 24 equations
-  hand-transcribed** in `eqs/transcriptions.md`, figure/table crops. README indexes which
-  section holds what — §II objective, §IV-B filler/overflow split, §V ω and the γ/λ throttle.
-  Numbers stay in `2_ARTIFACTS/xplace_results/`.)
-`.claude/skills/paper-extract/` (does the above for any paper PDF; tracked)

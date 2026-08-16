@@ -339,7 +339,19 @@ void Placer::analyzeDesignArea(bool bins_auto)
     int   num_rows   = (int)(db.getDieArea().getYsize() / std::max(1.0f, row_height));
     int   row_cap    = 1 << std::clamp((int)std::floor(std::log2((float)std::max(1, num_rows))), 3, 12);
     formula_bins_per_row = std::min(bins, row_cap);
-    if (bins_auto) bins_per_row = formula_bins_per_row;
+    if (bins_auto) {
+        bins_per_row = formula_bins_per_row;
+    } else if (bins_per_row > row_cap) {
+        // CLAUDE CODE: XPlace caps an explicitly-REQUESTED grid at num_rows too (database.py:161),
+        // not just its auto formula. A bin shorter than a standard-cell row over-resolves the
+        // density field and manufactures overflow -- worse at target_density<1, which caps only
+        // fixed/macro density, never std cells. This is what made our exact overflow read ~7x
+        // XPlace's on the low-row mgc designs (they run capped there, we ran the raw 512). Meow.
+        Logger::log_info("Grid override " + std::to_string(bins_per_row) + " exceeds num_rows "
+            + std::to_string(num_rows) + "; capping to " + std::to_string(row_cap)
+            + " (XPlace database.py:161)");
+        bins_per_row = row_cap;
+    }
     Logger::log_info("Grid (ePlace formula): " + std::to_string(formula_bins_per_row)
         + "  [sqrt|B|=" + std::to_string(bins) + ", num_rows=" + std::to_string(num_rows)
         + ", row_cap=" + std::to_string(row_cap) + "]  effective bins_per_row="

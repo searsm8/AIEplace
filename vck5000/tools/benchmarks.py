@@ -6,9 +6,19 @@
 # setup_dataset.py, and (c) present locally under host/benchmarks/. Efforts are
 # limited to this list so every sw_only result has a comparable XPlace reference.
 #
-# Grid / target_density columns are XPlace's own per-design tuned values
-# (Xplace/utils/setup_dataset.py::setup_design_args) — use them so a sweep runs
-# each design at the same resolution XPlace did.
+# Grid column = XPlace's REQUESTED num_bin (setup_dataset.py). XPlace then caps it at num_rows —
+# num_bin_y = 2^floor(log2(num_rows)) when num_rows < requested (database.py:161) — and so does
+# sw_only, at run time, for BOTH the auto formula and an explicit override (Setup.cpp, the row_cap
+# branch; TODO #31). So carry the *requested* value here and let the code cap it; 13 of 20 tier-2
+# designs actually run at 128/256. The effective grid is logged per run ("effective bins_per_row=").
+# Fixing the cap-on-override closed the low-row overflow stalls AND reconciled our overflow signal
+# with XPlace's (both evaluate at the capped grid).
+#
+# target_density column = the per-design value dse.py feeds as maximum_utilization. It MATCHES
+# XPlace's: XPlace sets the same per-design td in setup_dataset.py (setup_design_args, the mgc_*
+# branches) and logs it as "target density = 0.65" (database.py:839) -- the "target_density: 1.0"
+# that appears in XPlace logs is a params-dict echo, NOT the effective value. (Corrects the earlier
+# "#25 -- XPlace uses 1.0" claim, which misread that echo; verified 0 mismatches on all 20 ISPD2015.)
 #
 # Tiers:
 #   1  ISPD2005  — fixed macros; coordinate frame MATCHES sw_only (site_width=100
@@ -29,7 +39,7 @@
 # present). See memory morris_sobol_sensitivity_tooling / grid_sizing.
 # ----------------------------------------------------------------------------
 
-# (design_name, suite, tier, xplace_grid, xplace_target_density)
+# (design_name, suite, tier, effective_grid, our_target_density)   # see header note on both columns
 _ROWS = [
     # --- Tier 1: ISPD2005 (fixed macros, clean frame) -----------------------
     ("adaptec1", "ispd2005", 1,  512, 1.0),
@@ -42,6 +52,9 @@ _ROWS = [
     ("bigblue4", "ispd2005", 1, 2048, 1.0),
 
     # --- Tier 2: ISPD2015 mgc_* (site-width frame) --------------------------
+    # grid = XPlace's REQUESTED num_bin (setup_dataset.py: 512 for every mgc_*). sw_only caps it at
+    # num_rows at run time (Setup.cpp, XPlace database.py:161), so the low-row designs actually run
+    # at 128/256 -- do NOT pre-cap the value here; the code does it and logs the effective grid.
     ("mgc_des_perf_1",     "ispd2015", 2, 512, 0.910),
     ("mgc_des_perf_a",     "ispd2015", 2, 512, 0.429),
     ("mgc_des_perf_b",     "ispd2015", 2, 512, 0.497),
@@ -58,7 +71,7 @@ _ROWS = [
     ("mgc_pci_bridge32_a", "ispd2015", 2, 512, 0.384),
     ("mgc_pci_bridge32_b", "ispd2015", 2, 512, 0.143),
     ("mgc_superblue11_a",  "ispd2015", 2, 512, 0.650),
-    ("mgc_superblue12",    "ispd2015", 2, 1024, 0.650),
+    ("mgc_superblue12",    "ispd2015", 2, 512, 0.650),  # XPlace requests 512, not 1024 (was a manifest error)
     ("mgc_superblue14",    "ispd2015", 2, 512, 0.560),
     ("mgc_superblue16_a",  "ispd2015", 2, 512, 0.550),
     ("mgc_superblue19",    "ispd2015", 2, 512, 0.530),
