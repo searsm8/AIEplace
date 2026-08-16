@@ -19,23 +19,39 @@ Log a problem once. When you rely on that note again, append a dated timestamp. 
 collects **3+ timestamps**, promote it to [[rules.md]] and delete it from noteToSelf.
 
 **The workflow files live in `.claude/0_WORKFLOW/`** — `summary.md`, `tasks.md`, `history.md`,
-`rules.md` (all tracked), plus the untracked personal scratchpad `noteToSelf.md`. They sit in a
-dotfolder so a newcomer browsing the repo sees the code first, not our workflow.
+`rules.md`, `journal.md` (all tracked), plus the untracked personal scratchpad `noteToSelf.md`.
+They sit in a dotfolder so a newcomer browsing the repo sees the code first, not our workflow.
+
+**`journal.md` is the dated narrative** — the chronological story of how the numbers and state
+evolved, and the home for the superseded status snapshots `summary.md` sheds. Distinct from
+`history.md`, which is the **task-indexed** archive (full completed-task sections, looked up by
+`#n`): journal is read top-to-bottom, history is looked up by task number.
 
 For a new session, follow these steps:
 
-1) Build context. Read `.claude/0_WORKFLOW/summary.md` to quickly gain current summarized status.
-2) From Mark's prompt and the summary, decide if you need to read tasks.md items and reports relevant to the task at hand.
+1) Build context. Read `.claude/0_WORKFLOW/summary.md` to quickly gain understanding.
+2) From Mark's prompt and the summary, decide if you need to read tasks.md items or reports relevant to the task at hand.
 3) Do the task.
 4) If requested by Mark, write a report or generate an artifact.
 5) Update tasks.md by summarizing the task or report, then update summary.md by summarizing tasks.md.
 
-Recall how useful the summary was when starting the session. 
-It only stays useful if it is meticulously kept up to date.
+After completing the task, recall how useful the summary was when starting the session. 
+It only stays useful if kept up to date.
 A stale summary is worse than no summary, because it gets believed. 
 Mark will also read it, so treat it as a report to both him and your future self.
 
-**Maintain a timestamp** in summary.md with minute precision accuracy. Eastern time.
+### Keep summary.md lean — one in, one out
+summary.md is injected into every session, so length is paid for every time; and it's meant to be
+**current state at a glance**, not a journal. Soft cap ~2 screens (≲200 lines). **To add a line,
+remove one.** What gets evicted, and to where:
+- A **superseded status snapshot** (old headline numbers, a "we thought X, now Y" retraction) →
+  move to `journal.md`, dated, verbatim. Never just delete it — the retraction trail is the point.
+- **Dated "Closed YYYY-MM-DD" narration** once it's no longer live context → `journal.md`.
+- A **finished task's full section** → `history.md` (the task-indexed archive; see below).
+
+If something is done and no longer live context, it isn't "where things stand" — evict it. A closed
+item stays in summary.md **only** when it's a standing decision a session must not re-derive (e.g.
+the #26 fence bullet is the always-loaded statement of a decision whose record lives in history.md).
 
 ### Keep tasks.md from bloating
 Every session may load this file whole, so anything finished that stays in it is paid for again on
@@ -212,7 +228,7 @@ If it genuinely is not a verdict, say so in the output (`[info]`) so nobody mist
 | **2 — synthesis** | `test/synth_check.tcl` | minutes | Vitis | `vitis_hls -f synth_check.tcl` |
 | **3 — emulation** | the `run-*` bring-up modes | slow | Vitis + built xclbin | `make run-<mode>` (see `vck5000/Makefile`) |
 
-**Run tier 1 after every edit under `pl/src/pl_algo/src/modules/`** — it costs nothing and it is
+**Run tier 1 after any major edit under `pl/src/pl_algo/src/modules/`** — it costs nothing and it is
 the only thing standing between a normalization typo and finding out three weeks later in sw_emu.
 Tier 3 is for integration points. A slow test you skip protects nothing.
 
@@ -266,7 +282,8 @@ number we quote is tracked; one-off experiment runners stay with the output.** R
 ## Coding style for this repo
 General style rules are in `~/.claude/CLAUDE.md`; this is the hardware-specific addition.
 
-**When you author a new comment
+**When you author a new comment, prefix it with your signature, e.g.
+// CLAUDE CODE: comment
 
 **HLS code reads differently from pure software.** Annotate the datapath: pragmas,
 memory-resource intent (`_URAM`/`_BRAM`/`_DDR` suffixes), and a short note on why a loop is

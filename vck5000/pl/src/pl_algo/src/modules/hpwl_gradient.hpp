@@ -55,8 +55,8 @@ static inline float hpwl_lut_exp(const float lut_BRAM[HPWL_CU_LUT_MAX], int lut_
 
 static void hpwl_CU(const coord_t* node_pos_DDR,   // [num_nodes] AoS {x,y}
                     const int*     net_ptr_DDR,    // [num_nets+1] CSR (unused: kept for ABI)
-                    const NodePin* pins_DDR,       // [num_pins] NET-major (phase A)
-                    const NodePin* npins_DDR,      // [num_npins] NODE-major (phase B)
+                    const NodePin* pins_DDR,       // [num_pins] NET-major (phase 1&2)
+                    const NodePin* npins_DDR,      // [num_npins] NODE-major (phase 3)
                     const float*   exp_lut_DDR,    // [lut_size] exp(-t) table
                     NetBBox*       bb_DDR,         // [num_nets] scratch (A writes, B reads)
                     NetSums*       sums_DDR,       // [num_nets] scratch (A writes, B reads)
@@ -77,7 +77,7 @@ cache_lut:
         lut_BRAM[i] = exp_lut_DDR[i];
     }
 
-    // ===== PHASE A1: bounding box, segmented over nets (register-accumulated) =====
+    // ===== PHASE 1: bounding box, segmented over nets (register-accumulated) =====
     int   bb_net = -1;                              // current segment's net
     float maxx = -1e30f, minx = 1e30f, maxy = -1e30f, miny = 1e30f;
 sweep_bbox:
@@ -106,7 +106,7 @@ sweep_bbox:
         bb_DDR[bb_net] = b;
     }
 
-    // ===== PHASE A2: B/C sums, segmented over nets (bb_DDR is final) =====
+    // ===== PHASE 2: B/C sums, segmented over nets (bb_DDR is final) =====
     int     bc_net = -1;
     NetBBox b{};                                    // current net's bbox (read at boundary)
     float Bpx = 0, Bmx = 0, Cpx = 0, Cmx = 0, Bpy = 0, Bmy = 0, Cpy = 0, Cmy = 0;
@@ -141,7 +141,7 @@ sweep_sums:
         sums_DDR[bc_net] = s;
     }
 
-    // ===== PHASE B: per-node gradient, segmented over nodes =====
+    // ===== PHASE 3: per-node gradient, segmented over nodes =====
     // node_grad is write-once per node; nodes with no gradient-bearing pin never
     // appear in npins, so zero the output first (sequential -> burst).
 clear_grad:
@@ -167,8 +167,11 @@ seg_reduce:
         const coord_t c = node_pos_DDR[r.node_idx];
         const float x = c.x + r.off_x;
         const float y = c.y + r.off_y;
+
+        // 
         const NetBBox bb = bb_DDR[r.net];           // random READ-ONLY -> II=1
         const NetSums s  = sums_DDR[r.net];
+
         const float apx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, bb.mxx - x);
         const float amx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, x - bb.mnx);
         const float apy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, bb.mxy - y);
