@@ -1,7 +1,9 @@
 # REPORT #24 — one snapshot buffer, three trackers, and what the spread actually costs
 
-*2026-08-10, branch `pl_algo`. Closes the code side of TODO #24. Two decisions left open at the
-bottom — read those before building on this.*
+*Written 2026-08-10; last updated 2026-08-17 at #24's close, branch `pl_algo`. **#24 is CLOSED**
+(`history.md`). Remaining follow-on work (two faithfulness gaps + widening the A/B) is spun off to
+**#32** — read §6b/§7 for what that covers. §8's `target_density` diagnosis is RETRACTED — see its
+banner before citing it.*
 
 ---
 
@@ -17,9 +19,12 @@ bottom — read those before building on this.*
    `best_sol_rollback` net we never had. It ships the spread-out placement only when it is nearly
    free — 8 of 19 converged designs, not all of them.
 4. **A/B on the 0.5% budget: 1.005 wins.** Loosening it to 1.010 buys ~35% lower overflow for
-   ~0.5–0.7% GP HPWL; DP recovers 41–74% of that cost but never all of it. **Keep XPlace's 1.005.**
-5. `make test`, `make test-regress`, `make test-regress-slow` all green. Three baselines
-   regenerated with reasons.
+   ~0.5–0.7% GP HPWL; DP recovers 41–74% of that cost but never all of it. **Keep XPlace's 1.005**
+   (n=2; widening it is #32's job, not done here).
+5. `make test`, `make test-regress`, `make test-regress-slow` all green, including the MMS re-run
+   (`results/DSE_20260814_152306`, 16/16). Three baselines regenerated with reasons.
+6. **§8's `target_density` claim is wrong** — retracted 2026-08-15 as #25. Real cause was a grid-cap
+   bug (#31), not a `target_density` gap. See §8's banner.
 
 ---
 
@@ -287,10 +292,16 @@ between the tracker port and fix (B). Its first run came immediately after (B), 
 divergence was attributed to the change that happened to be most recent. *Run the slow suite at
 each step that can touch phase 2, not once at the end.*
 
-### 6b. Widen the A/B?
+### 6b. Widen the A/B? — carried forward to #32
 
 n=2 is thin for a default that governs every design. Getting more usable flippers means running
 ~8–10 more designs blind, since the trace projection cannot identify them near the boundary.
+**Not done as part of #24** — spun off to #32 at close (2026-08-17) along with §7's two remaining
+divergences, rather than reopening this ticket for follow-on work its own defects don't block.
+
+**MMS re-run: DONE 2026-08-14.** `results/DSE_20260814_152306`, 16/16, DP ratio median 1.0138 /
+mean 1.0161, 13/16 within ±2%. Not a controlled #24-isolated A/B (#26/#27/#30 also landed first),
+so it does not cleanly difference against a pre-#24 MMS baseline — none was ever recorded.
 
 ---
 
@@ -322,7 +333,22 @@ immediately while XPlace waits 50 iterations. Mixed-size only.
 (Our `life` is also a different quantity from XPlace's — a divergence-guard budget, not a
 post-threshold countdown. Pre-existing and unrelated to #24; noted so it is not re-discovered.)
 
-## 8. Do the overflow metrics agree? — only where `target_density` does
+## 8. Do the overflow metrics agree? — RETRACTED diagnosis, kept for the trail
+
+**⚠️ RETRACTED 2026-08-15 as #25, then explained 2026-08-15 via #31. The `target_density` claim
+below is FALSE.** XPlace's `mgc_*` branches in `setup_design_args` (`setup_dataset.py:95+`) set the
+*same* per-design `target_density` we do — 0 mismatches across all 20 ISPD2015 designs, checked
+mechanically. The `target_density: 1.0` this section quotes is XPlace's params-dict **echo**
+(`log_design_params`, always the arg default); the *effective* value is logged separately after
+`setup_design_args` runs (`database.py:839`, `target density = 0.65`), and that one matches ours.
+
+The overflow ratios below are real — they just are not a `target_density` gap. The actual cause
+(#31): XPlace caps `num_bin` at `num_rows`, sw_only's cap only applied on the auto-grid path, and
+`mgc_fft_b`/`mgc_des_perf_1` both ran finer than XPlace as a result. Fixed in `Setup.cpp`; the
+residual, now-reconciled overflow-metric question lives in `#3`, not here. Do not re-derive
+"XPlace uses 1.0" from this section — grep `setup_dataset.py` for the `mgc_` branches instead.
+
+Kept below verbatim as the retraction trail, per the project's "never rewrite, annotate" rule.
 
 Measured on byte-identical `.def` files: our `Final Overflow (exact, no fillers)` vs XPlace's
 `get_obj_overflow` on that same placement.

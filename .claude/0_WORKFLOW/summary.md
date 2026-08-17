@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-08-15 16:35 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-17 11:21 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 > **Soft cap — one in, one out.** Current state only, ~2 screens. To add a line, remove one:
 > superseded snapshots & dated "Closed" narration → [[journal.md]]; finished task sections → [[history.md]].
 > If it's done and no longer live context, it isn't "where things stand" — evict it.
@@ -63,10 +63,6 @@
   — standalone and in the 28-design suite. Which config produced the 825-iteration claim is
   unknown. `mgc_superblue11_a`'s iteration count also differs (842, not 849).
   </details>
-- **#24 — the `Restored … from iteration N` log line names a placement that is not the one
-  shipped** (opened 2026-08-10). One snapshot buffer, two trackers writing it. Headline numbers are
-  unaffected (recomputed on the restored geometry); the provenance line is false and it already
-  caused one wrong diagnosis. → [[HANDOFF_24_best_solution_buffer_20260810.md]]
 - **#26 — fence regions: scored, measured, priced, and CLOSED** (2026-08-12). **Decision (Mark): we
   do NOT implement fence regions — we ignore them, as XPlace does, and say so.** ⚠️ `CLAUDE.md`
   carries only the two *operational* rules (how to regenerate `ispd2015_fix`, keep the fenced
@@ -153,25 +149,15 @@
   baseline bit-for-bit with `enable_preconditioning = false` on the new binary.
   → [[_NEW_REPORT_26_precond_always_on_20260811.md]]
 
-## Closed 2026-08-10
-- **#24 code DONE** — best-solution tracking rebuilt to match XPlace: three trackers
-  (`best_primary`/`best_aux`/`best_rollback`), **each with its own geometry buffer**, one shared
-  `selectBestSolution()` (`get_best_solution`, param_scheduler.py:540-577). Two defects, only one
-  of which was known: the shared buffer (17 of 29 runs shipped a placement the log did not name),
-  and a **torn restore** — density deposits at `probe_pos`, which the restore never touched, so
-  every reported overflow described the *last iteration* rather than the shipped placement. That
-  second one produced #24's original evidence, so the ticket's stated proof was misattributed.
-  All three suites green; 3 baselines regenerated with `--reason`.
-  ⚠️ **The rule does not always ship the spread-out placement** — aux 8 / primary 11 over 29
-  traces, and the *bug* shipped spread nearly always. A/B on the 0.5% budget says **keep XPlace's
-  1.005**: 1.010 buys ~35% less overflow for ~0.5–0.7% GP HPWL and DP recovers only 41–74% of it.
-  **Two decisions still open** (fix (B)'s scope → possible MMS re-run; n=2 on the A/B).
-  → [[_NEW_REPORT_24_best_solution_trackers_20260810.md]]
-- **#23 the fix** — `init_step_seed` scaled by site width (above). Regress baselines for
-  `mgc_fft_a` / `mgc_pci_bridge32_b` regenerated with `--reason`; `mms_adaptec1` untouched
-  (⚠️ superseded — #24's fix (B) changed `mms_adaptec1`, see above).
-- **#23 bullet 2** — `estimateInitialStep()` now hard-errors on a zero/NaN BB step instead of
-  no-opping to max_iterations. `make test-regress` bit-identical; error path exercised directly.
+## Closed 2026-08-17
+- **#24 CLOSED** — best-solution tracking now matches XPlace's `get_best_solution`: three trackers
+  (`best_primary`/`best_aux`/`best_rollback`), each with its own geometry buffer, one shared
+  selection rule. Fixed a shared-buffer defect (17/29 runs shipped a placement the log didn't name)
+  and a torn-restore defect (reported overflow described the last iteration, not the shipped one).
+  MMS suite re-run 2026-08-14: 16/16, DP ratio median 1.0138 / mean 1.0161. Two remaining
+  faithfulness gaps (snapshot position u-vs-v; `BEST_SOL_MIN_ITER` absolute-vs-phase-relative) and
+  the A/B's n=2 spun off to **#32** rather than left open here.
+  → [[_NEW_REPORT_24_best_solution_trackers_20260810.md]]. Superseded prior narration: [[journal.md]].
 
 ## Closed 2026-08-09 (three low-risk items, both test suites green)
 - **#19** — pl_algo's `dff`/`dff_coef` renamed to `kappa`/`kappa_coef`; `make test` numbers
@@ -184,6 +170,11 @@
   the `floorplan.def` hardcoding stands.
 
 ## Newly open
+- **#32 — best-solution tracking: two remaining XPlace divergences + widen the A/B** (opened
+  2026-08-17, spun off #24's close). Snapshot position u-vs-v, `BEST_SOL_MIN_ITER`
+  absolute-vs-phase-relative, and `best_aux_max_hpwl_ratio`'s A/B still rests on n=2. None of these
+  are regressions from #24 — they're gaps its faithfulness audit found and #24's own fixes don't
+  reach. → [[_NEW_REPORT_24_best_solution_trackers_20260810.md]] §7
 - **#31 — overflow-stall investigation 2026-08-15: it was ALL the grid cap; overflow metric is
   correct.** → [[_NEW_REPORT_31_overflow_stall_grid_20260815.md]]. Three overflow columns now stand
   per-sweep (`Best OVFW` smoothed / **`Our Exact OVFW`** / **`XPlace In OVFW`** = #3's `gp_ovfl_in`),

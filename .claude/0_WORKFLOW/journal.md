@@ -41,3 +41,35 @@ scored and which inflated its mean were unrecoverable; and its stage-1 GP inputs
 fix, with a third of the ISPD2015 tier frozen (`mgc_superblue12` carried a 7.05e+09 post-DP HPWL
 — XPlace's legalizer fed cells stacked at die centre). **Do not average the old and new numbers.**
 The MMS side still rests on `lgdp_suite_results.tsv`, valid but scored under a different harness.
+
+---
+
+## Dated closed narration, evicted from summary.md's soft cap
+
+### 2026-08-10 — #24 "code DONE", #23 baselines
+> - **#24 code DONE** — best-solution tracking rebuilt to match XPlace: three trackers
+>   (`best_primary`/`best_aux`/`best_rollback`), **each with its own geometry buffer**, one shared
+>   `selectBestSolution()` (`get_best_solution`, param_scheduler.py:540-577). Two defects, only one
+>   of which was known: the shared buffer (17 of 29 runs shipped a placement the log did not name),
+>   and a **torn restore** — density deposits at `probe_pos`, which the restore never touched, so
+>   every reported overflow described the *last iteration* rather than the shipped placement. That
+>   second one produced #24's original evidence, so the ticket's stated proof was misattributed.
+>   All three suites green; 3 baselines regenerated with `--reason`.
+>   ⚠️ **The rule does not always ship the spread-out placement** — aux 8 / primary 11 over 29
+>   traces, and the *bug* shipped spread nearly always. A/B on the 0.5% budget says **keep XPlace's
+>   1.005**: 1.010 buys ~35% less overflow for ~0.5–0.7% GP HPWL and DP recovers only 41–74% of it.
+>   **Two decisions still open** (fix (B)'s scope → possible MMS re-run; n=2 on the A/B).
+>   → [[_NEW_REPORT_24_best_solution_trackers_20260810.md]]
+> - **#23 the fix** — `init_step_seed` scaled by site width. Regress baselines for
+>   `mgc_fft_a` / `mgc_pci_bridge32_b` regenerated with `--reason`; `mms_adaptec1` untouched
+>   (⚠️ superseded — #24's fix (B) changed `mms_adaptec1`, see above).
+> - **#23 bullet 2** — `estimateInitialStep()` now hard-errors on a zero/NaN BB step instead of
+>   no-opping to max_iterations. `make test-regress` bit-identical; error path exercised directly.
+
+**Superseded 2026-08-17 by #24's close.** Both "decisions still open" resolved: fix (B) was scoped
+to the final restore only (`syncProbeToCommitted()`), and its premise ("scoping it leaves MMS
+bit-identical") was itself wrong — MMS moves under #24's *selection* fix regardless of (B)'s scope,
+via `beginFixedMacroPhase`. The MMS suite was re-run 2026-08-14 (16/16, DP ratio median 1.0138).
+The A/B's n=2 and the two further faithfulness gaps found while auditing the close (u-vs-v
+snapshot position, `BEST_SOL_MIN_ITER` absolute-vs-phase-relative) carry forward as **#32**. Full
+record: `history.md` #24.

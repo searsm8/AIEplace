@@ -16,6 +16,8 @@ removed — it had been sitting in both files since 2026-07-30).
 
 **Compacted 2026-08-07:** the full pre-compaction text of the still-OPEN tasks (#1, #3, #6, #7, #9, #10, #11, #14, #15, #17, #19, #20, #21, #22, #23, Parked, Improvements) - first section below.
 
+**Closed 2026-08-17:** **#24** — best-solution tracking rebuilt to match XPlace's `get_best_solution`: three trackers (`best_primary`/`best_aux`/`best_rollback`), each with its own geometry buffer in `Node` (a single shared buffer meant last-writer-won, so the log's provenance line named a placement that wasn't the one shipped — confirmed on 17 of 29 `full44_v2` runs, all converged), plus a torn-restore fix (`syncProbeToCommitted()`) so reported overflow describes the shipped placement instead of the last iteration. All three test suites green, 3 baselines regenerated, MMS suite re-run (16/16). Closed with two remaining faithfulness gaps and an A/B that needs widening spun off to **#32**, rather than reopening this ticket for follow-on work its own defects didn't block.
+
 **Closed 2026-08-16:** **#31** — the `Best OVFW > 0.1` stalls AND the ~7x overflow-vs-XPlace gap were one root cause: XPlace caps `num_bin` at `num_rows` (`database.py:161`) but sw_only applied its identical `row_cap` only on the auto grid path, so `dse --grid xplace`'s explicit 512 bypassed it — 13 of 20 ISPD2015 designs ran finer than XPlace. Fixed by capping any grid at `num_rows` (`Setup.cpp`, Mark's call over a manifest patch); headline 1.0149 -> **1.0113 mean / 1.0096 median**, GP-ratio mean 1.0223 -> 1.0047, and the overflow *signal* (which drives the gamma/lambda schedule) now matches XPlace on the std-cell designs. An independent naive reference proved `computeOverflow` correct at every grid — it was never a metric bug. Also landed the 3-column overflow tooling (`Best OVFW` / `Our Exact OVFW` / `XPlace In OVFW`), closing #3's `gp_ovfl_in` reconciliation. Residual macro fixed-density difference -> #3; `node_pos`-deposit question -> tasks.md Topics.
 
 **Closed 2026-08-16:** **#25** — RETRACTED, not resolved: the premise was false. XPlace does NOT force `target_density = 1.0` on ISPD2015 — its `setup_dataset.py` sets the same per-design td we do (0 mismatches on all 20). The `target_density: 1.0` in XPlace's log is a params-dict echo; the effective value (`target density = 0.65`, `database.py:839`) matches ours. The overflow ratios the entry cited were real but were the td<1 grid divergence (#31), measured against a mislabeled column. Guard against re-deriving: grep `setup_dataset.py` for the `mgc_` branches.
@@ -53,6 +55,138 @@ change (the denylist had been silently blanking `Best HPWL` on every row), and g
 label-keyed and what the summary joins swept parameters from. The two live defects it *found* and
 did not fix are now **#29** (the XPlace reference belongs in the placer, masked-vs-masked and
 site-width-correct) and **#30** (LG+DP inside `dse.py`).
+
+---
+
+## #24 — best-solution trackers: shared buffer + torn restore (opened 2026-08-10, CLOSED 2026-08-17)
+
+**FIXED — two defects, only one of which was known when this was opened.** Three trackers
+(`best_primary`/`best_aux`/`best_rollback`) each with their own geometry buffer, plus XPlace's
+`get_best_solution` selection; and `restoreBestPlacement()` now also sets `probe_pos = node_pos`.
+`make test`, `make test-regress`, `make test-regress-slow` green; 3 baselines regenerated with
+reasons; MMS re-run (16/16). **Closing note (2026-08-17):** every item below is checked off —
+either done, or deliberately spun out to **#32** (two remaining faithfulness gaps + the A/B needs
+widening) so this ticket doesn't stay open for follow-on work its own defects don't block.
+→ [[_NEW_REPORT_24_best_solution_trackers_20260810.md]]
+
+- **Defect 1 (as opened): one buffer, two writers.** Confirmed on 17 of 29 `full44_v2` runs — and
+  those 17 are exactly the *converged* designs, the ones that get scored.
+- **Defect 2 (NOT known when this was opened): a placement is two variables and the snapshot copied
+  one.** HPWL reads `node_pos`; density/overflow deposits at `probe_pos` (`Grid.cpp:36`), which the
+  restore never touched. After a restore the node held committed position from one iteration and
+  lookahead from another — a state that existed at no point in the run.
+  **This is what produced the evidence quoted below**, so that evidence does not prove what it says.
+  The real proof of defect 1 is the *HPWL* mismatch: adaptec1 logged iter 728 (HPWL 7.035e+07) while
+  `Final HPWL` read 7.051e+07 = iteration **751**. `freezeMovableMacros` (`DataBase.cpp:396`) had
+  already diagnosed and locally patched defect 2 — it was never generalised.
+
+⚠️ **The rule does NOT always ship the spread-out solution** — it prefers it only when
+`aux_hpwl < best_hpwl*1.005` and `aux_ovfl*1.1 < best_ovfl`. Over 29 traces: aux 8, primary 11,
+none 10. The *bug* shipped the spread one nearly always, so this makes 11 designs less spread,
+deliberately. A/B on that 0.5% budget (`best_aux_max_hpwl_ratio`, `DSE_RUN_SET=best_sol_ab`):
+1.010 buys ~35% less overflow for ~0.5-0.7% GP HPWL, DP recovers 41-74% of it but never all —
+**keep XPlace's 1.005** (n=2 designs with usable DP data; see report Section 5).
+
+<details><summary>Superseded framing as opened (2026-08-10) — kept for the retraction trail</summary>
+
+> **The "Restored … from iteration N" log line names a placement that is not the one shipped.**
+> Headline HPWL/overflow are still trustworthy; the *provenance* line is not.
+>
+> There is exactly one snapshot buffer, `Node::best_solution_pos` (`AIEplace.cpp:107`), and **both**
+> `best_primary` and `best_fallback` write it through the same `snapshotBestPlacement()`
+> (`Output.cpp:670-685`). Last writer wins. `restoreBestSolution()` (`Output.cpp:414`) then selects by
+> *metadata* priority (primary > fallback), logs that metadata, and calls `restoreBestPlacement()`,
+> which loads whatever geometry happens to be in the buffer. When the fallback updated after the
+> primary last did — the common case, since overflow keeps falling after the threshold crossing — the
+> log names the primary's iteration while the restored cells are the fallback's.
+
+**Two corrections.** "Headline HPWL/overflow are still trustworthy" was wrong for **overflow**:
+defect 2 meant every reported overflow described the last iteration, not the shipped placement.
+And the adaptec1 overflow evidence below is defect 2's signature, not defect 1's.
+</details>
+
+**Evidence (adaptec1, `full44_v2` run 2026-08-10):**
+```
+log:            Restored primary (converged) best placement from iteration 728
+                (HPWL: 70346752, overflow: 0.069424)
+reported:       Final Overflow (smoothed, no fillers) = 3.746e-02
+iterations.dat: iter 757 OVFW = 3.746e-02   <- exact match
+                iter 728 OVFW = 0.0694
+```
+`m.final_smoothed_overflow` is recomputed on the restored positions (`Output.cpp:455`), so the
+geometry is demonstrably iteration **757** while the log says **728**. Reproduced on
+`mgc_matrix_mult_c` (log it863 / 0.0692; reported 4.317e-02 = iter 892).
+
+Two defects, ranked:
+
+- [x] **1. Selection has no control over the geometry.** DONE — three trackers, three buffers, one
+      shared `selectBestSolution()`. Verified on **both** branches of the rule: adaptec1 ships aux
+      iter 757, `mgc_pci_bridge32_b` ships primary iter 723, and in each `Final HPWL` equals the
+      selected solution's HPWL.
+      ⚠️ **the falsifier as written is unusable** — it assumes `Final Overflow` describes the
+      restored placement, which was defect 2. It can only be applied on a design whose selected
+      solution is *not* the last iteration.
+- [x] **2. The log line is false, and it misleads.** DONE — the slot now travels in the same struct
+      as the metadata, so they cannot disagree.
+
+- [x] **The `best_sol_aux` faithfulness gap** (the warning note below, folded in once defect 1
+      stopped confounding it). `best_fallback` was renamed `best_aux`, gated on convergence, and
+      given XPlace's accept rule; the missing `best_sol_rollback` was added with its
+      free-on-first-convergence lifetime. The inverted `OVFW_EPSILON = 0.005` rule is gone.
+
+**Still open (at close):**
+- [x] **Fix (B)'s scope — RESOLVED 2026-08-11 as (b).** `syncProbeToCommitted()` is a separate step
+      called only from `restoreBestSolution()`; `restoreBestPlacement()` restores `node_pos` alone,
+      so the phase-2 macro freeze is untouched.
+      ⚠️ **the premise for choosing (b) was wrong, and the correction matters more than the
+      choice.** (b) does **not** leave MMS bit-identical: it produces sha `e9cc52242ad0`,
+      byte-identical to the (a) build. Fix (B) never affected MMS at all. The MMS change is **#24's
+      selection fix** — `beginFixedMacroPhase` (`Phase2.cpp:72`) picks the placement to freeze
+      macros at via `selectBestSolution()`. So **MMS results move under #24 either way**, and the
+      `full44_v2` MMS exclusion (valid for #23, which provably could not touch bookshelf designs)
+      does **not** carry over. Cause of the error: `test-regress-slow` was never run between the
+      tracker port and (B), so the divergence was pinned on the most recent change. See report
+      Section 6a.
+- [x] **Re-run the MMS suite (16 designs) — DONE 2026-08-14.** `results/DSE_20260814_152306`:
+      16/16 succeeded, all converged bar `newblue4` (overflow 0.116). DP ratio **median 1.0138 /
+      mean 1.0161**, 13/16 within ±2%, better than XPlace on 3. `make test-regress-slow` re-verified
+      bit-identical against this tree on 2026-08-16.
+      ⚠️ not a controlled #24-isolated A/B — #26/#27/#30 also landed before this run, so it
+      does not cleanly difference against a pre-#24 MMS baseline. No such baseline was ever recorded.
+- [x] **Our overflow metric vs XPlace's disagree on direction for `mgc_superblue19`** — ROOT-CAUSED
+      2026-08-11 as a `target_density` difference; **that diagnosis was WRONG and retracted
+      2026-08-15 as #25**. The real cause (also 2026-08-15, via #31): XPlace caps `num_bin` at
+      `num_rows` and sw_only's cap only applied on the auto-grid path, so 13/20 ISPD2015 designs ran
+      finer than XPlace and their exact overflow read up to 7x high on an apples-to-oranges grid.
+      Fixed in `Setup.cpp`; not a best-solution-tracking defect at all. See #3, #31,
+      [[_NEW_REPORT_31_overflow_stall_grid_20260815.md]]
+- [x] **Move the A/B data out of `/tmp`** — the two summary TSVs are in
+      `.claude/2_ARTIFACTS/todo24_best_sol_ab/`. ⚠️ **partial** — `vck5000/results/DSE_20260810_173906`
+      (the GP `.def`s and per-run logs behind them) no longer exists, so only the aggregate numbers
+      survive — nothing to re-derive from. Widening the A/B (below) needs a fresh run regardless.
+- [x] **Best-solution tracking still diverges from XPlace in two places, and widen the A/B (n=2)**
+      (found while answering "is it faithful?", 2026-08-11 — the *rule* is faithful, these are not).
+      **Spun off to #32** — carrying forward rather than reopening #24 for it:
+      - XPlace snapshots the lookahead (v_k), we snapshot the committed position (u).
+      - `BEST_SOL_MIN_ITER` is absolute; XPlace's is phase-relative.
+      - `keep XPlace's 1.005` for `best_aux_max_hpwl_ratio` still rests on n=2 designs.
+
+<details><summary>Superseded: the warning "Related but SEPARATE" note — now folded in and done</summary>
+
+> ⚠️ **Related but SEPARATE — do not conflate.** sw_only has no equivalent of XPlace's
+> `best_sol_aux`, and `best_fallback`'s accept rule is *inverted* against XPlace's: ours tolerates
+> overflow degrading by `OVFW_EPSILON = 0.005` to gain HPWL, XPlace's requires overflow to strictly
+> improve and tolerates 0.5% HPWL loss (`param_scheduler.py:432-441`), then prefers it over the
+> HPWL-driven pick when `aux_hpwl < best_hpwl*1.005 and aux_ovfl*1.1 < best_ovfl`
+> (`get_best_solution`, :563-577). That is a real faithfulness gap, **but defect 1 confounds any
+> measurement of it** — fix 1 first, then re-measure.
+
+Correct as written, and the sequencing advice was right — defect 1 *was* confounding it. Both were
+fixed in one change once defect 1 landed, since the rename and the gate touch the same lines.
+</details>
+
+→ [[_NEW_REPORT_24_best_solution_trackers_20260810.md]],
+  [[HANDOFF_24_best_solution_buffer_20260810.md]]
 
 ---
 
