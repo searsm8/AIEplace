@@ -16,6 +16,10 @@ removed — it had been sitting in both files since 2026-07-30).
 
 **Compacted 2026-08-07:** the full pre-compaction text of the still-OPEN tasks (#1, #3, #6, #7, #9, #10, #11, #14, #15, #17, #19, #20, #21, #22, #23, Parked, Improvements) - first section below.
 
+**Closed 2026-08-16:** **#31** — the `Best OVFW > 0.1` stalls AND the ~7x overflow-vs-XPlace gap were one root cause: XPlace caps `num_bin` at `num_rows` (`database.py:161`) but sw_only applied its identical `row_cap` only on the auto grid path, so `dse --grid xplace`'s explicit 512 bypassed it — 13 of 20 ISPD2015 designs ran finer than XPlace. Fixed by capping any grid at `num_rows` (`Setup.cpp`, Mark's call over a manifest patch); headline 1.0149 -> **1.0113 mean / 1.0096 median**, GP-ratio mean 1.0223 -> 1.0047, and the overflow *signal* (which drives the gamma/lambda schedule) now matches XPlace on the std-cell designs. An independent naive reference proved `computeOverflow` correct at every grid — it was never a metric bug. Also landed the 3-column overflow tooling (`Best OVFW` / `Our Exact OVFW` / `XPlace In OVFW`), closing #3's `gp_ovfl_in` reconciliation. Residual macro fixed-density difference -> #3; `node_pos`-deposit question -> tasks.md Topics.
+
+**Closed 2026-08-16:** **#25** — RETRACTED, not resolved: the premise was false. XPlace does NOT force `target_density = 1.0` on ISPD2015 — its `setup_dataset.py` sets the same per-design td we do (0 mismatches on all 20). The `target_density: 1.0` in XPlace's log is a params-dict echo; the effective value (`target density = 0.65`, `database.py:839`) matches ours. The overflow ratios the entry cited were real but were the td<1 grid divergence (#31), measured against a mislabeled column. Guard against re-deriving: grep `setup_dataset.py` for the `mgc_` branches.
+
 **Closed 2026-08-07:** **#7** — both items resolved. Item 1 (κ scheduling) turned out to be already
 implemented, on the wrong quantity, and was closed against #19b. Item 2 (Xplace-Route detailed
 routability) is **out of scope** — Mark's call.
@@ -49,6 +53,182 @@ change (the denylist had been silently blanking `Best HPWL` on every row), and g
 label-keyed and what the summary joins swept parameters from. The two live defects it *found* and
 did not fix are now **#29** (the XPlace reference belongs in the placer, masked-vs-masked and
 site-width-correct) and **#30** (LG+DP inside `dse.py`).
+
+---
+
+## #31 — Investigate designs that stall at overflow > 0.1 (opened 2026-08-14, CLOSED 2026-08-16)
+
+Mark, 2026-08-14, on the 28-design `make dse` (`results/DSE_20260814_133037`): *"The few designs
+with overflow above 0.1 should be flagged for investigation. … wait until the MMS designs are run."*
+
+**⚠️ BLOCKED until the tier-3 (MMS) `make dse` lands** — deliberately. MMS is a different regime and
+the 0.1 threshold does NOT transfer to it (see below); flag the MMS stragglers off their own XPlace
+reference once that run exists, then start the investigation with the full ISPD+MMS picture.
+
+**ISPD flagged (Best OVFW > 0.1, from the 28-design run):**
+
+| design | Best OVFW | GP Ratio | DP Ratio |
+|---|---|---|---|
+| `mgc_pci_bridge32_b` | 0.321 | 1.0090 | 0.9843 |
+| `mgc_pci_bridge32_a` | 0.273 | 1.0983 | 1.0540 |
+| `mgc_fft_2`          | 0.146 | 1.0988 | 1.0278 |
+| `mgc_des_perf_b`     | 0.105 | 1.0324 | 1.0154 |
+
+These stop above the 0.07 XPlace-matched threshold at the 1200-iter cap (or a divergence guard),
+i.e. GP never fully spread. Two observations to carry in:
+- **The high-overflow designs have inflated GP ratios that LG+DP partly repairs** (Mark's note):
+  `fft_2`/`pci_bridge32_a` are ~1.098 at GP but 1.028/1.054 after DP — legalization re-spreads the
+  under-converged placement and closes the gap. So the *GP* ratio on these is not a QoR verdict; the
+  DP ratio is. `pci_bridge32_b` even beats XPlace post-DP (0.9843) despite the worst overflow.
+- `pci_bridge32_a/b` are the **low-row std-cell** designs where our forced 512 grid is finer than the
+  row structure — the old #(grid_ab) diagnosis (XPlace caps num_bin ≤ num_rows; pci_bridge32_b has
+  ~400 rows, XPlace uses 256 and converges at 725). That lead was never closed; start here.
+
+* Note from Mark: * first thing to check is if the lg or dp tools can verify the overflow metric on the exact same data.
+
+**MMS caveat — do NOT flag MMS on the flat 0.1 rule.** XPlace's own Mixed-GP reference stops at
+**0.10–0.18 exact overflow on nearly every MMS design** — that is normal for macros-movable, not a
+stall. Flag a tier-3 design only where OUR macro-excluded overflow materially exceeds its Mixed-GP
+reference, not where it merely exceeds 0.1. Reference (`benchmarks._XPLACE_MMS_MIXED_GP`, exact,
+filler+macro-excluded overflow):
+
+| design | ref ovfw | design | ref ovfw | design | ref ovfw | design | ref ovfw |
+|---|---|---|---|---|---|---|---|
+| adaptec1 | 0.131 | adaptec5 | 0.149 | bigblue4 | 0.130 | newblue4 | 0.182 |
+| adaptec2 | 0.096 | bigblue1 | 0.174 | newblue1 | 0.136 | newblue5 | 0.170 |
+| adaptec3 | 0.125 | bigblue2 | 0.105 | newblue2 | 0.143 | newblue6 | 0.142 |
+| adaptec4 | 0.135 | bigblue3 | 0.124 | newblue3 | **0.040** | newblue7 | 0.152 |
+
+Compare against sw_only's **macro-excluded** overflow (`[OVFW-DIAG] macro-excluded=`, or the
+"Macro-Excluded Overflow (exact, no fillers)" summary row on mixed-size runs) — NOT the
+filler+macro-included "Final Overflow (exact, +fillers)".
+
+**MMS DONE** — `results/DSE_20260814_152306` (16/16, DP Ratio median 1.0137 / mean 1.0161, 13/16
+within 2%, better on 3). Our macro-excluded overflow (from each run's `run_summary.md`) vs the
+Mixed-GP reference:
+
+| design | ours | ref | over? | design | ours | ref | over? |
+|---|---|---|---|---|---|---|---|
+| **newblue3** | **0.107** | **0.040** | **2.7× — the standout** | adaptec2 | 0.125 | 0.096 | 1.30× |
+| newblue4 | 0.209 | 0.182 | 1.15× (worst absolute) | newblue1 | 0.157 | 0.136 | 1.15× |
+
+All 12 others sit at or below their reference. **Flag: newblue3** (materially over — exactly as
+predicted, its 0.040 ref is the one a modest overflow trips), with adaptec2/newblue1/newblue4 as
+mild secondaries. **Key finding: the overflow does NOT cost post-DP QoR** — every flagged design's
+DP ratio is fine (newblue3 1.0144, newblue4 1.0138, adaptec2 1.0137, newblue1 1.0121); LG+DP
+absorbs the under-spread. So this is a GP-convergence question, not a quality one.
+
+**Mark's note (line above) — answered:** the LG tool already reports an independent overflow on our
+**exact** placement. `main.py --global_placement False --given_solution <our.def>` logs
+`Input solution … exact Overflow:` — XPlace's own overflow on the same cells we placed. That is the
+cross-check to make. **It is TODO #3's open reconciliation**: XPlace's overflow-on-our-solution
+(`gp_ovfl_in`) vs our `computeOverflow` runs a consistent ~2–4×, direction unexplained, fillers
+explaining part (#19a) and a residual ~2.2× on adaptec1/adaptec4 with newblue1 the opposite sign.
+`lgdp.py` currently scrapes only `lg_hpwl`/`dp_hpwl`; **first step is to also scrape
+`Input solution … exact Overflow` and surface it as a results.csv column**, so every design carries
+XPlace's overflow-verdict on our exact placement next to ours — turning #3 from a one-off into a
+standing per-sweep check. Do this before chasing any single design's stall.
+
+**Deliverable:** one report — per flagged design (ISPD + MMS), whether the stall is a
+grid/schedule/step issue and whether it costs post-DP QoR (the metric that matters). Cheap to
+reproduce per design via `make dse --designs <name>`; convergence history in the run's
+`iterations.dat` (`plot_histories.py`).
+
+### Investigation DONE 2026-08-15 → [[_NEW_REPORT_31_overflow_stall_grid_20260815.md]]
+
+- [x] **Tooling (the mandated first step): 3 overflow columns now stand per-sweep.** `results.csv`
+      carries `Best OVFW` (smoothed) + **`Our Exact OVFW`** + **`XPlace In OVFW`** on the same shipped
+      `.def`. `lgdp.py` scrapes XPlace's `Input solution … exact Overflow` (`in_ovfl` = #3's
+      `gp_ovfl_in`); `dse.py` scrapes our exact from `run_summary.md`. No exe change. Re-summarizing
+      the 28-design run reproduces the headline exactly (DP 1.0106/1.0149).
+- [x] **The STALL is a grid issue, NOT the optimizer** — but the *overflow-metric* half of my first
+      read was wrong (corrected below). The stall fix: **Grid — we force 512; XPlace caps
+      `num_bin ≤ num_rows`** (`database.py:161`, pow-2 floor). sw_only has the identical cap
+      (`Setup.cpp:340`) but only on the AUTO path; an explicit `bins_per_row` override bypasses it,
+      and `benchmarks.py` stored XPlace's *requested* 512 not its *effective* grid. **5 designs**:
+      `pci_bridge32_a`→128, `pci_bridge32_b`/`des_perf_a`/`des_perf_b`/`edit_dist_a`→256. Fix landed
+      (below), all 5 improved.
+- [x] **RESOLVED 2026-08-15 — the overflow discrepancy was the GRID, and the grid fix was INCOMPLETE.**
+      td matches XPlace on all 20 (corrected #25). The `fft_2` "7× at matched grid" was my error: I
+      read the *requested* 512 from XPlace's eval-log header and missed the cap warning — XPlace
+      evaluated fft_2 at **128** (171 rows). A naive reference confirms our metric is correct
+      (512→0.161=ours, 128→0.020≈XPlace). **The #31 grid fix caught only 5 of 13 row-capped designs**
+      (I derived them from XPlace's GP-reference logs, which anomalously print 512 for fft_1/fft_2).
+      **Fixed properly:** sw_only now caps an explicit grid at `num_rows` too (Setup.cpp row_cap
+      branch), so all 13 run at XPlace's grid AND our overflow signal matches XPlace's. See below.
+- [x] **Grid A/B (all 5, full GP+LG+DP): matching XPlace's grid improves BOTH ratios on every one; 3
+      flip to beating XPlace post-DP.** `pci_bridge32_a` GP 1.098→1.013 / DP 1.054→1.024;
+      `pci_bridge32_b` DP 0.984→**0.976**; `des_perf_a` 1.018→**0.997**; `des_perf_b` 1.015→**0.993**;
+      `edit_dist_a` 1.011→1.010. All previously-flagged low-row stallers converge < 0.07 smoothed at
+      the correct grid. Exact overflow is NOT the QoR predictor (rises on some, DP still improves) —
+      the wrong grid cost *wirelength* (stall/over-spread), consistent with #31's thesis.
+- [x] **FIX LANDED 2026-08-15 (Mark's go-ahead) — `benchmarks.py` grid corrected for the 5 designs to
+      XPlace's effective value** (`pci_bridge32_a`→128, the other four →256); the mislabeled
+      `xplace_grid`/`xplace_target_density` header comments rewritten (grid now = XPlace's EFFECTIVE
+      value, density col = OUR DEF value). Full 28-design re-run `DSE_20260815_105117`: **only the 5
+      moved, all improved, 23 bit-identical** (deterministic GP). Headline **1.0106/1.0149 →
+      1.0095/1.0120**, better-on 4→6. Per-design DP: `pci_bridge32_a` 1.054→1.024, `pci_bridge32_b`
+      0.984→**0.976**, `des_perf_a` 1.018→**0.997**, `des_perf_b` 1.015→**0.993**, `edit_dist_a`
+      1.011→1.010. (within-±2% 21→20 only because `pci_bridge32_b` now beats XPlace by >2%.)
+- [x] **`fft_2` overflow gap was the GRID (RESOLVED).** XPlace evaluates it at 128 (171 rows capped),
+      we ran 512; naive reference matches ours at 512 and XPlace at 128, so the metric is correct. The
+      universal-cap code fix makes fft_2 run at 128 like XPlace. → #3.
+- [x] **Universal grid-cap code fix LANDED 2026-08-15 (Mark's call — "code fix in sw_only, robust").**
+      `Setup.cpp` now caps an explicit `bins_per_row` at `row_cap` (`min(requested, 2^floor(log2(num_rows)))`),
+      not just the auto formula — matching XPlace's `database.py:161`. `benchmarks.py` reverted to
+      XPlace's *requested* 512 for all 20 ISPD2015 (was pre-capped for 5; superblue12 1024→512 manifest
+      fix); the code caps at run time and logs the effective grid. `make test-regress` **bit-identical**
+      (regress configs use the auto path, untouched). **8 more designs now cap** (fft_1/fft_2/des_perf_1
+      →128; fft_a/fft_b/matrix_mult_1/matrix_mult_2→256) + superblue12→512.
+      **Re-run DONE `DSE_20260815_161306`: headline 1.0096/1.0113, 22/28 within 2%, GP mean
+      1.0223→1.0047.** Mixed per-design (fft_a −2.7pp, fft_2 −1.4pp better; des_perf_1 +1.8pp, fft_1
+      +0.6pp worse), net better. **Overflow signal now reconciles with XPlace on std-cell designs**
+      (fft_2 ours 0.227/XPlace 0.228, des_perf_b 0.192/0.192, matrix_mult_1 0.185/0.185).
+      ⚠️ **ISPD2005 unaffected** — their num_rows (890–2694) exceed the requested grid, so no cap fires;
+      verified against the 105117 run's logged row_cap values.
+- [ ] **Macro-design faithfulness (separate, minor):** XPlace *scales* fixed/blockage density by td
+      (`initializer.py:82`), we *cap* it (`Grid.cpp:139`). Equal at td=1, ours slightly higher at td<1
+      in macro-perimeter bins. Not the fft_2 cause (0 fixed there). Worth aligning for macro-heavy designs.
+
+---
+
+## #25 — RETRACTED 2026-08-15: XPlace does NOT force td=1; our td MATCHES XPlace (opened 2026-08-11)
+
+**The entire premise was a misread and is false.** XPlace uses the **same per-design
+`target_density` we do** on all 20 ISPD2015 designs — verified mechanically: our `benchmarks.py` td
+vs XPlace's `setup_dataset.py` td = **0 mismatches** (fft_2 0.65/0.65, pci_bridge32_b 0.143/0.143,
+des_perf_1 0.91/0.91, …). So there is **no target_density divergence** and nothing to reconcile or
+A/B here.
+
+**How the misread happened, so it doesn't recur.** XPlace logs *two* target_density lines: a
+params-dict **echo** `target_density: 1.0` (`log_design_params`, always 1.0 — the arg default) and
+the **effective** value `target density = 0.65` (`database.py:839`, after `setup_design_args`). #25
+quoted the echo. `setup_design_args` **does** have per-design `mgc_*` branches
+(`setup_dataset.py:95+`), reached via `find_design_params` (`run_placement_nesterov.py:428`) in both
+GP and LG-eval paths. Confirmed straight from the lgdp eval logs that produced our `XPlace In OVFW`
+numbers: `fft_2` computed at `target density = 0.65`, `pci_bridge32_b` at `0.14`, `des_perf_b` at
+`0.50` — all matching ours.
+
+**What survives from #25 → folded into #3.** The overflow numbers *do* differ 2–7× on `mgc_*` — but
+that is NOT td (matches) and NOT grid (matches for fft_2); it is a genuine **overflow-metric
+divergence at td<1**, now the open item under #3. The convergence-signal / filler / macro-weight
+points below are still true consequences of td<1, they were just wrongly attributed to a td *gap*
+that does not exist.
+
+<details><summary>RETRACTED original claim (2026-08-11) — kept as the retraction trail</summary>
+
+> **We and XPlace use DIFFERENT `target_density` on ISPD2015 … we are optimizing to a different
+> density target on 20 of 28 ISPD designs.** … XPlace's `setup_design_args` branches "cover only
+> ISPD2005 and the *classic* superblue names. No branch matches `mgc_*`, so ISPD2015 keeps the
+> default 1.0." … measured `mgc_des_perf_1` ours 0.906 / XPlace 1.0, ratio 8.79.
+
+False: the `mgc_*` branches exist and set our exact values; the "1.0" was the params echo, not the
+effective td. The 8.79 ratio was real but is the td<1 *metric* divergence (#3), measured against a
+mislabeled td column, not a td-value difference. **Do not re-derive "XPlace uses 1.0" — grep
+`setup_dataset.py` for the `mgc_` branches and read `database.py:839`'s `target density =` line.**
+</details>
+
+→ [[_NEW_REPORT_31_overflow_stall_grid_20260815.md]] (the correction + source trail)
 
 ---
 
