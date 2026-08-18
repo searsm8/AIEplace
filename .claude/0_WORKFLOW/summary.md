@@ -57,16 +57,27 @@
   Moved to [[journal.md]] to keep summary.md under its soft cap — the retraction trail is preserved
   there verbatim, dated most-recent-first.
   </details>
-- **MMS (16 designs): 16/16, DP ratio median 1.0138 / mean 1.0161, from the 2026-08-14 re-run.**
-  **Still valid — checked 2026-08-17, and it is NOT stale despite predating #31.** The #31 grid cap
-  (`row_cap = 2^floor(log2(num_rows))`) **fires on zero of the 16**: every MMS design's requested
-  grid is already at or below its cap — tightest is `newblue1` (930 rows → cap 512, requested 512),
-  loosest `newblue3` (4182 → 4096, requested 2048) — and the 8 that overlap tier-1 were shown
-  bit-identical by #31 itself. Re-derive with `benchmarks._ROWS` grids vs `CoreRow` counts in the
-  bookshelf `.scl`. **No new MMS data exists** — the
-  2026-08-15 headline run (`DSE_20260815_161306`) is tier1+tier2 only, 8 ISPD2005 + 20 ISPD2015.
-  ⚠️ The only MMS run since is today's `newblue1` under `.claude/2_ARTIFACTS/GIFS_20260817_211039/`
-  — a **viz/#14 run from the other session**, not a suite result; don't score from it.
+- ⚠️ **MMS (16 designs) IS UNMEASURED ON THE FROZEN BINARY — the last numbers are 2026-08-14
+  (16/16, DP ratio median 1.0138 / mean 1.0161) and they no longer describe the code.** This is the
+  one gap left in the freeze. **The 28-design ISPD re-run on 08-17 did not include MMS**
+  (`DSE_20260817_223934` is tier1+tier2 only), and both of that day's algorithm changes reach MMS:
+  - **#32's 7a/7b** (best-solution tracking on `v_k`) affects **all 16** — it is design-independent.
+  - **#3's cap→scale** affects the **8 that run at td<1**: `adaptec5`/`newblue4`/`newblue5` (0.5),
+    `newblue1`/`newblue3`/`newblue6`/`newblue7` (0.8), `newblue2` (0.9). The other 8 are td=1.0,
+    where `min(ρ,1)·td` and `min(ρ,td)` are identically equal — which is exactly why
+    `mms_adaptec1`'s regress baseline came back bit-identical and is **not** evidence for the rest.
+  **Fix: `make dse --designs tier3`.** Until then MMS has no quotable number.
+  <details><summary>Superseded 2026-08-18: "Still valid — checked 2026-08-17 … NOT stale"</summary>
+
+  That check was correct **about #31 only** — the grid cap does fire on zero of the 16 (every MMS
+  design's requested grid is at or below its cap; tightest `newblue1` 930 rows → cap 512, requested
+  512; loosest `newblue3` 4182 → 4096, requested 2048; re-derive from `benchmarks._ROWS` vs
+  `CoreRow` counts in the bookshelf `.scl`). It was written before #32/7a-7b and #3 landed later the
+  same day, and those are what invalidate the numbers. **The lesson: "verified still valid" carries
+  the date of the thing it was checked against, not the date it was written.**
+  </details>
+  ⚠️ The only MMS run since is `newblue1` under `.claude/2_ARTIFACTS/GIFS_20260817_211039/` — a
+  **viz/#14 run**, not a suite result; don't score from it.
 - Landed: two-phase mixed-size flow + LP macro legalization; #19's two XPlace faithfulness fixes
   (overflow excludes fillers; the γ/λ throttle gates on preconditioner κ). Both toggles retired
   2026-08-07 — faithful behaviour is now unconditional.

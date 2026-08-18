@@ -36,9 +36,11 @@ If a rule stops being true, flag it for deletion and tell Mark — a stale rule 
   map to XPlace's symbol and its file e.g. `// equal to XPlace's weighted_weight (param_scheduler.py:386)`.
   Analyzing the same name / different maths is invisible to diff, grep, and tests — it costs real time (#19b).
 
-## Developing pl_algo 
+## Developing pl_algo
 - Try to be faithful to sw_only, match functionality. It should match xPlace too by extension if uncertain.
-- 
+- **sw_only is FROZEN (2026-08-18).** Do not change behaviour under `host/src/sw_only/` — bit-identical
+  `make test-regress` is the contract, not a convenience. Cleanup, tooling, docs and tests are NOT
+  frozen. Match the frozen sw_only; never "fix" a pl_algo mismatch by moving sw_only instead.
 
 ## Git
 - **Commit only when Mark asks,** but prompt Mark to commit if you think it should happen or you pass a major milestone.

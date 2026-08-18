@@ -3,13 +3,23 @@
 Open work, one section per task. **Status lives here; evidence lives in a
 report.** Don't reuse task numbers, find the highest number and add one.
 
-## ⚠️ sw_only functionality is FROZEN as of 2026-08-17 (Mark's call)
+## ⚠️ sw_only functionality is FROZEN — called 2026-08-17, EFFECTIVE 2026-08-18 (Mark)
 
-sw_only reached parity with XPlace — **median 1.0096 / mean 1.0113 legal-vs-legal over all 28
-ISPD designs**, 22/28 within ±2%, better on 6 — and the remaining gaps are sub-1%. The active
-thread is now **pl_algo** (#20). Freezing is not a pause: pl_algo's algorithm is pinned to the
-2026-07-14 sw_only, so **every further sw_only change is another port**, and a stable sw_only is
-what makes #20 a bounded job.
+sw_only is at parity with XPlace — **median 1.0097 / mean 1.0126 legal-vs-legal over all 28 ISPD
+designs** (`results/DSE_20260817_223934`), 22/28 within ±2%, better on 6. The active thread is now
+**pl_algo** (#20). Freezing is not a pause: pl_algo's algorithm is pinned to the 2026-07-14
+sw_only, so **every further sw_only change is another port**, and a stable sw_only is what makes
+#20 a bounded job.
+
+**Why the freeze carries two dates.** It was called on 08-17 against the 08-15 numbers
+(1.0096 / 1.0113), then three faithfulness fixes already in flight were allowed to land — **#32's
+7a+7b** (snapshot and measure on the lookahead `v_k`) and **#3's cap→scale** — bundled into one
+80-minute suite re-run rather than two. Those are the last changes admitted under the freeze.
+⚠️ **They cost +0.13 pp of mean and left the median flat** (18 designs worse, 7 better, 3
+unchanged). That is the expected shape of a faithfulness change, not a defect, and it was kept per
+`CLAUDE.md`'s standing rule to prefer XPlace's formulation over an ad-hoc win — but it means
+**the frozen sw_only is deliberately NOT the best-scoring sw_only we ever measured.** Anyone
+tempted to "improve" the number by reverting one of those three is re-opening a closed decision.
 
 What the freeze means:
 - **No further algorithm or behaviour changes to `host/src/sw_only/`** without an explicit
@@ -54,9 +64,12 @@ tree committed, **67 GB freed** from `results/` (helper: `tools/prune_run_artifa
       </details>
 - [~] The stale `run_config.json` re-baseline comment is fixed but **uncommitted** — bundled with
       #2's comment pruning.
-- [~] `~/phd/Xplace` carries **3 uncommitted local edits** (a real `calculator.py` bug fix under
-      `--use_precond False`, plus `param_scheduler.py` PRECOND_TRACE instrumentation). Mark's call:
-      commit them into XPlace or keep them local-only.
+- [x] **DONE 2026-08-17 — `~/phd/Xplace`'s 3 local edits are committed**, on a new branch
+      `local-fixes` (the clone was sitting on `main`). Split into three commits so the two genuine
+      fixes are cherry-pickable and the instrumentation is not: `5ecf97e` apply_precond returns
+      None, `9b0851d` weighted_weight never assigned, `88ae004` the PRECOND_TRACE dump (marked
+      LOCAL ONLY in both its comment and its commit message). Working tree clean.
+      → whether to send the two fixes upstream is now an **Improvements** item, see below.
 
 ---
 
@@ -597,6 +610,37 @@ the rule depends on. None of these are regressions — #24's fixes are correct a
 
 Algorithmic ideas beyond faithfulness cleanup — hypotheses, not yet scoped.
 
+- [ ] **Upstream the two XPlace `--use_precond False` fixes as a PR or issue** (opened 2026-08-18).
+      Both are already committed locally on `~/phd/Xplace` branch `local-fixes`; this item is only
+      about whether to send them to `github.com/cuhk-eda/Xplace`.
+      **The bug:** `--use_precond False` is a documented flag that cannot run at all, breaking two
+      independent ways. (1) `apply_precond()` (`calculator.py:5`) returns the preconditioned
+      gradient on the normal path but falls off the end returning `None` when `use_precond` is
+      false; its only caller assigns that to `grad` (`calculator.py:89`) and hands it to the
+      optimizer. (2) `update_precond_weight()` returned early, but `self.weighted_weight` is
+      **never initialised in `__init__`** — it appears there only as a *string* in the
+      `self.metrics` list — while `step()` reads it unconditionally at `param_scheduler.py:284`
+      to gate the every-3rd-iteration throttle.
+      **Why it would be a good PR:** tiny, self-contained, a documented flag that is completely
+      broken, and trivial for a maintainer to verify.
+      ⚠️ **Three things to settle before sending, all real:**
+      - **It is verified STATICALLY, not by running.** Nobody has executed XPlace with
+        `--use_precond False` and captured the two tracebacks. That is the first thing a maintainer
+        will ask for, and it is the one piece of evidence missing.
+      - **Fix (2) is a judgement call, not mechanical.** The minimal fix is
+        `self.weighted_weight = 0.0` in `__init__`, keeping the early return; ours computes it
+        unconditionally, which *changes throttle behaviour* under the flag. Our argument is that
+        `weighted_weight` is a **schedule** quantity and `use_precond` properly gates
+        `apply_precond()`, where the division actually happens — defensible, but a maintainer may
+        prefer the minimal form. **File as an issue showing both**, rather than a PR that assumes
+        ours is the wanted one.
+      - **Repo activity is unknown** — last upstream commit is "update download link". Worth
+        checking issue/PR response times before spending effort.
+      **Why we care beyond good citizenship:** we run XPlace as our reference, and fix (2) sits on
+      the path that computes `weighted_weight` = our `precond_kappa` (see the naming rule in
+      `CLAUDE.md`). If upstream ever adopts the minimal form instead, our `--use_precond False`
+      diagnostic runs quietly stop being comparable to theirs.
+
 - [ ] **Operator-level optimizations, ported from XPlace** (was **#6**, opened 2026-07-29, demoted
       here 2026-08-17 by the sw_only freeze). XPlace gets ~2× over DREAMPlace almost entirely from
       operator-level restructuring of the same ePlace math we already implement — not a new
@@ -687,7 +731,16 @@ that hides the defect.
 
 Open questions worth measuring, not yet scoped into a task.
 
-- [ ] **Deposit the density footprint at the committed `node_pos`, not the probe/lookahead
+- [x] **DECIDED 2026-08-17 by #32's 7a — and decided the OTHER WAY: everything now evaluates at
+      the lookahead `v_k`, so the deposit stays where it was.** This entry proposed moving the
+      density deposit *back* to the committed `node_pos` to match HPWL. 7a instead moved HPWL and
+      the best-solution snapshot *forward* onto the probe, which is what XPlace does (`p` IS `v_k`,
+      `nesterov_optimizer.py:71`; `evaluator_fn` measures both metrics there). The inconsistency the
+      entry was written to fix — density at v, HPWL at u — is gone, resolved in the direction
+      opposite to the one proposed here. **No A/B needed; do not re-open without re-reading #32.**
+      <details><summary>original proposal, verbatim</summary>
+
+      - [ ] **Deposit the density footprint at the committed `node_pos`, not the probe/lookahead
       `probe_pos`** (Mark, 2026-08-15). `computeNodeFootprint` (`Grid.cpp:38-39`) deposits at
       `getProbeX()/getProbeY()` — the Nesterov lookahead `v_k`, not the committed position `u`. XPlace
       snapshots and evaluates the LOOKAHEAD too (`mov_node_pos` IS `v_k`, `nesterov_optimizer.py:71`),
@@ -699,3 +752,4 @@ Open questions worth measuring, not yet scoped into a task.
       *shipped* placement probe and committed have already converged; the interesting effect is
       mid-run, where they differ. Cheap to try: one-line change in `computeNodeFootprint`, then
       `make test-regress` (expect it to CHANGE — needs a deliberate A/B, not a pass/fail).
+      </details>
