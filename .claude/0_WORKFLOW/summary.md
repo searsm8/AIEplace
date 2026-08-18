@@ -14,6 +14,16 @@
   so every further sw_only change was another port.
 
 ## Where sw_only stands (frozen — this is the final state, not a waypoint)
+> ⚠️ **STALE AS OF 2026-08-17 EVENING — the headline below predates an uncommitted behaviour
+> change.** The concurrent #32 session has implemented **7a (snapshot/measure on the lookahead
+> `v_k` instead of the committed `u`) and 7b (`BEST_SOL_MIN_ITER` → `phaseIteration()`)** and has
+> **regenerated all three `test/regress` baselines** (new reason string dated 2026-08-18 at commit
+> `6e75e39`). That is a real sw_only behaviour change, so **`DSE_20260815_161306`'s
+> 1.0096 / 1.0113 no longer describes the current tree** — it describes the last committed binary.
+> **The 28-design suite must be re-run before the headline is quotable again**, and whoever does
+> that should decide #3's cap-vs-scale first (see *Open*): a re-run is now needed regardless, so
+> bundling that one-line fix into the same run is nearly free, where standalone it was the
+> whole cost. The freeze stands — this change was Mark's, via that session.
 - **Median HPWL ratio 1.0096, mean 1.0113, over ALL 28 ISPD designs** (legal-vs-legal; GP from the
   2026-08-15 run `results/DSE_20260815_161306` on the #31 universal grid-cap fix). 22/28 within ±2%,
   **better than XPlace on 6**. **Nothing is unscored any more** — #26 closed the 9-design fence hole.
