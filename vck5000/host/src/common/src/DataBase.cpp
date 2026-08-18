@@ -504,7 +504,7 @@ void DataBase::sortPositionsByY()
         item.second->sortPositionsByY();
 }
 
-float DataBase::computeTotalWirelength(string method, int max_net_degree)
+float DataBase::computeTotalWirelength(string method, int max_net_degree, bool at_probe)
 {
     // max_net_degree matches XPlace's ignore_net_degree (net_mask): nets with more pins are
     // excluded from the HPWL metric so the reported number, the density-weight schedule's
@@ -513,7 +513,7 @@ float DataBase::computeTotalWirelength(string method, int max_net_degree)
     // map walk exactly. Masked-out nets contribute +0.0f, which is an exact no-op on the sum.
     return m_ordered_reduce.sum((int)mv_nets_by_name.size(), [&](int i) {
         Net* net_p = mv_nets_by_name[i];
-        return (net_p->getDegree() <= max_net_degree) ? net_p->computeWirelength(method) : 0.0f;
+        return (net_p->getDegree() <= max_net_degree) ? net_p->computeWirelength(method, at_probe) : 0.0f;
     });
 }
 

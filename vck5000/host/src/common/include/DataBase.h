@@ -180,7 +180,7 @@ public:
     void sortPositionsByX();
     void sortPositionsByY();
 
-    float computeTotalWirelength(string, int max_net_degree = INT_MAX);
+    float computeTotalWirelength(string, int max_net_degree = INT_MAX, bool at_probe = false);
     float computeTotalComponentArea();
     float getTotalFixedArea() { return m_total_fixed_area; }
     float getTotalMovableArea() { return m_total_movable_area; }

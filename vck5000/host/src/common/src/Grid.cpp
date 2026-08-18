@@ -127,16 +127,27 @@ void Grid::depositNodeOverlaps(Node* node_p)
 }
 
 /**
- * @brief Clamp each bin's overlap to target_density * bin_area after fixed components are added,
+ * @brief Saturate each bin's fixed-component occupancy at FULL, then scale it by target_density,
  *        so fixed macros don't count as overflow — only movable cells stacked on top do.
+ *
+ * SCALE, not cap (TODO #3, fixed 2026-08-17). XPlace does
+ * `init_density_map.clamp_(min=0.0, max=1.0).mul_(args.target_density)` (`initializer.py:82`) —
+ * in density terms `min(rho, 1) * td`. We used to compute `min(rho, td)`, which is a different
+ * function everywhere a bin is partially occupied: at td=0.65 and rho=0.5 XPlace gives 0.325 and
+ * the cap gives 0.50, so we read HIGH in macro-perimeter bins. Identical at td=1, which is why
+ * only macro designs at td<1 ever saw it, and why the fillerless std-cell designs (#31's fft_2
+ * reconciliation, 0 fixed cells) could not.
+ *
+ * total_overlap is an absolute area, so `min(rho,1)*td` is `min(overlap, bin_area) * td`.
  */
 void Grid::clampFixedDensity(float target_density)
 {
     #pragma omp parallel for schedule(static)
     for (int col = 0; col < m_bins_per_row; col++)
         for (int row = 0; row < m_bins_per_col; row++) {
-            float cap = m_bins[col][row].bb.getArea() * target_density;
-            m_bins[col][row].total_overlap = std::min(m_bins[col][row].total_overlap, cap);
+            float bin_area = m_bins[col][row].bb.getArea();
+            float saturated = std::min(m_bins[col][row].total_overlap, bin_area);
+            m_bins[col][row].total_overlap = saturated * target_density;
         }
 }
 

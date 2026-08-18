@@ -13,6 +13,8 @@
  *   manifest.json      text  -- dtypes, die frame, quantization box, per-generation frame index
  *   nodes_gen<N>.bin   bin   -- static per-node record (position, size, kind) for generation N
  *   frames_gen<N>.bin  bin   -- concatenated uint16 position frames for generation N
+ *   names_gen<N>.txt   text  -- sparse "<index> <name>" for the named nodes of generation N,
+ *                               i.e. everything except the anonymous fillers (TODO #14 node-lock)
  *
  * Only POSITIONS live here. Every per-iteration scalar the overlay prints (HPWL, overflow, step
  * length, lambda) is already in iterations.dat and is not duplicated -- the offline tool reads
@@ -117,13 +119,27 @@ void Placer::beginPositionDumpGeneration()
     std::ofstream nodes(m_pos_dump.dir / ("nodes_gen" + std::to_string(gen.id) + ".bin"),
                         std::ios::binary);
 
+    // Node names, for the offline tool's node-lock view (TODO #14). SPARSE -- "<index> <name>",
+    // skipping fillers. Fillers DO carry names ("filler_0", ...), but they are generated
+    // whitespace rather than design objects, so locking a view onto one is meaningless and their
+    // names are pure index arithmetic. They are ~35% of the node set (181k of 512k on newblue1),
+    // and that is what the skip buys.
+    //
+    // Written PER GENERATION rather than once, and that is the point: freezeMovableMacros() and
+    // rebuildFillers() both change the node set, so index i means a different node either side of
+    // the phase-2 boundary. The name is the only identifier that survives it.
+    std::ofstream names(m_pos_dump.dir / ("names_gen" + std::to_string(gen.id) + ".txt"));
+
     // Index order is the contract between the two files: the frames carry the movable+filler
     // prefix, so it must come first and in getMovableNodes() order, and the nodes that never move
     // follow it. Frame slot i and static record i are then the same node by construction.
-    auto emit = [&nodes, &gen](Node* node_p, uint8_t kind) {
+    auto emit = [&nodes, &names, &gen](Node* node_p, uint8_t kind) {
         StaticNodeRecord rec{node_p->getX(), node_p->getY(),
                              node_p->getXsize(), node_p->getYsize(), kind};
         nodes.write(reinterpret_cast<const char*>(&rec), sizeof(rec));
+        const std::string& name = node_p->getName();
+        if (kind != KIND_FILLER && !name.empty())
+            names << gen.num_static_nodes << ' ' << name << '\n';
         gen.num_static_nodes++;
     };
 
@@ -140,6 +156,7 @@ void Placer::beginPositionDumpGeneration()
         emit(pad_p, KIND_IOPAD);
 
     nodes.close();
+    names.close();
 
     m_pos_dump.frames.open(m_pos_dump.dir / ("frames_gen" + std::to_string(gen.id) + ".bin"),
                            std::ios::binary);
@@ -237,6 +254,7 @@ void Placer::finalizePositionDump()
         manifest << "    {\"id\": " << gen.id
                  << ", \"phase\": \"" << gen.phase << "\""
                  << ", \"first_iter\": " << gen.first_iter
+                 << ", \"names\": \"names_gen" << gen.id << ".txt\""
                  << ", \"num_static_nodes\": " << gen.num_static_nodes
                  << ", \"frame_nodes\": " << gen.frame_nodes
                  << ", \"filler_start\": " << gen.filler_start

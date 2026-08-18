@@ -114,48 +114,41 @@ static inline Position& bestSlotPos(Node* node_p, Placer::BestSlot slot)
 }
 
 /// @brief Save current movable + filler positions into one tracker's snapshot.
+///
+/// Snapshots the LOOKAHEAD v_k, not the committed u (TODO #32/7a). XPlace has only one position
+/// variable -- `p` IS `v_k` (nesterov_optimizer.py:71, "directly use p as v_k to save memory") --
+/// so `ps.step(hpwl, overflow, mov_node_pos, ...)` stores v_k and `evaluator_fn(mov_node_pos)`
+/// measures BOTH metrics there (run_placement_nesterov.py:142-145). One self-consistent placement.
+/// We used to store u while measuring HPWL at u and overflow at v, which is a pair no single
+/// iteration ever held; recordIterationResults() now measures HPWL at v to match.
 void Placer::snapshotBestPlacement(BestSlot slot)
 {
     const auto& nodes = db.getMovableNodes();
     #pragma omp parallel for schedule(static)
     for (int i = 0; i < (int)nodes.size(); i++)
-        bestSlotPos(nodes[i], slot) = nodes[i]->next.node_pos;
+        bestSlotPos(nodes[i], slot) = nodes[i]->next.probe_pos;
 }
 
-/// @brief Restore movable + filler positions from one tracker's snapshot.
+/// @brief Restore movable + filler positions from one tracker's snapshot -- BOTH halves of the pair.
 ///
-/// Restores node_pos ONLY. Callers that are about to *report* on this placement must follow with
-/// syncProbeToCommitted() -- see there for why, and why it is not done here.
+/// A placement here is the pair (node_pos, probe_pos): HPWL reads node_pos (Net.h:25) while every
+/// density/overflow metric deposits at probe_pos (computeNodeFootprint, Grid.cpp:36). Writing only
+/// node_pos would leave the node in a state that existed at no point in the run -- snapshot
+/// position from one iteration, lookahead from another -- so the reported overflow would describe
+/// the last iteration rather than the placement being shipped (TODO #24).
+///
+/// Since TODO #32/7a the snapshot holds v_k, so restoring it into both fields reconstructs
+/// XPlace's single position variable exactly (nesterov_optimizer.py:71): after this call u == v,
+/// which is the state XPlace is always in. This subsumes the old separate syncProbeToCommitted().
 void Placer::restoreBestPlacement(BestSlot slot)
 {
     const auto& nodes = db.getMovableNodes();
     #pragma omp parallel for schedule(static)
-    for (int i = 0; i < (int)nodes.size(); i++)
-        nodes[i]->next.node_pos = bestSlotPos(nodes[i], slot);
-}
-
-/// @brief Collapse the lookahead onto the committed position, so every metric describes the same
-///        placement.
-///
-/// A placement here is the PAIR (node_pos, probe_pos): HPWL reads node_pos (Net.h:25) while every
-/// density/overflow metric deposits at probe_pos (computeNodeFootprint, Grid.cpp:36). A restore
-/// writes only node_pos, which leaves the node in a state that existed at no point in the run --
-/// committed position from one iteration, lookahead from another -- so the reported overflow
-/// describes the last iteration rather than the placement being shipped (TODO #24).
-/// freezeMovableMacros collapses state the same way, for the same reason (DataBase.cpp:396).
-///
-/// DELIBERATELY NOT folded into restoreBestPlacement(). That runs mid-iteration too, at the phase-2
-/// macro freeze, where nothing is being reported and everything downstream is re-initialised
-/// anyway. Doing it there perturbs the phase-2 restart by ~0.04% in step_length/density_weight,
-/// which amplifies chaotically over the remaining iterations (mms_adaptec1: 1325 -> 1288 iterations,
-/// HPWL +0.24%, overflow +2.8% -- a wash, but it costs an MMS re-baseline for nothing). This is a
-/// REPORTING fix, so it is applied only where a report is about to be produced.
-void Placer::syncProbeToCommitted()
-{
-    const auto& nodes = db.getMovableNodes();
-    #pragma omp parallel for schedule(static)
-    for (int i = 0; i < (int)nodes.size(); i++)
-        nodes[i]->next.probe_pos = nodes[i]->next.node_pos;
+    for (int i = 0; i < (int)nodes.size(); i++) {
+        const Position& saved = bestSlotPos(nodes[i], slot);
+        nodes[i]->next.node_pos  = saved;
+        nodes[i]->next.probe_pos = saved;
+    }
 }
 
 AIEPLACE_NAMESPACE_END

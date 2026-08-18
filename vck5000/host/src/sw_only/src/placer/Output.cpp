@@ -346,8 +346,7 @@ Placer::BestChoice Placer::restoreBestSolution()
     BestChoice chosen = selectBestSolution();
 
     if (chosen.sol) {
-        restoreBestPlacement(chosen.slot);
-        syncProbeToCommitted();   // everything below this point reports on the restored placement
+        restoreBestPlacement(chosen.slot);   // restores both halves; everything below reports on it
         Logger::log_info("Restored " + std::string(chosen.type) + " best placement from iteration " +
             std::to_string(chosen.sol->iteration) +
             " (HPWL: " + std::to_string(chosen.sol->hpwl) +
@@ -551,7 +550,11 @@ float Placer::getMemoryUsageMB()
 void Placer::recordIterationResults()
 {
     TIME_FUNCTION();
-    float hpwl = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), cfg["params"]["ignore_net_degree"].value_or(100));
+    // Measured at the LOOKAHEAD v_k (at_probe = true), matching XPlace's single position variable
+    // (TODO #32/7a; see snapshotBestPlacement). This is the one `hpwl` XPlace's evaluator_fn
+    // produces: it feeds the recorder's delta_hpwl, convergence, AND update_best_sol alike, so all
+    // three describe the same placement as the overflow computed just below.
+    float hpwl = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), cfg["params"]["ignore_net_degree"].value_or(100), true);
     // Drive convergence off the smoothed overflow (clamped footprints; equivalent to XPlace's
     // expand_ratio-inflated field): the smoothed density the optimizer minimizes, which descends
     // toward the stop threshold. The exact overflow is reported separately as the physical result.
@@ -570,7 +573,11 @@ void Placer::recordIterationResults()
 
     // Best-solution tracking, ported from XPlace's update_best_sol (param_scheduler.py:390-451).
     // Skip early iterations to let the solver stabilize (XPlace: `iter - init_iter < 50`).
-    if (iteration < BEST_SOL_MIN_ITER) return;
+    // PHASE-RELATIVE, as XPlace's is (param_scheduler.py:393, and init_iter is reset at every
+    // optimizer restart): after the phase-2 mixed-size restart the solver is re-seeded and
+    // re-estimates its step, so it needs the same 50-iteration settling window phase 1 got.
+    // This was absolute until TODO #32/7b, which made phase 2 start tracking immediately.
+    if (phaseIteration() < BEST_SOL_MIN_ITER) return;
 
     const bool converged_now = (overflow < overflow_threshold);
 

@@ -58,8 +58,11 @@ public:
     void sortPositionsByY();
 
     // Metrics
-    position_type computeWirelength(string method); // method must be "HPWL" or "RSMT"
-    position_type computeWirelength_HPWL(); // Simple Half-Perimeter Wirelength
+    // CLAUDE CODE: at_probe picks which half of the (node_pos, probe_pos) pair the metric reads.
+    // XPlace optimizes v_k directly (nesterov_optimizer.py:71) and measures HPWL there, so
+    // best-solution tracking passes true; anything reporting a committed placement leaves it false.
+    position_type computeWirelength(string method, bool at_probe = false); // method must be "HPWL" or "RSMT"
+    position_type computeWirelength_HPWL(bool at_probe = false); // Simple Half-Perimeter Wirelength
     position_type computeWirelength_RSMT(); // Rectilinear Steiner Minimum Spanning Tree
 
     // Debugging

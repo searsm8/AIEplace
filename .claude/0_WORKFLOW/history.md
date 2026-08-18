@@ -18,6 +18,8 @@ removed — it had been sitting in both files since 2026-07-30).
 
 **Closed 2026-08-17:** **#24** — best-solution tracking rebuilt to match XPlace's `get_best_solution`: three trackers (`best_primary`/`best_aux`/`best_rollback`), each with its own geometry buffer in `Node` (a single shared buffer meant last-writer-won, so the log's provenance line named a placement that wasn't the one shipped — confirmed on 17 of 29 `full44_v2` runs, all converged), plus a torn-restore fix (`syncProbeToCommitted()`) so reported overflow describes the shipped placement instead of the last iteration. All three test suites green, 3 baselines regenerated, MMS suite re-run (16/16). Closed with two remaining faithfulness gaps and an A/B that needs widening spun off to **#32**, rather than reopening this ticket for follow-on work its own defects didn't block.
 
+**Closed 2026-08-17:** **#14** — zoomable visualizer finished, all three remaining items. The MMS zoom path ran end-to-end on newblue1 and `MIN_SIZE` was cleared: at zoom it floors **0%** of std cells, fillers and macros, and the only nodes it does floor are 337 **zero-area** bookshelf terminals (`w == h == 0`), where flooring is the desired behaviour. **Node-lock** landed (`--lock <name>|index:N|most-moved`): the window re-centres on one tracked cell every frame, verified by assertion at **0.0000 px** from the reticle across all 31 frames and all three generations. That needed a dump change — `PositionDump.cpp` now writes a sparse per-generation `names_gen<N>.txt`, because `freezeMovableMacros()` + `rebuildFillers()` reshuffle indices at the phase-2 boundary and the name is the only identifier that survives it (placement bit-identical, `make test-regress` unchanged). **Multi-view** landed (`--add-view`, repeatable): N windows in one pass, decoding each frame once, verified byte-identical to N separate invocations. Builds on #16, which moved rendering out of the placer.
+
 **Closed 2026-08-16:** **#31** — the `Best OVFW > 0.1` stalls AND the ~7x overflow-vs-XPlace gap were one root cause: XPlace caps `num_bin` at `num_rows` (`database.py:161`) but sw_only applied its identical `row_cap` only on the auto grid path, so `dse --grid xplace`'s explicit 512 bypassed it — 13 of 20 ISPD2015 designs ran finer than XPlace. Fixed by capping any grid at `num_rows` (`Setup.cpp`, Mark's call over a manifest patch); headline 1.0149 -> **1.0113 mean / 1.0096 median**, GP-ratio mean 1.0223 -> 1.0047, and the overflow *signal* (which drives the gamma/lambda schedule) now matches XPlace on the std-cell designs. An independent naive reference proved `computeOverflow` correct at every grid — it was never a metric bug. Also landed the 3-column overflow tooling (`Best OVFW` / `Our Exact OVFW` / `XPlace In OVFW`), closing #3's `gp_ovfl_in` reconciliation. Residual macro fixed-density difference -> #3; `node_pos`-deposit question -> tasks.md Topics.
 
 **Closed 2026-08-16:** **#25** — RETRACTED, not resolved: the premise was false. XPlace does NOT force `target_density = 1.0` on ISPD2015 — its `setup_dataset.py` sets the same per-design td we do (0 mismatches on all 20). The `target_density: 1.0` in XPlace's log is a params-dict echo; the effective value (`target density = 0.65`, `database.py:839`) matches ours. The overflow ratios the entry cited were real but were the td<1 grid divergence (#31), measured against a mislabeled column. Guard against re-deriving: grep `setup_dataset.py` for the `mgc_` branches.
@@ -55,6 +57,63 @@ change (the denylist had been silently blanking `Best HPWL` on every row), and g
 label-keyed and what the summary joins swept parameters from. The two live defects it *found* and
 did not fix are now **#29** (the XPlace reference belongs in the placer, masked-vs-masked and
 site-width-correct) and **#30** (LG+DP inside `dse.py`).
+
+---
+
+## #14 — Zoomable visualizer window (opened 2026-07-31)
+
+Done: a configurable `ViewWindow` (centre/span as **fractions of the die**, so one setting means the
+same magnification on every benchmark), four zoom-only detail layers (row pitch, density bins, cell
+outlines, filler/cell separation), and the GIF path. Verified by rendering on `mgc_pci_bridge32_a`.
+
+⚠️ **The y axis was mirrored until 2026-08-05.** Every PNG/GIF produced before that date is
+vertically flipped relative to every one produced after — including `.claude/2_ARTIFACTS/newblue5_placement.gif`
+and the whole `GIFS_*` pile. **Do not compare an old frame against a new one and conclude the
+placement moved.**
+
+- [x] **DONE 2026-08-17 — MMS zoom path run, and `MIN_SIZE` floors nothing at zoom that it
+      shouldn't.** `make_viz_gifs.py --designs newblue1 --zoom --every 50` ran end-to-end (512,198
+      nodes, 3 generations, 31 frames, both GIFs produced). Measured the floor directly off the
+      dump rather than eyeballing frames:
+
+      | view | floored | std cells | fillers | macros | fixed |
+      |---|---|---|---|---|---|
+      | full die | 100.0% | 100% | 100% | 0% | 100% |
+      | zoom span 0.05 | **0.1%** | **0%** | **0%** | 0% | 100% |
+      | zoom span 0.01 | **0.1%** | **0%** | **0%** | 0% | 100% |
+
+      The only thing floored at zoom is the 337 fixed terminals, and those are **exactly zero-area**
+      (`w == h == 0`, bookshelf terminals) — flooring them is the desired behaviour, since otherwise
+      they draw as nothing. Real cells are 3–1140 units wide against a 0.7-unit floor threshold at
+      span 0.05, i.e. 4× clear at the *narrowest* cell. Nothing to fix.
+- [x] **DONE 2026-08-17 — node-lock landed: `generate_viz.py --lock TARGET`.** The window re-centres
+      on one tracked cell every frame. TARGET is a node name, `index:N`, or `most-moved`.
+      **Needed a dump-format change**: the dump carried no names, so `PositionDump.cpp` now writes
+      `names_gen<N>.txt` — sparse `"<index> <name>"`, skipping fillers (they are generated
+      whitespace, not design objects, and are ~35% of the node set). Written **per generation**, and
+      that is the point: `freezeMovableMacros()` + `rebuildFillers()` reshuffle the node set at the
+      phase-2 boundary, so index *i* is a different node either side of it and the name is the only
+      identifier that survives. Placement behaviour unaffected — `make test-regress` bit-identical.
+      **Verified by assertion, not by eye**: for all 31 newblue1 frames, spanning **all three
+      generations**, the tracked cell's centre lands **0.0000 px** from the canvas reticle (tol 0.5 px).
+      `most-moved` picks the furthest-travelling *named movable* cell across generation 0 — a stable
+      target, deliberately not the per-frame winner, which would pan the window randomly rather than
+      follow anything.
+- [x] **DONE 2026-08-17 — multiple windows per run: `--add-view` (repeatable).** `--add-view full
+      --add-view zoom:0.4,0.6,0.02` renders any number of windows in ONE pass, each to its own
+      window-named directory (`viz_render/zoom_c0.4-0.6_s0.02`). Each frame is decoded **once** and
+      drawn into every window — `read_frame` is the file I/O plus dequantization, which dominates a
+      zoom render that then discards ~99.99% of the nodes. **Verified byte-identical** to the same
+      windows rendered as separate invocations (3 frames × 2 views, `cmp` on every PNG).
+      Single-view CLI is unchanged, so `make_viz_gifs.py` and the `viz-gif` skill still work.
+      ⚠️ The original entry's premise ("today `output.zoom*` is one window fixed at setup and
+      changing it means re-running the placement") was already void — #16 moved rendering offline.
+      What was actually missing was doing several in one pass.
+
+**Overlay note (2026-08-17):** header lines are scarce — with `DIE_START = 0.10` the **third** one
+lands inside the die box and is drawn over the cells. Benchmark + frame tag + phase now share the
+top line (Mark's call), and the locked-cell name rides the zoom line, which is what keeps a locked
+two-phase frame at two header lines.
 
 ---
 

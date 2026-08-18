@@ -10,6 +10,7 @@ took an hour, which is the whole point -- a new window or a new cadence no longe
     python3 tools/generate_viz.py <run_dir> --iters 1:600:2 # a subset/stride of them
     python3 tools/generate_viz.py <run_dir> --gif           # ...and animate the result
     python3 tools/generate_viz.py <run_dir> --view zoom --center 0.4,0.6 --span 0.02
+    python3 tools/generate_viz.py <run_dir> --add-view full --add-view zoom:0.4,0.6,0.02  # many
 
 At MMS scale a full-die frame is 200k-1M cells in ~2000 px, so everything below the macro scale is
 a grey wash; the zoom is where the standard-cell rows, the filler distribution and the macro edges
@@ -17,8 +18,9 @@ become visible. Only the zoom draws row pitch, density-bin boundaries and per-ce
 only the zoom clips to the window -- in the full-die view fixed terminals legitimately sit in the
 margin outside the core-row die and clipping would silently hide them.
 
-Node-lock and multi-view are still to come; the coordinate map already takes an arbitrary window,
-so they are additive.
+Multi-view landed (TODO #14): --add-view renders any number of windows in ONE pass, decoding each
+frame once. Node-lock -- a window that re-centres on a tracked cell every frame -- is still to come;
+the coordinate map already takes an arbitrary window, so it is additive.
 
 Fidelity: the geometry constants, layer order and colours below are ported from Visualizer.cpp and
 must stay in step with it while both renderers exist. `.claude/2_ARTIFACTS/compare_viz_frames.py` is the
@@ -95,9 +97,67 @@ def load_run(run_dir):
     for gen in manifest["generations"]:
         gen["static"] = np.fromfile(dump / f"nodes_gen{gen['id']}.bin", dtype=STATIC_DTYPE)
         gen["path"] = dump / f"frames_gen{gen['id']}.bin"
+        gen["names_path"] = dump / gen.get("names", f"names_gen{gen['id']}.txt")
         for i, (it, tag) in enumerate(zip(gen["frame_iters"], gen["frame_tags"])):
             frames.append((gen, i, it, tag))
     return manifest, frames
+
+
+def name_to_index(gen):
+    """{node name -> static-record index} for one generation, from its sparse names file.
+
+    Built per generation, and that is the whole point of locking by NAME rather than by index:
+    freezeMovableMacros() and rebuildFillers() reshuffle the node set at the phase-2 boundary, so
+    index i is a different node either side of it. The name is what survives.
+    """
+    if "name_index" not in gen:
+        path = gen["names_path"]
+        if not path.is_file():
+            sys.exit(f"{path} not found -- this dump predates node names; re-run the placement "
+                     f"(the placer writes names_gen<N>.txt alongside nodes_gen<N>.bin).")
+        table = {}
+        for line in path.read_text().splitlines():
+            index, _, name = line.partition(" ")
+            if name:
+                table[name] = int(index)
+        gen["name_index"] = table
+    return gen["name_index"]
+
+
+def resolve_lock(manifest, frames, target):
+    """Lock target -> a node NAME, resolving the two computed forms against generation 0.
+
+    Returned as a name rather than an index so the caller re-resolves it per generation.
+    """
+    gen0 = manifest["generations"][0]
+    if target.startswith("index:"):
+        index = int(target.split(":", 1)[1])
+        for name, i in name_to_index(gen0).items():
+            if i == index:
+                return name
+        sys.exit(f"--lock index:{index} is not a named node in generation 0 "
+                 f"(fillers are anonymous and cannot be locked onto).")
+
+    if target == "most-moved":
+        # Total displacement over the run's FIRST generation, not "this iteration": a per-frame
+        # winner changes cell every frame, which pans the window randomly rather than following
+        # anything. This picks one cell and stays on it, which is the question the view answers.
+        gen_frames = [f for f in frames if f[0] is gen0]
+        if len(gen_frames) < 2:
+            sys.exit("--lock most-moved needs at least 2 frames in generation 0.")
+        first = read_frame(manifest, gen0, gen_frames[0][1])
+        last = read_frame(manifest, gen0, gen_frames[-1][1])
+        moved = np.hypot(last[:, 0] - first[:, 0], last[:, 1] - first[:, 1])
+        # Fillers move furthest and are anonymous; restrict to the real, named, movable cells.
+        movable_named = {i: n for n, i in name_to_index(gen0).items() if i < gen0["filler_start"]}
+        if not movable_named:
+            sys.exit("--lock most-moved found no named movable nodes in generation 0.")
+        best = max(movable_named, key=lambda i: moved[i])
+        return movable_named[best]
+
+    if target not in name_to_index(gen0):
+        sys.exit(f"--lock: no node named '{target}' in generation 0.")
+    return target
 
 
 def read_frame(manifest, gen, index):
@@ -200,6 +260,7 @@ class View:
         self.die_w, self.die_h = die["w"], die["h"]
         self.zoomed = center is not None
 
+        self.span_frac = span   # kept verbatim for slug(); `side` below is already in die units
         if not self.zoomed:
             self.xl, self.yl = 0.0, 0.0
             self.width, self.height = self.die_w, self.die_h
@@ -238,6 +299,15 @@ class View:
         """Window centre as a fraction of the die -- i.e. what --center was given."""
         return ((self.xl + 0.5 * self.width) / self.die_w,
                 (self.yl + 0.5 * self.height) / self.die_h)
+
+    def slug(self):
+        """Directory name for this view. Carries the WINDOW, not just the mode: rendering several
+        zooms of one run is the point of --add-view, and they would otherwise all land in
+        viz_render/zoom and overwrite each other frame by frame."""
+        if not self.zoomed:
+            return "full"
+        cx, cy = self.center_frac()
+        return f"zoom_c{cx:g}-{cy:g}_s{self.span_frac:g}"
 
     def map_x(self, die_x):
         return DIE_START + (die_x - self.xl) * DIE_SCALE / self.width
@@ -373,7 +443,7 @@ def load_font(px):
     return ImageFont.load_default()
 
 
-def draw_overlay(image, view, manifest, iteration, tag, phase, phase_iter, scalars):
+def draw_overlay(image, view, manifest, iteration, tag, phase, phase_iter, scalars, lock_label=""):
     """The text overlay from Visualizer::drawPlacementInfoOverlay, in the same canvas positions."""
     draw = ImageDraw.Draw(image)
     W, H = view.out_w, view.out_h
@@ -382,18 +452,19 @@ def draw_overlay(image, view, manifest, iteration, tag, phase, phase_iter, scala
     def text(ux, uy, s):
         draw.text((ux * W, uy * H), s, fill=(0, 0, 0), font=font, anchor="ls")
 
-    # The frame tag rides the benchmark line rather than claiming a header line of its own: with
-    # DIE_START = 0.10 a 4th line lands inside the die box and is unreadable against the cells.
-    # It used to be printed in the footer's alpha slot, which cost tagged frames alpha and lambda
-    # -- exactly the two scalars a phase-boundary frame is worth looking at for.
-    text(0.01, 0.04, f"Benchmark: {manifest['benchmark']}" + (f"   [{tag}]" if tag else ""))
+    # Benchmark, frame tag and phase all share the top line. Header lines are scarce: with
+    # DIE_START = 0.10 the 4th one lands inside the die box and is unreadable against the cells,
+    # and a locked zoom already wants three. The tag used to be printed in the footer's alpha slot,
+    # which cost tagged frames alpha and lambda -- exactly the two scalars a phase-boundary frame
+    # is worth looking at for.
+    top = f"Benchmark: {manifest['benchmark']}" + (f"   [{tag}]" if tag else "")
+    if phase:
+        top += f"   Phase: {phase} (phase iter {phase_iter})"
+    text(0.01, 0.04, top)
 
     # Optional header lines, each its OWN line rather than a suffix on the one above: past ~70
     # characters a line runs off the canvas and neither renderer wraps or warns.
     header_y, HEADER_LINE = 0.075, 0.035
-    if phase:
-        text(0.01, header_y, f"Phase: {phase} (phase iter {phase_iter})")
-        header_y += HEADER_LINE
     # Where on the die this window is, and how much of it. Without this a zoom frame is
     # unreadable -- a few hundred cells with nothing to locate them by.
     if view.zoomed:
@@ -401,10 +472,15 @@ def draw_overlay(image, view, manifest, iteration, tag, phase, phase_iter, scala
         # --center was given, so a frame can be reproduced from its own caption. Absolute die
         # coordinates are unreadable without knowing the die size, which the caption does not carry.
         cx, cy = view.center_frac()
+        # The locked cell rides THIS line. Merging Benchmark+Phase above freed exactly one header
+        # slot, and giving it back to a "Locked:" line spends it at y=0.110 -- inside the die box,
+        # which starts at DIE_START=0.10 -- so the name is drawn over the cells. Two header lines
+        # is the budget that clears the box; the zoom line already says WHERE the window went, and
+        # under a lock the only thing missing is what took it there.
         text(0.01, header_y,
              f"Zoom: {100.0 * view.width / view.die_w:.2g}% x "
              f"{100.0 * view.height / view.die_h:.2g}% of die @ "
-             f"({cx:.3f}, {cy:.3f})")
+             f"({cx:.3f}, {cy:.3f})" + (f"   Locked: {lock_label}" if lock_label else ""))
         header_y += HEADER_LINE
 
     # The footer is now the same four scalars in every view and on every frame, tagged or not.
@@ -417,8 +493,32 @@ def draw_overlay(image, view, manifest, iteration, tag, phase, phase_iter, scala
         text(0.78, 0.99, f"lambda: {lam:.3e}")
 
 
-def render_frame(manifest, view, gen, index, iteration, tag, scalars):
-    pos = read_frame(manifest, gen, index)
+def locked_view(manifest, gen, pos, lock_name, span, canvas_px, supersample):
+    """A zoom window centred on one tracked node, for THIS frame.
+
+    Rebuilt every frame rather than fixed at setup -- that is the difference between watching cells
+    drift through a static box and watching what the optimizer does to one cell. View construction
+    is a handful of arithmetic, so per-frame is free next to the raster.
+    """
+    index = name_to_index(gen).get(lock_name)
+    if index is None:
+        return None   # node absent from this generation; caller decides what to do
+    die = manifest["die"]
+    size = gen["static"][index]
+    # Centre on the node's MIDDLE, not its origin: a macro's origin is its lower-left corner, so
+    # centring there puts three quarters of the macro outside the window.
+    cx = (pos[index, 0] + 0.5 * size["w"]) / die["w"]
+    cy = (pos[index, 1] + 0.5 * size["h"]) / die["h"]
+    return View(die, canvas_px, center=(cx, cy), span=span, supersample=supersample)
+
+
+def render_frame(manifest, view, gen, pos, iteration, tag, scalars, lock_label=""):
+    """Draw one already-decoded frame into one view.
+
+    `pos` is passed in rather than read here so that rendering N views of a run decodes each frame
+    ONCE -- read_frame is the file I/O plus the dequantization, and at MMS node counts it dominates
+    a zoom render, which discards ~99.99% of the nodes in View.visible().
+    """
     static = gen["static"]
     size = np.stack([static["w"], static["h"]], axis=1).astype(np.float64)
     kinds = static["kind"]
@@ -467,7 +567,7 @@ def render_frame(manifest, view, gen, index, iteration, tag, scalars):
 
     phase = gen["phase"] if len(manifest["generations"]) > 1 else ""
     draw_overlay(image, view, manifest, iteration, tag, phase,
-                 iteration - gen["first_iter"], scalars)
+                 iteration - gen["first_iter"], scalars, lock_label)
     return image
 
 
@@ -500,6 +600,17 @@ def main():
                     help="rasterize at Nx and box-downsample for antialiasing. Default 2 for the "
                          "full-die view, 4 for zoom (which draws per-cell outlines that need the "
                          "resolution -- see SUPERSAMPLE_DEFAULT). 1 disables; costs N^2.")
+    ap.add_argument("--add-view", action="append", default=[], metavar="SPEC",
+                    help="render an ADDITIONAL window in the same pass; repeatable. SPEC is "
+                         "'full' or 'zoom:CX,CY,SPAN'. Each window gets its own output "
+                         "directory named after itself. Given at least once, --view/--center/"
+                         "--span are ignored. Every frame is decoded once and drawn into each "
+                         "window, so N windows cost far less than N invocations.")
+    ap.add_argument("--lock", metavar="TARGET",
+                    help="follow ONE node: the window re-centres on it every frame instead of "
+                         "staying put. TARGET is a node name, 'index:N', or 'most-moved' (the "
+                         "named movable cell that travels furthest across generation 0). Implies "
+                         "a zoom window of --span; incompatible with --add-view.")
     ap.add_argument("--gif", action="store_true", help="animate the output with gif_builder.py")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
@@ -507,38 +618,112 @@ def main():
     manifest, frames = load_run(args.run_dir)
     scalars = read_iteration_scalars(args.run_dir)
 
-    ss = args.supersample if args.supersample else SUPERSAMPLE_DEFAULT[args.view]
-    if args.view == "zoom":
-        center = tuple(float(v) for v in args.center.split(","))
-        if len(center) != 2:
-            ap.error("--center takes X,Y as fractions of the die, e.g. 0.5,0.5")
-        view = View(manifest["die"], args.canvas, center=center, span=args.span, supersample=ss)
-    else:
-        view = View(manifest["die"], args.canvas, supersample=ss)
+    def build_view(mode, center, span):
+        ss = args.supersample if args.supersample else SUPERSAMPLE_DEFAULT[mode]
+        if mode == "zoom":
+            return View(manifest["die"], args.canvas, center=center, span=span, supersample=ss)
+        return View(manifest["die"], args.canvas, supersample=ss)
 
-    out_dir = args.out or args.run_dir / "viz_render" / args.view
-    out_dir.mkdir(parents=True, exist_ok=True)
+    views = []
+    if args.lock:
+        if args.add_view:
+            ap.error("--lock follows one node in one window; --add-view renders several fixed ones")
+        lock_name = resolve_lock(manifest, frames, args.lock)
+        lock_ss = args.supersample if args.supersample else SUPERSAMPLE_DEFAULT["zoom"]
+        out_dirs = [args.out or args.run_dir / "viz_render" / f"lock_{lock_name.replace('/', '_')}"]
+        out_dirs[0].mkdir(parents=True, exist_ok=True)
+
+        wanted = parse_iters(args.iters)
+        selected = [f for f in frames if wanted(f[2])]
+        if not args.quiet:
+            print(f"{len(selected)} of {len(frames)} frames, locked on '{lock_name}' "
+                  f"(span {args.span}) -> {out_dirs[0]}")
+
+        written, skipped = [], 0
+        for gen, index, iteration, tag in selected:
+            pos = read_frame(manifest, gen, index)
+            view = locked_view(manifest, gen, pos, lock_name, args.span, args.canvas, lock_ss)
+            if view is None:
+                skipped += 1
+                continue
+            name = (f"{BEST_PNG_PREFIX}iter{iteration}.png" if tag == "best_solution"
+                    else f"iter_{iteration}" + (f"_{tag}" if tag else "") + ".png")
+            image = render_frame(manifest, view, gen, pos, iteration, tag, scalars, lock_name)
+            image.save(out_dirs[0] / name)
+            written.append(out_dirs[0] / name)
+            if not args.quiet:
+                print(f"  {name}", flush=True)
+
+        if skipped:
+            print(f"warning: '{lock_name}' is absent from {skipped} frame(s); those were skipped.",
+                  file=sys.stderr)
+        if not written:
+            sys.exit(f"--lock produced no frames: '{lock_name}' matched no selected frame.")
+        if args.gif:
+            builder = Path(__file__).resolve().parent / "gif_builder.py"
+            cmd = [sys.executable, str(builder), "-o", str(out_dirs[0] / GIF_NAME),
+                   "--frames", *(str(p) for p in written)]
+            subprocess.run(cmd + (["--quiet"] if args.quiet else []), check=True)
+        return
+
+    if args.add_view:
+        if args.out:
+            ap.error("--out names a single directory; with --add-view each window gets its own")
+        for spec in args.add_view:
+            mode, _, rest = spec.partition(":")
+            if mode == "full":
+                if rest:
+                    ap.error(f"'full' takes no parameters, got: {spec}")
+                views.append(build_view("full", None, None))
+            elif mode == "zoom":
+                try:
+                    cx, cy, span = (float(v) for v in rest.split(","))
+                except ValueError:
+                    ap.error(f"--add-view zoom wants zoom:CX,CY,SPAN, got: {spec}")
+                views.append(build_view("zoom", (cx, cy), span))
+            else:
+                ap.error(f"--add-view SPEC must start with 'full' or 'zoom', got: {spec}")
+    else:
+        center = None
+        if args.view == "zoom":
+            center = tuple(float(v) for v in args.center.split(","))
+            if len(center) != 2:
+                ap.error("--center takes X,Y as fractions of the die, e.g. 0.5,0.5")
+        views.append(build_view(args.view, center, args.span))
+
+    # Single-view keeps the historical viz_render/<view> path (make_viz_gifs.py and the viz-gif
+    # skill both reach straight into it); only multi-view needs the window-qualified name.
+    if len(views) == 1 and not args.add_view:
+        out_dirs = [args.out or args.run_dir / "viz_render" / args.view]
+    else:
+        out_dirs = [args.run_dir / "viz_render" / v.slug() for v in views]
+    for d in out_dirs:
+        d.mkdir(parents=True, exist_ok=True)
 
     wanted = parse_iters(args.iters)
     selected = [f for f in frames if wanted(f[2])]
     if not args.quiet:
-        where = (f", window {view.width:.4g} x {view.height:.4g} @ centre "
-                 f"({view.center_frac()[0]:.3f}, {view.center_frac()[1]:.3f})") if view.zoomed else ""
         print(f"{len(selected)} of {len(frames)} frames, "
-              f"{len(manifest['generations'])} generation(s), "
-              f"canvas {view.out_w}x{view.out_h} ({view.ss}x supersampled)"
-              f"{where} -> {out_dir}")
+              f"{len(manifest['generations'])} generation(s), {len(views)} view(s)")
+        for view, out_dir in zip(views, out_dirs):
+            where = (f", window {view.width:.4g} x {view.height:.4g} @ centre "
+                     f"({view.center_frac()[0]:.3f}, {view.center_frac()[1]:.3f})"
+                     if view.zoomed else "")
+            print(f"  canvas {view.out_w}x{view.out_h} ({view.ss}x supersampled)"
+                  f"{where} -> {out_dir}")
 
-    written = []
+    written = [[] for _ in views]
     for gen, index, iteration, tag in selected:
-        image = render_frame(manifest, view, gen, index, iteration, tag, scalars)
+        pos = read_frame(manifest, gen, index)   # decoded ONCE, drawn into every view
         # The two files worth reaching for first are named to sort first: the GIF, then the
         # best-solution frame. Everything else keeps the cairo renderer's iter_<N> naming, so the
         # rest of the folder still reads in trajectory order below them.
         name = (f"{BEST_PNG_PREFIX}iter{iteration}.png" if tag == "best_solution"
                 else f"iter_{iteration}" + (f"_{tag}" if tag else "") + ".png")
-        image.save(out_dir / name)
-        written.append(out_dir / name)
+        for i, (view, out_dir) in enumerate(zip(views, out_dirs)):
+            image = render_frame(manifest, view, gen, pos, iteration, tag, scalars)
+            image.save(out_dir / name)
+            written[i].append(out_dir / name)
         if not args.quiet:
             print(f"  {name}", flush=True)
 
@@ -547,9 +732,10 @@ def main():
         # which put the trajectory in order only as long as every frame was named iter_<N> -- the
         # best-solution frame is deliberately no longer, and would sort to the front of the GIF.
         builder = Path(__file__).resolve().parent / "gif_builder.py"
-        cmd = [sys.executable, str(builder), "-o", str(out_dir / GIF_NAME),
-               "--frames", *(str(p) for p in written)]
-        subprocess.run(cmd + (["--quiet"] if args.quiet else []), check=True)
+        for out_dir, paths in zip(out_dirs, written):
+            cmd = [sys.executable, str(builder), "-o", str(out_dir / GIF_NAME),
+                   "--frames", *(str(p) for p in paths)]
+            subprocess.run(cmd + (["--quiet"] if args.quiet else []), check=True)
 
 
 if __name__ == "__main__":

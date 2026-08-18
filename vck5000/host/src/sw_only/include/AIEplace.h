@@ -388,8 +388,7 @@ public:
     // Bookkeeping and visualization
     void recordIterationResults();
     void snapshotBestPlacement(BestSlot slot);
-    void restoreBestPlacement(BestSlot slot);
-    void syncProbeToCommitted();  // follow a restore with this before REPORTING on the placement
+    void restoreBestPlacement(BestSlot slot);  // restores node_pos AND probe_pos
 
     // Post run analysis
     void computeStatistics();

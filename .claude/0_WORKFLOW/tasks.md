@@ -73,20 +73,20 @@ result dir is not a reference run until you check its argv *and* that it reached
 log header is the argument dump, not what ran; `gp_ovfl_in` is macro-INCLUDED; **newblue4 is
 build-sensitive at ~1%**.
 
-- [ ] **❓DECISION FOR MARK — fixed-density cap-vs-scale: the last known XPlace divergence in the
-      density path.** Promoted 2026-08-17 out of the ⚠️ note buried inside the closed checkbox
-      below, where it was invisible. **Verified in both sources this session:**
-      XPlace `initializer.py:82` — `init_density_map.clamp_(min=0.0, max=1.0).mul_(args.target_density)`
-      = **`min(ρ,1)·td`**, a *scale*. Ours, `Grid::clampFixedDensity` (`Grid.cpp:139`) —
-      `min(total_overlap, area·td)` = **`min(ρ,td)`**, a *cap*. Identical at td=1; at td=0.65 and
-      ρ=0.5 XPlace gives 0.325 and we give 0.50, so **we read high in macro-perimeter bins**.
-      Affects macro designs at td<1 only; the fillerless std-cell designs are untouched, which is
-      why #31's `fft_2` reconciliation (0 fixed cells) did not see it.
-      ⚠️ **This is a behaviour change to a frozen sw_only, and it is not free.** Applying it turns
-      `make test-regress` red (baselines need `--reason` regeneration) and invalidates the committed
-      28-design headline until a full `make dse` re-run. The edit is one line; the re-baseline is
-      the cost. **Mark's call: fix it now and re-run, or record the divergence as known-and-accepted
-      and leave the frozen numbers standing.**
+- [x] **DONE 2026-08-17 — fixed-density is now a SCALE, matching XPlace.** Mark's call: bundle it
+      with #32's 7a/7b and pay for one suite re-run instead of two. `Grid::clampFixedDensity`
+      (`Grid.cpp`) now computes `min(overlap, bin_area) * td` — XPlace's
+      `init_density_map.clamp_(min=0.0, max=1.0).mul_(args.target_density)` (`initializer.py:82`),
+      i.e. `min(ρ,1)·td` — where it previously capped at `min(ρ,td)`. The two differ wherever a bin
+      is partially occupied: at td=0.65, ρ=0.5 XPlace gives 0.325 and the cap gave 0.50, so we read
+      HIGH in macro-perimeter bins.
+      **Identical at td=1, and that is verifiable rather than asserted:** `mms_adaptec1` (td=1.0)
+      re-baselined **bit-identical** — same 1274 iterations, same `.def` sha `91cbbdee0d59`. The two
+      ISPD2015 regress designs (td<1) both moved: `mgc_fft_a` 620 → 632 iterations,
+      `mgc_pci_bridge32_b` 693 → 713.
+      ⚠️ **Net effect on the headline was slightly NEGATIVE** — see summary.md and #32. All three
+      2026-08-17 fixes are faithfulness fixes and together they cost +0.13 pp of mean. Kept anyway,
+      per `CLAUDE.md`'s rule to prefer XPlace's formulation over an ad-hoc win.
 - [ ] **sw_only has no per-row site model.** `enforceDieBoundaries` clamps to the die *rectangle*,
       but 11 of 16 MMS designs have a ragged (staircase) core. `tools/check_row_spans.py`: adaptec3
       **315 cells outside their row's span** (worst overhang 4122), newblue4 25, adaptec5 23.
@@ -226,30 +226,6 @@ template run looks nondeterministic. **Pin it in any manual A/B.**
             serve it. Those cannot all be true. Check the code, then fix the entry — and if the re-test is
             real, run it now that #19 has fixed the stop criterion.
       </details>
-
----
-
-## #14 — Zoomable visualizer window (opened 2026-07-31)
-
-Done: a configurable `ViewWindow` (centre/span as **fractions of the die**, so one setting means the
-same magnification on every benchmark), four zoom-only detail layers (row pitch, density bins, cell
-outlines, filler/cell separation), and the GIF path. Verified by rendering on `mgc_pci_bridge32_a`.
-
-⚠️ **The y axis was mirrored until 2026-08-05.** Every PNG/GIF produced before that date is
-vertically flipped relative to every one produced after — including `.claude/2_ARTIFACTS/newblue5_placement.gif`
-and the whole `GIFS_*` pile. **Do not compare an old frame against a new one and conclude the
-placement moved.**
-
-- [ ] **Run the zoom path once on a full MMS design** —
-      `python3 tools/make_viz_gifs.py --designs newblue1 --zoom --every 50`. Watch whether `MIN_SIZE`
-      (0.001 of canvas) still floors anything at zoom, where it should not.
-- [ ] **Zoom window locked to a NODE, not a fixed region** — give the window a target (a node name,
-      a macro, or "the node that moved most this iteration") and re-centre every frame, so the
-      animation tracks that cell instead of watching cells drift through a static box. This is the
-      version that answers *what is the optimizer doing to this cell*. Needs per-frame recomputation,
-      so it belongs in the offline tool. → [[_NEW_HANDOFF_viz_offline_tool_20260805.md]]
-- [ ] **Multiple zoom levels / regions per run** — today `output.zoom*` is one window fixed at setup
-      and changing it means re-running the placement. Same conclusion: offline tool.
 
 ---
 

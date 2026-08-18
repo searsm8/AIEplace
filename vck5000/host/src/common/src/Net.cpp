@@ -70,10 +70,10 @@ string Net::to_string()
  * @param method "HPWL" or "RSMT"
  * @return the net's wirelength
  */
-position_type Net::computeWirelength(string method)
+position_type Net::computeWirelength(string method, bool at_probe)
 {
     if (method == "HPWL")
-        return computeWirelength_HPWL();
+        return computeWirelength_HPWL(at_probe);
     else if (method == "RSMT")
         return computeWirelength_RSMT();
     else
@@ -88,13 +88,18 @@ position_type Net::computeWirelength(string method)
  * @brief Half-Perimeter Wirelength: width + height of the net's pin bounding box.
  * @return the net's HPWL
  */
-position_type Net::computeWirelength_HPWL()
+position_type Net::computeWirelength_HPWL(bool at_probe)
 {
-    Position first = mv_pins.front().getPos();
+    // CLAUDE CODE: one branch outside the loop, not per pin -- this runs over every net every
+    // iteration and the predicate is loop-invariant.
+    auto pin_pos = [at_probe](const NetPin& pin) {
+        return at_probe ? pin.getProbePos() : pin.getPos();
+    };
+    Position first = pin_pos(mv_pins.front());
     float min_x = first.x, max_x = first.x;
     float min_y = first.y, max_y = first.y;
     for (const NetPin& pin : mv_pins) {
-        Position p = pin.getPos();
+        Position p = pin_pos(pin);
         min_x = std::min(min_x, p.x); max_x = std::max(max_x, p.x);
         min_y = std::min(min_y, p.y); max_y = std::max(max_y, p.y);
     }
