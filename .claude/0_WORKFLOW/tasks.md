@@ -570,73 +570,33 @@ solved problem, on a frozen placer. → [[REPORT_23_site_width_seed_20260810.md]
 
 ---
 
-## #32 — Best-solution tracking: two remaining XPlace divergences + widen the A/B (opened 2026-08-17)
+## #33 — The aux ACCEPT budget is hardcoded and has never been swept (opened 2026-08-17)
 
-**Spun off #24 at close.** #24 fixed the shared-buffer and torn-restore defects and made the
-*selection rule* faithful to XPlace's `get_best_solution`. Auditing that closure ("is it faithful
-now?") turned up two things the rule itself doesn't reach, plus unfinished confidence on a value
-the rule depends on. None of these are regressions — #24's fixes are correct as far as they go.
+Spun off #32's A/B rather than holding that item open, because it is a different knob.
 
-- [x] **DONE 2026-08-17 — we now track on the lookahead v_k, as XPlace does (7a).** Mark's call:
-      adopt XPlace's position. `snapshotBestPlacement()` stores `next.probe_pos`, and
-      `recordIterationResults()` measures HPWL at the probe via a new `at_probe` argument threaded
-      through `computeTotalWirelength` → `computeWirelength` → `computeWirelength_HPWL`
-      (`host/src/common/`, defaults false so the pl_algo host is unaffected). HPWL, overflow and
-      the stored solution now describe **one** position, which is XPlace's whole structure: `p` IS
-      `v_k` (`nesterov_optimizer.py:71`) and `evaluator_fn(mov_node_pos)` measures both metrics
-      there (`run_placement_nesterov.py:142-145`). Before, we stored u, measured HPWL at u and
-      overflow at v — a pair no iteration ever held.
-      ⚠️ **This is a behavior change, not a bug fix, and it moves every number.** All three regress
-      baselines regenerated. On `mms_adaptec1` (frozen regress config): **1259 → 1274 iterations,
-      HPWL 6.366e7 → 6.344e7 (−0.35%), smoothed overflow 0.0405 → 0.0453**.
-      **The 28-design suite has NOT been re-scored** — summary.md's 1.0096/1.0113 headline predates
-      this and is now stale. → next action: `make dse`.
-- [x] **DONE 2026-08-17 — `BEST_SOL_MIN_ITER` is now phase-relative (7b).** `Output.cpp` gates on
-      `phaseIteration()`, not absolute `iteration`, matching `param_scheduler.py:393` (XPlace resets
-      `init_iter` at every optimizer restart). `phaseIteration()` was already the established
-      analogue everywhere in `Schedule.cpp` — including `past_warmup = phaseIteration() >= 50` at
-      `Schedule.cpp:39`, which mirrors `param_scheduler.py:286` — so this call site was the lone
-      holdout. Phase 2 now gets the same 50-iteration settling window phase 1 does.
-- [x] **DONE 2026-08-17 — `syncProbeToCommitted()` deleted; folded into `restoreBestPlacement()`,
-      which now restores BOTH halves of the (node_pos, probe_pos) pair.** Mark asked what it was
-      for; the answer is that a restore wrote only `node_pos` while every density/overflow metric
-      reads `probe_pos`, so the reported overflow described the last iteration rather than the
-      shipped placement (#24 defect 2). 7a does **not** retire that — it changes which value is
-      torn, not whether it is torn.
-      **The comment blocking the fold was wrong.** It claimed folding perturbs the phase-2 restart
-      (`mms_adaptec1: 1325 → 1288 iterations, HPWL +0.24%`). Measured A/B on the frozen config,
-      isolating the fold from 7a/7b: **bit-exact identical** — trajectory row-for-row and the same
-      `.def` sha256 (`91cbbdee0d59`), on all three regress designs. Mechanism: the phase-2 restore
-      is immediately followed by `freezeMovableMacros()` (collapses macro state onto `node_pos`,
-      `DataBase.cpp:421`) and `reinitializeStdCells()` (re-seeds everything else), so the
-      `probe_pos` write is overwritten before anything reads it. At the *final* restore the fold is
-      equivalent by construction. Verified the path actually ran (no "no best placement recorded"
-      warning, phase 1 = 654 iterations).
-- [~] **Settle the `best_aux_max_hpwl_ratio` A/B — RUN IN FLIGHT 2026-08-17 evening.**
-      `make dse DSE_ARGS="--set best_aux_max_hpwl_ratio=1.005,1.010"` — **all 28 designs × 2 arms =
-      56 runs, ~2.7 h** (Mark's call). Full-suite rather than a subset, because a subset has to be
-      chosen by a projection the report itself calls unreliable, and one arm of the whole suite is
-      only 80 min. Verdict criterion: the suite median/mean DP ratio under each arm, directly.
-      **It is a RE-RUN, not a widening.** The 2026-08-10 A/B ran on a **pre-7a** binary, and 7a
-      changed which position both trackers snapshot *and* where HPWL is measured — precisely the two
-      quantities this ratio compares. The old "keep 1.005" verdict (n=2: `bigblue2` +0.138% post-DP,
-      `mgc_superblue19` +0.410%, both favouring 1.005) describes a binary that no longer exists.
-      ⚠️ **There are TWO 1.005 budgets in XPlace and this knob only drives one** (found 2026-08-17
-      while answering "what is the aux ratio?"):
-      | | XPlace | ours |
-      |---|---|---|
-      | **accept** — record a new aux snapshot | `param_scheduler.py:436` | **hardcoded `1.005f`** in `Output.cpp::recordIterationResults` |
-      | **prefer** — ship aux over primary | `param_scheduler.py:567` | `best_aux_max_hpwl_ratio` (config), `Schedule.cpp:420` |
-      So this sweep answers the *preference* question only. Sweeping the accept rule needs a small
-      change to expose the hardcoded constant — **not done, and worth deciding separately**; the two
-      are independent knobs that happen to share a literal upstream.
-      ⚠️ Carry forward from report §5 caveat 3, still unresolved: on `mgc_superblue19` our
-      `Best OVFW` and XPlace's exact overflow **disagree on the direction** of the 1.005→1.010 move.
-      Not systematic (`bigblue2` agrees), but our overflow number should not be used to argue
-      placement quality until it is understood.
+XPlace has **two** 0.5% budgets around `best_aux`, and they are independent — they just share a
+literal upstream:
 
-→ [[_NEW_REPORT_24_best_solution_trackers_20260810.md]] §7 (the faithfulness audit that found the
-  first two), §5 (the original A/B)
+| | XPlace | ours | swept? |
+|---|---|---|---|
+| **accept** — record a new aux snapshot | `param_scheduler.py:436` | **hardcoded `1.005f`**, `Output.cpp::recordIterationResults` | **no** |
+| **prefer** — ship aux over primary | `param_scheduler.py:567` | `best_aux_max_hpwl_ratio` (config), `Schedule.cpp:420` | yes, #32 |
+
+#32 settled the preference budget (keep 1.005) and found it binds on **1 design of 28**. The accept
+budget governs something different: how *often* an aux snapshot is refreshed during the run, and
+therefore which placement `best_aux` even holds by the end. A knob that rarely binds at selection
+time may still be shaping the candidate it selects from.
+
+- [ ] **Decide whether this is worth exposing at all.** Cheap diagnostic first: instrument how many
+      times the accept rule fires per run and how much the aux snapshot moves, before spending
+      another 2.7 h suite on it. If aux is refreshed a handful of times, the budget is not doing
+      much and this can be closed as known-and-accepted.
+- [ ] **If exposed, name it distinctly.** `best_aux_max_hpwl_ratio` already means the preference
+      test; a second knob called anything similar re-creates exactly the `density_force_fraction`
+      trap (#19b) — same name, same units, different function, invisible to grep.
+
+⚠️ **Do not "fix" this by making both read one config value.** They are separate constants in
+XPlace and happen to be equal; collapsing them asserts an equality upstream does not.
 
 ---
 

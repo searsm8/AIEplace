@@ -18,6 +18,8 @@ removed — it had been sitting in both files since 2026-07-30).
 
 **Closed 2026-08-17:** **#24** — best-solution tracking rebuilt to match XPlace's `get_best_solution`: three trackers (`best_primary`/`best_aux`/`best_rollback`), each with its own geometry buffer in `Node` (a single shared buffer meant last-writer-won, so the log's provenance line named a placement that wasn't the one shipped — confirmed on 17 of 29 `full44_v2` runs, all converged), plus a torn-restore fix (`syncProbeToCommitted()`) so reported overflow describes the shipped placement instead of the last iteration. All three test suites green, 3 baselines regenerated, MMS suite re-run (16/16). Closed with two remaining faithfulness gaps and an A/B that needs widening spun off to **#32**, rather than reopening this ticket for follow-on work its own defects didn't block.
 
+**Closed 2026-08-17:** **#32** — best-solution tracking made faithful to XPlace, and the aux-ratio question settled. **7a**: we now snapshot and measure HPWL on the lookahead `v_k` (`probe_pos`) rather than the committed `u`, via a new `at_probe` argument threaded through `computeTotalWirelength`/`computeWirelength_HPWL`, so HPWL, overflow and the stored solution describe ONE position — XPlace has a single position variable (`p` IS `v_k`). **7b**: `BEST_SOL_MIN_ITER` is phase-relative (`phaseIteration()`), matching `param_scheduler.py:393`; `Schedule.cpp` already did this everywhere and `Output.cpp` was the lone holdout. `syncProbeToCommitted()` deleted, folded into `restoreBestPlacement()` (restores BOTH halves) after an A/B showed the perturbation its comment claimed was **bit-exact identical** — that claim is retracted. **A/B**: 28 designs x 2 arms (`DSE_20260818_113716`, 56/56, 159.6 min) — **keep 1.005**, but the real finding is that the knob binds on **1 design of 28**, so the effective n is 1 and widening the design set cannot help. Where it binds (`mgc_des_perf_a`) 1.005 wins by 0.71 pp post-DP, and **DP amplified the penalty rather than absorbing it**, reversing report §5's "spread legalizes better". The unswept ACCEPT budget (a second, hardcoded 1.005) spun off to **#33**. Cost of 7a/7b+#3 together: +0.13 pp of suite mean, accepted per the prefer-XPlace rule.
+
 **Closed 2026-08-17:** **#14** — zoomable visualizer finished, all three remaining items. The MMS zoom path ran end-to-end on newblue1 and `MIN_SIZE` was cleared: at zoom it floors **0%** of std cells, fillers and macros, and the only nodes it does floor are 337 **zero-area** bookshelf terminals (`w == h == 0`), where flooring is the desired behaviour. **Node-lock** landed (`--lock <name>|index:N|most-moved`): the window re-centres on one tracked cell every frame, verified by assertion at **0.0000 px** from the reticle across all 31 frames and all three generations. That needed a dump change — `PositionDump.cpp` now writes a sparse per-generation `names_gen<N>.txt`, because `freezeMovableMacros()` + `rebuildFillers()` reshuffle indices at the phase-2 boundary and the name is the only identifier that survives it (placement bit-identical, `make test-regress` unchanged). **Multi-view** landed (`--add-view`, repeatable): N windows in one pass, decoding each frame once, verified byte-identical to N separate invocations. Builds on #16, which moved rendering out of the placer.
 
 **Closed 2026-08-16:** **#31** — the `Best OVFW > 0.1` stalls AND the ~7x overflow-vs-XPlace gap were one root cause: XPlace caps `num_bin` at `num_rows` (`database.py:161`) but sw_only applied its identical `row_cap` only on the auto grid path, so `dse --grid xplace`'s explicit 512 bypassed it — 13 of 20 ISPD2015 designs ran finer than XPlace. Fixed by capping any grid at `num_rows` (`Setup.cpp`, Mark's call over a manifest patch); headline 1.0149 -> **1.0113 mean / 1.0096 median**, GP-ratio mean 1.0223 -> 1.0047, and the overflow *signal* (which drives the gamma/lambda schedule) now matches XPlace on the std-cell designs. An independent naive reference proved `computeOverflow` correct at every grid — it was never a metric bug. Also landed the 3-column overflow tooling (`Best OVFW` / `Our Exact OVFW` / `XPlace In OVFW`), closing #3's `gp_ovfl_in` reconciliation. Residual macro fixed-density difference -> #3; `node_pos`-deposit question -> tasks.md Topics.
@@ -57,6 +59,85 @@ change (the denylist had been silently blanking `Best HPWL` on every row), and g
 label-keyed and what the summary joins swept parameters from. The two live defects it *found* and
 did not fix are now **#29** (the XPlace reference belongs in the placer, masked-vs-masked and
 site-width-correct) and **#30** (LG+DP inside `dse.py`).
+
+---
+
+## #32 — Best-solution tracking: XPlace divergences + the aux-ratio A/B (opened 2026-08-17, CLOSED 2026-08-17)
+
+**Spun off #24 at close.** #24 fixed the shared-buffer and torn-restore defects and made the
+*selection rule* faithful to XPlace's `get_best_solution`. Auditing that closure ("is it faithful
+now?") turned up two things the rule itself doesn't reach, plus unfinished confidence on a value
+the rule depends on. None of these are regressions — #24's fixes are correct as far as they go.
+
+- [x] **DONE 2026-08-17 — we now track on the lookahead v_k, as XPlace does (7a).** Mark's call:
+      adopt XPlace's position. `snapshotBestPlacement()` stores `next.probe_pos`, and
+      `recordIterationResults()` measures HPWL at the probe via a new `at_probe` argument threaded
+      through `computeTotalWirelength` → `computeWirelength` → `computeWirelength_HPWL`
+      (`host/src/common/`, defaults false so the pl_algo host is unaffected). HPWL, overflow and
+      the stored solution now describe **one** position, which is XPlace's whole structure: `p` IS
+      `v_k` (`nesterov_optimizer.py:71`) and `evaluator_fn(mov_node_pos)` measures both metrics
+      there (`run_placement_nesterov.py:142-145`). Before, we stored u, measured HPWL at u and
+      overflow at v — a pair no iteration ever held.
+      ⚠️ **This is a behavior change, not a bug fix, and it moves every number.** All three regress
+      baselines regenerated. On `mms_adaptec1` (frozen regress config): **1259 → 1274 iterations,
+      HPWL 6.366e7 → 6.344e7 (−0.35%), smoothed overflow 0.0405 → 0.0453**.
+      **The 28-design suite has NOT been re-scored** — summary.md's 1.0096/1.0113 headline predates
+      this and is now stale. → next action: `make dse`.
+- [x] **DONE 2026-08-17 — `BEST_SOL_MIN_ITER` is now phase-relative (7b).** `Output.cpp` gates on
+      `phaseIteration()`, not absolute `iteration`, matching `param_scheduler.py:393` (XPlace resets
+      `init_iter` at every optimizer restart). `phaseIteration()` was already the established
+      analogue everywhere in `Schedule.cpp` — including `past_warmup = phaseIteration() >= 50` at
+      `Schedule.cpp:39`, which mirrors `param_scheduler.py:286` — so this call site was the lone
+      holdout. Phase 2 now gets the same 50-iteration settling window phase 1 does.
+- [x] **DONE 2026-08-17 — `syncProbeToCommitted()` deleted; folded into `restoreBestPlacement()`,
+      which now restores BOTH halves of the (node_pos, probe_pos) pair.** Mark asked what it was
+      for; the answer is that a restore wrote only `node_pos` while every density/overflow metric
+      reads `probe_pos`, so the reported overflow described the last iteration rather than the
+      shipped placement (#24 defect 2). 7a does **not** retire that — it changes which value is
+      torn, not whether it is torn.
+      **The comment blocking the fold was wrong.** It claimed folding perturbs the phase-2 restart
+      (`mms_adaptec1: 1325 → 1288 iterations, HPWL +0.24%`). Measured A/B on the frozen config,
+      isolating the fold from 7a/7b: **bit-exact identical** — trajectory row-for-row and the same
+      `.def` sha256 (`91cbbdee0d59`), on all three regress designs. Mechanism: the phase-2 restore
+      is immediately followed by `freezeMovableMacros()` (collapses macro state onto `node_pos`,
+      `DataBase.cpp:421`) and `reinitializeStdCells()` (re-seeds everything else), so the
+      `probe_pos` write is overwritten before anything reads it. At the *final* restore the fold is
+      equivalent by construction. Verified the path actually ran (no "no best placement recorded"
+      warning, phase 1 = 654 iterations).
+- [x] **DONE 2026-08-17 — A/B settled on the full suite: KEEP 1.005 (XPlace's literal).**
+      `DSE_20260818_113716`, all 28 designs x 2 arms = **56 runs, 56/56, 159.6 min**. Full-suite
+      rather than a subset because the flip set cannot be predicted from traces.
+
+      | arm | ISPD2005 (8) | ISPD2015 (20) | **all 28** |
+      |---|---|---|---|
+      | **1.005** | 1.0057 / 1.0057 | 1.0101 / 1.0153 | **1.0097 / 1.0126** |
+      | 1.010 | 1.0057 / 1.0057 | 1.0101 / 1.0157 | 1.0097 / 1.0128 |
+
+      *(median / mean DP ratio.)*
+
+      **The headline finding is that the knob almost never binds: 1 design of 28 selects a
+      different solution.** ISPD2005 is byte-identical across arms (0 movers). So the suite-mean
+      difference (+0.02 pp for 1.010) is *entirely* `mgc_des_perf_a`, and the effective n for the
+      decision is **1, not 28** — widening the design set cannot help, because the set was already
+      everything.
+
+      Where it does bind, 1.005 wins clearly. `mgc_des_perf_a`: 1.005 ships iter 630
+      (GP 1.946e9, ovfw 0.0694) → **DP ratio 1.0005**; 1.010 ships iter 659 (GP 1.957e9,
+      ovfw 0.0468) → **DP ratio 1.0076**. The looser budget buys −32.6% overflow for +0.565% GP
+      HPWL, and post-DP that is **+0.705%**.
+      ⚠️ **DP AMPLIFIED the penalty (−25% "recovery"), it did not absorb it** — reversing report
+      §5's finding that DP recovers most of the cost (74% on `bigblue2`, 41% on `mgc_superblue19`).
+      The "more spread legalizes better" story does **not** hold here.
+      ⚠️ **Why so few movers now?** The 2026-08-10 A/B found 3 flippers in 8 designs; those three
+      (`mgc_superblue19`, `mgc_superblue16_a`, `bigblue2`) no longer flip. **Hypothesis, not a
+      finding:** the selection rule's second conjunct is an overflow test
+      (`aux.overflow * 1.1 < primary.overflow`), and #31's grid cap moved 13 ISPD2015 designs from
+      512 to 128/256, which changes overflow substantially. Untested.
+      ⚠️ **Only the PREFERENCE budget was swept.** The accept-rule 1.005 is still hardcoded — see
+      **#33**.
+
+→ [[_NEW_REPORT_24_best_solution_trackers_20260810.md]] §7 (the faithfulness audit that found the
+  first two), §5 (the original A/B)
 
 ---
 

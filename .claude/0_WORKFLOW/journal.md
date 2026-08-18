@@ -17,6 +17,36 @@ status. **Never rewrite an entry; annotate.** The retraction trail is the point.
 
 ---
 
+## 2026-08-17 (later) — evicted from summary.md when #32 and #14 closed
+
+Moved verbatim under the soft cap. These closed on 2026-08-12; their task-indexed records are
+in [[history.md]]. Kept here for the trail — the `tools/` triage in particular is the reason an
+unlisted tool is now a visible defect rather than an unknown.
+
+## Closed 2026-08-12
+- **`tools/` triaged; every survivor now carries a status** (`331f1df`, closes a #1 bullet). The dir
+  had grown past the point where useful and stale were distinguishable by inspection. 5 stale tools
+  deleted — `xplace_gp_ref.py`, `collate_mms.py`, `make_scorecard.py`, `legalize_swonly_mms.sh`,
+  `bench_swonly.sh` — each with zero references from any code, Makefile or skill, and each
+  superseded by a named replacement. 2.1 MB of `adaptec1_*.png` run output was **moved, not
+  destroyed**, to `.claude/2_ARTIFACTS/legacy_density_heatmaps/`. `tools/README.md` now has a
+  **live / dormant** row for all 38 survivors, checked mechanically, so an unlisted tool is a
+  visible defect. Kept as *dormant* rather than deleted: the OpenROAD opendp island (independent
+  legalizer, binary still installed), `eval_overflow_xplace.sh`, `vcd_to_svg.py`.
+- **#26 — fence regions** (details above). Decision: ignore them, document it, keep both benchmark
+  variants. Guards against re-deriving this: the operational rules in `CLAUDE.md`, a warning in every
+  run log, and both ISPD2015 harnesses now failing loudly (with the regeneration command) when
+  `ispd2015_fix` is missing or older than the raw data.
+- **The scoring pipeline is now TRACKED, in `vck5000/tools/`** — 10 scripts moved out of the
+  gitignored `.claude/2_ARTIFACTS/`, where the guards above would have protected exactly one machine.
+  `tools/README.md` has the run order and the rule for what belongs there: *anything that produces a
+  number we quote is tracked; one-off experiment runners stay with the output.* Code moved, results
+  did not — every runner writes to `$ARTIFACTS`, still defaulting to `.claude/2_ARTIFACTS/`.
+  The move surfaced three live path bugs, all fixed: `run_suite.sh` and `run_lgdp_suite.sh` defaulted
+  to `vck5000/2_ARTIFACTS/` (gone since 08-07), and `run_xplace_ref.sh` wrote ISPD2005 references to
+  a **different file** than `run_xplace_ref_2015.sh` wrote the ISPD2015 ones. `analyze_full44.py` now
+  exits loudly on a missing artifacts dir instead of printing a table of dashes.
+
 ## 2026-08-17 — evicted from summary.md under the soft cap
 
 Moved verbatim when #32 (7a/7b) and #14 landed and summary.md went over ~200 lines. These were

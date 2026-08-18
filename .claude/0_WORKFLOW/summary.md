@@ -139,30 +139,6 @@
   round-trip per iteration.
 - `make host HOST=pl_algo` needs one `make clean HOST=pl_algo` first (stale `.d`, not a source break).
 
-## Closed 2026-08-12
-- **`tools/` triaged; every survivor now carries a status** (`331f1df`, closes a #1 bullet). The dir
-  had grown past the point where useful and stale were distinguishable by inspection. 5 stale tools
-  deleted — `xplace_gp_ref.py`, `collate_mms.py`, `make_scorecard.py`, `legalize_swonly_mms.sh`,
-  `bench_swonly.sh` — each with zero references from any code, Makefile or skill, and each
-  superseded by a named replacement. 2.1 MB of `adaptec1_*.png` run output was **moved, not
-  destroyed**, to `.claude/2_ARTIFACTS/legacy_density_heatmaps/`. `tools/README.md` now has a
-  **live / dormant** row for all 38 survivors, checked mechanically, so an unlisted tool is a
-  visible defect. Kept as *dormant* rather than deleted: the OpenROAD opendp island (independent
-  legalizer, binary still installed), `eval_overflow_xplace.sh`, `vcd_to_svg.py`.
-- **#26 — fence regions** (details above). Decision: ignore them, document it, keep both benchmark
-  variants. Guards against re-deriving this: the operational rules in `CLAUDE.md`, a warning in every
-  run log, and both ISPD2015 harnesses now failing loudly (with the regeneration command) when
-  `ispd2015_fix` is missing or older than the raw data.
-- **The scoring pipeline is now TRACKED, in `vck5000/tools/`** — 10 scripts moved out of the
-  gitignored `.claude/2_ARTIFACTS/`, where the guards above would have protected exactly one machine.
-  `tools/README.md` has the run order and the rule for what belongs there: *anything that produces a
-  number we quote is tracked; one-off experiment runners stay with the output.* Code moved, results
-  did not — every runner writes to `$ARTIFACTS`, still defaulting to `.claude/2_ARTIFACTS/`.
-  The move surfaced three live path bugs, all fixed: `run_suite.sh` and `run_lgdp_suite.sh` defaulted
-  to `vck5000/2_ARTIFACTS/` (gone since 08-07), and `run_xplace_ref.sh` wrote ISPD2005 references to
-  a **different file** than `run_xplace_ref_2015.sh` wrote the ISPD2015 ones. `analyze_full44.py` now
-  exits loudly on a missing artifacts dir instead of printing a table of dashes.
-
 ## Closed 2026-08-17
 - **#24 CLOSED** — best-solution tracking now matches XPlace's `get_best_solution`: three trackers
   (`best_primary`/`best_aux`/`best_rollback`), each with its own geometry buffer, one shared
@@ -188,29 +164,31 @@
 #31) were **closed and already archived to [[history.md]]** — the most-read file in the repo was
 advertising finished work as open. Their full text is in history.md; only live items are below.*
 
-- **#32 — 7a and 7b DONE 2026-08-17, suite re-run, committed; only the A/B is left.** Mark's call, which is
-  the explicit decision the freeze requires. **The u-vs-v question is settled: we track on v.**
-  `snapshotBestPlacement()` stores `probe_pos` and `recordIterationResults()` measures HPWL there
-  (new `at_probe` arg threaded through `computeTotalWirelength`/`computeWirelength_HPWL` in
-  `common/`, defaulting false so the pl_algo host is untouched), so HPWL, overflow and the stored
-  solution finally describe **one** position — XPlace's single `p`/`v_k`. 7b made
-  `BEST_SOL_MIN_ITER` phase-relative (`phaseIteration()`), matching `param_scheduler.py:393`;
-  `Schedule.cpp` already did this everywhere and `Output.cpp` was the lone holdout.
-  **`mms_adaptec1`: 1259 → 1274 iterations, HPWL 6.366e7 → 6.344e7 (−0.35%), overflow 0.0405 →
-  0.0453.** All three regress baselines regenerated; both tiers, pl_algo tier-1 and the pl_algo
-  host build all green.
-  **Also deleted `syncProbeToCommitted()`** — folded into `restoreBestPlacement()`, which now
-  restores BOTH halves of the (node_pos, probe_pos) pair. The comment forbidding that fold claimed
-  it perturbs phase 2 (`1325 → 1288 iters`); an A/B isolating the fold from 7a/7b found it
-  **bit-exact identical** on all three designs, because the phase-2 restore is immediately followed
-  by `freezeMovableMacros()` + `reinitializeStdCells()`, which overwrite `probe_pos` before anything
-  reads it. That claim is now retracted in the code.
-  ⚠️ **Suite cost, measured:** bundled with #3 into `DSE_20260817_223934` — mean **1.0113 → 1.0126**,
-  median flat. ISPD2005 (#3 is a no-op there, td=1) moved **+0.05 pp on 7a/7b alone**. Faithful, and
-  slightly more expensive; kept per `CLAUDE.md`'s prefer-XPlace rule. Details in the headline above.
-  ⚠️ **Still open: widen the `best_aux_max_hpwl_ratio` A/B (n=2).** Needs ~8–10 designs run blind;
-  the trace projection cannot identify flippers near the 0.5% budget. → tasks.md #32.
-  ⚠️ **pl_algo inherits this**: its resident loop must snapshot v, not u.
+- **#32 — CLOSED 2026-08-17**, archived to [[history.md]]. All three items done. **The u-vs-v
+  question is settled: we track on `v`.** `snapshotBestPlacement()` stores `probe_pos` and HPWL is
+  measured there too (new `at_probe` arg on `computeTotalWirelength`/`computeWirelength_HPWL`), so
+  HPWL, overflow and the stored solution describe **one** position — XPlace's single `p`/`v_k`.
+  `BEST_SOL_MIN_ITER` is phase-relative. `syncProbeToCommitted()` deleted, folded into
+  `restoreBestPlacement()` (restores both halves) after its blocking comment's claimed perturbation
+  measured **bit-exact identical** — retracted in the code.
+  **A/B settled: KEEP 1.005** (`DSE_20260818_113716`, 28 designs × 2 arms, 56/56, 159.6 min).
+  1.005 → 1.0097 / 1.0126; 1.010 → 1.0097 / 1.0128 (median / mean DP).
+  ⚠️ **The real finding is that the knob barely binds: 1 design of 28 selects differently**
+  (ISPD2005 byte-identical across arms). So the effective n is **1, not 28**, and widening the
+  design set cannot help — the set was already everything. Where it binds (`mgc_des_perf_a`) 1.005
+  wins by 0.71 pp post-DP, and **DP amplified the penalty rather than absorbing it**, reversing the
+  #24 report §5 story that "more spread legalizes better". Unexplained: the three designs that
+  flipped in the 2026-08-10 A/B no longer do — plausibly #31's grid cap moving the overflow gate,
+  but that is a hypothesis, untested.
+  ⚠️ **pl_algo inherits the u-vs-v decision** — flagged in tasks.md #20 step 6, with the specific
+  trap: `sched_verify` checks the schedule, not the geometry, so it cannot catch a wrong choice.
+- **#33 — the aux ACCEPT budget is hardcoded and has never been swept** (opened 2026-08-17, from
+  #32). XPlace has **two** 0.5% budgets: an accept rule in `update_best_sol`
+  (`param_scheduler.py:436` — ours is a hardcoded `1.005f` in `Output.cpp`) and the preference test
+  #32 just settled (`:567` — our `best_aux_max_hpwl_ratio`). They are independent knobs that share
+  a literal upstream. Next step is a cheap diagnostic (how often does the accept rule fire?) before
+  spending another suite on it. ⚠️ Do **not** collapse the two onto one config value — that asserts
+  an equality XPlace does not.
 - **#3 — fixed-density cap-vs-scale: CLOSED 2026-08-17.** Now a scale (`min(ρ,1)·td`), matching
   `initializer.py:82`; was a cap (`min(ρ,td)`). Bundled into the same suite re-run as #32's 7a/7b
   (Mark's call). Provably a no-op at td=1, so all 8 ISPD2005 designs are untouched by it —
