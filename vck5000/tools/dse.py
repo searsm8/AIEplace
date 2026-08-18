@@ -33,7 +33,9 @@ What a sweep leaves behind, in results/DSE_<timestamp>/:
   configs/, logs/   one TOML / one stdout+stderr capture per run
   gp_only.csv   the exe's raw GP record, one appended row per run (schema owned by Output.cpp)
   results.csv   dse.py's product: gp_only.csv plus every XPlace comparison (GP Ratio, LG/DP), from
-                tools/benchmarks.py; rewritten whole from gp_only.csv each time
+                tools/benchmarks.py; rewritten whole from gp_only.csv each time. Its `grid` column
+                is the EFFECTIVE grid the run used (the row cap can lower it, TODO #31), not the
+                grid that was requested -- gp_only.csv keeps the request, which is the identity
   lgdp.json     per-run LG+DP result (unless --gp-only); XPlace logs under lgdp/<label>/
 
 Two CSVs, two owners: the exe only appends to gp_only.csv, dse.py only writes results.csv, so
@@ -361,6 +363,24 @@ def _our_exact_overflow(out_dir):
     return None
 
 
+def _effective_grid(out_dir):
+    """The grid the run ACTUALLY used. bins_per_row is capped at num_rows at run time (Setup.cpp,
+    matching XPlace database.py:161), so a requested 512 on a low-row mgc_* design really ran at
+    128/256 (TODO #31) and every number in the row was measured there. gp_only.csv only echoes back
+    what DSE_info requested, so read it from the run dir, same as _our_exact_overflow."""
+    if not out_dir:
+        return None
+    for name, pattern in (("run_summary.md", r"bins_per_row\s*\|\s*(\d+)"),
+                          ("run.log", r"effective bins_per_row=(\d+)")):
+        path = os.path.join(out_dir, name)
+        if os.path.exists(path):
+            with open(path) as f:
+                m = re.search(pattern, f.read())
+            if m:
+                return m.group(1)
+    return None
+
+
 def summarize(sweep_dir):
     """(Re)write results.csv from the exe's gp_only.csv, adding every XPlace-reference comparison
     from tools/benchmarks.py: GP Ratio (masked → xplace_gp_masked_in_sw_frame) and, once legalized,
@@ -388,7 +408,7 @@ def summarize(sweep_dir):
         print(f"  [warn] gp_only.csv has no column '{missing}' — Output.cpp schema changed; "
               f"update RESULT_COLS in tools/dse.py")
 
-    fenced = []
+    fenced, unknown_grid = [], []
     for row in rows:
         path = f"{row.get('Suite', '')}/{row.get('Design', '')}"
         xgp = benchmarks.xplace_gp_masked_in_sw_frame(path)
@@ -408,6 +428,17 @@ def summarize(sweep_dir):
                            else ("no-ref" if dp else r.get("status", "")))
         if r.get("variant") == "ispd2015_fix":
             fenced.append(row["Design"])
+
+        # `grid` reports the EFFECTIVE grid, never the requested one -- a row whose numbers came
+        # from a capped 128 must not read 512. Rewritten HERE, after both identity joins above,
+        # which match on the requested value that gp_only.csv and sweep.json share. Consequence:
+        # two runs of a --grid sweep whose requests cap to the same value show identical rows,
+        # because they ARE the same placement.
+        effective = _effective_grid(row.get("Output Dir"))
+        if effective:
+            row["grid"] = effective
+        elif "grid" in row:
+            unknown_grid.append(row.get("Design", "?"))
 
     rows.sort(key=lambda r: (r.get("Suite", ""), r.get("Design", ""),
                              tuple(r.get(k, "") for k in col_keys)))
@@ -442,6 +473,10 @@ def summarize(sweep_dir):
         print(f"  DP Ratio vs XPlace post-DP:     median {dp[len(dp)//2]:.4f} mean {sum(dp)/len(dp):.4f}"
               f"  ({sum(abs(x-1)<=.02 for x in dp)}/{len(dp)} within 2%, better on {sum(x<1 for x in dp)}"
               f" — legal-vs-legal, the headline)")
+    if unknown_grid:
+        print(f"  [warn] effective grid unreadable for {len(unknown_grid)} run(s) -- showing the "
+              "REQUESTED grid, which the row cap may have lowered: "
+              + ", ".join(sorted(unknown_grid)))
     if fenced:
         print(f"  fence-stripped both sides ({len(fenced)}, TODO #26): {', '.join(sorted(fenced))}")
     unscored = [f"{r['Design']}({r['DP Ratio']})" for r in rows
@@ -468,7 +503,7 @@ def main():
                     help="stop after global placement; skip the XPlace LG+DP legal-vs-legal score")
     ap.add_argument("--runset", metavar="JSON", help="run list from morris.py / sobol.py")
     ap.add_argument("--resume", metavar="DSE_DIR",
-                    help="re-enter a sweep dir and run only what its results.csv is missing")
+                    help="re-enter a sweep dir and run only what its gp_only.csv is missing")
     ap.add_argument("--dry-run", action="store_true", help="list the runs and exit")
     args = ap.parse_args()
 

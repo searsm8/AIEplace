@@ -17,6 +17,7 @@ you'd like.
 
 Log a problem once. When you rely on that note again, append a dated timestamp. Once a note
 collects **3+ timestamps**, promote it to [[rules.md]] and delete it from noteToSelf.
+**Always read rules.md and treat it as gospel.** 
 
 **The workflow files live in `.claude/0_WORKFLOW/`** — `summary.md`, `tasks.md`, `history.md`,
 `rules.md`, `journal.md` (all tracked), plus the untracked personal scratchpad `noteToSelf.md`.

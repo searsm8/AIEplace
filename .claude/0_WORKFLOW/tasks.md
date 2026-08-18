@@ -105,6 +105,15 @@ build-sensitive at ~1%**.
       branch), matching XPlace, so both evaluate at the same grid. This also completed #31's grid fix
       (8 more low-row designs were still running at 512). `make test-regress` bit-identical (auto path
       unchanged). → [[_NEW_REPORT_31_overflow_stall_grid_20260815.md]]
+      **Reporting follow-up 2026-08-18:** `results.csv`'s `grid` column was still printing the
+      *requested* grid, so all 21 `mgc_*` rows read 512 while 12 of them had actually run at the
+      capped 128/256 — the fix was in, the artifact hid it. `dse.py::summarize` now scrapes the
+      effective `bins_per_row` from each run's `run_summary.md` and writes THAT into the single
+      `grid` column (identity joins still use the requested value gp_only.csv/sweep.json share;
+      unreadable run dirs now warn instead of silently showing the request).
+      `results/DSE_20260817_223934/results.csv` regenerated: every other column bit-identical.
+      Capped at 128: `mgc_fft_1/fft_2/pci_bridge32_a/des_perf_1`. At 256: `des_perf_a/des_perf_b/`
+      `edit_dist_a/fft_a/fft_b/matrix_mult_1/matrix_mult_2/pci_bridge32_b`.
       ⚠️ One real *macro-design* difference remains, separate and minor: XPlace **scales** the
       fixed/blockage density by td (`initializer.py:82`) while we **cap** it at td (`Grid.cpp:139`);
       equal at td=1, ours slightly higher at td<1 in macro-perimeter bins. `fft_2` has 0 fixed cells
