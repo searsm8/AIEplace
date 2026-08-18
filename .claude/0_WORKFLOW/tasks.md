@@ -3,6 +3,22 @@
 Open work, one section per task. **Status lives here; evidence lives in a
 report.** Don't reuse task numbers, find the highest number and add one.
 
+## ⚠️ sw_only functionality is FROZEN as of 2026-08-17 (Mark's call)
+
+sw_only reached parity with XPlace — **median 1.0096 / mean 1.0113 legal-vs-legal over all 28
+ISPD designs**, 22/28 within ±2%, better on 6 — and the remaining gaps are sub-1%. The active
+thread is now **pl_algo** (#20). Freezing is not a pause: pl_algo's algorithm is pinned to the
+2026-07-14 sw_only, so **every further sw_only change is another port**, and a stable sw_only is
+what makes #20 a bounded job.
+
+What the freeze means:
+- **No further algorithm or behaviour changes to `host/src/sw_only/`** without an explicit
+  decision from Mark. Bit-identical `make test-regress` is now the contract, not a convenience.
+- **Cleanup, tooling, docs and tests are NOT frozen** — #1 covers most of that.
+- Items that only ever mattered *because* sw_only was moving have been closed or demoted; items
+  that were filed under sw_only but are really pl_algo work have been re-filed (marked
+  **↪ pl_algo** below).
+
 ---
 
 ## #1 — Clean house: repo / notes / code cleanup (opened 2026-07-27)
@@ -57,6 +73,20 @@ result dir is not a reference run until you check its argv *and* that it reached
 log header is the argument dump, not what ran; `gp_ovfl_in` is macro-INCLUDED; **newblue4 is
 build-sensitive at ~1%**.
 
+- [ ] **❓DECISION FOR MARK — fixed-density cap-vs-scale: the last known XPlace divergence in the
+      density path.** Promoted 2026-08-17 out of the ⚠️ note buried inside the closed checkbox
+      below, where it was invisible. **Verified in both sources this session:**
+      XPlace `initializer.py:82` — `init_density_map.clamp_(min=0.0, max=1.0).mul_(args.target_density)`
+      = **`min(ρ,1)·td`**, a *scale*. Ours, `Grid::clampFixedDensity` (`Grid.cpp:139`) —
+      `min(total_overlap, area·td)` = **`min(ρ,td)`**, a *cap*. Identical at td=1; at td=0.65 and
+      ρ=0.5 XPlace gives 0.325 and we give 0.50, so **we read high in macro-perimeter bins**.
+      Affects macro designs at td<1 only; the fillerless std-cell designs are untouched, which is
+      why #31's `fft_2` reconciliation (0 fixed cells) did not see it.
+      ⚠️ **This is a behaviour change to a frozen sw_only, and it is not free.** Applying it turns
+      `make test-regress` red (baselines need `--reason` regeneration) and invalidates the committed
+      28-design headline until a full `make dse` re-run. The edit is one line; the re-baseline is
+      the cost. **Mark's call: fix it now and re-run, or record the divergence as known-and-accepted
+      and leave the frozen numbers standing.**
 - [ ] **sw_only has no per-row site model.** `enforceDieBoundaries` clamps to the die *rectangle*,
       but 11 of 16 MMS designs have a ragged (staircase) core. `tools/check_row_spans.py`: adaptec3
       **315 cells outside their row's span** (worst overhang 4122), newblue4 25, adaptec5 23.
@@ -110,24 +140,6 @@ build-sensitive at ~1%**.
       Still the live question. The "opposite sign" (newblue1) was `Best OVFW` being *smoothed* (it
       under-reads exact by ~3×); the exact-vs-exact gap is the density-metric divergence above.
       </details>
-
----
-
-## #6 — Port XPlace's operator-level optimizations (opened 2026-07-29)
-
-XPlace gets ~2× over DREAMPlace almost entirely from operator-level restructuring of the same
-ePlace math we already implement — not a new algorithm. Four techniques; the fourth was measured
-and folded into #20 (the bottleneck is **~76 MB/iter of host DMA, ~8× the launch overhead**, so the
-payoff is keeping matrices device-side — exactly what Stage 5 does).
-
-- [ ] **Operator combination** — merge WA wirelength, WA gradient and HPWL into one pass; all three
-      need the same per-net min/max. Check `Partials.cpp::computeHpwlPartials_CPU` for redundant
-      recomputation.
-- [ ] **Operator extraction** — share one cell-density-map build between the objective and the
-      overflow metric. Check `Density.cpp::compute_eField_DCT` against `computeOverflow`.
-- [ ] **Operator skipping** — XPlace skips the density gradient while
-      `|density_grad|/|wirelength_grad| < 0.01` and `iteration < 100`. Check whether sw_only's early
-      iterations already qualify, and carry it into pl_algo's modules from the start.
 
 ---
 
@@ -241,9 +253,15 @@ placement moved.**
 
 ---
 
-## #15 — Net-local coordinate frames for the wirelength gradient (opened 2026-08-03)
+## #15 — ↪ pl_algo — Net-local coordinate frames for the wirelength gradient (opened 2026-08-03)
 
 **Parked at Mark's request 2026-08-03 — analysis done, no implementation.**
+
+**↪ RE-FILED to pl_algo 2026-08-17** (sw_only freeze). This was never sw_only work and the entry
+says so itself: the motivation is **PL precision** — it is what makes a narrow `ap_fixed` feasible —
+and the third bullet expects **no HPWL movement** on sw_only. Nothing here changes the CPU golden.
+Sequence it against #20; #23's close notes the specific trigger (*"if pl_algo ever narrows to fixed
+point this stops being cosmetic"*).
 
 Store each net's pin coordinates relative to that net's own min, so the absolute die offset never
 enters the gradient arithmetic. The WA gradient is translation-invariant, so this is a **reframing,
@@ -277,8 +295,16 @@ Related: **#23 is this same precision problem actually killing runs on the CPU g
 before touching a baseline. The frozen configs are **snapshots, not live copies** of
 `run_config.toml`, and `random_seed = 42` is pinned and load-bearing.
 
-- [ ] **Nothing checks quality, only stability.** A reproducibly *wrong* sw_only passes. Guarding the
-      XPlace ratio would need committed reference numbers and a tolerance — a separate job.
+- [x] **CLOSED 2026-08-17 by the sw_only freeze — "nothing checks quality, only stability" is no
+      longer the right complaint.** The entry existed to catch *quality drift during active
+      development*: a reproducibly wrong sw_only passes a stability check. Freezing inverts the
+      requirement — bit-identical trajectory + position hash is now a **stronger** guard than any
+      XPlace-ratio tolerance would be, because it admits no drift at all, and the ratio is pinned
+      instead by the committed 28-design headline (median 1.0096 / mean 1.0113).
+      Not building the reference-number-plus-tolerance harness that was scoped here.
+      ⚠️ **Reopen this if the freeze lifts.** The gap it names is real and returns the moment
+      sw_only's behaviour is allowed to move again. The blind spot that *does* still matter under
+      the freeze is coverage, not quality — see #23's "add one large design", which is open.
 - [x] **DONE 2026-08-09 — `readDEF()` now says what it wanted.** `DataBase.cpp:212` returns false with
       *"No 'floorplan.def' in \<dir\>; that is the only .def name readDEF() accepts. Found: \<names\>"*
       instead of handing the parser an empty path. **The hardcoding itself is unchanged** — this fixes
@@ -323,7 +349,7 @@ roughly 2× high against anything XPlace prints.
       FAIL, exit 1 — while schedule and convergence still pass, which is the blind spot they had.
       Also corrected `test/fixtures/README.md`, which had explained the 1.608 closed-form error away
       as a preconditioning artifact. It was not an artifact.
-- [ ] **Regenerate the fixture trace from the post-#19 sw_only** — blocked on #20 step 1
+- [ ] **↪ pl_algo — Regenerate the fixture trace from the post-#19 sw_only** — blocked on #20 step 1
       (`dumpScheduleTrace()` must be restored first). Until then the fixture is a 2026-08-05 capture
       of the OLD gate quantity.
 - [x] **DONE 2026-08-09 — renamed pl_algo's `dff`/`dff_coef` to `kappa`/`kappa_coef`** (matching
@@ -336,7 +362,7 @@ roughly 2× high against anything XPlace prints.
       instantiated in `top.cpp`, so those two harnesses were the only callers.
       Remaining `dff` mentions are deliberate: the trace **column** is genuinely
       density_force_fraction, and the `[info]` line that prints its 2136% spread must keep its name.
-- [ ] **`host/src/pl_algo/` still gates on the real dff — the pre-#19 bug, live.** Found doing the
+- [ ] **↪ pl_algo — `host/src/pl_algo/` still gates on the real dff — the pre-#19 bug, live.** Found doing the
       rename above and deliberately NOT bundled with it. `Placement.hpp`'s throttle uses
       `densityForceFraction()` (gradient L1 norms, `Driver.cpp`), i.e. exactly the non-monotone
       quantity #19b replaced in sw_only. It was left alone because fixing it is a behaviour change to
@@ -487,9 +513,12 @@ else covers ISPD2015.
       2026-08-10 fix, and now for two reasons:** the fast tier is small LEF/DEF, and the slow tier is
       bookshelf where `site_width = 1` makes the new scaling a no-op. Nothing in the suite exercises
       a large site width.
-- [ ] **pl_algo's mirror is compile-verified only.** `Driver.cpp::estimate_initial_step` now scales
-      by `cfg.site_width` (set in `main.cpp` from `db.getSiteWidth()`), and `make host HOST=pl_algo`
-      builds — but it has never been run against the golden. Needs Geert's card or sw_emu.
+- [ ] **↪ pl_algo — pl_algo's mirror is compile-verified only.** `Driver.cpp::estimate_initial_step`
+      now scales by `cfg.site_width` (set in `main.cpp` from `db.getSiteWidth()`), and
+      `make host HOST=pl_algo` builds — but it has never been run against the golden. Needs Geert's
+      card or sw_emu. **Re-filed 2026-08-17**: this is the only bullet left in #23 that is not
+      sw_only work, and it is the same item as the "pl_algo initial-step mirror" that used to sit
+      in **Parked** — the duplicate has been deleted, this is the one copy. Fold into #20.
 - [x] **Re-run the 4 excluded designs** — DONE, all 5 previously-`nan_metrics` designs re-run:
       `mgc_superblue11_a/12/14/16_a` converge; `mgc_des_perf_b` places but stops on
       `divergence_guard`. ⚠️ Surfaced a *new* defect: `mgc_matrix_mult_a` at **3.03×** (GP dies at
@@ -503,17 +532,24 @@ hyperparameter, not comparable to the other 40, and it hides the defect.
 
 ## Parked — open technical follow-ups
 
-- [ ] **pl_algo initial-step mirror** — implemented in `Driver.cpp::estimate_initial_step`, compiles,
-      **unverified**. Needs Geert's card or sw_emu to check against the sw_only golden.
+*(2026-08-17: the **pl_algo initial-step mirror** bullet was deleted from here — it duplicated #23's
+last bullet word for word. #23 keeps the one copy, now marked ↪ pl_algo.)*
+
 - [ ] **SoA layout for the hot per-node/per-bin fields** (from #12). The next real threading win is
       layout, not more threads: `computeOverlaps`/`combineGradients`/`recordIterationResults` are
       memory-bound over pointer-chased objects and go flat by 4 threads. Big change, own task.
+      ⚠️ **Under the sw_only freeze this needs a decision, not just a schedule slot.** It is meant
+      to be behaviour-preserving, but it rewrites the hot data model of a frozen reference — so it
+      is exactly the class of change the freeze exists to stop. `make test-regress` bit-identical
+      is the bar if it is ever attempted.
 - [ ] **Logger cosmetics** (from #5) — double-bordered summary tables (nested `Table`); the welcome
       banner still goes straight to `cout`, the last source of trailing whitespace; `run.log` written
       for **every** run including DSE sweeps (~125 MB per 500-run sweep); and "Algorithm time (s) |
       0.000" in Run Statistics, noticed in passing and never investigated.
-- [ ] **(optional) `init_step_seed` narrow-range Morris** [0.005, 0.05] — low priority, mechanism
-      already understood. ⚠️ #23 changes the premise: read it first.
+*(2026-08-17: the **`init_step_seed` narrow-range Morris** bullet was deleted — self-marked optional
+and low-priority, and its own warning said #23 changed its premise. #23 found the mechanism
+outright (the seed was in raw DBU, not site widths); a sensitivity sweep would now be measuring a
+solved problem, on a frozen placer. → [[REPORT_23_site_width_seed_20260810.md]].)*
 
 ---
 
@@ -524,19 +560,41 @@ hyperparameter, not comparable to the other 40, and it hides the defect.
 now?") turned up two things the rule itself doesn't reach, plus unfinished confidence on a value
 the rule depends on. None of these are regressions — #24's fixes are correct as far as they go.
 
-- [ ] **XPlace snapshots the lookahead (v_k); we snapshot the committed position (u).** In XPlace
-      the optimized parameter *is* v_k (`nesterov_optimizer.py:71`, *"directly use p as v_k to save
-      memory"*), so `update_best_sol(mov_node_pos)` stores v_k and `evaluator_fn(mov_node_pos)`
-      measures HPWL **and** overflow at v_k — one self-consistent position. We snapshot `node_pos`
-      (u): HPWL is measured at u, overflow at v (`probe_pos`) only because of #24's fix (B)
-      (`syncProbeToCommitted()`), so we're self-consistent at u, not v. Neither is wrong, but they
-      are not the same placement, and choosing between them changes the shipped `.def`. Decide
-      which, and note it is a genuine behavior change, not a bug fix.
-- [ ] **`BEST_SOL_MIN_ITER` is absolute; XPlace's is phase-relative.** Ours: `iteration < 50`.
-      XPlace: `self.iter - self.init_iter < 50` (`param_scheduler.py:393`). After the phase-2
-      mixed-size restart, ours starts tracking best solutions immediately; XPlace waits another 50
-      iterations. Affects mixed-size only — check whether it matters given #24's MMS re-run already
-      landed with the current (absolute) behavior.
+- [x] **DONE 2026-08-17 — we now track on the lookahead v_k, as XPlace does (7a).** Mark's call:
+      adopt XPlace's position. `snapshotBestPlacement()` stores `next.probe_pos`, and
+      `recordIterationResults()` measures HPWL at the probe via a new `at_probe` argument threaded
+      through `computeTotalWirelength` → `computeWirelength` → `computeWirelength_HPWL`
+      (`host/src/common/`, defaults false so the pl_algo host is unaffected). HPWL, overflow and
+      the stored solution now describe **one** position, which is XPlace's whole structure: `p` IS
+      `v_k` (`nesterov_optimizer.py:71`) and `evaluator_fn(mov_node_pos)` measures both metrics
+      there (`run_placement_nesterov.py:142-145`). Before, we stored u, measured HPWL at u and
+      overflow at v — a pair no iteration ever held.
+      ⚠️ **This is a behavior change, not a bug fix, and it moves every number.** All three regress
+      baselines regenerated. On `mms_adaptec1` (frozen regress config): **1259 → 1274 iterations,
+      HPWL 6.366e7 → 6.344e7 (−0.35%), smoothed overflow 0.0405 → 0.0453**.
+      **The 28-design suite has NOT been re-scored** — summary.md's 1.0096/1.0113 headline predates
+      this and is now stale. → next action: `make dse`.
+- [x] **DONE 2026-08-17 — `BEST_SOL_MIN_ITER` is now phase-relative (7b).** `Output.cpp` gates on
+      `phaseIteration()`, not absolute `iteration`, matching `param_scheduler.py:393` (XPlace resets
+      `init_iter` at every optimizer restart). `phaseIteration()` was already the established
+      analogue everywhere in `Schedule.cpp` — including `past_warmup = phaseIteration() >= 50` at
+      `Schedule.cpp:39`, which mirrors `param_scheduler.py:286` — so this call site was the lone
+      holdout. Phase 2 now gets the same 50-iteration settling window phase 1 does.
+- [x] **DONE 2026-08-17 — `syncProbeToCommitted()` deleted; folded into `restoreBestPlacement()`,
+      which now restores BOTH halves of the (node_pos, probe_pos) pair.** Mark asked what it was
+      for; the answer is that a restore wrote only `node_pos` while every density/overflow metric
+      reads `probe_pos`, so the reported overflow described the last iteration rather than the
+      shipped placement (#24 defect 2). 7a does **not** retire that — it changes which value is
+      torn, not whether it is torn.
+      **The comment blocking the fold was wrong.** It claimed folding perturbs the phase-2 restart
+      (`mms_adaptec1: 1325 → 1288 iterations, HPWL +0.24%`). Measured A/B on the frozen config,
+      isolating the fold from 7a/7b: **bit-exact identical** — trajectory row-for-row and the same
+      `.def` sha256 (`91cbbdee0d59`), on all three regress designs. Mechanism: the phase-2 restore
+      is immediately followed by `freezeMovableMacros()` (collapses macro state onto `node_pos`,
+      `DataBase.cpp:421`) and `reinitializeStdCells()` (re-seeds everything else), so the
+      `probe_pos` write is overwritten before anything reads it. At the *final* restore the fold is
+      equivalent by construction. Verified the path actually ran (no "no best placement recorded"
+      warning, phase 1 = 654 iterations).
 - [ ] **Widen the `best_aux_max_hpwl_ratio` A/B (currently n=2).** Default is XPlace's 1.005
       (`default_config.toml`); the A/B backing that choice only has usable post-DP numbers for
       `bigblue2` and `mgc_superblue19` (`.claude/2_ARTIFACTS/todo24_best_sol_ab/`, 2026-08-10).
@@ -554,6 +612,21 @@ the rule depends on. None of these are regressions — #24's fixes are correct a
 
 Algorithmic ideas beyond faithfulness cleanup — hypotheses, not yet scoped.
 
+- [ ] **Operator-level optimizations, ported from XPlace** (was **#6**, opened 2026-07-29, demoted
+      here 2026-08-17 by the sw_only freeze). XPlace gets ~2× over DREAMPlace almost entirely from
+      operator-level restructuring of the same ePlace math we already implement — not a new
+      algorithm. These are **pure speed on sw_only and change no HPWL**, which is why the freeze
+      demotes rather than closes them. Three remaining techniques (the fourth was measured and
+      folded into #20 — the bottleneck is **~76 MB/iter of host DMA, ~8× the launch overhead**, so
+      the payoff is keeping matrices device-side, exactly what Stage 5 does):
+      **(a) operator combination** — merge WA wirelength, WA gradient and HPWL into one pass; all
+      three need the same per-net min/max (check `Partials.cpp::computeHpwlPartials_CPU` for
+      redundant recomputation). **(b) operator extraction** — share one cell-density-map build
+      between the objective and the overflow metric (`Density.cpp::compute_eField_DCT` vs
+      `computeOverflow`). **(c) operator skipping** — XPlace skips the density gradient while
+      `|density_grad|/|wirelength_grad| < 0.01` and `iteration < 100`.
+      ⚠️ **(c) is the one with a pl_algo deadline** — its own note says *carry it into pl_algo's
+      modules from the start*, so it wants deciding during #20 step 6, not after.
 - [ ] **Data type precision sweep (float vs double).** The codebase uses a mix (`float` for density
       grids to save bandwidth, `double` elsewhere). Sweep sw_only systematically — wall-clock, HPWL,
       convergence trajectory — under float-only, double-only and the current hybrid on adaptec1 /

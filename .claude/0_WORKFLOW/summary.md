@@ -1,14 +1,19 @@
 # Summary — project status at a glance
-*Updated 2026-08-17 11:21 EDT. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-17. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 > **Soft cap — one in, one out.** Current state only, ~2 screens. To add a line, remove one:
 > superseded snapshots & dated "Closed" narration → [[journal.md]]; finished task sections → [[history.md]].
 > If it's done and no longer live context, it isn't "where things stand" — evict it.
 
 ## Two threads
-- **sw_only** — CPU golden reference; goal is to match XPlace. The active thread.
-- **pl_algo** — move the whole placement iteration onto the PL. Blocked behind #20, deliberately.
+- **sw_only** — CPU golden reference; goal is to match XPlace. **FROZEN 2026-08-17 (Mark's call).**
+  Parity reached; no further algorithm/behaviour changes without an explicit decision. Cleanup,
+  tooling, docs and tests are NOT frozen. `make test-regress` bit-identical is now the contract.
+- **pl_algo** — move the whole placement iteration onto the PL. **The active thread**, starting at
+  #20 step 1 (restore `dumpScheduleTrace()`; `sched_verify` currently validates a 07-18 golden and
+  always will). Why freezing came first: pl_algo's algorithm is pinned to the 2026-07-14 sw_only,
+  so every further sw_only change was another port.
 
-## Where sw_only stands
+## Where sw_only stands (frozen — this is the final state, not a waypoint)
 - **Median HPWL ratio 1.0096, mean 1.0113, over ALL 28 ISPD designs** (legal-vs-legal; GP from the
   2026-08-15 run `results/DSE_20260815_161306` on the #31 universal grid-cap fix). 22/28 within ±2%,
   **better than XPlace on 6**. **Nothing is unscored any more** — #26 closed the 9-design fence hole.
@@ -37,6 +42,16 @@
   Moved to [[journal.md]] to keep summary.md under its soft cap — the retraction trail is preserved
   there verbatim, dated most-recent-first.
   </details>
+- **MMS (16 designs): 16/16, DP ratio median 1.0138 / mean 1.0161, from the 2026-08-14 re-run.**
+  **Still valid — checked 2026-08-17, and it is NOT stale despite predating #31.** The #31 grid cap
+  (`row_cap = 2^floor(log2(num_rows))`) **fires on zero of the 16**: every MMS design's requested
+  grid is already at or below its cap — tightest is `newblue1` (930 rows → cap 512, requested 512),
+  loosest `newblue3` (4182 → 4096, requested 2048) — and the 8 that overlap tier-1 were shown
+  bit-identical by #31 itself. Re-derive with `benchmarks._ROWS` grids vs `CoreRow` counts in the
+  bookshelf `.scl`. **No new MMS data exists** — the
+  2026-08-15 headline run (`DSE_20260815_161306`) is tier1+tier2 only, 8 ISPD2005 + 20 ISPD2015.
+  ⚠️ The only MMS run since is today's `newblue1` under `.claude/2_ARTIFACTS/GIFS_20260817_211039/`
+  — a **viz/#14 run from the other session**, not a suite result; don't score from it.
 - Landed: two-phase mixed-size flow + LP macro legalization; #19's two XPlace faithfulness fixes
   (overflow excludes fillers; the γ/λ throttle gates on preconditioner κ). Both toggles retired
   2026-08-07 — faithful behaviour is now unconditional.
@@ -78,8 +93,17 @@
     legal solutions by 2.6% on the 11 unfenced designs and 12.5% on the fenced 9.
   → [[_NEW_REPORT_26_fence_regions_20260811.md]]
 
-## Where pl_algo stands
+## Where pl_algo stands — THE ACTIVE THREAD as of 2026-08-17
 - All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
+- **Start at #20 step 1.** Two decisions are still open and step 1 wants them answered (#20 §10):
+  is v1 *"phase-1 GP, device-resident, bit-comparable"* or does it include phase 2 + backtracking;
+  and does pl_algo pin to a named sw_only commit or chase HEAD? The freeze makes pinning cheap —
+  pin to the frozen HEAD and `sched_verify` becomes meaningful again.
+- Items re-filed here from the sw_only list on 2026-08-17 (marked **↪ pl_algo** in tasks.md):
+  **#15** entirely (net-local frames — PL precision, expects no sw_only HPWL movement), **#23**'s
+  initial-step mirror, **#19**'s two remaining bullets (the live pre-#19 dff gate in
+  `host/src/pl_algo/`, and the fixture-trace regeneration blocked on step 1), and **#6c** operator
+  skipping (now an *Improvements* bullet, but wanted during step 6, not after).
 - **#20 — do NOT compose Stage 5 first.** pl_algo's algorithm is frozen at the **2026-07-14**
   sw_only, and `dumpScheduleTrace()` — the mechanism that would catch the drift — was deleted from
   sw_only as dead code on 07-28. So `make test`'s green `sched_verify` checks a **07-18 golden and
@@ -159,70 +183,32 @@
   the A/B's n=2 spun off to **#32** rather than left open here.
   → [[_NEW_REPORT_24_best_solution_trackers_20260810.md]]. Superseded prior narration: [[journal.md]].
 
-## Closed 2026-08-09 (three low-risk items, both test suites green)
-- **#19** — pl_algo's `dff`/`dff_coef` renamed to `kappa`/`kappa_coef`; `make test` numbers
-  byte-identical, so it is a pure rename. **New:** `host/src/pl_algo/` still gates on the *real* dff —
-  the pre-#19 bug, still live there, now tracked under #19.
-- **#11** — the self-contradicting `macro_td_expand_ratio` entry resolved from the code: the toggle is
-  gone, the faithful branch is unconditional, and the "re-test unblocked by #19" note is moot as
-  written (re-testing means re-adding the branch). Whether that is worth doing is Mark's call.
-- **#17** — `readDEF()` names the file it wanted instead of printing an empty path. Diagnosis only;
-  the `floorplan.def` hardcoding stands.
+## Open
+*Rewritten 2026-08-17. This section was headed "Newly open" and 4 of its 6 entries (#25, #28, #29,
+#31) were **closed and already archived to [[history.md]]** — the most-read file in the repo was
+advertising finished work as open. Their full text is in history.md; only live items are below.*
 
-## Newly open
 - **#32 — best-solution tracking: two remaining XPlace divergences + widen the A/B** (opened
   2026-08-17, spun off #24's close). Snapshot position u-vs-v, `BEST_SOL_MIN_ITER`
   absolute-vs-phase-relative, and `best_aux_max_hpwl_ratio`'s A/B still rests on n=2. None of these
   are regressions from #24 — they're gaps its faithfulness audit found and #24's own fixes don't
   reach. → [[_NEW_REPORT_24_best_solution_trackers_20260810.md]] §7
-- **#31 — overflow-stall investigation 2026-08-15: it was ALL the grid cap; overflow metric is
-  correct.** → [[_NEW_REPORT_31_overflow_stall_grid_20260815.md]]. Three overflow columns now stand
-  per-sweep (`Best OVFW` smoothed / **`Our Exact OVFW`** / **`XPlace In OVFW`** = #3's `gp_ovfl_in`),
-  scraped in `lgdp.py`+`dse.py`, no exe change. **The whole story is one root cause:** XPlace caps
-  `num_bin` at `num_rows` (`database.py:161`); sw_only had the same cap (`Setup.cpp`) but applied it
-  only on the AUTO path, so `dse --grid xplace`'s explicit 512 bypassed it. **13 of 20 ISPD2015
-  designs run finer than XPlace** — this both caused the `Best OVFW > 0.1` stalls AND made our exact
-  overflow read up to 7× XPlace's (XPlace evaluates at the capped grid, e.g. fft_2 at 128; a naive
-  reference confirms our metric is correct at every grid — 512→0.161=ours, 128→0.020≈XPlace).
-  **FIX (Mark's call): sw_only now caps an explicit grid at `num_rows` too**, matching XPlace;
-  `benchmarks.py` holds XPlace's requested 512 and the code caps. `make test-regress` bit-identical
-  (auto path untouched). ⚠️ **td is NOT a factor** — it matches XPlace on all 20 (#25 RETRACTED; my
-  earlier "target_density gap" was a misread of a params-echo log line). **Full re-run done
-  (`DSE_20260815_161306`): headline 1.0096/1.0113, 22/28 within 2%**; the overflow columns now
-  reconcile on std-cell designs (fft_2 ours 0.227 / XPlace 0.228). Residual overflow gap on macro
-  designs = the fixed-density cap-vs-scale (`initializer.py:82` vs `Grid.cpp:139`), a separate #3 item.
-- **#29 — XPlace GP reference (was N/A on 22 of 28) — CLOSED 2026-08-14** (`edd268f`), archived to
-  `history.md`. Fixed **in dse.py from `benchmarks.py`**, not the placer (Mark redirected): the exe
-  now writes raw measured columns only, its hardcoded 6-entry map is gone, and dse.py enriches
-  results.csv with `XPlace GP HPWL` + `GP Ratio` — **masked-paired** (superblue12 masked vs exact
-  differ 7.9%) and **site-width-correct** (200 mgc_*, 100 superblue). `benchmarks._XPLACE_GP_MASKED`
-  holds all 28 (2026-08-07 batch).
-- **#30 — LG+DP inside `dse.py` — LANDED 2026-08-13, on by default** (Mark's call; `--gp-only`
-  skips). `make dse` runs GP then legalizes + detailed-places each result through XPlace, and dse.py
-  enriches results.csv with `Our DP HPWL` / `XPlace DP HPWL` / `DP Ratio` (legal-vs-legal, the
-  headline) **in the same file as the GP comparison** (#29). Core is `tools/lgdp.py`; all three
-  format paths verified (adaptec1 **1.001**, mgc_fft_2 1.028, fenced mgc_des_perf_a 1.018). Post-DP
-  needs no ×site_width (from XPlace's own log). **Cross-check PASSED 2026-08-14:** a single
-  `make dse` (`results/DSE_20260814_133037`, GP+LG+DP with the CPU/GPU pipeline overlap) reproduced
-  the standing pipeline's committed numbers **exactly** — ispd2005 1.0053/1.0052, ispd2015
-  1.0163/1.0189, all 28 **median 1.0106 / mean 1.0149**. So `make dse` is now the one command that
-  produces the headline; retiring `run_suite.sh`/`run_lgdp44.sh` is unblocked (awaiting Mark's
-  go-ahead, tier-3/MMS spot-check first).
-- **#28 — `dse.py` refactor — CLOSED 2026-08-12**, archived to `history.md`. 846 → 371 lines;
-  `make dse` (optionally `DSE_ARGS="…"`) is now the single launch point for multi-benchmark runs:
-  `--designs tier1+tier2 | --set K=v1,v2 | --grid | --runset | --resume | --dry-run`. Grid and
-  `target_density` come from `benchmarks.py`. Every sweep writes **`sweep.json`** — the manifest of
-  exactly what was launched, and what the summary joins swept parameters from. The silent
-  blank-column defect is fixed (positive `RESULT_COLS`, loud warning on schema drift); the old
-  ⚠️ "read `analyze_dse.py`, not `results.md`" caveat is void — `analyze_dse.py` is now a 10-line
-  wrapper around the same renderer. `DSE_RUN_SET`/`MORRIS_RUNSET` are gone; `history.md` carries the
-  old→new command table for any dated report that quotes them.
-- **#25 — RETRACTED 2026-08-15: our `target_density` MATCHES XPlace; there is no td gap.** The whole
-  premise was a misread of XPlace's log (a `target_density: 1.0` **params echo** vs the effective
-  `target density = 0.65`). Verified mechanically: our `benchmarks.py` td == XPlace's
-  `setup_dataset.py` td on all 20 ISPD2015 designs, **0 mismatches** (XPlace's `mgc_*` branches at
-  `setup_dataset.py:95+` set our exact values). The `8.79` etc. ratios were real but are the **td<1
-  overflow-metric divergence (#3)**, not a td-value difference. See #3 / [[_NEW_REPORT_31_overflow_stall_grid_20260815.md]].
+  ⚠️ **Being handled in a separate session (2026-08-17), along with #14.** Don't start it here.
+  ⚠️ **The u-vs-v question is filed in three places** — this entry, the #24 report §7, and the
+  "deposit at `node_pos` vs `probe_pos`" bullet under *Topics for investigation*. Same question:
+  XPlace optimizes v_k directly so it snapshots, measures HPWL and deposits density all at **v**;
+  we deposit at v but snapshot and measure HPWL at **u**. It is the one open faithfulness question
+  that **changes the shipped `.def`**, and the one place the freeze could bite — decided wrong (or
+  not at all), pl_algo inherits the inconsistency and hard-codes it into the resident loop.
+- **#3 — fixed-density cap-vs-scale, the last known XPlace divergence in the density path.**
+  ❓Needs Mark's decision *because* of the freeze. XPlace `initializer.py:82` scales
+  (`min(ρ,1)·td`); our `Grid::clampFixedDensity` (`Grid.cpp:139`) caps (`min(ρ,td)`). Equal at
+  td=1; at td=0.65, ρ=0.5 → XPlace 0.325 vs ours 0.50, so we read high in macro-perimeter bins.
+  Macro designs at td<1 only. **One-line edit, but it reddens `make test-regress` and invalidates
+  the 28-design headline until a full `make dse` re-run** — fix-and-re-run, or record as
+  known-and-accepted. See tasks.md #3.
+- **#30 — collapse the two suite runners.** Unblocked by the passed cross-check; awaiting Mark's
+  go-ahead, MMS/tier-3 spot-check first. Everything else in #30 landed.
 
 ## Also open
 - **#21 — repo restructure** (host to top level, one host binary). Proposal only, nothing started.

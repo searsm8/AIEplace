@@ -17,6 +17,35 @@ status. **Never rewrite an entry; annotate.** The retraction trail is the point.
 
 ---
 
+## 2026-08-17 — sw_only FROZEN; evicted "Closed 2026-08-09" from summary.md
+
+Mark's call: sw_only functionality is frozen at parity (median 1.0096 / mean 1.0113 legal-vs-legal,
+28 ISPD designs), and pl_algo (#20) becomes the active thread. The reasoning that decided it:
+pl_algo's algorithm is pinned to the 2026-07-14 sw_only, so every further sw_only change was
+another port — freezing is what makes #20 bounded, not a pause.
+
+Evicted from summary.md the same day under the one-in-one-out rule (verbatim, none of it is a
+standing decision a session must not re-derive — all three are recorded in history.md by task):
+
+> ## Closed 2026-08-09 (three low-risk items, both test suites green)
+> - **#19** — pl_algo's `dff`/`dff_coef` renamed to `kappa`/`kappa_coef`; `make test` numbers
+>   byte-identical, so it is a pure rename. **New:** `host/src/pl_algo/` still gates on the *real* dff —
+>   the pre-#19 bug, still live there, now tracked under #19.
+> - **#11** — the self-contradicting `macro_td_expand_ratio` entry resolved from the code: the toggle is
+>   gone, the faithful branch is unconditional, and the "re-test unblocked by #19" note is moot as
+>   written (re-testing means re-adding the branch). Whether that is worth doing is Mark's call.
+> - **#17** — `readDEF()` names the file it wanted instead of printing an empty path. Diagnosis only;
+>   the `floorplan.def` hardcoding stands.
+
+The #19 "still live there" bullet is **not** dead with this eviction — it was re-filed the same day
+as **↪ pl_algo** in tasks.md #19 and folds into #20 step 2.
+
+Also rewritten in summary.md that day: the section headed **"Newly open"**, in which 4 of 6 entries
+(#25, #28, #29, #31) were closed and already archived to history.md. The most-read file in the repo
+was advertising finished work as open.
+
+---
+
 ## Superseded headline HPWL-ratio snapshots (sw_only vs XPlace)
 
 ### 2026-08-10 — "median 1.0113, mean 1.1218" (pre-`3c70b38`)
