@@ -403,6 +403,25 @@ Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
       change; largest quality lever.
 - [ ] **6. Compose the resident loop (Stage 5 proper)** with the second movable-only density map, the
       best-position DDR buffer, and phase-2 re-entrancy designed in from the start.
+      ⚠️ **The best-position DDR buffer must hold the LOOKAHEAD `v_k`, not the committed `u`** — see
+      the sw_only-parity note below. Getting this wrong is invisible: both are float32 positions of
+      the right shape, and a wrong choice costs a fraction of a percent of HPWL, not a crash.
+
+⚠️ **sw_only parity note — u vs v (added 2026-08-17, from #32/7a).** sw_only now does what XPlace
+does: **best-solution tracking snapshots the lookahead `v_k` (`probe_pos`) and measures HPWL there
+too**, so HPWL, overflow and the stored solution all describe one position. XPlace has only one
+position variable — `p` IS `v_k` (`nesterov_optimizer.py:71`) — and `evaluator_fn` measures both
+metrics at it (`run_placement_nesterov.py:142-145`). Three consequences for pl_algo, all in step 6:
+- the resident loop's **snapshot** writes `v_k`;
+- its **HPWL metric** (`metrics.hpp`) must evaluate at `v_k`, not at the committed position — sw_only
+  threads this as the new `at_probe` argument on `computeTotalWirelength`/`computeWirelength_HPWL`;
+- a **restore** writes BOTH position fields, because sw_only's `syncProbeToCommitted()` is gone —
+  folded into `restoreBestPlacement()`, which now restores the whole pair (u == v afterwards, which
+  is the state XPlace is permanently in).
+pl_algo's density deposit is already at the probe (`node_footprint.hpp`), so the deposit side needs
+no change — it is the snapshot and the HPWL metric that would otherwise inherit the old split.
+This is exactly the class of divergence that `sched_verify` cannot catch (it checks the schedule,
+not the geometry), so it needs a step-3 harness or it will not be noticed.
 
 **Open questions for Mark** (report §10): does "the same algorithm" include phase 2 and backtracking,
 or is v1 "phase-1 GP, device-resident, bit-comparable"? Pin pl_algo to a named sw_only commit rather
@@ -593,13 +612,28 @@ the rule depends on. None of these are regressions — #24's fixes are correct a
       `probe_pos` write is overwritten before anything reads it. At the *final* restore the fold is
       equivalent by construction. Verified the path actually ran (no "no best placement recorded"
       warning, phase 1 = 654 iterations).
-- [ ] **Widen the `best_aux_max_hpwl_ratio` A/B (currently n=2).** Default is XPlace's 1.005
-      (`default_config.toml`); the A/B backing that choice only has usable post-DP numbers for
-      `bigblue2` and `mgc_superblue19` (`.claude/2_ARTIFACTS/todo24_best_sol_ab/`, 2026-08-10).
-      Needs ~8–10 more designs run blind — the trace projection **cannot** identify flippers near
-      the 0.5% budget (4-sig-fig HPWL in `iterations.dat`; `adaptec3`'s ratio straddled it and
-      didn't flip when projected to). The GP `.def`s behind the original A/B are gone
-      (`results/DSE_20260810_173906` no longer exists), so this is a fresh run, not a re-derivation.
+- [~] **Settle the `best_aux_max_hpwl_ratio` A/B — RUN IN FLIGHT 2026-08-17 evening.**
+      `make dse DSE_ARGS="--set best_aux_max_hpwl_ratio=1.005,1.010"` — **all 28 designs × 2 arms =
+      56 runs, ~2.7 h** (Mark's call). Full-suite rather than a subset, because a subset has to be
+      chosen by a projection the report itself calls unreliable, and one arm of the whole suite is
+      only 80 min. Verdict criterion: the suite median/mean DP ratio under each arm, directly.
+      **It is a RE-RUN, not a widening.** The 2026-08-10 A/B ran on a **pre-7a** binary, and 7a
+      changed which position both trackers snapshot *and* where HPWL is measured — precisely the two
+      quantities this ratio compares. The old "keep 1.005" verdict (n=2: `bigblue2` +0.138% post-DP,
+      `mgc_superblue19` +0.410%, both favouring 1.005) describes a binary that no longer exists.
+      ⚠️ **There are TWO 1.005 budgets in XPlace and this knob only drives one** (found 2026-08-17
+      while answering "what is the aux ratio?"):
+      | | XPlace | ours |
+      |---|---|---|
+      | **accept** — record a new aux snapshot | `param_scheduler.py:436` | **hardcoded `1.005f`** in `Output.cpp::recordIterationResults` |
+      | **prefer** — ship aux over primary | `param_scheduler.py:567` | `best_aux_max_hpwl_ratio` (config), `Schedule.cpp:420` |
+      So this sweep answers the *preference* question only. Sweeping the accept rule needs a small
+      change to expose the hardcoded constant — **not done, and worth deciding separately**; the two
+      are independent knobs that happen to share a literal upstream.
+      ⚠️ Carry forward from report §5 caveat 3, still unresolved: on `mgc_superblue19` our
+      `Best OVFW` and XPlace's exact overflow **disagree on the direction** of the 1.005→1.010 move.
+      Not systematic (`bigblue2` agrees), but our overflow number should not be used to argue
+      placement quality until it is understood.
 
 → [[_NEW_REPORT_24_best_solution_trackers_20260810.md]] §7 (the faithfulness audit that found the
   first two), §5 (the original A/B)
