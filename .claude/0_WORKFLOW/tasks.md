@@ -698,6 +698,76 @@ Algorithmic ideas beyond faithfulness cleanup — hypotheses, not yet scoped.
 
 ---
 
+## #34 — MMS regressed 1.0161 → 1.0351 on the frozen binary, and #3 carries it (opened 2026-08-19)
+
+**The tier-3 run the freeze was waiting on has landed** — `vck5000/results/DSE_20260819_152124`,
+16/16 scored, and it is **worse than the pre-fix 2026-08-14 run**:
+
+| | 2026-08-14 (pre-fix) | **2026-08-19 (frozen binary)** |
+|---|---|---|
+| median | 1.0137 | **1.0192** |
+| mean | 1.0161 | **1.0351** |
+| within ±2% | — | 9 / 16 |
+| better than XPlace | — | 4 |
+
+**The split by `target_density` is the whole story, and it is clean.** #3's cap→scale is
+*provably algebraically identical at td=1* (`min(ρ,1)·td` == `min(ρ,td)` when td=1), so the td=1
+half isolates #32's 7a/7b and the td<1 half carries 7a/7b **plus** #3:
+
+| group | designs | mean Δ |
+|---|---|---|
+| **td < 1** (#3 active) | adaptec5, newblue1-7 | **+4.99 pp — all 8 worse** |
+| **td = 1** (#3 a no-op) | adaptec1-4, bigblue1-4 | **−1.19 pp — 5 of 8 better** |
+
+So **7a/7b is a net win on MMS**, and **#3 costs roughly +6 pp** on the designs it touches. The
+magnitude tracks (1−td) as the formula predicts: td=0.5 → `adaptec5` **+15.21 pp**,
+`newblue4` +5.12, `newblue5` +5.05; td=0.8 → +0.56…+9.72; td=0.9 → `newblue2` +0.72.
+(Biggest improvement anywhere: `bigblue3` **−8.15 pp**, td=1.0, i.e. 7a/7b.)
+
+⚠️ **This is ~46× what #3 cost on ISPD (+0.13 pp), and that is consistent, not contradictory:**
+ISPD is std-cell, so the fixed-density path barely fires. Measured — the our/XPlace exact-overflow
+ratio on ISPD is **unchanged** pre-vs-post #3 at every td band (td=0.65: 0.791→0.834; td=1.00:
+0.998→0.999). MMS is where fixed blockage area actually matters, and it is the tier that was never
+re-run before the freeze was called.
+
+- [ ] **DEFECT — `computeOverflow` still uses the PRE-#3 cap, and its comment claims otherwise.**
+      Found reading both functions, **not** inferred from the numbers. #3 changed the solver's
+      field but not the metric:
+      - `Grid::clampFixedDensity` (`Grid.cpp:143-152`) — **new**: `min(overlap, bin_area) * td`
+      - `Placer::computeOverflow` (`Density.cpp:324-326`) — **old**: `min(density, bin_area*td)`,
+        under the comment *"Fixed baseline at exact size, capped per bin (**mirrors
+        clampFixedDensity**)"*. **It no longer mirrors it.**
+      This is exactly the failure `CLAUDE.md` names: *a comment that names an upstream function is
+      a claim; check the code below it computes that function.*
+      ⚠️ **I have NOT established that this defect causes the MMS regression** — the sign of its
+      effect on the reported metric is opposite to what is observed against XPlace, so something
+      else is also in play. Treat it as a real inconsistency that must be fixed regardless, and as
+      the first suspect, not as the diagnosis.
+- [ ] **DECISION FOR MARK — do not freeze MMS at 1.0351 without settling this.** Three options:
+      **(a)** fix the metric side of #3 and re-run tier3 (~the length of one MMS suite);
+      **(b)** revert #3 entirely — the td=1 evidence says 7a/7b alone would leave MMS *better* than
+      2026-08-14 — and accept the ISPD golden loses its #3 component too;
+      **(c)** accept 1.0351 as the faithful cost, per `CLAUDE.md`'s prefer-XPlace rule.
+      ⚠️ **(c) is the standing default and I am flagging against applying it blind here.** The rule
+      exists for a faithfulness change that costs a fraction of a percent, which is what #3 looked
+      like when it was judged on ISPD alone. +15 pp on one design and +5 pp on a tier is a
+      different question, and the metric/field inconsistency above means we have not yet measured
+      #3 cleanly.
+- [ ] **Reading of XPlace, for whoever takes this.** `init_density_map` is normalized to (0,1)
+      (`database.py:671` comment), `.clamp_(0,1).mul_(target_density)` (`initializer.py:82`), and
+      overflow thresholds at `(density_map - target_density) * bin_area` (`evaluator.py:48`). On a
+      half-blocked bin at td=0.5 that leaves 0.25 of headroom for movable cells; the pre-#3 cap
+      left **zero**. So **#3's direction is right and the old code was wrong** — which is what
+      makes the regression worth explaining rather than simply reverting.
+- [x] **#30's tier-3 spot-check PASSES** — the long-open "MMS via `make dse --designs tier3` has
+      never been validated" bullet. All **16/16** `XPlace DP HPWL` values in `results.csv` match
+      `benchmarks._XPLACE_MMS_FINAL` (tolerance 1e-4; `results.csv` stores ~5 significant figures,
+      so a tighter bound reports false mismatches). `--designs tier3` needs no special config:
+      `mixed_size_mode` is auto-detected from `num_movable_macros > 0` (`Setup.cpp:393`) and
+      `enable_phase2` defaults true.
+
+---
+
 ## #30 — Legalization + detailed placement inside `dse.py` (opened 2026-08-12)
 
 Mark, 2026-08-12: *"As a future goal, we also need to incorporate legalization and Detailed

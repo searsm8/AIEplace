@@ -74,15 +74,17 @@
     `newblue1`/`newblue3`/`newblue6`/`newblue7` (0.8), `newblue2` (0.9). The other 8 are td=1.0,
     where `min(ρ,1)·td` and `min(ρ,td)` are identically equal — which is exactly why
     `mms_adaptec1`'s regress baseline came back bit-identical and is **not** evidence for the rest.
-  **🔄 RUN IN FLIGHT as of 2026-08-19 15:21 — `vck5000/results/DSE_20260819_152124`**
-  (`make dse DSE_ARGS="--designs tier3"`). Until it lands MMS has no quotable number.
-  When it does: archive it as `GOLDEN_sw_only_frozen_mms_<date>/` beside the ISPD golden, then
-  delete `DSE_20260814_152306` — which is being kept **only** as the before-half of the comparison
-  that shows what the three 08-17 faithfulness fixes cost on MMS.
-  ⚠️ **This is also #30's never-done tier-3 spot-check**, so treat the first result as unvalidated
-  until it is checked against `benchmarks._XPLACE_MMS_FINAL`. Pre-flight done: `--designs tier3` is
-  a supported alias, and MMS needs no special config — `mixed_size_mode` is auto-detected from
-  `num_movable_macros > 0` (`Setup.cpp:393`) and `enable_phase2` defaults true.
+  **RUN LANDED 2026-08-19 (`vck5000/results/DSE_20260819_152124`, 16/16) — and it REGRESSED:
+  median 1.0137 → 1.0192, mean 1.0161 → 1.0351.** → **#34**, opened for it.
+  **NOT archived as golden, deliberately.** The split by td is clean and #3's cap→scale carries it:
+  **td<1 (8 designs, #3 active) all 8 worse, mean +4.99 pp** (`adaptec5` +15.21) while **td=1
+  (8 designs, #3 a provable no-op) mean −1.19 pp**, i.e. 7a/7b alone is a *win* on MMS. A real
+  inconsistency was found while checking it — `computeOverflow` still uses the pre-#3 cap under a
+  comment claiming it mirrors `clampFixedDensity` — so **#3 has not yet been measured cleanly.**
+  ⚠️ **Do not quote 1.0351 as the frozen MMS number and do not delete `DSE_20260814_152306`**
+  (the pre-fix run) until #34 is settled: it is the only before-half of this comparison.
+  ✅ Side effect: **#30's never-done tier-3 spot-check PASSES** — 16/16 references match
+  `benchmarks._XPLACE_MMS_FINAL`.
   <details><summary>Superseded 2026-08-18: "Still valid — checked 2026-08-17 … NOT stale"</summary>
 
   That check was correct **about #31 only** — the grid cap does fire on zero of the 16 (every MMS
