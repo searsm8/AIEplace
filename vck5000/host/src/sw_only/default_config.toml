@@ -96,7 +96,7 @@ convergence_window = 5  # Number of iterations used to determine convergence.
 convergence_hpwl_improvement_threshold = 0.01 # If HPWL improvement over window is below this, HPWL convergence is met.
 convergence_overflow_threshold = 0.07 # Stop when smoothed overflow/movable-area < this. Matches XPlace --stop_overflow default 0.07 (apples-to-apples; do not override lower in sweeps).
 convergence_iterations = 30 # Extra iterations to run after overflow drops below threshold (XPlace uses 30)
-best_aux_max_hpwl_ratio = 1.005 # Max HPWL the spread-out (aux) solution may cost before the HPWL-driven pick wins. XPlace hard-codes 1.005 (param_scheduler.py:565); 1.01 ships the spread solution on ~5 more designs.
+aux_select_hpwl_ratio = 1.005 # SELECTION budget: max HPWL the spread-out (aux) solution may cost vs PRIMARY before the HPWL-driven pick wins. XPlace hard-codes 1.005 (param_scheduler.py:568). Distinct from the aux UPDATE budget of the same value (AUX_UPDATE_HPWL_RATIO, measured against aux's own previous HPWL) -- see TODO #33. A/B'd over all 28 designs 2026-08-17: 1.005 kept; it changes the shipped solution on 1 design of 28.
 maximum_utilization = 1.0  # Default target density. Overridden by benchmark's placement.constraints if present (e.g. ISPD2015).
 
 [output]

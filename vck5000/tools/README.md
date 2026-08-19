@@ -78,6 +78,7 @@ never just one.
 
 | file | status | what |
 |---|---|---|
+| `config_keys.py` | **live** | derives the config keys sw_only actually reads, straight from the sources, and asserts nothing sets one it doesn't. Run by `make test` (`--check-configs`) and by `dse.py` on every `--set` (a misspelled key would otherwise sweep nothing and report success). |
 | `generate_viz.py` | **live** | full-die / zoomed placement frames from a run's node-position dump (TODO #16). Driven by the `viz-gif` skill. |
 | `make_viz_gifs.py`, `gif_builder.py` | **live** | frame → GIF assembly. |
 | `plot_histories.py` | **live** | the 5 convergence charts from `iterations.dat` (written every iteration, ungated). |

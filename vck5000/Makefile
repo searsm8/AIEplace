@@ -138,6 +138,7 @@ TEST_DIR ?= $(PROJECT_ROOT)/test
 
 .PHONY: test
 test:
+	@python3 tools/config_keys.py --check-configs
 	$(MAKE) -C $(TEST_DIR) test
 
 # =============================================================================

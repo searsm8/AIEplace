@@ -417,8 +417,8 @@ Placer::BestChoice Placer::selectBestSolution() const
     if (!best_aux.valid)     return {&best_primary, BestSlot::PRIMARY, "primary (HPWL driven)"};
     if (!best_primary.valid) return {&best_aux,     BestSlot::AUX,     "aux (overflow driven)"};
 
-    const bool aux_worth_its_hpwl = (best_aux.hpwl < best_primary.hpwl * best_aux_max_hpwl_ratio &&
-                                     best_aux.overflow * 1.1f < best_primary.overflow);
+    const bool aux_worth_its_hpwl = (best_aux.hpwl < best_primary.hpwl * aux_select_hpwl_ratio &&
+                                     best_aux.overflow * AUX_SELECT_OVFW_RATIO < best_primary.overflow);
     return aux_worth_its_hpwl ? BestChoice{&best_aux,     BestSlot::AUX,     "aux (overflow driven)"}
                               : BestChoice{&best_primary, BestSlot::PRIMARY, "primary (HPWL driven)"};
 }

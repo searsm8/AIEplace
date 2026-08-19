@@ -256,7 +256,7 @@ void Placer::loadConfiguration()
     hpwl_improvement_threshold = ConfigUtils::require<float>(cfg, "params", "convergence_hpwl_improvement_threshold");
     overflow_threshold = ConfigUtils::require<float>(cfg, "params", "convergence_overflow_threshold");
     // value_or, not require: the frozen test/regress configs predate this key and must keep working.
-    best_aux_max_hpwl_ratio = cfg["params"]["best_aux_max_hpwl_ratio"].value_or(best_aux_max_hpwl_ratio);
+    aux_select_hpwl_ratio = cfg["params"]["aux_select_hpwl_ratio"].value_or(aux_select_hpwl_ratio);
     target_density = cfg["params"]["maximum_utilization"].value_or(target_density);
     enable_backtracking = ConfigUtils::require<bool>(cfg, "params", "enable_backtracking");
     enable_momentum = ConfigUtils::require<bool>(cfg, "params", "enable_momentum");

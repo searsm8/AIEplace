@@ -60,6 +60,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from collections import OrderedDict
 
@@ -154,6 +155,15 @@ def build_runs(args):
         return runs, col_keys
 
     sets = parse_sets(args.set)
+    # Fail here, not in 2.7 hours. write_config() will happily write ANY key into the TOML and the
+    # exe reads with value_or(default), so a misspelled --set produces a sweep whose arms are all
+    # the same behaviour -- reported as a clean success. config_keys derives the readable set from
+    # the sw_only sources, so it cannot drift from the code.
+    if sets:
+        checker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config_keys.py")
+        if subprocess.run([sys.executable, checker, "--check", *sets]).returncode:
+            raise SystemExit("dse: refusing to launch -- see the unread --set key(s) above.")
+
     swept = [k for k, v in sets.items() if len(v) > 1]   # only these get a column / label suffix
     col_keys = ["grid"] + [k.rsplit(".", 1)[-1] for k in swept]
     designs = sorted(benchmarks.expand_designs(args.designs), key=design_bytes)

@@ -593,15 +593,17 @@ void Placer::recordIterationResults()
     // Rollback: near-converged band, before any converged solution exists. Overflow must improve;
     // HPWL is allowed to creep 1% to buy it (param_scheduler.py:407-428).
     if (!ever_converged && overflow < 5.0f * overflow_threshold &&
-        hpwl < best_rollback.hpwl * 1.01f && overflow < best_rollback.overflow)
+        hpwl < best_rollback.hpwl * ROLLBACK_UPDATE_HPWL_RATIO && overflow < best_rollback.overflow)
     {
         best_rollback = {hpwl, overflow, iteration, true};
         snapshotBestPlacement(BestSlot::ROLLBACK);
     }
 
-    // Aux: converged, driving overflow down, paying at most 0.5% HPWL per update (:431-441).
+    // Aux: converged, driving overflow down, paying at most 0.5% HPWL per update (:434-441).
     // This is NOT a divergence guard -- it is the spread-out solution the selection rule PREFERS.
-    if (converged_now && hpwl < best_aux.hpwl * 1.005f && overflow < best_aux.overflow) {
+    // Measured against the aux snapshot's OWN previous HPWL, which is what makes this a different
+    // budget from aux_select_hpwl_ratio despite both being 0.5% (TODO #33).
+    if (converged_now && hpwl < best_aux.hpwl * AUX_UPDATE_HPWL_RATIO && overflow < best_aux.overflow) {
         best_aux = {hpwl, overflow, iteration, true};
         snapshotBestPlacement(BestSlot::AUX);
     }

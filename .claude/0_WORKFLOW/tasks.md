@@ -570,33 +570,67 @@ solved problem, on a frozen placer. → [[REPORT_23_site_width_seed_20260810.md]
 
 ---
 
-## #33 — The aux ACCEPT budget is hardcoded and has never been swept (opened 2026-08-17)
+## #33 — The aux ACCEPT budget: named 2026-08-17, still unswept (opened 2026-08-17)
 
 Spun off #32's A/B rather than holding that item open, because it is a different knob.
 
-XPlace has **two** 0.5% budgets around `best_aux`, and they are independent — they just share a
-literal upstream:
+**Renamed 2026-08-17 (Mark).** The four tracker tolerances were one named parameter and three magic
+numbers; the name that existed, `best_aux_max_hpwl_ratio`, omitted *what it was measured against* —
+which is the only thing separating it from its twin, and exactly why the twin stayed hidden. All
+four now carry the reference point in a `{tracker}_{moment}_{quantity}` slot, where the moment is
+XPlace's own function name, so each name round-trips upstream:
 
-| | XPlace | ours | swept? |
+| moment | compares | name | XPlace |
 |---|---|---|---|
-| **accept** — record a new aux snapshot | `param_scheduler.py:436` | **hardcoded `1.005f`**, `Output.cpp::recordIterationResults` | **no** |
-| **prefer** — ship aux over primary | `param_scheduler.py:567` | `best_aux_max_hpwl_ratio` (config), `Schedule.cpp:420` | yes, #32 |
+| aux update | new HPWL vs **aux's own** snapshot | `AUX_UPDATE_HPWL_RATIO` = 1.005 | `param_scheduler.py:436` |
+| aux select | aux HPWL vs **primary** | `aux_select_hpwl_ratio` = 1.005 (config) | `:568` |
+| aux select | aux overflow vs **primary** | `AUX_SELECT_OVFW_RATIO` = 1.1 | `:569` |
+| rollback update | new HPWL vs **rollback's own** | `ROLLBACK_UPDATE_HPWL_RATIO` = 1.01 | `:425` |
 
-#32 settled the preference budget (keep 1.005) and found it binds on **1 design of 28**. The accept
-budget governs something different: how *often* an aux snapshot is refreshed during the run, and
-therefore which placement `best_aux` even holds by the end. A knob that rarely binds at selection
-time may still be shaping the candidate it selects from.
+`update` = `update_best_sol` (recording, every iteration, against the tracker's own previous value);
+`select` = `get_best_solution` (choosing what to ship, once, against the other tracker). Rename is
+behaviour-neutral — `make test-regress` bit-identical. XPlace writes all four as bare literals,
+which is why the duplication was invisible there too.
 
-- [ ] **Decide whether this is worth exposing at all.** Cheap diagnostic first: instrument how many
-      times the accept rule fires per run and how much the aux snapshot moves, before spending
-      another 2.7 h suite on it. If aux is refreshed a handful of times, the budget is not doing
-      much and this can be closed as known-and-accepted.
-- [ ] **If exposed, name it distinctly.** `best_aux_max_hpwl_ratio` already means the preference
-      test; a second knob called anything similar re-creates exactly the `density_force_fraction`
-      trap (#19b) — same name, same units, different function, invisible to grep.
+- [ ] **The accept budget is still unswept.** #32 settled the *selection* budget (keep 1.005; binds
+      on 1 design of 28). The accept budget governs something different — how often `best_aux` is
+      refreshed during the run, and therefore which placement it holds by the end. A knob that
+      rarely binds at selection time may still be shaping the candidate it selects from.
+      Cheap diagnostic first: count how many times the accept rule fires per run and how far the aux
+      snapshot moves, before spending another 2.7 h suite. If aux is refreshed a handful of times,
+      close this as known-and-accepted.
+- [ ] **If it is ever exposed to config, it needs a `_ratio` entry of its own**, not a shared one.
+      ⚠️ **Do not "fix" this by pointing both at one config value.** They are separate constants in
+      XPlace and merely happen to be equal; collapsing them asserts an equality upstream does not.
 
-⚠️ **Do not "fix" this by making both read one config value.** They are separate constants in
-XPlace and happen to be equal; collapsing them asserts an equality upstream does not.
+### Dead-config-key guard (landed 2026-08-17, Mark's call)
+
+*"Any parameter that is set but not used should raise a flag. A single typo could silently cause
+unintended behaviour."* The failure it prevents: `write_config()` (`dse.py`) writes **any** key into
+the TOML with no validation, and the exe reads with `value_or(default)` — so
+`--set aux_select_hpwl_rato=1.01` writes the misspelled key, every arm falls back to the default,
+and the sweep reports a clean success with all arms secretly identical. That is a multi-hour run
+producing a confident wrong answer.
+
+`tools/config_keys.py` derives the readable key set **from the sw_only sources on every call**, so
+it cannot drift the way a checked-in list would. Wired in at the two points that matter:
+- `make test` → `--check-configs` (the live configs set nothing unread)
+- `dse.py` → `--check` on every `--set`, **before launching**; refuses to start and suggests the
+  closest real key.
+
+Audit at landing: the tracked configs were clean apart from **`input.xclbin`**, genuinely dead —
+sw_only is CPU-only and never reads it; it is a leftover of the era when one config served the
+hardware variants. Listed in `_KNOWN_UNREAD` rather than deleted, because it also sits in the
+FROZEN `test/regress` configs, which must stay byte-identical to the inputs that produced their
+baselines.
+
+- [ ] **Residual gap: a config passed straight to the exe is still unchecked.**
+      `aieplace_sw_only.exe my_config.toml` (i.e. `make run`, the `run-benchmark` skill, hand runs)
+      does not go through either guard, so a typo there is still silent. The complete fix is runtime
+      read-tracking in C++ — or, cheaper, generate a key header from `config_keys.py --list` and
+      validate at startup, with a test that regenerates it and asserts it is unchanged. **Not done:
+      it adds build machinery to a frozen sw_only and the expensive failure mode is already
+      covered.** Mark's call whether it is worth it.
 
 ---
 

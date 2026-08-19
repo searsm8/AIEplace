@@ -253,10 +253,23 @@ public:
     // XPlace expresses this as `life < max_life` (param_scheduler.py:396-405). Spelled out here
     // because OUR `life` is a different quantity — a divergence-guard budget, burned 6 at a time.
     bool ever_converged = false;
-    // How much HPWL the spread-out (aux) solution may cost before selectBestSolution() rejects it.
-    // XPlace hard-codes 1.005 (param_scheduler.py:565); exposed here because roughly a third of the
-    // suite sits within 1% of it, so it decides how spread the shipped placement is.
-    float best_aux_max_hpwl_ratio = 1.005f;
+    // ---- Tracker tolerances -------------------------------------------------------------------
+    // Four multiplicative budgets govern the trackers, and the ONLY thing separating them is what
+    // each is measured against — so the name carries that, in the {tracker}_{moment}_{quantity}
+    // slot. `update` is XPlace's update_best_sol (recording a snapshot, every iteration, against
+    // the tracker's OWN previous value); `select` is get_best_solution (choosing what to ship,
+    // once, against the OTHER tracker). XPlace writes all four as bare literals, which is exactly
+    // why it was easy to miss that 1.005 appears twice meaning two different things (TODO #33).
+    // They stay four independent declarations: upstream does not assert they are equal.
+    //
+    // Config-overridable, because roughly a third of the suite sits within 1% of it and it decides
+    // how spread the shipped placement is. A/B'd over all 28 designs 2026-08-17 (DSE_20260818_113716):
+    // 1.005 kept. It binds on ONE design of 28, so this is a low-leverage knob, not a tuning lever.
+    float aux_select_hpwl_ratio = 1.005f;          // matches param_scheduler.py:568
+
+    static constexpr float AUX_UPDATE_HPWL_RATIO      = 1.005f; // param_scheduler.py:436
+    static constexpr float AUX_SELECT_OVFW_RATIO      = 1.1f;   // param_scheduler.py:569
+    static constexpr float ROLLBACK_UPDATE_HPWL_RATIO = 1.01f;  // param_scheduler.py:425
     enum class BestSlot { PRIMARY, AUX, ROLLBACK };
     // The selected solution and the buffer holding its geometry. `sol` is null when nothing is
     // valid (the last iterated placement is then shipped as-is).
