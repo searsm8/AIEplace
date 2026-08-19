@@ -724,7 +724,10 @@ magnitude tracks (1−td) as the formula predicts: td=0.5 → `adaptec5` **+15.2
 `newblue4` +5.12, `newblue5` +5.05; td=0.8 → +0.56…+9.72; td=0.9 → `newblue2` +0.72.
 (Biggest improvement anywhere: `bigblue3` **−8.15 pp**, td=1.0, i.e. 7a/7b.)
 
-⚠️ **This is ~46× what #3 cost on ISPD (+0.13 pp), and that is consistent, not contradictory:**
+⚠️ **On ISPD, #3 cost about +0.10 pp; here it costs ~+6 pp — roughly 60×.** (Careful with the
+basis: ISPD's headline +0.13 pp is the WHOLE three-fix bundle, not #3. Split it — ISPD2005 is all
+td=1, so its +0.05 pp is 7a/7b alone; ISPD2015 moved +0.15 pp carrying both, leaving ~+0.10 pp for
+#3.) **That is consistent, not contradictory:**
 ISPD is std-cell, so the fixed-density path barely fires. Measured — the our/XPlace exact-overflow
 ratio on ISPD is **unchanged** pre-vs-post #3 at every td band (td=0.65: 0.791→0.834; td=1.00:
 0.998→0.999). MMS is where fixed blockage area actually matters, and it is the tier that was never
