@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-08-17. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-19. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 > **Soft cap — one in, one out.** Current state only, ~2 screens. To add a line, remove one:
 > superseded snapshots & dated "Closed" narration → [[journal.md]]; finished task sections → [[history.md]].
 > If it's done and no longer live context, it isn't "where things stand" — evict it.
@@ -14,11 +14,19 @@
   so every further sw_only change was another port.
 
 ## Where sw_only stands (frozen — this is the final state, not a waypoint)
-- **Median HPWL ratio 1.0097, mean 1.0126, over ALL 28 ISPD designs** (legal-vs-legal;
-  `results/DSE_20260817_223934`, 2026-08-17, 28/28 succeeded in 80.6 min). 22/28 within ±2%,
-  **better than XPlace on 6**. Nothing is unscored — #26 closed the 9-design fence hole.
+- 🏆 **GOLDEN — median HPWL ratio 1.0097, mean 1.0126, over ALL 28 ISPD designs** (legal-vs-legal,
+  2026-08-17, 28/28 in 80.6 min). 22/28 within ±2%, **better than XPlace on 6**. Nothing is
+  unscored — #26 closed the 9-design fence hole.
+  **Archived 2026-08-19 to `.claude/2_ARTIFACTS/results/GOLDEN_sw_only_frozen_20260817/`** (was
+  `vck5000/results/DSE_20260817_223934`, which no longer exists). **Read the README there before
+  quoting it** — it carries the two caveats, the per-tier split, and the reproduce command. Stats
+  were recomputed from its `results.csv` at archive time, not copied from here, and they match.
+  ⚠️ The data was produced at `821a9c8`; the frozen commit is `64cfa0e`, two later and
+  **behaviour-neutral by its own acceptance criterion** (no value changed, `make test-regress`
+  bit-identical). Mark's call 2026-08-19, over re-running 80 minutes on the exact commit. If
+  sw_only behaviour ever disagrees with these numbers, suspect that assumption first.
 
-  | | 2026-08-15 (`DSE_20260815_161306`) | **now (`DSE_20260817_223934`)** |
+  | | 2026-08-15 (`DSE_20260815_161306`) | **GOLDEN (2026-08-17)** |
   |---|---|---|
   | **ISPD2005 (8)** | 1.0053 / 1.0052 | 1.0057 / 1.0057 |
   | **ISPD2015 (20)** | 1.0113 / 1.0138 | 1.0101 / **1.0153** |
@@ -66,7 +74,15 @@
     `newblue1`/`newblue3`/`newblue6`/`newblue7` (0.8), `newblue2` (0.9). The other 8 are td=1.0,
     where `min(ρ,1)·td` and `min(ρ,td)` are identically equal — which is exactly why
     `mms_adaptec1`'s regress baseline came back bit-identical and is **not** evidence for the rest.
-  **Fix: `make dse --designs tier3`.** Until then MMS has no quotable number.
+  **🔄 RUN IN FLIGHT as of 2026-08-19 15:21 — `vck5000/results/DSE_20260819_152124`**
+  (`make dse DSE_ARGS="--designs tier3"`). Until it lands MMS has no quotable number.
+  When it does: archive it as `GOLDEN_sw_only_frozen_mms_<date>/` beside the ISPD golden, then
+  delete `DSE_20260814_152306` — which is being kept **only** as the before-half of the comparison
+  that shows what the three 08-17 faithfulness fixes cost on MMS.
+  ⚠️ **This is also #30's never-done tier-3 spot-check**, so treat the first result as unvalidated
+  until it is checked against `benchmarks._XPLACE_MMS_FINAL`. Pre-flight done: `--designs tier3` is
+  a supported alias, and MMS needs no special config — `mixed_size_mode` is auto-detected from
+  `num_movable_macros > 0` (`Setup.cpp:393`) and `enable_phase2` defaults true.
   <details><summary>Superseded 2026-08-18: "Still valid — checked 2026-08-17 … NOT stale"</summary>
 
   That check was correct **about #31 only** — the grid cap does fire on zero of the 16 (every MMS
