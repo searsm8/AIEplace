@@ -28,20 +28,23 @@ headline is legal-vs-legal (post-DP HPWL, the metric the XPlace paper reports �
 flatters whichever placer spread less, TODO #3). Pass --gp-only to stop after GP. LG+DP needs
 XPlace's environment (CUDA + its conda python); see tools/lgdp.py.
 
-What a sweep leaves behind, in results/DSE_<timestamp>/:
-  sweep.json    the manifest of what was launched — every run's label, config path, overrides
-  configs/, logs/   one TOML / one stdout+stderr capture per run
-  gp_only.csv   the exe's raw GP record, one appended row per run (schema owned by Output.cpp)
-  results.csv   dse.py's product: gp_only.csv plus every XPlace comparison (GP Ratio, LG/DP), from
-                tools/benchmarks.py; rewritten whole from gp_only.csv each time. Its `grid` column
-                is the EFFECTIVE grid the run used (the row cap can lower it, TODO #31), not the
-                grid that was requested -- gp_only.csv keeps the request, which is the identity
-  lgdp.json     per-run LG+DP result (unless --gp-only); XPlace logs under lgdp/<label>/
+What a sweep leaves behind, in results/DSE_<timestamp>/ — one file per WRITER, named for its owner:
+  sweep.json      the manifest of what was launched — every run's label, config path, overrides
+  configs/, logs/     one TOML / one stdout+stderr capture per run
+  gp_only.csv     the EXE's raw GP record, one appended row per run (schema owned by Output.cpp)
+  lgdp.json       the LG WORKER's per-run LG+DP result (unless --gp-only); XPlace logs in lgdp/<label>/
+  dse_results.csv DSE.PY's product: gp_only.csv plus every XPlace comparison (GP Ratio, LG/DP), from
+                  tools/benchmarks.py; rewritten whole after EVERY run, so killing a sweep partway
+                  still leaves the table for what finished. Its `grid` column is the EFFECTIVE grid
+                  the run used (the row cap can lower it, TODO #31), not the grid that was requested
+                  -- gp_only.csv keeps the request, which is the identity
 
-Two CSVs, two owners: the exe only appends to gp_only.csv, dse.py only writes results.csv, so
-neither clashes with the other across a --resume. A run's identity is (Suite, Design, grid, swept
-values) — all visible columns (dse.py emits `grid` + each swept param into DSE_info), so gp_only.csv
-and sweep.json rows join on that tuple and --resume skips identities already in gp_only.csv.
+Three files, three owners, no shared writer: the exe only appends gp_only.csv, the LG worker only
+writes lgdp.json, dse.py only writes dse_results.csv — so nothing clashes across a --resume, and
+dse_results.csv is disposable (delete it and `analyze_dse.py` rebuilds it) while the other two are
+the durable record. A run's identity is (Suite, Design, grid, swept values) — all visible columns
+(dse.py emits `grid` + each swept param into DSE_info), so gp_only.csv and sweep.json rows join on
+that tuple and --resume skips identities already in gp_only.csv.
 
 GP runs one design at a time (the placer is OpenMP-threaded across all cores, so concurrent GPs
 were measured — 9bea10e, 2026-07-31 — to give the same wall clock with more ways to go wrong), but
@@ -73,8 +76,12 @@ EXE_PATH = "build/hw/host/sw_only/aieplace_sw_only.exe"
 TEMPLATE_PATH = "host/src/sw_only/default_config.toml"
 BENCH_ROOT = "host/benchmarks"
 
+# CLAUDE CODE: one file per owner, and the name says who wrote it -- the exe appends gp_only.csv,
+# the LG worker owns lgdp.json, dse.py produces this.
+RESULTS_CSV = "dse_results.csv"
+
 # Raw exe columns summarize depends on. Checked as a POSITIVE list: a name missing from
-# results.csv warns loudly, rather than the table silently blanking as it did when Output.cpp
+# dse_results.csv warns loudly, rather than the table silently blanking as it did when Output.cpp
 # renamed its columns (TODO #28).
 RESULT_COLS = ["Best Iter", "Best OVFW", "Best GP HPWL", "Final HPWL Exact"]
 
@@ -134,7 +141,7 @@ def grid_values(spec, meta):
 
 def build_runs(args):
     """-> (runs, col_keys). runs = [(label, overrides, columns)]; columns is the {grid + swept}
-    dict emitted into results.csv (via DSE_info) and forming each run's identity. col_keys is that
+    dict emitted into dse_results.csv (via DSE_info) and forming each run's identity. col_keys is that
     column order, shared across the sweep."""
     if args.runset:
         with open(args.runset) as f:
@@ -207,7 +214,7 @@ def write_config(template, overrides, columns, path, run_num, total):
             config[section] = tomlkit.table()
         config[section][param] = f"{BENCH_ROOT}/{value}" if param == "benchmark" else value
 
-    # The exe drops the first two DSE_info lines and turns the rest into results.csv columns
+    # The exe drops the first two DSE_info lines and turns the rest into dse_results.csv columns
     # (Output.cpp::parseDSEParams). We emit `grid` + each swept parameter, so the CSV columns
     # ARE the run's identity (Suite, Design, grid, swept-values) -- no opaque run label needed.
     lines = [f"DSE sweep progress={run_num} of {total}", f"benchmark={overrides['benchmark']}"]
@@ -247,7 +254,7 @@ def prepare(runs, col_keys, sweep_dir):
 # =============================================================================
 
 # A run's identity is (benchmark, its column values) — the same tuple whether read from a sweep.json
-# entry or a results.csv row, so the two join without an opaque label column.
+# entry or a dse_results.csv row, so the two join without an opaque label column.
 def entry_ident(entry, col_keys):
     return (entry["overrides"]["benchmark"], tuple(str(entry["columns"][k]) for k in col_keys))
 
@@ -257,7 +264,7 @@ def row_ident(row, col_keys):
 
 
 def read_gp(sweep_dir):
-    """The exe's raw per-run GP records (gp_only.csv). dse.py enriches these into results.csv but
+    """The exe's raw per-run GP records (gp_only.csv). dse.py enriches these into dse_results.csv but
     never writes gp_only.csv, so the exe can keep appending to it across --resume without a schema
     clash."""
     import csv
@@ -333,11 +340,18 @@ def run_all(entries, total, sweep_dir, gp_only, col_keys):
             if pending is not None:
                 pending.result()          # prev LG+DP (overlapped this GP) — recorded itself
                 pending = None
+            # CLAUDE CODE: refresh dse_results.csv HERE, the one point per iteration where no LG+DP
+            # worker is running — summarize() reads lgdp.json, which legalize_run() rewrites whole
+            # from the worker thread, so anywhere else risks reading a half-written file. Same
+            # quiescence argument as resolve_gp_def below. A sweep killed partway then leaves a
+            # complete dse_results.csv for every run that finished, instead of none at all.
+            summarize(sweep_dir, quiet=True)
             if ok and not gp_only:
                 gp_def = resolve_gp_def(sweep_dir, entry, col_keys)
                 pending = pool.submit(legalize_run, sweep_dir, entry, gp_def, lgdp_store)
         if pending is not None:
             pending.result()
+            summarize(sweep_dir, quiet=True)   # the last design's LG+DP, collected after the loop
     return failed, time.time() - t0
 
 
@@ -391,15 +405,20 @@ def _effective_grid(out_dir):
     return None
 
 
-def summarize(sweep_dir):
-    """(Re)write results.csv from the exe's gp_only.csv, adding every XPlace-reference comparison
+def summarize(sweep_dir, quiet=False):
+    """(Re)write dse_results.csv from the exe's gp_only.csv, adding every XPlace-reference comparison
     from tools/benchmarks.py: GP Ratio (masked → xplace_gp_masked_in_sw_frame) and, once legalized,
     the LG/DP columns (DP HPWL is already in XPlace's frame). Prints the aggregate ratios only — the
-    per-row table IS results.csv, not re-dumped here. Idempotent."""
+    per-row table IS dse_results.csv, not re-dumped here. Idempotent.
+
+    CLAUDE CODE: quiet=True writes the file and reports nothing. run_all() calls it once per
+    iteration so a sweep killed partway still leaves a complete dse_results.csv for everything that
+    finished; 28 copies of the aggregate report would bury the per-run progress lines."""
     import csv
+    say = (lambda *a, **k: None) if quiet else print
     rows = read_gp(sweep_dir)
     if not rows:
-        print(f"  (no gp_only.csv in {sweep_dir} — every run failed?)")
+        say(f"  (no gp_only.csv in {sweep_dir} — every run failed?)")
         return
 
     col_keys, by_ident = [], {}
@@ -415,8 +434,8 @@ def summarize(sweep_dir):
     have_dp = bool(lgdp_store)
 
     for missing in [c for c in RESULT_COLS if c not in rows[0]]:
-        print(f"  [warn] gp_only.csv has no column '{missing}' — Output.cpp schema changed; "
-              f"update RESULT_COLS in tools/dse.py")
+        say(f"  [warn] gp_only.csv has no column '{missing}' — Output.cpp schema changed; "
+            f"update RESULT_COLS in tools/dse.py")
 
     fenced, unknown_grid = [], []
     for row in rows:
@@ -453,8 +472,9 @@ def summarize(sweep_dir):
     rows.sort(key=lambda r: (r.get("Suite", ""), r.get("Design", ""),
                              tuple(r.get(k, "") for k in col_keys)))
 
-    # results.csv is dse.py's alone (the exe only appends to gp_only.csv), rewritten whole each time,
-    # with the enriched columns slotted in after "Best GP HPWL" — next to the number they compare.
+    # dse_results.csv is dse.py's alone (the exe only appends to gp_only.csv), rewritten whole
+    # each time, with the enriched columns slotted in after "Best GP HPWL" — next to the number
+    # they compare.
     base = [c for c in rows[0] if c not in ENRICHED and c not in (EXACT_COL, OVFL_COL)]
     enriched = ENRICHED if have_dp else ENRICHED[:2]   # GP ratio always; DP cols only if legalized
     at = base.index("Best GP HPWL") + 1 if "Best GP HPWL" in base else len(base)
@@ -468,7 +488,7 @@ def summarize(sweep_dir):
         if have_dp:
             fields.insert(fields.index("Best OVFW") + 1, OVFL_COL)
         fields.insert(fields.index("Best OVFW") + 1, EXACT_COL)
-    with open(os.path.join(sweep_dir, "results.csv"), "w", newline="") as f:
+    with open(os.path.join(sweep_dir, RESULTS_CSV), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
@@ -477,22 +497,22 @@ def summarize(sweep_dir):
         return sorted(float(r[name]) for r in rows if _is_float(r.get(name)))
     gp, dp = ratios("GP Ratio"), ratios("DP Ratio")
     if gp:
-        print(f"  GP Ratio vs XPlace GP (masked): median {gp[len(gp)//2]:.4f} mean {sum(gp)/len(gp):.4f}"
-              f"  ({len(gp)}/{len(rows)} designs; meaningful only where Best OVFW converged, TODO #3)")
+        say(f"  GP Ratio vs XPlace GP (masked): median {gp[len(gp)//2]:.4f} mean {sum(gp)/len(gp):.4f}"
+            f"  ({len(gp)}/{len(rows)} designs; meaningful only where Best OVFW converged, TODO #3)")
     if dp:
-        print(f"  DP Ratio vs XPlace post-DP:     median {dp[len(dp)//2]:.4f} mean {sum(dp)/len(dp):.4f}"
-              f"  ({sum(abs(x-1)<=.02 for x in dp)}/{len(dp)} within 2%, better on {sum(x<1 for x in dp)}"
-              f" — legal-vs-legal, the headline)")
+        say(f"  DP Ratio vs XPlace post-DP:     median {dp[len(dp)//2]:.4f} mean {sum(dp)/len(dp):.4f}"
+            f"  ({sum(abs(x-1)<=.02 for x in dp)}/{len(dp)} within 2%, better on {sum(x<1 for x in dp)}"
+            f" — legal-vs-legal, the headline)")
     if unknown_grid:
-        print(f"  [warn] effective grid unreadable for {len(unknown_grid)} run(s) -- showing the "
-              "REQUESTED grid, which the row cap may have lowered: "
-              + ", ".join(sorted(unknown_grid)))
+        say(f"  [warn] effective grid unreadable for {len(unknown_grid)} run(s) -- showing the "
+            "REQUESTED grid, which the row cap may have lowered: "
+            + ", ".join(sorted(unknown_grid)))
     if fenced:
-        print(f"  fence-stripped both sides ({len(fenced)}, TODO #26): {', '.join(sorted(fenced))}")
+        say(f"  fence-stripped both sides ({len(fenced)}, TODO #26): {', '.join(sorted(fenced))}")
     unscored = [f"{r['Design']}({r['DP Ratio']})" for r in rows
                 if have_dp and not _is_float(r["DP Ratio"]) and r["DP Ratio"] != "no-ref"]
     if unscored:
-        print(f"  no post-DP ({len(unscored)}): {', '.join(sorted(unscored))}")
+        say(f"  no post-DP ({len(unscored)}): {', '.join(sorted(unscored))}")
 
 
 # =============================================================================
@@ -553,7 +573,7 @@ def main():
         print(f"\n{'=' * 78}\n  DSE COMPLETE — {len(entries) - failed}/{len(entries)} succeeded, "
               f"{failed} failed  ({elapsed / 60:.1f} min)\n{'=' * 78}\n")
     summarize(sweep_dir)
-    print(f"\n  {sweep_dir}/  (results.csv = the table, sweep.json = what ran"
+    print(f"\n  {sweep_dir}/  (dse_results.csv = the table, sweep.json = what ran"
           f"{'' if args.gp_only else ', lgdp.json = LG+DP'})\n")
 
 

@@ -12,9 +12,9 @@
 #                           viz/                           (TODO #16 node-position dumps:
 #                                                           ~96 MB per adaptec1 run,
 #                                                           ~480 MB per bigblue4 run)
-# What is NEVER dropped: every top-level file (results.csv, results.md, scorecard.md,
-# DSE_info) plus configs/ and analysis/.  Reports cite results.csv / results.md, and
-# `analyze_morris.py <DSE_dir> <morris_dir>` reads only results.csv -- so a slimmed
+# What is NEVER dropped: every top-level file (dse_results.csv, results.md, scorecard.md,
+# DSE_info) plus configs/ and analysis/.  Reports cite dse_results.csv / results.md, and
+# `analyze_morris.py <DSE_dir> <morris_dir>` reads only dse_results.csv -- so a slimmed
 # sweep still supports every published number and a full morris re-analysis.
 #
 # --viz-only drops just the TODO #16 viz/ dumps and keeps the rest of each run intact;

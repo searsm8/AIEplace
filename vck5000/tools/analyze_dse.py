@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Re-process a finished sweep without re-running it: rebuild results.csv from gp_only.csv +
+"""Re-process a finished sweep without re-running it: rebuild dse_results.csv from gp_only.csv +
 lgdp.json + the current tools/benchmarks.py references, and print the aggregate ratios.
 
-    python3 tools/analyze_dse.py results/DSE_<ts>          # or .../results.csv
+    python3 tools/analyze_dse.py results/DSE_<ts>          # or .../dse_results.csv
 
-Useful after a benchmarks.py reference changes — the per-design table is results.csv itself.
+Useful after a benchmarks.py reference changes — the per-design table is dse_results.csv itself.
 Calls dse.py::summarize, the one implementation.
 """
 import os

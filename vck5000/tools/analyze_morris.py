@@ -4,7 +4,7 @@
 #
 #   python3 tools/analyze_morris.py <results/DSE_...dir> <results/morris_...dir>
 #
-# Joins the DSE results.csv (one row per Morris sample, keyed by the "run"
+# Joins the DSE dse_results.csv (one row per Morris sample, keyed by the "run"
 # label) back to the sampled X matrix, then for each objective computes the
 # Morris indices with SALib:
 #   mu*    : mean |elementary effect| — overall influence ranking (the headline)
@@ -19,13 +19,15 @@ import json
 import os
 import sys
 
+import dse  # owns the results table + its name (dse.RESULTS_CSV)
+
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from SALib.analyze import morris as morris_analyze
 
-# objective column in results.csv -> (short key, "min" is better? for reporting)
+# objective column in dse_results.csv -> (short key, "min" is better? for reporting)
 OBJECTIVES = [
     ("Best GP HPWL",        "hpwl_gp",   True),   # headline QoR (masked GP HPWL)
     ("Final HPWL Exact",    "hpwl_exact", True),
@@ -36,9 +38,9 @@ OBJECTIVES = [
 
 
 def read_results(dse_dir):
-    """label -> {column: value} from the DSE results.csv (csv handles the
+    """label -> {column: value} from the DSE dse_results.csv (csv handles the
     quoted embedded newlines in the HYPERLINK cells)."""
-    path = os.path.join(dse_dir, "results.csv")
+    path = os.path.join(dse_dir, dse.RESULTS_CSV)
     with open(path, newline="") as f:
         rows = list(csv.DictReader(f))
     by_label = {}

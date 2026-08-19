@@ -13,7 +13,7 @@
 #        -> writes results/morris_<ts>/{problem.json, X.npy, runset.json, meta.json}
 #      and prints the --runset command to launch the sweep.
 #   2. python3 tools/dse.py --runset <runset.json>
-#        -> runs every row, produces results/DSE_<ts>/results.csv
+#        -> runs every row, produces results/DSE_<ts>/dse_results.csv
 #   3. python3 tools/analyze_morris.py <DSE_dir> <morris_dir>
 #        -> mu*/sigma ranking + plot, per objective.
 # ----------------------------------------------------------------------------

@@ -121,7 +121,7 @@ says so, but the per-row number does not (per-row gate deferred to #3).
 <details><summary>Fixed 2026-08-14 (#29): XPlace GP HPWL was N/A on 22 of 28</summary>
 
 `Placer::lookupXplaceReferenceHPWL` was a hardcoded 6-entry map. Now the exe writes raw columns
-only and dse.py enriches results.csv with `XPlace GP HPWL` + `GP Ratio` from
+only and dse.py enriches dse_results.csv with `XPlace GP HPWL` + `GP Ratio` from
 `benchmarks._XPLACE_GP_MASKED` (all 28), masked-paired and site-width-correct. The DP comparison
 lands in the same file the same way.
 </details>

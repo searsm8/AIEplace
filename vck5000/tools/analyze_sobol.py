@@ -3,7 +3,7 @@
 # Sobol variance-based sensitivity ANALYSIS.
 #   python3 tools/analyze_sobol.py <results/DSE_...dir> <results/sobol_...dir>
 #
-# Joins the DSE results.csv (keyed by the "run" label) to the Saltelli sample,
+# Joins the DSE dse_results.csv (keyed by the "run" label) to the Saltelli sample,
 # then per objective computes Sobol indices with SALib:
 #   S1 : first-order  — variance explained by the factor ALONE
 #   ST : total-order  — variance explained by the factor + ALL its interactions
@@ -18,6 +18,8 @@ import csv
 import json
 import os
 import sys
+
+import dse  # owns the results table + its name (dse.RESULTS_CSV)
 
 import numpy as np
 import matplotlib
@@ -35,7 +37,7 @@ OBJECTIVES = [
 
 
 def read_results(dse_dir):
-    rows = list(csv.DictReader(open(os.path.join(dse_dir, "results.csv"), newline="")))
+    rows = list(csv.DictReader(open(os.path.join(dse_dir, dse.RESULTS_CSV), newline="")))
     return {(r.get("run") or "").strip(): r for r in rows if (r.get("run") or "").strip()}
 
 
