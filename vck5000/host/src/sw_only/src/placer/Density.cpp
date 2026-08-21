@@ -279,7 +279,8 @@ float Placer::computeOverflow(bool smooth, std::vector<float>* out_density, bool
     const int ny = grid.getBinsPerCol();
     const float bin_w = grid.getBinWidth();
     const float bin_h = grid.getBinHeight();
-    const float cap   = bin_w * bin_h * target_density;   // per-bin capacity
+    const float bin_area = bin_w * bin_h;
+    const float cap   = bin_area * target_density;        // per-bin capacity (the overflow threshold)
 
     std::vector<float> density(nx * ny, 0.0f);            // area deposited per bin
 
@@ -321,11 +322,19 @@ float Placer::computeOverflow(bool smooth, std::vector<float>* out_density, bool
         }
     };
 
-    // Fixed baseline at exact size, capped per bin (mirrors clampFixedDensity). The passes are
-    // ordered (the cap reads the fixed baseline); within a pass the nodes are independent.
+    // Fixed baseline at exact size, SATURATED at a full bin then scaled by target_density --
+    // min(rho,1)*td, which is what Grid::clampFixedDensity does and what XPlace does
+    // (initializer.py:82: init_density_map.clamp_(0,1).mul_(target_density)). The passes are
+    // ordered (the saturation reads the fixed baseline); within a pass the nodes are independent.
+    // CLAUDE CODE: was min(density, cap) = min(rho,td) until 2026-08-19 (TODO #34). That is a
+    // DIFFERENT function -- on a half-blocked bin at td=0.5 it left zero headroom for movable
+    // cells where this leaves 0.25 -- and since this overflow is the convergence signal
+    // (Output.cpp: the smoothed call) sw_only was optimizing one density map and deciding when
+    // to stop from another. Identical at td=1, which is why mms_adaptec1 does not move.
     deposit_pass(db.getFixedComponents(), false);
     #pragma omp parallel for schedule(static)
-    for (int i = 0; i < (int)density.size(); i++) density[i] = std::min(density[i], cap);
+    for (int i = 0; i < (int)density.size(); i++)
+        density[i] = std::min(density[i], bin_area) * target_density;
 
     // Movable real cells (clamped when requested). Fillers included only for the diagnostic
     // that mirrors XPlace's filler-inclusive GP stop signal (default: excluded). exclude_macros

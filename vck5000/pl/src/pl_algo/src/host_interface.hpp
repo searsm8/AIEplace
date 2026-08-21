@@ -271,7 +271,8 @@ struct NodeBox { float x; float y; float w; float h; };
 //   row direction). Natural float (128-bit beat packing deferred, like hpwl_CU).
 //   bin_w = die_xsize/GRID, bin_h = die_ysize/GRID; bin indexing assumes die
 //   origin (0,0) (sw_only convention). rho = clamped_overlap / (bin_w*bin_h);
-//   fixed overlap is clamped to target_density*bin_area before movable is added.
+//   fixed overlap saturates at bin_area then scales by target_density (min(rho,1)*td,
+//   XPlace initializer.py:82) before movable is added. TODO #34.
 
 } // namespace plalgo
 

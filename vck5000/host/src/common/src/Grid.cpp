@@ -140,6 +140,12 @@ void Grid::depositNodeOverlaps(Node* node_p)
  *
  * total_overlap is an absolute area, so `min(rho,1)*td` is `min(overlap, bin_area) * td`.
  */
+// CLAUDE CODE: THIS IS THE CANONICAL fixed-density formulation -- min(rho,1)*target_density,
+// matching XPlace initializer.py:82. Three other places reproduce it and MUST be changed with
+// it; they silently disagreed between 2026-08-17 and 2026-08-19 (TODO #34):
+//   sw_only/src/placer/Density.cpp   Placer::computeOverflow   (the convergence signal)
+//   pl/src/pl_algo/src/modules/density_bin.hpp                 (the HLS module)
+//   test/density_bin_model.cpp                                 (both reference impls)
 void Grid::clampFixedDensity(float target_density)
 {
     #pragma omp parallel for schedule(static)

@@ -7,7 +7,7 @@
 // Grid-strip tiled along x: a STRIP x GRID accumulator (256 KB) lives on-chip and
 // nodes are re-streamed once per strip (~16x). Two-pass per strip, matching sw_only
 // Density.cpp::computeOverlaps: fixed nodes first, clamp each bin to
-// target_density*bin_area, then movable nodes on top. Per-node scatter mirrors
+// min(rho,1)*target_density, then movable nodes on top. Per-node scatter mirrors
 // Grid::computeBinOverlaps (fast path for sub-bin cells, else exact rect
 // intersection). Fillers EXCLUDED in v1. rho = clamped_overlap / bin_area, written
 // x-major (bin_density[x*GRID+y]) per host_interface.hpp.
@@ -72,7 +72,9 @@ static void density_bin(const NodeBox* node_box,    // [num_nodes]  movable [0,M
     static float acc_URAM[STRIP][GRID];                  // on-chip strip accumulator (256 KB)
 #pragma HLS bind_storage variable=acc_URAM type=RAM_2P impl=URAM
     const float bin_area = bin_w * bin_h;
-    const float cap      = target_density * bin_area;    // per-bin fixed-density clamp
+    // CLAUDE CODE: fixed baseline saturates at a FULL BIN, then scales by target_density
+    //  -- min(rho,1)*td, matching Grid::clampFixedDensity and XPlace initializer.py:82.
+    //  Was min(rho,td) until 2026-08-19 (TODO #34); the two differ on partly-blocked bins.
     const float inv_area = 1.0f / bin_area;
 
 strip_loop:
@@ -89,14 +91,17 @@ strip_loop:
         for (int n = num_movable; n < num_nodes; n++)
             bin_scatter(node_box[n], bin_w, bin_h, c0, acc_URAM);
 
-    // Clamp all fixed nodes (large macros) to target_density*bin_area before movable nodes are added.
-    // This ensures no overflow occurs unless a movable node is on top of a fixed node.
+    // Saturate the fixed nodes (large macros) at a full bin, then scale by target_density,
+    // before movable nodes are added. A fully-blocked bin lands exactly at capacity, so it
+    // contributes no overflow; a partly-blocked one keeps proportional headroom.
     clamp_i:
         for (int i = 0; i < STRIP; i++)
         clamp_y:
             for (int y = 0; y < GRID; y++) {
 #pragma HLS PIPELINE II=1
-                if (acc_URAM[i][y] > cap) acc_URAM[i][y] = cap;
+                // CLAUDE CODE: one compare + one multiply, still II=1.
+                const float sat = (acc_URAM[i][y] > bin_area) ? bin_area : acc_URAM[i][y];
+                acc_URAM[i][y]  = sat * target_density;
             }
 
     pass2_movable:
