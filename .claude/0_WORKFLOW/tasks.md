@@ -746,6 +746,37 @@ re-run before the freeze was called.
       effect on the reported metric is opposite to what is observed against XPlace, so something
       else is also in play. Treat it as a real inconsistency that must be fixed regardless, and as
       the first suspect, not as the diagnosis.
+- [ ] **⚠️ ESCALATED 2026-08-19 — `computeOverflow` is the CONVERGENCE SIGNAL, not just a report.**
+      Verified by enumerating its callers: `Output.cpp:568` (*"convergence signal"*, the smoothed
+      call that drives the γ/λ schedule and the stop test) and `Phase2.cpp:216-217` (the phase-1→2
+      transition). The other call sites are reporting. **So the metric/field inconsistency above is
+      live inside the optimizer**, not cosmetic — sw_only is currently optimizing one density map
+      while deciding when to stop from a different one, on every td<1 design.
+      **Two consequences that change the shape of this task:**
+      - **Fixing it re-baselines ISPD as well as MMS**, so it invalidates
+        `GOLDEN_sw_only_frozen_20260817`. The golden is not safe to build on until #34 closes.
+      - It strengthens the mechanism: post-#3 the *field* says a partly-blocked bin has headroom
+        (weaker density force there) while the *metric* still says it is full (overflow stays high,
+        GP keeps running). Mismatched signals on exactly the designs that regressed.
+      ⚠️ **Still not proof.** The direction of the raw overflow comparison does not line up — with
+      the old cap our metric should read HIGHER than XPlace's and it reads LOWER on MMS td<1
+      (`adaptec5` 0.1986 vs 0.3958). Something else is also in play. The mechanism is plausible and
+      the inconsistency must be fixed either way; the proof is running the fix.
+- [ ] **⚠️ THIS IS WHAT MAKES #34 BLOCK pl_algo — there is a THIRD copy, and it is also stale.**
+      `pl/src/pl_algo/src/modules/density_bin.hpp:75` computes
+      `cap = target_density * bin_area` and clamps `if (acc_URAM[i][y] > cap) ... = cap` — the
+      **pre-#3** `min(ρ,td)`. Three copies of one quantity, disagreeing two ways:
+
+      | where | formula | state |
+      |---|---|---|
+      | `Grid::clampFixedDensity` (sw_only solver field) | `min(ρ,1)·td` | **new (#3)** |
+      | `Placer::computeOverflow` (sw_only convergence signal) | `min(ρ,td)` | **stale** |
+      | `density_bin.hpp:75` (pl_algo) | `min(ρ,td)` | **stale** |
+
+      #20 step 3 names `density_bin` as one of the six modules needing a tier-1 harness, and its
+      golden is the sw_only field that changed. **Writing that harness before #34 closes means
+      verifying against a golden that is about to move** — the exact waste `rules.md` exists to
+      prevent. Same for `node_footprint`, `force_gather`, `metrics`.
 - [ ] **DECISION FOR MARK — do not freeze MMS at 1.0351 without settling this.** Three options:
       **(a)** fix the metric side of #3 and re-run tier3 (~the length of one MMS suite);
       **(b)** revert #3 entirely — the td=1 evidence says 7a/7b alone would leave MMS *better* than
