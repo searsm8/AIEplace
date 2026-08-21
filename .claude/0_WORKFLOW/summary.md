@@ -14,88 +14,23 @@
   so every further sw_only change was another port.
 
 ## Where sw_only stands (frozen — this is the final state, not a waypoint)
-- 🏆 **GOLDEN — median HPWL ratio 1.0097, mean 1.0126, over ALL 28 ISPD designs** (legal-vs-legal,
-  2026-08-17, 28/28 in 80.6 min). 22/28 within ±2%, **better than XPlace on 6**. Nothing is
-  unscored — #26 closed the 9-design fence hole.
-  **Archived 2026-08-19 to `.claude/2_ARTIFACTS/results/GOLDEN_sw_only_frozen_20260817/`** (was
-  `vck5000/results/DSE_20260817_223934`, which no longer exists). **Read the README there before
-  quoting it** — it carries the two caveats, the per-tier split, and the reproduce command. Stats
-  were recomputed from its `results.csv` at archive time, not copied from here, and they match.
-  ⚠️ The data was produced at `821a9c8`; the frozen commit is `64cfa0e`, two later and
-  **behaviour-neutral by its own acceptance criterion** (no value changed, `make test-regress`
-  bit-identical). Mark's call 2026-08-19, over re-running 80 minutes on the exact commit. If
-  sw_only behaviour ever disagrees with these numbers, suspect that assumption first.
-
-  | | 2026-08-15 (`DSE_20260815_161306`) | **GOLDEN (2026-08-17)** |
-  |---|---|---|
-  | **ISPD2005 (8)** | 1.0053 / 1.0052 | 1.0057 / 1.0057 |
-  | **ISPD2015 (20)** | 1.0113 / 1.0138 | 1.0101 / **1.0153** |
-  | **all ISPD (28)** | 1.0095 / 1.0113 | **1.0097 / 1.0126** |
-
-  ⚠️ **This run is slightly WORSE on the mean (+0.13 pp) and flat on the median, and that is the
-  honest result of three faithfulness fixes** (#32's 7a+7b, #3's cap→scale) landed together on
-  2026-08-17. **18 designs worse, 7 better, 3 unchanged**; within-2% 23→22; still better than XPlace
-  on 6. Biggest movers: `mgc_pci_bridge32_a` +1.11 pp and `mgc_superblue19` +1.04 pp against
-  `mgc_superblue12` −0.70 pp. **Matching XPlace more closely did not score better here** — which is
-  the expected shape of a faithfulness change, not a defect, and `CLAUDE.md`'s standing rule is to
-  prefer XPlace's formulation over an ad-hoc win. Recorded rather than tuned away.
-
-  **Attribution is partial, because the three fixes were bundled into one run (Mark's call, to
-  avoid paying for two 80-minute suites).** One clean split does survive: **all 8 ISPD2005 designs
-  run at `td = 1.0`, where #3's `min(ρ,1)·td` and the old `min(ρ,td)` are identically equal**, so #3
-  is a *provable* no-op there — confirmed independently by `mms_adaptec1`'s regress baseline coming
-  back bit-identical. Therefore **ISPD2005's +0.05 pp is 7a/7b alone**, and only the ISPD2015 delta
-  carries #3. Separating #3 from 7a/7b on ISPD2015 needs one more suite run with #3 reverted.
-
-  *(median / mean.)* **The mean is quotable** as of #27's fix. **#31 grid cap (2026-08-15):** sw_only
-  now caps ANY grid at `num_rows` like XPlace (`Setup.cpp`; was applied only to the auto path). 13 of
-  20 ISPD2015 designs are row-capped and were running at 512 — now 128/256. Net: ISPD2015 mean
-  1.0189 → 1.0138, **GP-ratio mean 1.0223 → 1.0047**, and the overflow *signal* (which drives the γ/λ
-  schedule) now matches XPlace's on the std-cell designs. Mixed per-design (fft_a −2.7pp, fft_2
-  −1.4pp; des_perf_1 +1.8pp, fft_1 +0.6pp), net better. ISPD2005 bit-identical (no cap fires).
-  → [[_NEW_REPORT_31_overflow_stall_grid_20260815.md]] ⚠️ **The 9 fence designs are scored on
-  the fence-STRIPPED variant on both sides** (as the XPlace paper's †-marked table is) — a fair
-  tool-vs-tool comparison, but **not** legal ISPD2015 solutions: we place 59–94% of their constrained
-  cells outside their fence. ⚠️ The v3/v4 TSVs deliberately still hold the broken `matrix_mult_a`
-  row — see #27.
-  → [[_NEW_REPORT_26_fence_regions_20260811.md]], [[REPORT_26_precond_always_on_20260811.md]],
-  [[REPORT_27_matrix_mult_a_stray_space_20260811.md]]
-  <details><summary>Superseded headline snapshots (1.0113/1.1218 · 1.0090/33-designs) → [[journal.md]]</summary>
-
-  Moved to [[journal.md]] to keep summary.md under its soft cap — the retraction trail is preserved
-  there verbatim, dated most-recent-first.
-  </details>
-- ⚠️ **MMS (16 designs) IS UNMEASURED ON THE FROZEN BINARY — the last numbers are 2026-08-14
-  (16/16, DP ratio median 1.0138 / mean 1.0161) and they no longer describe the code.** This is the
-  one gap left in the freeze. **The 28-design ISPD re-run on 08-17 did not include MMS**
-  (`DSE_20260817_223934` is tier1+tier2 only), and both of that day's algorithm changes reach MMS:
-  - **#32's 7a/7b** (best-solution tracking on `v_k`) affects **all 16** — it is design-independent.
-  - **#3's cap→scale** affects the **8 that run at td<1**: `adaptec5`/`newblue4`/`newblue5` (0.5),
-    `newblue1`/`newblue3`/`newblue6`/`newblue7` (0.8), `newblue2` (0.9). The other 8 are td=1.0,
-    where `min(ρ,1)·td` and `min(ρ,td)` are identically equal — which is exactly why
-    `mms_adaptec1`'s regress baseline came back bit-identical and is **not** evidence for the rest.
-  **RUN LANDED 2026-08-19 (`vck5000/results/DSE_20260819_152124`, 16/16) — and it REGRESSED:
-  median 1.0137 → 1.0192, mean 1.0161 → 1.0351.** → **#34**, opened for it.
-  **NOT archived as golden, deliberately.** The split by td is clean and #3's cap→scale carries it:
-  **td<1 (8 designs, #3 active) all 8 worse, mean +4.99 pp** (`adaptec5` +15.21) while **td=1
-  (8 designs, #3 a provable no-op) mean −1.19 pp**, i.e. 7a/7b alone is a *win* on MMS. A real
-  inconsistency was found while checking it — `computeOverflow` still uses the pre-#3 cap under a
-  comment claiming it mirrors `clampFixedDensity` — so **#3 has not yet been measured cleanly.**
-  ⚠️ **Do not quote 1.0351 as the frozen MMS number and do not delete `DSE_20260814_152306`**
-  (the pre-fix run) until #34 is settled: it is the only before-half of this comparison.
-  ✅ Side effect: **#30's never-done tier-3 spot-check PASSES** — 16/16 references match
-  `benchmarks._XPLACE_MMS_FINAL`.
-  <details><summary>Superseded 2026-08-18: "Still valid — checked 2026-08-17 … NOT stale"</summary>
-
-  That check was correct **about #31 only** — the grid cap does fire on zero of the 16 (every MMS
-  design's requested grid is at or below its cap; tightest `newblue1` 930 rows → cap 512, requested
-  512; loosest `newblue3` 4182 → 4096, requested 2048; re-derive from `benchmarks._ROWS` vs
-  `CoreRow` counts in the bookshelf `.scl`). It was written before #32/7a-7b and #3 landed later the
-  same day, and those are what invalidate the numbers. **The lesson: "verified still valid" carries
-  the date of the thing it was checked against, not the date it was written.**
-  </details>
-  ⚠️ The only MMS run since is `newblue1` under `.claude/2_ARTIFACTS/GIFS_20260817_211039/` — a
-  **viz/#14 run**, not a suite result; don't score from it.
+- 🏆 **GOLDEN (ISPD) — median 1.0094, mean 1.0112, over ALL 28 ISPD designs**, legal-vs-legal,
+  2026-08-21, 28/28. 24/28 within ±2%, better than XPlace on 5. Nothing unscored (#26).
+  Archived: `.claude/2_ARTIFACTS/results/GOLDEN_sw_only_frozen_20260821/` — **read its README
+  before quoting it**, it has the full per-tier split and reproduce command. Frozen commit
+  `02464d0`. Supersedes the 2026-08-17 golden (renamed `SUPERSEDED_sw_only_20260817_pre34/`),
+  which was built on a binary where three of four copies of the fixed-density formula disagreed
+  (TODO #34) — full narration of that gap moved to [[journal.md]].
+- ⚠️ **MMS (16 designs) — measured, NOT golden.** `.claude/2_ARTIFACTS/results/
+  MMS_sw_only_frozen_20260821/`: median 1.0188, mean **1.0347** — worse than the last known-good
+  2026-08-14 run (median 1.0137, mean 1.0161). #34's fix (make the four fixed-density formulas
+  agree) closed the ISPD gap above but moved MMS by only 0.04 pp — **the metric-consistency
+  hypothesis for MMS's regression is falsified.** The cause is now understood to be `#3`'s solver
+  field itself (`Grid::clampFixedDensity`, `min(ρ,1)·td`) hurting macro-heavy/mixed-size
+  convergence specifically, even though the identical formula *helped* ISPD's lowest-td designs
+  (`pci_bridge32_a/b`, −4.8%/−8.7% GP HPWL). Mechanism unresolved → **#35**.
+  ⚠️ `.claude/2_ARTIFACTS/results/DSE_20260814_152306/` stays undeleted — it is the only surviving
+  pre-#3 reference now that the intermediate 2026-08-19 broken run has been pruned.
 - Landed: two-phase mixed-size flow + LP macro legalization; #19's two XPlace faithfulness fixes
   (overflow excludes fillers; the γ/λ throttle gates on preconditioner κ). Both toggles retired
   2026-08-07 — faithful behaviour is now unconditional.

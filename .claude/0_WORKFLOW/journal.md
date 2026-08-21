@@ -90,6 +90,37 @@ closed on 2026-08-11 and are no longer live context; their task-indexed records 
   baseline bit-for-bit with `enable_preconditioning = false` on the new binary.
   → [[_NEW_REPORT_26_precond_always_on_20260811.md]]
 
+## 2026-08-21 -- evicted from summary.md: the 2026-08-17 golden and 2026-08-19 MMS-regression narration
+
+Superseded by TODO #34's fix (`02464d0`) and the 2026-08-21 re-runs. Kept verbatim -- both blocks
+were the live "where things stand" text in summary.md between 2026-08-17 and 2026-08-21 and the
+retraction trail is the point. Current state: `.claude/2_ARTIFACTS/results/
+GOLDEN_sw_only_frozen_20260821/` (ISPD) and `.claude/2_ARTIFACTS/results/MMS_sw_only_frozen_20260821/`
+(MMS, not golden -- see TODO #35).
+
+> - GOLDEN -- median HPWL ratio 1.0097, mean 1.0126, over ALL 28 ISPD designs (legal-vs-legal,
+>   2026-08-17, 28/28 in 80.6 min). 22/28 within +-2%, better than XPlace on 6. Archived 2026-08-19
+>   to `GOLDEN_sw_only_frozen_20260817/` (later renamed `SUPERSEDED_sw_only_20260817_pre34/`). Data
+>   produced at `821a9c8`; frozen commit `64cfa0e`, believed behaviour-neutral at the time -- this
+>   later turned out to still be a two-commit gap on top of a THIRD problem (#34), not the neutral
+>   commit itself. 2026-08-15 -> 2026-08-17 table: ISPD2005 1.0053/1.0052 -> 1.0057/1.0057,
+>   ISPD2015 1.0113/1.0138 -> 1.0101/1.0153, all-28 1.0095/1.0113 -> 1.0097/1.0126. Attributed to
+>   #32's 7a/7b + #3's cap->scale bundled into one run; ISPD2005's +0.05pp isolated as 7a/7b alone
+>   since #3 is a provable no-op at td=1.
+> - MMS (16 designs) IS UNMEASURED ON THE FROZEN BINARY -- the 2026-08-14 numbers (median 1.0138 /
+>   mean 1.0161) predate #32/7a-7b and #3. RUN LANDED 2026-08-19 (`DSE_20260819_152124`) and
+>   REGRESSED: median 1.0137 -> 1.0192, mean 1.0161 -> 1.0351. Split by td: td<1 (8 designs) all
+>   worse, mean +4.99pp; td=1 (8 designs) mean -1.19pp, i.e. 7a/7b alone is a WIN on MMS. Found a
+>   real inconsistency while checking it -- `computeOverflow` still used the pre-#3 cap under a
+>   comment claiming it mirrored `clampFixedDensity`. Opened as TODO #34. Also closed #30's
+>   never-done tier-3 spot-check (16/16 references matched `_XPLACE_MMS_FINAL`).
+>
+> **What actually happened next (TODO #34/#35), for continuity:** fixing the metric inconsistency
+> (`02464d0`) improved ISPD (mean 1.0126 -> 1.0112) but moved MMS's mean by only 0.04pp (1.0351 ->
+> 1.0347) -- FALSIFYING the hypothesis that the stale metric was driving the MMS regression. The
+> regression is intrinsic to `#3`'s solver-field formula itself on macro-heavy/mixed-size designs,
+> a mechanism still under investigation as #35.
+
 ## 2026-08-17 — sw_only FROZEN; evicted "Closed 2026-08-09" from summary.md
 
 Mark's call: sw_only functionality is frozen at parity (median 1.0096 / mean 1.0113 legal-vs-legal,

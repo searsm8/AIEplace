@@ -773,6 +773,35 @@ re-run before the freeze was called.
       −20.67% as a result. The suites are running (`DSE_20260821_112603` = ISPD 28, MMS follows).
       Also added a pointer comment at `Grid::clampFixedDensity` naming all three reproductions,
       since drift between them is what cost this task.
+- [x] **BOTH SUITES RE-RUN 2026-08-21 — ISPD confirms the fix; MMS DISPROVES my hypothesis.**
+      New goldens: `.claude/2_ARTIFACTS/results/GOLDEN_sw_only_frozen_20260821/` (ISPD, supersedes
+      the 08-17 one, renamed `SUPERSEDED_sw_only_20260817_pre34/`) and
+      `.claude/2_ARTIFACTS/results/MMS_sw_only_frozen_20260821/` (MMS, **not** golden).
+
+      **ISPD: median 1.0097→1.0094, mean 1.0126→1.0112, within±2% 22→24.** `pci_bridge32_a` and
+      `_b` (the two lowest-td ISPD2015 designs) carry essentially the whole move — GP HPWL −4.78%
+      and −8.67%, and `_a`'s overflow gap against XPlace's own report of the same placement closed
+      from 0.0151 to 0.0001. Independent confirmation the fix is correct.
+
+      **MMS: mean 1.0161 (08-14, pre-#3) → 1.0351 (08-19, broken) → 1.0347 (08-21, fixed).**
+      Fixing the metric moved MMS's mean by **0.04 pp — noise.** ⚠️ **This falsifies the working
+      theory that a stale `computeOverflow` was driving the MMS regression** by feeding the
+      schedule a wrong stop decision. `Grid::clampFixedDensity` — the solver's actual density
+      field — was correct *before* this fix and is unchanged *by* it, so ruling out the metric
+      leaves the field itself as the cause: **`#3`'s `min(ρ,1)·td` formulation, applied correctly,
+      makes MMS worse on macro-heavy / mixed-size designs specifically**, even though it is more
+      faithful to XPlace and it *helped* std-cell ISPD designs at the same td range.
+      Per-design (unchanged from the 08-19 breakdown, confirming td<1 is still the carrier):
+      `adaptec5` (td=0.5) +15.02 pp, `newblue1` (td=0.8) +9.68 pp vs the 08-14 baseline.
+
+      **#34 is PARTIALLY closed.** The four-copy consistency fix stands — it is correct regardless
+      of the MMS outcome (three copies silently disagreeing is a bug on its own terms, and the
+      td=1 control proves it changed only the intended thing) and it demonstrably helped ISPD.
+      **The MMS regression itself is NOT resolved and is NOT explained.** Continued under **#35**
+      rather than left open here, since the diagnosis has changed: it is no longer a metric
+      question, it is a "why does XPlace's own fixed-density formula hurt phase-2/mixed-size
+      convergence" question, and that needs its own investigation.
+
 - [ ] **STILL OPEN — `make test` does not actually verify the shipped HLS header.**
       `test/density_bin_model.cpp` **reproduces** `density_bin.hpp` rather than including it, so
       its (genuine, bit-exact) agreement between two reference implementations says nothing about
@@ -832,6 +861,46 @@ re-run before the freeze was called.
       so a tighter bound reports false mismatches). `--designs tier3` needs no special config:
       `mixed_size_mode` is auto-detected from `num_movable_macros > 0` (`Setup.cpp:393`) and
       `enable_phase2` defaults true.
+
+---
+
+## #35 — MMS regression is intrinsic to `#3`'s field, not the metric (opened 2026-08-21)
+
+**Spun off #34 at partial close.** #34 hypothesized the MMS regression (mean 1.0161 → 1.0351,
+2026-08-14 → 2026-08-19) was caused by `Placer::computeOverflow` lagging `Grid::
+clampFixedDensity`'s formula change. That hypothesis is **falsified**: fixing the metric
+(`02464d0`) moved MMS's mean by 0.04 pp. See `.claude/2_ARTIFACTS/results/
+MMS_sw_only_frozen_20260821/README.md` for the three-way comparison.
+
+**What is established:**
+- The regression is carried entirely by the **8 td<1 designs** (`adaptec5`, `newblue1-7`); the 8
+  td=1 designs are flat once #32's 7a/7b is subtracted out (`bigblue3` −8.13 pp is 7a/7b).
+- Magnitude tracks (1−td): `adaptec5` (td=0.5) +15.02 pp, `newblue1` (td=0.8) +9.68 pp,
+  `newblue2` (td=0.9) +0.73 pp.
+- The same field change **helped** ISPD2015's lowest-td designs (`pci_bridge32_a/b`, td=0.384/
+  0.143) by 4-9% GP HPWL, and its overflow now matches XPlace's own report to within 0.0001.
+- So the formula is not simply wrong — it is a correct, more-faithful formula that helps one
+  design class and hurts another, and the discriminator is not td alone (ISPD's lowest-td design
+  improved; MMS's did not) so something else about MMS specifically is the missing variable.
+
+**What is NOT established — this is the open question:**
+- [ ] **Why does the same `min(ρ,1)·td` formula help low-td ISPD and hurt low-td MMS?** The
+      obvious candidate is **movable macros / phase 2**: MMS is the only tier with
+      `mixed_size_mode`, frozen macros, and a phase-1→phase-2 transition; ISPD has none of that.
+      Check whether `clampFixedDensity`'s `db.getFixedComponents()` deposit set changes between
+      phase 1 and phase 2 (frozen macros — are they added to the fixed set, or handled elsewhere?),
+      and whether the interaction is with the phase-2 restart rather than the formula itself.
+- [ ] **Check `Phase2.cpp`'s macro-freeze path** for anything that reads a density field assuming
+      the old cap semantics (a hard `td` ceiling) rather than the new proportional one — a filler
+      count, a re-initialization heuristic, or a convergence-gate threshold tuned against the old
+      field's numeric range.
+- [ ] **A/B `#3` in isolation on MMS** (revert just `Grid::clampFixedDensity`, keep everything else
+      at HEAD) to confirm the field change alone reproduces the regression outside of any
+      interaction with #32's 7a/7b — the current evidence bundles them by construction since both
+      landed in the same 2026-08-17 run and neither tier was re-run with one reverted.
+- [ ] **Decide the standing question `#34` deferred:** is 1.0347 the faithful-but-costly number to
+      accept (`CLAUDE.md`'s prefer-XPlace rule), or does macro/mixed-size handling need its own fix
+      once the mechanism is understood? Not answerable until the mechanism is.
 
 ---
 
