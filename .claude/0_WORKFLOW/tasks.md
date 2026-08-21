@@ -746,6 +746,39 @@ re-run before the freeze was called.
       effect on the reported metric is opposite to what is observed against XPlace, so something
       else is also in play. Treat it as a real inconsistency that must be fixed regardless, and as
       the first suspect, not as the diagnosis.
+- [x] **FIX LANDED 2026-08-21 (`02464d0`) — all copies now compute `min(ρ,1)·td`.** Mark
+      authorized it under the freeze. **A census found FOUR code copies, not three**, plus two doc
+      comments stating the contract:
+
+      | where | was | now |
+      |---|---|---|
+      | `Grid::clampFixedDensity` | `min(ρ,1)·td` | canonical, unchanged |
+      | `Placer::computeOverflow` (`Density.cpp`) | `min(ρ,td)` | **fixed** |
+      | `density_bin.hpp` (pl_algo HLS) | `min(ρ,td)` | **fixed** |
+      | `test/density_bin_model.cpp` **×2** | `min(ρ,td)` | **fixed** (both impls) |
+
+      **Regress-tier delta — both changed designs got BETTER, and it scales inversely with td
+      exactly as the formula predicts:**
+
+      | design | td | HPWL | iters | exact overflow |
+      |---|---|---|---|---|
+      | `mgc_fft_a` | 0.50 | **−1.05%** | 632 → 611 | 0.0530 → 0.0448 |
+      | `mgc_pci_bridge32_b` | 0.14 | **−20.67%** | 713 → 651 | 0.0638 → 0.0529 |
+      | `mms_adaptec1` | 1.00 | **bit-identical** | 1274 | sha `91cbbdee0d59` |
+
+      ⚠️ **`mms_adaptec1` is the CONTROL, not a datapoint.** The formulas are algebraically equal
+      at td=1, so its unchanged sha is what proves only the intended thing moved; its baseline diff
+      is 4 header lines over a bit-identical body. A change here would have meant a mistake.
+      ⚠️ **These are regress-tier GP numbers on 2 small designs — NOT suite numbers.** Do not quote
+      −20.67% as a result. The suites are running (`DSE_20260821_112603` = ISPD 28, MMS follows).
+      Also added a pointer comment at `Grid::clampFixedDensity` naming all three reproductions,
+      since drift between them is what cost this task.
+- [ ] **STILL OPEN — `make test` does not actually verify the shipped HLS header.**
+      `test/density_bin_model.cpp` **reproduces** `density_bin.hpp` rather than including it, so
+      its (genuine, bit-exact) agreement between two reference implementations says nothing about
+      the module that ships. That is #20 step 3's *"include the real header; delete
+      `density_bin_model`'s own stale copy"* — and this task is exactly why it matters: the
+      duplicate is how the module silently kept the old formula for four days.
 - [ ] **⚠️ ESCALATED 2026-08-19 — `computeOverflow` is the CONVERGENCE SIGNAL, not just a report.**
       Verified by enumerating its callers: `Output.cpp:568` (*"convergence signal"*, the smoothed
       call that drives the γ/λ schedule and the stop test) and `Phase2.cpp:216-217` (the phase-1→2
