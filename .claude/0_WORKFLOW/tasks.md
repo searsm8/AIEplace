@@ -5,21 +5,24 @@ report.** Don't reuse task numbers, find the highest number and add one.
 
 ## ⚠️ sw_only functionality is FROZEN — called 2026-08-17, EFFECTIVE 2026-08-18 (Mark)
 
-sw_only is at parity with XPlace — **median 1.0097 / mean 1.0126 legal-vs-legal over all 28 ISPD
-designs** (`results/DSE_20260817_223934`), 22/28 within ±2%, better on 6. The active thread is now
-**pl_algo** (#20). Freezing is not a pause: pl_algo's algorithm is pinned to the 2026-07-14
-sw_only, so **every further sw_only change is another port**, and a stable sw_only is what makes
-#20 a bounded job.
+sw_only is at parity with XPlace — **median 1.0094 / mean 1.0112 legal-vs-legal over all 28 ISPD
+designs**, 24/28 within ±2%, better on 5. Golden:
+`.claude/2_ARTIFACTS/results/GOLDEN_sw_only_frozen_20260821/` at commit `02464d0`. The active
+thread is now **pl_algo** (#20). Freezing is not a pause: pl_algo's algorithm is pinned to the
+2026-07-14 sw_only, so **every further sw_only change is another port**, and a stable sw_only is
+what makes #20 a bounded job.
+⚠️ **MMS is NOT covered by that number** — it is ~1.9 pp worse than its last known-good run and
+unresolved, see **#35**.
 
-**Why the freeze carries two dates.** It was called on 08-17 against the 08-15 numbers
-(1.0096 / 1.0113), then three faithfulness fixes already in flight were allowed to land — **#32's
-7a+7b** (snapshot and measure on the lookahead `v_k`) and **#3's cap→scale** — bundled into one
-80-minute suite re-run rather than two. Those are the last changes admitted under the freeze.
-⚠️ **They cost +0.13 pp of mean and left the median flat** (18 designs worse, 7 better, 3
-unchanged). That is the expected shape of a faithfulness change, not a defect, and it was kept per
-`CLAUDE.md`'s standing rule to prefer XPlace's formulation over an ad-hoc win — but it means
-**the frozen sw_only is deliberately NOT the best-scoring sw_only we ever measured.** Anyone
-tempted to "improve" the number by reverting one of those three is re-opening a closed decision.
+**Changes admitted under the freeze, in order.** It was called 2026-08-17 against the 08-15
+numbers (1.0096 / 1.0113). Three faithfulness fixes already in flight were then allowed to land —
+**#32's 7a+7b** and **#3's cap→scale** — which cost +0.13 pp of ISPD mean and were kept per
+`CLAUDE.md`'s prefer-XPlace rule. **#34** (2026-08-21, Mark-authorized) then found `#3` had been
+applied to only one of **four** places computing the same quantity, and made them agree; that
+recovered the loss and more on ISPD (mean 1.0126 → **1.0112**, within-2% 22 → 24).
+⚠️ **The frozen sw_only is still deliberately not the best-scoring sw_only we ever measured on
+every tier** — MMS remains worse than pre-`#3` (#35). Anyone tempted to "improve" a number by
+reverting one of these is re-opening a closed decision; take it to #35 instead.
 
 What the freeze means:
 - **No further algorithm or behaviour changes to `host/src/sw_only/`** without an explicit
@@ -865,6 +868,10 @@ re-run before the freeze was called.
 ---
 
 ## #35 — MMS regression is intrinsic to `#3`'s field, not the metric (opened 2026-08-21)
+
+→ [[_NEW_HANDOFF_35_mms_density_regression_20260821.md]] — **start there.** Carries the
+three-way numbers, the per-design td split, what is ruled out, the XPlace-side reading, and the
+isolating A/B (state "D") that has never been run.
 
 **Spun off #34 at partial close.** #34 hypothesized the MMS regression (mean 1.0161 → 1.0351,
 2026-08-14 → 2026-08-19) was caused by `Placer::computeOverflow` lagging `Grid::
