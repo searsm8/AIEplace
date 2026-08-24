@@ -1,5 +1,9 @@
 # pl_algo data flow
 
+> **Block diagrams:** [[DIAGRAM_iteration.md]] (the per-iteration loop) and
+> [[DIAGRAM_density.md]] (the density branch expanded). This file stays authoritative
+> for the contract; the diagrams follow it.
+
 One placement iteration, as data moves through the PL modules. Byte/word layouts are
 defined precisely in `src/formats.hpp`; this file is the narrative. All transport uses a
 128-bit logical word (4 packed floats) as the application-level packing unit -- this is
