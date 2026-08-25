@@ -90,6 +90,41 @@ closed on 2026-08-11 and are no longer live context; their task-indexed records 
   baseline bit-for-bit with `enable_preconditioning = false` on the new binary.
   → [[_NEW_REPORT_26_precond_always_on_20260811.md]]
 
+## 2026-08-25 — experiment D: `#3` IS the whole MMS regression, and reverting it beats even pre-`#3`
+
+The missing cell from the #35 handoff (state "D": `#3`'s formula reverted to `min(ρ,td)` in all
+four sites, **everything else held at HEAD**) is now run — `DSE_20260824_161319`, 16/16, 245 min.
+D isolates `#3` exactly, where the 2026-08-14 baseline confounded it with `#32`'s 7a/7b. Result:
+
+- **D vs C (HEAD) = `#3` alone = −2.38 pp of MMS mean** (1.0347 → 1.0110). The td-split is
+  perfectly clean: all 8 td=1 designs flat (±0.04 pp, `#3` is a provable no-op there), all 8 td<1
+  recover, magnitude tracking (1−td). adaptec5 −14.57 pp (recovers the +15.02 it regressed under
+  `#3`), newblue1 −8.47, newblue4/5 −5.2. Internal consistency exact — adaptec5 lands at 1.0501,
+  ~its pre-`#3` 1.0456.
+- **D (1.0110) beats even pre-`#3` A (1.0161)** by 0.52 pp, because D keeps 7a/7b (bigblue3 −8.12)
+  and the rest of HEAD that the 2026-08-14 A lacked. So reverting `#3` while holding everything
+  else at HEAD is the best MMS result on record.
+
+The handoff's decision gate ("if D ≈ 1.0161, `#3` alone is the whole regression") is resolved
+past its own threshold: `#3` alone is the whole thing, cleanly.
+
+**Two of the handoff's three leads died in static reads, and I was wrong to weight lead 2.** Mark
+called it: recreating the fillers at the phase boundary is idempotent — `freezeMovableMacros` →
+`computeAreaBreakdown` moves macro area movable→fixed, so `addFillers`'s inputs are invariant and
+the td-raise never fires (confirmed in the D logs). Lead 1 (macro deposit weight) is also dead:
+the area-conserving weight is exactly 1.0 for any node ≥ √2 bins, and XPlace zeroes the frozen
+macro out of the movable field just as we do. **One live faithful-vs-us divergence remains,
+untested:** our density *field* runs FIXED nodes through the √2 inflation; XPlace's
+`init_density_map` deposits them at raw size. That is the lever for a keep-`#3`-and-fix path.
+
+**Tree state:** D was a throwaway — source reverted (`git apply -R`), regress bit-identical, so
+**frozen HEAD is unchanged**; running D landed nothing on the frozen binary. What DID land
+(`289b45d`): the two stale `clampFixedDensity` comments in `Density.cpp` corrected to name
+saturate-then-scale, and the row-site-model improvement brief. The `#35` decision — accept D
+(−2.38 pp but un-faithful, overriding `CLAUDE.md`'s prefer-XPlace rule, needs Mark's call) vs
+keep `#3` and fix the fixed-node field divergence — is now sharply posed and still Mark's, with
+sw_only frozen. `scratch/experiment_D.patch` reproduces D on demand.
+
 ## 2026-08-21 -- evicted from summary.md: the 2026-08-17 golden and 2026-08-19 MMS-regression narration
 
 Superseded by TODO #34's fix (`02464d0`) and the 2026-08-21 re-runs. Kept verbatim -- both blocks

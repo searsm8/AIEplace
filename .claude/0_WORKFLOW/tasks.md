@@ -911,24 +911,48 @@ MMS_sw_only_frozen_20260821/README.md` for the three-way comparison.
   design class and hurts another, and the discriminator is not td alone (ISPD's lowest-td design
   improved; MMS's did not) so something else about MMS specifically is the missing variable.
 
-**What is NOT established — this is the open question:**
-- [ ] **Why does the same `min(ρ,1)·td` formula help low-td ISPD and hurt low-td MMS?** The
-      obvious candidate is **movable macros / phase 2**: MMS is the only tier with
-      `mixed_size_mode`, frozen macros, and a phase-1→phase-2 transition; ISPD has none of that.
-      Check whether `clampFixedDensity`'s `db.getFixedComponents()` deposit set changes between
-      phase 1 and phase 2 (frozen macros — are they added to the fixed set, or handled elsewhere?),
-      and whether the interaction is with the phase-2 restart rather than the formula itself.
-- [ ] **Check `Phase2.cpp`'s macro-freeze path** for anything that reads a density field assuming
-      the old cap semantics (a hard `td` ceiling) rather than the new proportional one — a filler
-      count, a re-initialization heuristic, or a convergence-gate threshold tuned against the old
-      field's numeric range.
-- [ ] **A/B `#3` in isolation on MMS** (revert just `Grid::clampFixedDensity`, keep everything else
-      at HEAD) to confirm the field change alone reproduces the regression outside of any
-      interaction with #32's 7a/7b — the current evidence bundles them by construction since both
-      landed in the same 2026-08-17 run and neither tier was re-run with one reverted.
-- [ ] **Decide the standing question `#34` deferred:** is 1.0347 the faithful-but-costly number to
-      accept (`CLAUDE.md`'s prefer-XPlace rule), or does macro/mixed-size handling need its own fix
-      once the mechanism is understood? Not answerable until the mechanism is.
+**RESOLVED 2026-08-25 — experiment D isolated `#3`, and it IS the whole MMS regression.**
+`DSE_20260824_161319` (throwaway; formula reverted to `min(ρ,td)` in all four sites, everything
+else at HEAD; source reverted after, regress bit-identical). D vs C isolates `#3` alone:
+
+| | td=1 (8 designs) | td<1 (8 designs) | mean |
+|---|---|---|---|
+| C (HEAD, faithful `min(ρ,1)·td`) | flat | regressed | 1.0347 |
+| **D (revert `#3`, else HEAD)** | flat (±0.04) | recovered | **1.0110** |
+| A (pre-`#3`, 2026-08-14) | — | — | 1.0161 |
+
+`#3` alone moves the MMS mean **−2.38 pp** (D−C), td-split perfectly clean: every td=1 flat,
+every td<1 recovers, magnitude tracking (1−td). adaptec5 −14.57 pp (recovers the +15.02 it
+regressed), newblue1 −8.47, newblue4/5 −5.2. **D (1.0110) beats even pre-`#3` A (1.0161)** by
+0.52 pp, because D keeps `#32`'s 7a/7b (bigblue3 −8.12) and the rest of HEAD that A lacked. So
+`#3` is the entire regression; reverting it while holding everything else at HEAD is the best MMS
+result on record. Per-design table + scripts: `/tmp/cmp3.py`, `results/DSE_20260824_161319/`.
+
+**Mechanism, from static reads (2026-08-25):**
+- ❌ **Fillers are NOT the divergence.** `rebuildFillers` at the phase boundary is idempotent:
+  `freezeMovableMacros` → `computeAreaBreakdown` moves macro area from movable→fixed, so
+  `addFillers`'s two inputs (`stdcell_placeable_area`, `stdcell_area`) are invariant and the
+  `stdcell_util>td` raise never fires. Confirmed in the D logs: adaptec1/newblue1/newblue2 all
+  show identical filler count and unchanged td across the transition. (Lead 2 of the handoff, dead.)
+- ❌ **Frozen-macro deposit weight is NOT the divergence.** The area-conserving weight is exactly
+  1.0 for any node ≥ √2 bins (i.e. every macro), and XPlace zeroes the frozen macro out of the
+  movable field (`cache_node_weight = -1.0`, `run_placement_nesterov.py:203`) — same as ours.
+  (Lead 1 of the handoff, narrowed to dead for macro-sized nodes.)
+- ◐ **One live faithful-vs-us divergence remains, untested:** our density *field*
+  (`computeNodeOverlaps`, `m_clamp_density=true`) runs FIXED nodes through the √2 inflation;
+  XPlace's `init_density_map` deposits fixed/frozen nodes at raw size, weight 1.0, no inflation.
+  Zero effect above √2 bins; below it we smear a fixed node wider/lower than XPlace. This is the
+  candidate mechanism by which the faithful scale hurts, and the lever for a keep-`#3`-and-fix path.
+
+**Still open — the standing decision (Mark's, and sw_only is FROZEN):**
+- [ ] **Accept D or fix macro handling?** Two arms, both now costed on the accept side:
+      (a) **Land D** — revert `#3`, take −2.38 pp MMS, but the old cap `min(ρ,td)` is
+      *un-faithful* to XPlace, so this deliberately overrides `CLAUDE.md`'s prefer-XPlace rule and
+      needs Mark's explicit call. (b) **Keep `#3` (faithful) and fix the fixed-node field
+      divergence above**, then re-measure whether the MMS win returns without the divergence —
+      unmeasured. The mechanism question ("why help low-td ISPD, hurt low-td MMS") is now
+      answerable as: the formula is faithful, ISPD has no frozen-macro/phase-2 path, and the
+      MMS-specific cost most likely enters through the fixed-node field smearing — arm (b) tests that.
 
 ---
 
