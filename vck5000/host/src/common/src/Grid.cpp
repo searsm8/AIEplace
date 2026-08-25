@@ -127,22 +127,31 @@ void Grid::depositNodeOverlaps(Node* node_p)
 }
 
 /**
- * @brief Saturate each bin's fixed-component occupancy at FULL, then scale it by target_density,
- *        so fixed macros don't count as overflow — only movable cells stacked on top do.
+ * @brief Cap each bin's fixed-component occupancy at bin_area*target_density, so fixed macros
+ *        don't count as overflow — only movable cells stacked on top do.
  *
- * SCALE, not cap (TODO #3, fixed 2026-08-17). XPlace does
- * `init_density_map.clamp_(min=0.0, max=1.0).mul_(args.target_density)` (`initializer.py:82`) —
- * in density terms `min(rho, 1) * td`. We used to compute `min(rho, td)`, which is a different
- * function everywhere a bin is partially occupied: at td=0.65 and rho=0.5 XPlace gives 0.325 and
- * the cap gives 0.50, so we read HIGH in macro-perimeter bins. Identical at td=1, which is why
- * only macro designs at td<1 ever saw it, and why the fillerless std-cell designs (#31's fft_2
- * reconciliation, 0 fixed cells) could not.
+ * CAP, not scale — `min(overlap, bin_area*td)` = `min(rho, td)`. This is a DELIBERATE DIVERGENCE
+ * from XPlace, Mark-authorized 2026-08-25 (TODO #35, landed experiment "D"). It overrides
+ * `CLAUDE.md`'s prefer-XPlace rule; the exception is registered there under "Deliberate
+ * divergences from XPlace" so a later session does not "fix" it back to faithful.
  *
- * total_overlap is an absolute area, so `min(rho,1)*td` is `min(overlap, bin_area) * td`.
+ * XPlace does `init_density_map.clamp_(0,1).mul_(target_density)` (`initializer.py:82`) — in
+ * density terms `min(rho,1)*td` (the SCALE). We shipped that faithful scale from 2026-08-17 to
+ * 2026-08-25 (TODO #3) and it cost +2.38 pp of MMS mean vs the cap — isolated cleanly by
+ * experiment D (`DSE_20260824_161319`): the cap wins −2.38 pp mean, entirely on the 8 td<1
+ * macro/mixed-size designs (adaptec5 −14.57 pp, newblue1 −8.47), every td=1 design flat because
+ * the two formulas are identical at td=1. Physical reading: a frozen macro actually occupies its
+ * area, and scaling its contribution by td tells the optimizer there is room where there is none,
+ * so cells crowd the macro perimeter and the legalizer pays for it. The cap is conservative there.
+ * (The faithful scale HELPS low-td ISPD, which has no frozen-macro/phase-2 path — a keep-scale-
+ * and-fix-the-field alternative was left on the table in #35; this landing takes the measured win.)
+ *
+ * The two formulas differ wherever a bin is partially occupied: at td=0.65, rho=0.5 the scale
+ * gives 0.325 and the cap gives 0.50, so under the cap we read HIGH in macro-perimeter bins.
  */
-// CLAUDE CODE: THIS IS THE CANONICAL fixed-density formulation -- min(rho,1)*target_density,
-// matching XPlace initializer.py:82. Three other places reproduce it and MUST be changed with
-// it; they silently disagreed between 2026-08-17 and 2026-08-19 (TODO #34):
+// CLAUDE CODE: THIS IS THE CANONICAL fixed-density formulation -- min(rho, target_density), a
+// deliberate divergence from XPlace (see above). Three other places reproduce it and MUST be
+// changed with it, or they silently disagree (that was TODO #34):
 //   sw_only/src/placer/Density.cpp   Placer::computeOverflow   (the convergence signal)
 //   pl/src/pl_algo/src/modules/density_bin.hpp                 (the HLS module)
 //   test/density_bin_model.cpp                                 (both reference impls)
@@ -152,8 +161,8 @@ void Grid::clampFixedDensity(float target_density)
     for (int col = 0; col < m_bins_per_row; col++)
         for (int row = 0; row < m_bins_per_col; row++) {
             float bin_area = m_bins[col][row].bb.getArea();
-            float saturated = std::min(m_bins[col][row].total_overlap, bin_area);
-            m_bins[col][row].total_overlap = saturated * target_density;
+            m_bins[col][row].total_overlap = std::min(m_bins[col][row].total_overlap,
+                                                      bin_area * target_density);
         }
 }
 

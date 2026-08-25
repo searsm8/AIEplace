@@ -888,11 +888,19 @@ re-run before the freeze was called.
 
 ---
 
-## #35 — MMS regression is intrinsic to `#3`'s field, not the metric (opened 2026-08-21)
+## #35 — MMS regression is intrinsic to `#3`'s field, not the metric — CLOSED 2026-08-25 (landed D)
 
-→ [[_NEW_HANDOFF_35_mms_density_regression_20260821.md]] — **start there.** Carries the
-three-way numbers, the per-design td split, what is ruled out, the XPlace-side reading, and the
-isolating A/B (state "D") that has never been run.
+**CLOSED 2026-08-25.** Root-caused to `#3`'s faithful scale, and **experiment D landed**: the
+fixed-density formula reverted to the cap `min(rho,td)` in all four sites — a deliberate,
+Mark-authorized divergence from XPlace, registered in `CLAUDE.md` under "Deliberate divergences
+from XPlace". Worth **+2.38 pp of MMS mean** (D vs HEAD, isolated clean; D 1.0110 beats even
+pre-`#3` A 1.0161). Regress baselines regenerated (`mgc_fft_a`, `mgc_pci_bridge32_b`; td=1
+`mms_adaptec1` bit-identical, confirming the no-op-at-td=1 claim). The keep-scale-and-fix-the-
+fixed-node-field alternative was recorded and **not taken** — see the ◐ note below if MMS ever
+returns to focus. Full record below stays for the trail; a task-indexed copy goes to history.md.
+
+→ [[_NEW_HANDOFF_35_mms_density_regression_20260821.md]] — the original handoff. Carries the
+three-way numbers, the per-design td split, what was ruled out, and the XPlace-side reading.
 
 **Spun off #34 at partial close.** #34 hypothesized the MMS regression (mean 1.0161 → 1.0351,
 2026-08-14 → 2026-08-19) was caused by `Placer::computeOverflow` lagging `Grid::
@@ -944,15 +952,18 @@ result on record. Per-design table + scripts: `/tmp/cmp3.py`, `results/DSE_20260
   Zero effect above √2 bins; below it we smear a fixed node wider/lower than XPlace. This is the
   candidate mechanism by which the faithful scale hurts, and the lever for a keep-`#3`-and-fix path.
 
-**Still open — the standing decision (Mark's, and sw_only is FROZEN):**
-- [ ] **Accept D or fix macro handling?** Two arms, both now costed on the accept side:
-      (a) **Land D** — revert `#3`, take −2.38 pp MMS, but the old cap `min(ρ,td)` is
-      *un-faithful* to XPlace, so this deliberately overrides `CLAUDE.md`'s prefer-XPlace rule and
-      needs Mark's explicit call. (b) **Keep `#3` (faithful) and fix the fixed-node field
-      divergence above**, then re-measure whether the MMS win returns without the divergence —
-      unmeasured. The mechanism question ("why help low-td ISPD, hurt low-td MMS") is now
-      answerable as: the formula is faithful, ISPD has no frozen-macro/phase-2 path, and the
-      MMS-specific cost most likely enters through the fixed-node field smearing — arm (b) tests that.
+**The standing decision — DECIDED 2026-08-25: land D (arm a).**
+- [x] **Accept D or fix macro handling? → LANDED D.** Mark's call 2026-08-25: take the measured
+      −2.38 pp MMS win; MMS isn't the main focus but 2.38 pp is noticeable. The cap `min(ρ,td)` is
+      *un-faithful* to XPlace, so this deliberately overrides `CLAUDE.md`'s prefer-XPlace rule —
+      registered there under "Deliberate divergences from XPlace" and stamped in all four code
+      comments so it isn't reverted-to-faithful by accident. Regress baselines regenerated with the
+      reason recorded in-file; td=1 `mms_adaptec1` bit-identical.
+      The **not-taken** alternative, kept for the record: (b) **keep the faithful scale and fix the
+      fixed-node field divergence above** (the ◐ note), then re-measure. Untested. The mechanism it
+      would test: the scale is faithful, ISPD has no frozen-macro/phase-2 path, so the MMS-specific
+      cost most likely enters through fixed-node field smearing. Revisit only if MMS returns to
+      focus AND matching XPlace on the field becomes worth a re-measure; the `◐` note is the lead.
 
 ---
 

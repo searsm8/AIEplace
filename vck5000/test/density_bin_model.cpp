@@ -86,11 +86,11 @@ static std::vector<float> bin_reference(const std::vector<NodeBox>& nodes, int M
     for (int n = M; n < (int)nodes.size(); n++)           // PASS 1: fixed [M,N)
         scatter(nodes[n], bin_w, bin_h, 0, GRID, add);
     clamped_bins = 0;
-    // CLAUDE CODE: min(rho,1)*td (TODO #34). clamped_bins now counts bins whose FIXED deposit
-    // saturates a full bin -- the point where the two formulas used to coincide.
+    // CLAUDE CODE: min(rho,td) -- the cap, a deliberate divergence from XPlace's scale
+    // (TODO #35). clamped_bins counts bins whose FIXED deposit hits the cap bin_area*td.
+    const float cap = bin_area * target_density;
     for (float& v : ov) {
-        if (v > bin_area) { v = bin_area; clamped_bins++; }
-        v *= target_density;
+        if (v > cap) { v = cap; clamped_bins++; }
     }
     for (int n = 0; n < M; n++)                           // PASS 2: movable [0,M)
         scatter(nodes[n], bin_w, bin_h, 0, GRID, add);
@@ -111,8 +111,9 @@ static std::vector<float> bin_strip_tiled(const std::vector<NodeBox>& nodes, int
         auto add = [&](int c, int r, float a){ acc[(c - c0) * GRID + r] += a; };
         for (int n = M; n < (int)nodes.size(); n++)       // PASS 1: fixed
             scatter(nodes[n], bin_w, bin_h, c0, c0 + STRIP, add);
-        // CLAUDE CODE: min(rho,1)*td (TODO #34), strip-local; each bin lives in exactly one strip.
-        for (float& v : acc) v = std::min(v, bin_area) * target_density;
+        // CLAUDE CODE: min(rho,td) -- the cap (deliberate divergence from XPlace, TODO #35),
+        // strip-local; each bin lives in exactly one strip.
+        for (float& v : acc) v = std::min(v, bin_area * target_density);
         for (int n = 0; n < M; n++)                       // PASS 2: movable
             scatter(nodes[n], bin_w, bin_h, c0, c0 + STRIP, add);
         for (int i = 0; i < STRIP; i++)                   // write strip -> rho (x-major)
@@ -159,7 +160,7 @@ int main() {
         max_abs = std::max(max_abs, (double)std::fabs(strip[i] - ref[i]));
         sum_ref += ref[i];
     }
-    printf("   fixed-saturated bins (rho_fixed >= 1 bin) = %d\n", clamped);
+    printf("   fixed-capped bins (rho_fixed >= td) = %d\n", clamped);
     printf("   total density mass = %.6g   max_abs_diff(strip - ref) = %.3e\n", sum_ref, max_abs);
     printf("   -> %s\n", max_abs < 1e-12 ? "PASS (bit-exact)" : "FAIL");
     return max_abs < 1e-12 ? 0 : 1;

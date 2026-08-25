@@ -21,15 +21,17 @@
   `02464d0`. Supersedes the 2026-08-17 golden (renamed `SUPERSEDED_sw_only_20260817_pre34/`),
   which was built on a binary where three of four copies of the fixed-density formula disagreed
   (TODO #34) — full narration of that gap moved to [[journal.md]].
-- ⚠️ **MMS (16 designs) — measured, NOT golden.** `.claude/2_ARTIFACTS/results/
-  MMS_sw_only_frozen_20260821/`: median 1.0188, mean **1.0347** — worse than the last known-good
-  2026-08-14 run (median 1.0137, mean 1.0161). #34's fix (make the four fixed-density formulas
-  agree) closed the ISPD gap above but moved MMS by only 0.04 pp — **the metric-consistency
-  hypothesis for MMS's regression is falsified.** The cause is now understood to be `#3`'s solver
-  field itself (`Grid::clampFixedDensity`, `min(ρ,1)·td`) hurting macro-heavy/mixed-size
-  convergence specifically, even though the identical formula *helped* ISPD's lowest-td designs
-  (`pci_bridge32_a/b`, −4.8%/−8.7% GP HPWL). Mechanism unresolved → **#35**.
-  ⚠️ `.claude/2_ARTIFACTS/results/DSE_20260814_152306/` stays undeleted — it is the only surviving
+- **MMS (16 designs) — #35 CLOSED 2026-08-25, regression fixed.** Root cause was `#3`'s faithful
+  scale (`Grid::clampFixedDensity`, `min(ρ,1)·td`) hurting macro/mixed-size convergence. Fixed by
+  **landing experiment D**: reverted the fixed-density formula to the cap `min(ρ,td)` in all four
+  sites — a **deliberate, Mark-authorized divergence from XPlace** (registered in `CLAUDE.md` under
+  "Deliberate divergences from XPlace"), worth **+2.38 pp of MMS mean** (D vs HEAD: 1.0347 →
+  **1.0110**, cleanly isolated; D beats even pre-`#3` 1.0161). Isolating run
+  `vck5000/results/DSE_20260824_161319/`. Regress baselines regenerated; td=1 `mms_adaptec1`
+  bit-identical (the cap is a provable no-op at td=1, so no ISPD/td=1 design moved). #34's earlier
+  metric-consistency fix was falsified as the cause but kept on its own merits. The not-taken
+  keep-faithful-and-fix-the-fixed-node-field alternative is recorded in #35.
+  ⚠️ `.claude/2_ARTIFACTS/results/DSE_20260814_152306/` stays undeleted — the only surviving
   pre-#3 reference now that the intermediate 2026-08-19 broken run has been pruned.
 - Landed: two-phase mixed-size flow + LP macro legalization; #19's two XPlace faithfulness fixes
   (overflow excludes fillers; the γ/λ throttle gates on preconditioner κ). Both toggles retired

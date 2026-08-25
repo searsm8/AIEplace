@@ -241,10 +241,11 @@ void Placer::computeOverlaps()
             grid.depositNodeOverlaps(node_vec[i]);
     };
 
-    // Pass 1: Fixed components — their density is SATURATED at one full bin, then scaled by
-    // target_density (min(rho,1)*td). A bin fully covered by fixed macros lands exactly at
-    // capacity, so it contributes no overflow; a partly-covered one keeps proportional
-    // headroom. NOT a per-bin cap at td -- see Grid::clampFixedDensity (TODO #3/#34).
+    // Pass 1: Fixed components — their density is CAPPED per bin at bin_area*td, min(rho,td),
+    // so a bin fully covered by fixed macros contributes no overflow. This is a deliberate
+    // divergence from XPlace (which scales, min(rho,1)*td) — Mark-authorized 2026-08-25, worth
+    // +2.38 pp of MMS mean; see Grid::clampFixedDensity (TODO #35) and CLAUDE.md's divergence
+    // registry. This deposit must track that function; when it lagged, that was TODO #34.
     deposit_pass(fixed);
 
     grid.clampFixedDensity(target_density);
@@ -266,8 +267,8 @@ void Placer::computeOverlaps()
  * inflated to at least sqrt(2) bins per dimension with an area-conserving weight
  * (real_area/clamped_area) and shifted to stay in-die — matching Grid::computeBinOverlaps —
  * so sub-bin cells are smeared to grid resolution rather than spiking a single bin. Fixed
- * macros form a saturate-then-scale baseline, min(rho,1)*td (mirrors clampFixedDensity);
- * fillers are excluded.
+ * macros form a per-bin-capped baseline, min(rho,td) (mirrors clampFixedDensity — a deliberate
+ * divergence from XPlace, TODO #35); fillers are excluded.
  *
  * Why smoothed matters: it is the smoothed density the electrostatic optimizer actually
  * minimizes, so it descends cleanly to the stop threshold. The exact overflow re-measures
@@ -325,19 +326,19 @@ float Placer::computeOverflow(bool smooth, std::vector<float>* out_density, bool
         }
     };
 
-    // Fixed baseline at exact size, SATURATED at a full bin then scaled by target_density --
-    // min(rho,1)*td, which is what Grid::clampFixedDensity does and what XPlace does
-    // (initializer.py:82: init_density_map.clamp_(0,1).mul_(target_density)). The passes are
-    // ordered (the saturation reads the fixed baseline); within a pass the nodes are independent.
-    // CLAUDE CODE: was min(density, cap) = min(rho,td) until 2026-08-19 (TODO #34). That is a
-    // DIFFERENT function -- on a half-blocked bin at td=0.5 it left zero headroom for movable
-    // cells where this leaves 0.25 -- and since this overflow is the convergence signal
-    // (Output.cpp: the smoothed call) sw_only was optimizing one density map and deciding when
-    // to stop from another. Identical at td=1, which is why mms_adaptec1 does not move.
+    // Fixed baseline at exact size, CAPPED per bin at bin_area*target_density -- min(rho,td),
+    // which is what Grid::clampFixedDensity does. DELIBERATE DIVERGENCE from XPlace's scale
+    // (initializer.py:82: min(rho,1)*td), Mark-authorized 2026-08-25 (TODO #35), worth +2.38 pp
+    // of MMS mean; see CLAUDE.md's divergence registry and the canonical comment in Grid.cpp.
+    // The passes are ordered (the cap reads the fixed baseline); within a pass the nodes are
+    // independent. This overflow is the convergence signal (Output.cpp: the smoothed call), so it
+    // MUST use the same formula as the field the solver minimizes -- when it lagged (used the cap
+    // while the field scaled) sw_only optimized one density map and stopped from another (TODO #34,
+    // now moot in the other direction: both are the cap). Identical at td=1; mms_adaptec1 unmoved.
     deposit_pass(db.getFixedComponents(), false);
     #pragma omp parallel for schedule(static)
     for (int i = 0; i < (int)density.size(); i++)
-        density[i] = std::min(density[i], bin_area) * target_density;
+        density[i] = std::min(density[i], bin_area * target_density);
 
     // Movable real cells (clamped when requested). Fillers included only for the diagnostic
     // that mirrors XPlace's filler-inclusive GP stop signal (default: excluded). exclude_macros

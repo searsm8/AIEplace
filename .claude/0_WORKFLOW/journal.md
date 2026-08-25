@@ -90,6 +90,29 @@ closed on 2026-08-11 and are no longer live context; their task-indexed records 
   baseline bit-for-bit with `enable_preconditioning = false` on the new binary.
   → [[_NEW_REPORT_26_precond_always_on_20260811.md]]
 
+## 2026-08-25 (later) — D LANDED; `#35` closed; first registered deliberate divergence from XPlace
+
+Mark's call: land D. "2.38 pp is noticeable, even though MMS isn't our main focus." So the
+fixed-density formula is now the cap `min(ρ,td)` on the frozen binary — reverted from the faithful
+scale in all four sites (`Grid::clampFixedDensity` canonical, `Density.cpp::computeOverflow`,
+`density_bin.hpp`, `density_bin_model.cpp`), each carrying a comment that names it a deliberate
+divergence, not a bug. Regress baselines regenerated for the two td<1 designs (reason recorded
+in-file); the landing reproduces D's final positions bit-for-bit (`pci_bridge32_b` sha
+`43fa7e73a889`). td=1 `mms_adaptec1` re-ran bit-identical at 1274 iters — the no-op-at-td=1 claim,
+verified, so nothing on ISPD or the td=1 half moved.
+
+**This is the first entry in a new `CLAUDE.md` section, "Deliberate divergences from XPlace."**
+`CLAUDE.md` already carried the rule that divergences must be *deliberate and documented*, but had
+no registry of the ones actually taken — so a divergence lived only in scattered code comments and
+was one "let me make this faithful again" away from silently regressing. The registry is the
+always-loaded backstop; the four code comments are the point-of-divergence claims. Where I'd been
+wrong earlier in the day and Mark corrected me (fillers idempotent) is now moot; the one lead left
+un-chased is the fixed-node √2-field-inflation divergence, recorded in #35 as the not-taken
+keep-faithful path.
+
+Landing commits on top of the doc-only `24c500b`. sw_only was frozen; this is a Mark-authorized
+change to the freeze, which is the only thing that updates the frozen binary.
+
 ## 2026-08-25 — experiment D: `#3` IS the whole MMS regression, and reverting it beats even pre-`#3`
 
 The missing cell from the #35 handoff (state "D": `#3`'s formula reverted to `min(ρ,td)` in all

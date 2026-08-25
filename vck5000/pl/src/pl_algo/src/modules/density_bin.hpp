@@ -72,9 +72,10 @@ static void density_bin(const NodeBox* node_box,    // [num_nodes]  movable [0,M
     static float acc_URAM[STRIP][GRID];                  // on-chip strip accumulator (256 KB)
 #pragma HLS bind_storage variable=acc_URAM type=RAM_2P impl=URAM
     const float bin_area = bin_w * bin_h;
-    // CLAUDE CODE: fixed baseline saturates at a FULL BIN, then scales by target_density
-    //  -- min(rho,1)*td, matching Grid::clampFixedDensity and XPlace initializer.py:82.
-    //  Was min(rho,td) until 2026-08-19 (TODO #34); the two differ on partly-blocked bins.
+    // CLAUDE CODE: fixed baseline is CAPPED per bin at bin_area*target_density -- min(rho,td),
+    //  matching Grid::clampFixedDensity. Deliberate divergence from XPlace's scale
+    //  (min(rho,1)*td, initializer.py:82), Mark-authorized 2026-08-25 (TODO #35, +2.38 pp MMS);
+    //  see CLAUDE.md's divergence registry. The two differ on partly-blocked bins, equal at td=1.
     const float inv_area = 1.0f / bin_area;
 
 strip_loop:
@@ -91,17 +92,17 @@ strip_loop:
         for (int n = num_movable; n < num_nodes; n++)
             bin_scatter(node_box[n], bin_w, bin_h, c0, acc_URAM);
 
-    // Saturate the fixed nodes (large macros) at a full bin, then scale by target_density,
-    // before movable nodes are added. A fully-blocked bin lands exactly at capacity, so it
-    // contributes no overflow; a partly-blocked one keeps proportional headroom.
+    // Cap the fixed nodes (large macros) per bin at bin_area*target_density, before movable
+    // nodes are added, so a fully-blocked bin contributes no overflow. Deliberate divergence
+    // from XPlace's scale (TODO #35); see the header comment above.
     clamp_i:
         for (int i = 0; i < STRIP; i++)
         clamp_y:
             for (int y = 0; y < GRID; y++) {
 #pragma HLS PIPELINE II=1
-                // CLAUDE CODE: one compare + one multiply, still II=1.
-                const float sat = (acc_URAM[i][y] > bin_area) ? bin_area : acc_URAM[i][y];
-                acc_URAM[i][y]  = sat * target_density;
+                // CLAUDE CODE: one multiply + one compare, still II=1.
+                const float cap = bin_area * target_density;
+                acc_URAM[i][y]  = (acc_URAM[i][y] > cap) ? cap : acc_URAM[i][y];
             }
 
     pass2_movable:

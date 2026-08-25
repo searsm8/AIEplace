@@ -147,6 +147,21 @@ If XPlace has a formulation, match it. If it genuinely has none, say so explicit
 that the choice is ours — that is exactly the kind of decision that must be written down
 (tasks.md or memory), or a later session will re-derive it from scratch.
 
+### Deliberate divergences from XPlace
+The short list of places sw_only **knowingly** departs from XPlace, each Mark-authorized and
+measured. Do NOT "fix" these back to faithful — that silently regresses a landed win. If you
+touch one, check here first.
+
+- **Fixed-density is a per-bin CAP, `min(rho, td)`, not XPlace's scale `min(rho,1)*td`**
+  (`initializer.py:82`). Landed 2026-08-25, Mark-authorized (TODO #35, experiment "D"). Worth
+  **+2.38 pp of MMS mean** — the faithful scale tells the optimizer there is room where a frozen
+  macro physically sits, so cells crowd the perimeter and the legalizer pays for it; the cap is
+  conservative on macro/mixed-size designs. Identical to the scale at td=1 (all ISPD2005 + the
+  td=1 half unaffected). **Four sites must stay in sync** (Grid.cpp `clampFixedDensity` is
+  canonical; Density.cpp `computeOverflow`; density_bin.hpp; density_bin_model.cpp) — they
+  disagreed once and that was TODO #34. A keep-scale-and-fix-the-fixed-node-field alternative is
+  recorded in #35 but not taken.
+
 ## pl_algo current state
 **`vck5000/pl/src/pl_algo/DATAFLOW.md` is the single authoritative source** — read it before
 touching pl_algo, and update it (not this section) when the state changes. `README.md` next to it
