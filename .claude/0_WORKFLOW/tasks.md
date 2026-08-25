@@ -5,24 +5,29 @@ report.** Don't reuse task numbers, find the highest number and add one.
 
 ## ⚠️ sw_only functionality is FROZEN — called 2026-08-17, EFFECTIVE 2026-08-18 (Mark)
 
-sw_only is at parity with XPlace — **median 1.0094 / mean 1.0112 legal-vs-legal over all 28 ISPD
-designs**, 24/28 within ±2%, better on 5. Golden:
-`.claude/2_ARTIFACTS/results/GOLDEN_sw_only_frozen_20260821/` at commit `02464d0`. The active
-thread is now **pl_algo** (#20). Freezing is not a pause: pl_algo's algorithm is pinned to the
-2026-07-14 sw_only, so **every further sw_only change is another port**, and a stable sw_only is
-what makes #20 a bounded job.
-⚠️ **MMS is NOT covered by that number** — it is ~1.9 pp worse than its last known-good run and
-unresolved, see **#35**.
+sw_only is at parity with XPlace on **both** tiers, at commit `271d024`:
+- **ISPD — median 1.0096 / mean 1.0115** legal-vs-legal over all 28 designs, 22/28 within ±2%,
+  better on 6. Golden: `.claude/2_ARTIFACTS/results/GOLDEN_sw_only_frozen_20260825/`.
+- **MMS — median 1.0139 / mean 1.0110** over 16 designs. Golden:
+  `.claude/2_ARTIFACTS/results/GOLDEN_mms_sw_only_frozen_20260825/`. **Now covered** — the #35
+  regression is fixed (below).
 
-**Changes admitted under the freeze, in order.** It was called 2026-08-17 against the 08-15
+The active thread is now **pl_algo** (#20). Freezing is not a pause: pl_algo's algorithm is pinned
+to the 2026-07-14 sw_only, so **every further sw_only change is another port**, and a stable
+sw_only is what makes #20 a bounded job.
+
+**Changes admitted under the freeze, in order.** It was called 2026-08-17 against the 08-15 ISPD
 numbers (1.0096 / 1.0113). Three faithfulness fixes already in flight were then allowed to land —
-**#32's 7a+7b** and **#3's cap→scale** — which cost +0.13 pp of ISPD mean and were kept per
-`CLAUDE.md`'s prefer-XPlace rule. **#34** (2026-08-21, Mark-authorized) then found `#3` had been
-applied to only one of **four** places computing the same quantity, and made them agree; that
-recovered the loss and more on ISPD (mean 1.0126 → **1.0112**, within-2% 22 → 24).
-⚠️ **The frozen sw_only is still deliberately not the best-scoring sw_only we ever measured on
-every tier** — MMS remains worse than pre-`#3` (#35). Anyone tempted to "improve" a number by
-reverting one of these is re-opening a closed decision; take it to #35 instead.
+**#32's 7a+7b** and **#3's cap→scale** — kept per `CLAUDE.md`'s prefer-XPlace rule. **#34**
+(2026-08-21) found `#3` applied to only one of **four** places computing the same quantity and made
+them agree. **#35** (2026-08-25, Mark-authorized) then reverted `#3` outright — landing experiment
+"D", the fixed-density **cap** `min(ρ,td)` — a **deliberate divergence from XPlace** (registered in
+`CLAUDE.md`), worth **−2.38 pp of MMS mean** at a cost of only **+0.03 pp on ISPD** (net-neutral:
+the formula is a no-op except on macro-bearing td<1 designs, where ISPD gains and losses cancel).
+That is the current frozen state above.
+⚠️ **The cap is a knowing divergence, not a bug.** Anyone tempted to "restore XPlace faithfulness"
+by reverting it is re-opening a closed, measured decision — see #35 in history.md and the
+divergence registry in `CLAUDE.md` first.
 
 What the freeze means:
 - **No further algorithm or behaviour changes to `host/src/sw_only/`** without an explicit
@@ -73,98 +78,6 @@ tree committed, **67 GB freed** from `results/` (helper: `tools/prune_run_artifa
       None, `9b0851d` weighted_weight never assigned, `88ae004` the PRECOND_TRACE dump (marked
       LOCAL ONLY in both its comment and its commit message). Working tree clean.
       → whether to send the two fixes upstream is now an **Improvements** item, see below.
-
----
-
-## #3 — Tooling & evaluation workflow
-
-Full-pipeline GP→LG→DP evaluation is built and measured; `run-benchmark` + `viz-gif` skills landed
-(a third, `xplace-compare`, was built, benchmarked at a **dead tie** against no skill, and
-scrapped — the lesson is in [[history.md]]); `dse.py --resume` works. adaptec3's segfault inside
-XPlace's legalizer was root-caused to **our own harness** — `gen_lgdp_inputs.py` hardcoded the
-`.pl` template instead of reading the one the design's `.aux` names — and fixed for all 16.
-
-⚠️ **[[history.md]] holds the XPlace-reference traps, which are written down nowhere else.** A
-result dir is not a reference run until you check its argv *and* that it reached `After DP`; the
-log header is the argument dump, not what ran; `gp_ovfl_in` is macro-INCLUDED; **newblue4 is
-build-sensitive at ~1%**.
-
-- [x] **DONE 2026-08-17 — fixed-density is now a SCALE, matching XPlace.** Mark's call: bundle it
-      with #32's 7a/7b and pay for one suite re-run instead of two. `Grid::clampFixedDensity`
-      (`Grid.cpp`) now computes `min(overlap, bin_area) * td` — XPlace's
-      `init_density_map.clamp_(min=0.0, max=1.0).mul_(args.target_density)` (`initializer.py:82`),
-      i.e. `min(ρ,1)·td` — where it previously capped at `min(ρ,td)`. The two differ wherever a bin
-      is partially occupied: at td=0.65, ρ=0.5 XPlace gives 0.325 and the cap gave 0.50, so we read
-      HIGH in macro-perimeter bins.
-      **Identical at td=1, and that is verifiable rather than asserted:** `mms_adaptec1` (td=1.0)
-      re-baselined **bit-identical** — same 1274 iterations, same `.def` sha `91cbbdee0d59`. The two
-      ISPD2015 regress designs (td<1) both moved: `mgc_fft_a` 620 → 632 iterations,
-      `mgc_pci_bridge32_b` 693 → 713.
-      ⚠️ **Net effect on the headline was slightly NEGATIVE** — see summary.md and #32. All three
-      2026-08-17 fixes are faithfulness fixes and together they cost +0.13 pp of mean. Kept anyway,
-      per `CLAUDE.md`'s rule to prefer XPlace's formulation over an ad-hoc win.
-- [ ] **sw_only has no per-row site model.** `enforceDieBoundaries` clamps to the die *rectangle*,
-      but 11 of 16 MMS designs have a ragged (staircase) core. `tools/check_row_spans.py`: adaptec3
-      **315 cells outside their row's span** (worst overhang 4122), newblue4 25, adaptec5 23.
-      Harmless so far and **not** the adaptec3 crash — but it is an unmodelled constraint a
-      legalizer has to absorb. XPlace's GP makes the same rectangular assumption, so check what its
-      output does here before calling this a divergence.
-- [x] **SOLVED 2026-08-15 — it was the GRID, not a metric bug; `computeOverflow` is correct** (via
-      #31). `XPlace In OVFW` (= `gp_ovfl_in`) and `Our Exact OVFW` are now standing `results.csv`
-      columns. An **independent naive rectangular-overlap reference** on `fft_2`'s shipped `.def`
-      reproduces OUR overflow exactly at every grid (512→0.161, 256→0.063, **128→0.020**), so our
-      metric is physically correct. The 7× gap was that **XPlace evaluates the overflow at its
-      row-capped grid** — `fft_2` has 171 rows so XPlace caps to **128** (its eval log:
-      *"num_bin_y 512 is larger than num_rows 171. Use 128"*) — while **we ran the raw 512**. Naive at
-      128 = 0.020 ≈ XPlace's 0.0215; at 512 = 0.161 = ours. Same metric, different grid.
-      **Fixed:** sw_only now caps an explicit grid at `num_rows` too (`Setup.cpp`, the `row_cap`
-      branch), matching XPlace, so both evaluate at the same grid. This also completed #31's grid fix
-      (8 more low-row designs were still running at 512). `make test-regress` bit-identical (auto path
-      unchanged). → [[_NEW_REPORT_31_overflow_stall_grid_20260815.md]]
-      **Reporting follow-up 2026-08-18:** `results.csv`'s `grid` column was still printing the
-      *requested* grid, so all 21 `mgc_*` rows read 512 while 12 of them had actually run at the
-      capped 128/256 — the fix was in, the artifact hid it. `dse.py::summarize` now scrapes the
-      effective `bins_per_row` from each run's `run_summary.md` and writes THAT into the single
-      `grid` column (identity joins still use the requested value gp_only.csv/sweep.json share;
-      unreadable run dirs now warn instead of silently showing the request).
-      `results/DSE_20260817_223934/results.csv` regenerated: every other column bit-identical.
-      Capped at 128: `mgc_fft_1/fft_2/pci_bridge32_a/des_perf_1`. At 256: `des_perf_a/des_perf_b/`
-      `edit_dist_a/fft_a/fft_b/matrix_mult_1/matrix_mult_2/pci_bridge32_b`.
-      ⚠️ One real *macro-design* difference remains, separate and minor: XPlace **scales** the
-      fixed/blockage density by td (`initializer.py:82`) while we **cap** it at td (`Grid.cpp:139`);
-      equal at td=1, ours slightly higher at td<1 in macro-perimeter bins. `fft_2` has 0 fixed cells
-      so it was NOT this. Worth a faithfulness fix but does not affect the fillerless std-cell designs.
-      <details><summary>RETRACTED twice on 2026-08-15: "metric diverges at td<1", then "grid+td config gap"</summary>
-
-      > - [~] **NARROWED — NOT a config gap; the metric itself diverges at td<1** … on `mgc_*` it is
-      >       2–7× high even when td AND grid match (`fft_2`: both grid 512). Root not yet localized.
-
-      Wrong: I had read the *requested* 512 from XPlace's eval-log header and MISSED the cap warning
-      below it — XPlace actually evaluated fft_2 at 128. Grid did NOT match; that was the whole cause.
-      The naive reference (matching ours at 512, XPlace at 128) settled it. Kept as the trail.
-      <details><summary>RETRACTED earlier same day: "EXPLAINED — entirely grid + target_density"</summary>
-
-      > - [x] **EXPLAINED 2026-08-15 — the metric is correct; the "~2-4×" was the config gap.** … The
-      >       `mgc_*` discrepancy is **entirely** two config divergences: (1) grid; (2) `target_density`
-      >       — we use the DEF constraint, XPlace uses 1.0 (#25).
-
-      Retracted the SAME day: the `target_density` half is FALSE — XPlace uses per-design td matching
-      ours exactly (corrected #25), and at matched td+grid the overflow still diverges 7× on fft_2.
-      The ISPD2005 (<0.3%) agreement holds, but it only validates the metric at td=1; the td<1 gap is
-      the real, still-open reconciliation. Kept verbatim as the retraction trail.
-      </details>
-      </details>
-      <details><summary>Superseded (original): "consistent ~2-4×, direction unexplained; diagnostic"</summary>
-
-      > - [~] **Reconcile XPlace's overflow on our given solution** (`gp_ovfl_in`) with our
-      >       `computeOverflow` — a consistent ~2-4×, direction unexplained. Fillers explain part of it
-      >       (#19a), but a residual ~2.2× remains on adaptec1/adaptec4 and **newblue1 has the opposite
-      >       sign**. The discriminator is a macro-INCLUDED variant of our own metric. Until then that
-      >       column is a diagnostic, not a metric.
-
-      Still the live question. The "opposite sign" (newblue1) was `Best OVFW` being *smoothed* (it
-      under-reads exact by ~3×); the exact-vs-exact gap is the density-metric divergence above.
-      </details>
 
 ---
 
@@ -285,34 +198,6 @@ Related: **#23 is this same precision problem actually killing runs on the CPU g
 - [ ] **Does sw_only change too?** Expect **no HPWL movement** (error is ~1e-6 there, below what BB
       reacts to) — do not sell this as a quality fix. If PL shifts and sw_only does not, the sw_emu
       partials tolerance must not be set tighter than ~1e-6 or it will chase a phantom.
-
----
-
-## #17 — sw_only regression tripwire (opened 2026-08-05, BUILT 2026-08-05)
-
-`vck5000/test/regress/`, run with `make test-regress`. Per design it asserts two things, both
-**exact, no tolerance**: `iterations.dat` matches the committed baseline row for row, and the
-`sha256` of the output `.def` matches. `vck5000/test/regress/README.md` is authoritative — read it
-before touching a baseline. The frozen configs are **snapshots, not live copies** of
-`run_config.toml`, and `random_seed = 42` is pinned and load-bearing.
-
-- [x] **CLOSED 2026-08-17 by the sw_only freeze — "nothing checks quality, only stability" is no
-      longer the right complaint.** The entry existed to catch *quality drift during active
-      development*: a reproducibly wrong sw_only passes a stability check. Freezing inverts the
-      requirement — bit-identical trajectory + position hash is now a **stronger** guard than any
-      XPlace-ratio tolerance would be, because it admits no drift at all, and the ratio is pinned
-      instead by the committed 28-design headline (median 1.0096 / mean 1.0113).
-      Not building the reference-number-plus-tolerance harness that was scoped here.
-      ⚠️ **Reopen this if the freeze lifts.** The gap it names is real and returns the moment
-      sw_only's behaviour is allowed to move again. The blind spot that *does* still matter under
-      the freeze is coverage, not quality — see #23's "add one large design", which is open.
-- [x] **DONE 2026-08-09 — `readDEF()` now says what it wanted.** `DataBase.cpp:212` returns false with
-      *"No 'floorplan.def' in \<dir\>; that is the only .def name readDEF() accepts. Found: \<names\>"*
-      instead of handing the parser an empty path. **The hardcoding itself is unchanged** — this fixes
-      the diagnosis, not the constraint; a dir whose DEF is named anything else still cannot be read.
-      Control flow is identical (both paths returned false, and `readDesignFiles()` still falls back to
-      Bookshelf), so `make test-regress` is bit-identical before and after. Error path exercised
-      directly on a probe dir with `renamed_top.def`, not just reasoned about.
 
 ---
 
@@ -719,251 +604,6 @@ Algorithmic ideas beyond faithfulness cleanup — hypotheses, not yet scoped.
       measure ITS overhang; if it's comparable, the win (if any) is ours to take, not a faithfulness
       gap. Also **not a lead for #35** — adaptec3, the worst offender (315), is td=1.0 and flat; the
       regression tracks (1−td), not raggedness.
-
----
-
-## #34 — MMS regressed 1.0161 → 1.0351 on the frozen binary, and #3 carries it (opened 2026-08-19)
-
-**The tier-3 run the freeze was waiting on has landed** — `vck5000/results/DSE_20260819_152124`,
-16/16 scored, and it is **worse than the pre-fix 2026-08-14 run**:
-
-| | 2026-08-14 (pre-fix) | **2026-08-19 (frozen binary)** |
-|---|---|---|
-| median | 1.0137 | **1.0192** |
-| mean | 1.0161 | **1.0351** |
-| within ±2% | — | 9 / 16 |
-| better than XPlace | — | 4 |
-
-**The split by `target_density` is the whole story, and it is clean.** #3's cap→scale is
-*provably algebraically identical at td=1* (`min(ρ,1)·td` == `min(ρ,td)` when td=1), so the td=1
-half isolates #32's 7a/7b and the td<1 half carries 7a/7b **plus** #3:
-
-| group | designs | mean Δ |
-|---|---|---|
-| **td < 1** (#3 active) | adaptec5, newblue1-7 | **+4.99 pp — all 8 worse** |
-| **td = 1** (#3 a no-op) | adaptec1-4, bigblue1-4 | **−1.19 pp — 5 of 8 better** |
-
-So **7a/7b is a net win on MMS**, and **#3 costs roughly +6 pp** on the designs it touches. The
-magnitude tracks (1−td) as the formula predicts: td=0.5 → `adaptec5` **+15.21 pp**,
-`newblue4` +5.12, `newblue5` +5.05; td=0.8 → +0.56…+9.72; td=0.9 → `newblue2` +0.72.
-(Biggest improvement anywhere: `bigblue3` **−8.15 pp**, td=1.0, i.e. 7a/7b.)
-
-⚠️ **On ISPD, #3 cost about +0.10 pp; here it costs ~+6 pp — roughly 60×.** (Careful with the
-basis: ISPD's headline +0.13 pp is the WHOLE three-fix bundle, not #3. Split it — ISPD2005 is all
-td=1, so its +0.05 pp is 7a/7b alone; ISPD2015 moved +0.15 pp carrying both, leaving ~+0.10 pp for
-#3.) **That is consistent, not contradictory:**
-ISPD is std-cell, so the fixed-density path barely fires. Measured — the our/XPlace exact-overflow
-ratio on ISPD is **unchanged** pre-vs-post #3 at every td band (td=0.65: 0.791→0.834; td=1.00:
-0.998→0.999). MMS is where fixed blockage area actually matters, and it is the tier that was never
-re-run before the freeze was called.
-
-- [ ] **DEFECT — `computeOverflow` still uses the PRE-#3 cap, and its comment claims otherwise.**
-      Found reading both functions, **not** inferred from the numbers. #3 changed the solver's
-      field but not the metric:
-      - `Grid::clampFixedDensity` (`Grid.cpp:143-152`) — **new**: `min(overlap, bin_area) * td`
-      - `Placer::computeOverflow` (`Density.cpp:324-326`) — **old**: `min(density, bin_area*td)`,
-        under the comment *"Fixed baseline at exact size, capped per bin (**mirrors
-        clampFixedDensity**)"*. **It no longer mirrors it.**
-      This is exactly the failure `CLAUDE.md` names: *a comment that names an upstream function is
-      a claim; check the code below it computes that function.*
-      ⚠️ **I have NOT established that this defect causes the MMS regression** — the sign of its
-      effect on the reported metric is opposite to what is observed against XPlace, so something
-      else is also in play. Treat it as a real inconsistency that must be fixed regardless, and as
-      the first suspect, not as the diagnosis.
-- [x] **FIX LANDED 2026-08-21 (`02464d0`) — all copies now compute `min(ρ,1)·td`.** Mark
-      authorized it under the freeze. **A census found FOUR code copies, not three**, plus two doc
-      comments stating the contract:
-
-      | where | was | now |
-      |---|---|---|
-      | `Grid::clampFixedDensity` | `min(ρ,1)·td` | canonical, unchanged |
-      | `Placer::computeOverflow` (`Density.cpp`) | `min(ρ,td)` | **fixed** |
-      | `density_bin.hpp` (pl_algo HLS) | `min(ρ,td)` | **fixed** |
-      | `test/density_bin_model.cpp` **×2** | `min(ρ,td)` | **fixed** (both impls) |
-
-      **Regress-tier delta — both changed designs got BETTER, and it scales inversely with td
-      exactly as the formula predicts:**
-
-      | design | td | HPWL | iters | exact overflow |
-      |---|---|---|---|---|
-      | `mgc_fft_a` | 0.50 | **−1.05%** | 632 → 611 | 0.0530 → 0.0448 |
-      | `mgc_pci_bridge32_b` | 0.14 | **−20.67%** | 713 → 651 | 0.0638 → 0.0529 |
-      | `mms_adaptec1` | 1.00 | **bit-identical** | 1274 | sha `91cbbdee0d59` |
-
-      ⚠️ **`mms_adaptec1` is the CONTROL, not a datapoint.** The formulas are algebraically equal
-      at td=1, so its unchanged sha is what proves only the intended thing moved; its baseline diff
-      is 4 header lines over a bit-identical body. A change here would have meant a mistake.
-      ⚠️ **These are regress-tier GP numbers on 2 small designs — NOT suite numbers.** Do not quote
-      −20.67% as a result. The suites are running (`DSE_20260821_112603` = ISPD 28, MMS follows).
-      Also added a pointer comment at `Grid::clampFixedDensity` naming all three reproductions,
-      since drift between them is what cost this task.
-- [x] **BOTH SUITES RE-RUN 2026-08-21 — ISPD confirms the fix; MMS DISPROVES my hypothesis.**
-      New goldens: `.claude/2_ARTIFACTS/results/GOLDEN_sw_only_frozen_20260821/` (ISPD, supersedes
-      the 08-17 one, renamed `SUPERSEDED_sw_only_20260817_pre34/`) and
-      `.claude/2_ARTIFACTS/results/MMS_sw_only_frozen_20260821/` (MMS, **not** golden).
-
-      **ISPD: median 1.0097→1.0094, mean 1.0126→1.0112, within±2% 22→24.** `pci_bridge32_a` and
-      `_b` (the two lowest-td ISPD2015 designs) carry essentially the whole move — GP HPWL −4.78%
-      and −8.67%, and `_a`'s overflow gap against XPlace's own report of the same placement closed
-      from 0.0151 to 0.0001. Independent confirmation the fix is correct.
-
-      **MMS: mean 1.0161 (08-14, pre-#3) → 1.0351 (08-19, broken) → 1.0347 (08-21, fixed).**
-      Fixing the metric moved MMS's mean by **0.04 pp — noise.** ⚠️ **This falsifies the working
-      theory that a stale `computeOverflow` was driving the MMS regression** by feeding the
-      schedule a wrong stop decision. `Grid::clampFixedDensity` — the solver's actual density
-      field — was correct *before* this fix and is unchanged *by* it, so ruling out the metric
-      leaves the field itself as the cause: **`#3`'s `min(ρ,1)·td` formulation, applied correctly,
-      makes MMS worse on macro-heavy / mixed-size designs specifically**, even though it is more
-      faithful to XPlace and it *helped* std-cell ISPD designs at the same td range.
-      Per-design (unchanged from the 08-19 breakdown, confirming td<1 is still the carrier):
-      `adaptec5` (td=0.5) +15.02 pp, `newblue1` (td=0.8) +9.68 pp vs the 08-14 baseline.
-
-      **#34 is PARTIALLY closed.** The four-copy consistency fix stands — it is correct regardless
-      of the MMS outcome (three copies silently disagreeing is a bug on its own terms, and the
-      td=1 control proves it changed only the intended thing) and it demonstrably helped ISPD.
-      **The MMS regression itself is NOT resolved and is NOT explained.** Continued under **#35**
-      rather than left open here, since the diagnosis has changed: it is no longer a metric
-      question, it is a "why does XPlace's own fixed-density formula hurt phase-2/mixed-size
-      convergence" question, and that needs its own investigation.
-
-- [ ] **STILL OPEN — `make test` does not actually verify the shipped HLS header.**
-      `test/density_bin_model.cpp` **reproduces** `density_bin.hpp` rather than including it, so
-      its (genuine, bit-exact) agreement between two reference implementations says nothing about
-      the module that ships. That is #20 step 3's *"include the real header; delete
-      `density_bin_model`'s own stale copy"* — and this task is exactly why it matters: the
-      duplicate is how the module silently kept the old formula for four days.
-- [ ] **⚠️ ESCALATED 2026-08-19 — `computeOverflow` is the CONVERGENCE SIGNAL, not just a report.**
-      Verified by enumerating its callers: `Output.cpp:568` (*"convergence signal"*, the smoothed
-      call that drives the γ/λ schedule and the stop test) and `Phase2.cpp:216-217` (the phase-1→2
-      transition). The other call sites are reporting. **So the metric/field inconsistency above is
-      live inside the optimizer**, not cosmetic — sw_only is currently optimizing one density map
-      while deciding when to stop from a different one, on every td<1 design.
-      **Two consequences that change the shape of this task:**
-      - **Fixing it re-baselines ISPD as well as MMS**, so it invalidates
-        `GOLDEN_sw_only_frozen_20260817`. The golden is not safe to build on until #34 closes.
-      - It strengthens the mechanism: post-#3 the *field* says a partly-blocked bin has headroom
-        (weaker density force there) while the *metric* still says it is full (overflow stays high,
-        GP keeps running). Mismatched signals on exactly the designs that regressed.
-      ⚠️ **Still not proof.** The direction of the raw overflow comparison does not line up — with
-      the old cap our metric should read HIGHER than XPlace's and it reads LOWER on MMS td<1
-      (`adaptec5` 0.1986 vs 0.3958). Something else is also in play. The mechanism is plausible and
-      the inconsistency must be fixed either way; the proof is running the fix.
-- [ ] **⚠️ THIS IS WHAT MAKES #34 BLOCK pl_algo — there is a THIRD copy, and it is also stale.**
-      `pl/src/pl_algo/src/modules/density_bin.hpp:75` computes
-      `cap = target_density * bin_area` and clamps `if (acc_URAM[i][y] > cap) ... = cap` — the
-      **pre-#3** `min(ρ,td)`. Three copies of one quantity, disagreeing two ways:
-
-      | where | formula | state |
-      |---|---|---|
-      | `Grid::clampFixedDensity` (sw_only solver field) | `min(ρ,1)·td` | **new (#3)** |
-      | `Placer::computeOverflow` (sw_only convergence signal) | `min(ρ,td)` | **stale** |
-      | `density_bin.hpp:75` (pl_algo) | `min(ρ,td)` | **stale** |
-
-      #20 step 3 names `density_bin` as one of the six modules needing a tier-1 harness, and its
-      golden is the sw_only field that changed. **Writing that harness before #34 closes means
-      verifying against a golden that is about to move** — the exact waste `rules.md` exists to
-      prevent. Same for `node_footprint`, `force_gather`, `metrics`.
-- [ ] **DECISION FOR MARK — do not freeze MMS at 1.0351 without settling this.** Three options:
-      **(a)** fix the metric side of #3 and re-run tier3 (~the length of one MMS suite);
-      **(b)** revert #3 entirely — the td=1 evidence says 7a/7b alone would leave MMS *better* than
-      2026-08-14 — and accept the ISPD golden loses its #3 component too;
-      **(c)** accept 1.0351 as the faithful cost, per `CLAUDE.md`'s prefer-XPlace rule.
-      ⚠️ **(c) is the standing default and I am flagging against applying it blind here.** The rule
-      exists for a faithfulness change that costs a fraction of a percent, which is what #3 looked
-      like when it was judged on ISPD alone. +15 pp on one design and +5 pp on a tier is a
-      different question, and the metric/field inconsistency above means we have not yet measured
-      #3 cleanly.
-- [ ] **Reading of XPlace, for whoever takes this.** `init_density_map` is normalized to (0,1)
-      (`database.py:671` comment), `.clamp_(0,1).mul_(target_density)` (`initializer.py:82`), and
-      overflow thresholds at `(density_map - target_density) * bin_area` (`evaluator.py:48`). On a
-      half-blocked bin at td=0.5 that leaves 0.25 of headroom for movable cells; the pre-#3 cap
-      left **zero**. So **#3's direction is right and the old code was wrong** — which is what
-      makes the regression worth explaining rather than simply reverting.
-- [x] **#30's tier-3 spot-check PASSES** — the long-open "MMS via `make dse --designs tier3` has
-      never been validated" bullet. All **16/16** `XPlace DP HPWL` values in `results.csv` match
-      `benchmarks._XPLACE_MMS_FINAL` (tolerance 1e-4; `results.csv` stores ~5 significant figures,
-      so a tighter bound reports false mismatches). `--designs tier3` needs no special config:
-      `mixed_size_mode` is auto-detected from `num_movable_macros > 0` (`Setup.cpp:393`) and
-      `enable_phase2` defaults true.
-
----
-
-## #35 — MMS regression is intrinsic to `#3`'s field, not the metric — CLOSED 2026-08-25 (landed D)
-
-**CLOSED 2026-08-25.** Root-caused to `#3`'s faithful scale, and **experiment D landed**: the
-fixed-density formula reverted to the cap `min(rho,td)` in all four sites — a deliberate,
-Mark-authorized divergence from XPlace, registered in `CLAUDE.md` under "Deliberate divergences
-from XPlace". Worth **+2.38 pp of MMS mean** (D vs HEAD, isolated clean; D 1.0110 beats even
-pre-`#3` A 1.0161). Regress baselines regenerated (`mgc_fft_a`, `mgc_pci_bridge32_b`; td=1
-`mms_adaptec1` bit-identical, confirming the no-op-at-td=1 claim). The keep-scale-and-fix-the-
-fixed-node-field alternative was recorded and **not taken** — see the ◐ note below if MMS ever
-returns to focus. Full record below stays for the trail; a task-indexed copy goes to history.md.
-
-→ [[_NEW_HANDOFF_35_mms_density_regression_20260821.md]] — the original handoff. Carries the
-three-way numbers, the per-design td split, what was ruled out, and the XPlace-side reading.
-
-**Spun off #34 at partial close.** #34 hypothesized the MMS regression (mean 1.0161 → 1.0351,
-2026-08-14 → 2026-08-19) was caused by `Placer::computeOverflow` lagging `Grid::
-clampFixedDensity`'s formula change. That hypothesis is **falsified**: fixing the metric
-(`02464d0`) moved MMS's mean by 0.04 pp. See `.claude/2_ARTIFACTS/results/
-MMS_sw_only_frozen_20260821/README.md` for the three-way comparison.
-
-**What is established:**
-- The regression is carried entirely by the **8 td<1 designs** (`adaptec5`, `newblue1-7`); the 8
-  td=1 designs are flat once #32's 7a/7b is subtracted out (`bigblue3` −8.13 pp is 7a/7b).
-- Magnitude tracks (1−td): `adaptec5` (td=0.5) +15.02 pp, `newblue1` (td=0.8) +9.68 pp,
-  `newblue2` (td=0.9) +0.73 pp.
-- The same field change **helped** ISPD2015's lowest-td designs (`pci_bridge32_a/b`, td=0.384/
-  0.143) by 4-9% GP HPWL, and its overflow now matches XPlace's own report to within 0.0001.
-- So the formula is not simply wrong — it is a correct, more-faithful formula that helps one
-  design class and hurts another, and the discriminator is not td alone (ISPD's lowest-td design
-  improved; MMS's did not) so something else about MMS specifically is the missing variable.
-
-**RESOLVED 2026-08-25 — experiment D isolated `#3`, and it IS the whole MMS regression.**
-`DSE_20260824_161319` (throwaway; formula reverted to `min(ρ,td)` in all four sites, everything
-else at HEAD; source reverted after, regress bit-identical). D vs C isolates `#3` alone:
-
-| | td=1 (8 designs) | td<1 (8 designs) | mean |
-|---|---|---|---|
-| C (HEAD, faithful `min(ρ,1)·td`) | flat | regressed | 1.0347 |
-| **D (revert `#3`, else HEAD)** | flat (±0.04) | recovered | **1.0110** |
-| A (pre-`#3`, 2026-08-14) | — | — | 1.0161 |
-
-`#3` alone moves the MMS mean **−2.38 pp** (D−C), td-split perfectly clean: every td=1 flat,
-every td<1 recovers, magnitude tracking (1−td). adaptec5 −14.57 pp (recovers the +15.02 it
-regressed), newblue1 −8.47, newblue4/5 −5.2. **D (1.0110) beats even pre-`#3` A (1.0161)** by
-0.52 pp, because D keeps `#32`'s 7a/7b (bigblue3 −8.12) and the rest of HEAD that A lacked. So
-`#3` is the entire regression; reverting it while holding everything else at HEAD is the best MMS
-result on record. Per-design table + scripts: `/tmp/cmp3.py`, `results/DSE_20260824_161319/`.
-
-**Mechanism, from static reads (2026-08-25):**
-- ❌ **Fillers are NOT the divergence.** `rebuildFillers` at the phase boundary is idempotent:
-  `freezeMovableMacros` → `computeAreaBreakdown` moves macro area from movable→fixed, so
-  `addFillers`'s two inputs (`stdcell_placeable_area`, `stdcell_area`) are invariant and the
-  `stdcell_util>td` raise never fires. Confirmed in the D logs: adaptec1/newblue1/newblue2 all
-  show identical filler count and unchanged td across the transition. (Lead 2 of the handoff, dead.)
-- ❌ **Frozen-macro deposit weight is NOT the divergence.** The area-conserving weight is exactly
-  1.0 for any node ≥ √2 bins (i.e. every macro), and XPlace zeroes the frozen macro out of the
-  movable field (`cache_node_weight = -1.0`, `run_placement_nesterov.py:203`) — same as ours.
-  (Lead 1 of the handoff, narrowed to dead for macro-sized nodes.)
-- ◐ **One live faithful-vs-us divergence remains, untested:** our density *field*
-  (`computeNodeOverlaps`, `m_clamp_density=true`) runs FIXED nodes through the √2 inflation;
-  XPlace's `init_density_map` deposits fixed/frozen nodes at raw size, weight 1.0, no inflation.
-  Zero effect above √2 bins; below it we smear a fixed node wider/lower than XPlace. This is the
-  candidate mechanism by which the faithful scale hurts, and the lever for a keep-`#3`-and-fix path.
-
-**The standing decision — DECIDED 2026-08-25: land D (arm a).**
-- [x] **Accept D or fix macro handling? → LANDED D.** Mark's call 2026-08-25: take the measured
-      −2.38 pp MMS win; MMS isn't the main focus but 2.38 pp is noticeable. The cap `min(ρ,td)` is
-      *un-faithful* to XPlace, so this deliberately overrides `CLAUDE.md`'s prefer-XPlace rule —
-      registered there under "Deliberate divergences from XPlace" and stamped in all four code
-      comments so it isn't reverted-to-faithful by accident. Regress baselines regenerated with the
-      reason recorded in-file; td=1 `mms_adaptec1` bit-identical.
-      The **not-taken** alternative, kept for the record: (b) **keep the faithful scale and fix the
-      fixed-node field divergence above** (the ◐ note), then re-measure. Untested. The mechanism it
-      would test: the scale is faithful, ISPD has no frozen-macro/phase-2 path, so the MMS-specific
-      cost most likely enters through fixed-node field smearing. Revisit only if MMS returns to
-      focus AND matching XPlace on the field becomes worth a re-measure; the `◐` note is the lead.
 
 ---
 

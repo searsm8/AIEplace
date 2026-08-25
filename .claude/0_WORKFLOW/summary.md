@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-08-19. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-25. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 > **Soft cap — one in, one out.** Current state only, ~2 screens. To add a line, remove one:
 > superseded snapshots & dated "Closed" narration → [[journal.md]]; finished task sections → [[history.md]].
 > If it's done and no longer live context, it isn't "where things stand" — evict it.
@@ -14,13 +14,13 @@
   so every further sw_only change was another port.
 
 ## Where sw_only stands (frozen — this is the final state, not a waypoint)
-- 🏆 **GOLDEN (ISPD) — median 1.0094, mean 1.0112, over ALL 28 ISPD designs**, legal-vs-legal,
-  2026-08-21, 28/28. 24/28 within ±2%, better than XPlace on 5. Nothing unscored (#26).
-  Archived: `.claude/2_ARTIFACTS/results/GOLDEN_sw_only_frozen_20260821/` — **read its README
-  before quoting it**, it has the full per-tier split and reproduce command. Frozen commit
-  `02464d0`. Supersedes the 2026-08-17 golden (renamed `SUPERSEDED_sw_only_20260817_pre34/`),
-  which was built on a binary where three of four copies of the fixed-density formula disagreed
-  (TODO #34) — full narration of that gap moved to [[journal.md]].
+- 🏆 **GOLDEN (ISPD) — median 1.0096, mean 1.0115, over ALL 28 ISPD designs**, legal-vs-legal,
+  2026-08-25, 28/28. 22/28 within ±2%, better than XPlace on 6. Nothing unscored (#26).
+  Archived: `.claude/2_ARTIFACTS/results/GOLDEN_sw_only_frozen_20260825/` — **read its README
+  before quoting it**. Frozen commit `271d024` (the #35 cap landing). Supersedes the 2026-08-21
+  golden (`GOLDEN_sw_only_frozen_20260821/`, banner added), built before the cap; the cap moved
+  ISPD only +0.03 pp (net-neutral — it is a no-op except on macro-bearing td<1 designs, where
+  gains and losses cancel), while winning −2.38 pp on MMS.
 - **MMS (16 designs) — #35 CLOSED 2026-08-25, regression fixed.** Root cause was `#3`'s faithful
   scale (`Grid::clampFixedDensity`, `min(ρ,1)·td`) hurting macro/mixed-size convergence. Fixed by
   **landing experiment D**: reverted the fixed-density formula to the cap `min(ρ,td)` in all four

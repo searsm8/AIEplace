@@ -57,8 +57,6 @@ void Placer::compute_a_uv_naive()
     std::vector< std::vector<float> > density = grid.getBinDensities(); // rho
     for (int u = 0; u < grid.getBinsPerRow(); u++) {
         for (int v = 0; v < grid.getBinsPerCol(); v++) {
-            //float w_u = 1 * M_PI * u / grid.getBinsPerRow();
-            //float w_v = 1 * M_PI * v / grid.getBinsPerCol();
             float w_u = 2 * M_PI * u / grid.getBinsPerRow();
             float w_v = 2 * M_PI * v / grid.getBinsPerCol();
 
@@ -67,11 +65,8 @@ void Placer::compute_a_uv_naive()
             for (int x = 0; x < grid.getBinsPerRow(); x++) {
                 for (int y = 0; y < grid.getBinsPerCol(); y++) {
                     a_uv += density[x][y] * cos(w_u*x) * cos(w_v*y);
-                    //cout << "density (rho): " << density[x][y] << "\toverlap/bb.area: " << (grid.getBin(x, y).overlap / grid.getBin(x, y).bb.getArea()) << endl;
-                    //a_uv += (grid.getBin(x, y).overlap / grid.getBin(x, y).bb.getArea()) * cos(w_u*x) * cos(w_v*y);
                 }
             }
-            //a_uv /= 2 * grid.getBinsPerRow(); // 1 / 2n
             a_uv /= grid.getBinsPerCol() * grid.getBinsPerRow(); // 1 / M^2
             grid.getBin(u, v).a_uv = a_uv;
         }
@@ -338,7 +333,7 @@ float Placer::computeOverflow(bool smooth, std::vector<float>* out_density, bool
     deposit_pass(db.getFixedComponents(), false);
     #pragma omp parallel for schedule(static)
     for (int i = 0; i < (int)density.size(); i++)
-        density[i] = std::min(density[i], bin_area * target_density);
+        density[i] = std::min(density[i], cap);   // cap == bin_area * target_density (defined above)
 
     // Movable real cells (clamped when requested). Fillers included only for the diagnostic
     // that mirrors XPlace's filler-inclusive GP stop signal (default: excluded). exclude_macros
