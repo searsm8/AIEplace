@@ -698,6 +698,27 @@ Algorithmic ideas beyond faithfulness cleanup — hypotheses, not yet scoped.
       reduce toward sharp as GP progresses, so late convergence tracks true physical density instead of
       declaring victory early. **Don't implement yet** — first diagnose *why* those designs won't
       spread.
+- [ ] **Respect the row site model, minimize overhang, measure the difference** (opened 2026-08-24,
+      tabled from #3's open "no per-row site model" item). sw_only builds `Grid` from one die
+      rectangle and `enforceDieBoundaries` clamps every movable cell to `[0, die−w]` regardless of
+      which row it lands in. But 11 of 16 MMS designs are ragged — the `.scl` gives each `CoreRow`
+      its own `SubrowOrigin`/`NumSites`, so the core is a staircase and "inside the die bbox" is
+      weaker than "inside a row". `tools/check_row_spans.py` measures the gap: adaptec3 **315** cells
+      outside their row span (worst overhang 4122 DBU ≈ 343 row-heights), newblue4 25, adaptec5 23.
+      **Idea:** carry the per-row legal span into GP — bound `enforceDieBoundaries` per row, or add a
+      blockage/whitespace penalty over the notch — so cells stop parking where no site exists and the
+      legalizer isn't handed 343-row-height forced moves.
+      **Why this is cleanly measurable:** our LG+DP is XPlace's OWN pipeline (`main.py
+      --global_placement False --given_solution`, then its greedy+abacus legalizer and the external
+      NTUplace3 for bookshelf), identical for every scored placement. A row-aware GP arm vs the
+      current arm, both fed through that same legalizer, isolates the effect on post-DP HPWL with
+      nothing else moving. Report overhang counts (this script) AND the DP-frame HPWL ratio.
+      ⚠️ **Not yet shown to be a divergence.** XPlace's GP makes the SAME rectangular assumption, so
+      it likely produces the same notch cells — meaning a fix could *beat* XPlace rather than match
+      it, or be absorbed entirely by the shared legalizer. **First** run XPlace on a ragged design and
+      measure ITS overhang; if it's comparable, the win (if any) is ours to take, not a faithfulness
+      gap. Also **not a lead for #35** — adaptec3, the worst offender (315), is td=1.0 and flat; the
+      regression tracks (1−td), not raggedness.
 
 ---
 

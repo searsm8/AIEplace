@@ -241,8 +241,10 @@ void Placer::computeOverlaps()
             grid.depositNodeOverlaps(node_vec[i]);
     };
 
-    // Pass 1: Fixed components — their density is clamped so bins fully covered
-    // by fixed macros register as "at capacity" but not overflowed.
+    // Pass 1: Fixed components — their density is SATURATED at one full bin, then scaled by
+    // target_density (min(rho,1)*td). A bin fully covered by fixed macros lands exactly at
+    // capacity, so it contributes no overflow; a partly-covered one keeps proportional
+    // headroom. NOT a per-bin cap at td -- see Grid::clampFixedDensity (TODO #3/#34).
     deposit_pass(fixed);
 
     grid.clampFixedDensity(target_density);
@@ -264,7 +266,8 @@ void Placer::computeOverlaps()
  * inflated to at least sqrt(2) bins per dimension with an area-conserving weight
  * (real_area/clamped_area) and shifted to stay in-die — matching Grid::computeBinOverlaps —
  * so sub-bin cells are smeared to grid resolution rather than spiking a single bin. Fixed
- * macros form a per-bin-capped baseline (mirrors clampFixedDensity); fillers are excluded.
+ * macros form a saturate-then-scale baseline, min(rho,1)*td (mirrors clampFixedDensity);
+ * fillers are excluded.
  *
  * Why smoothed matters: it is the smoothed density the electrostatic optimizer actually
  * minimizes, so it descends cleanly to the stop threshold. The exact overflow re-measures
