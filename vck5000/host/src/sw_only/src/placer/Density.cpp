@@ -321,19 +321,19 @@ float Placer::computeOverflow(bool smooth, std::vector<float>* out_density, bool
         }
     };
 
-    // Fixed baseline at exact size, CAPPED per bin at bin_area*target_density -- min(rho,td),
-    // which is what Grid::clampFixedDensity does. DELIBERATE DIVERGENCE from XPlace's scale
-    // (initializer.py:82: min(rho,1)*td), Mark-authorized 2026-08-25 (TODO #35), worth +2.38 pp
-    // of MMS mean; see CLAUDE.md's divergence registry and the canonical comment in Grid.cpp.
-    // The passes are ordered (the cap reads the fixed baseline); within a pass the nodes are
-    // independent. This overflow is the convergence signal (Output.cpp: the smoothed call), so it
-    // MUST use the same formula as the field the solver minimizes -- when it lagged (used the cap
-    // while the field scaled) sw_only optimized one density map and stopped from another (TODO #34,
-    // now moot in the other direction: both are the cap). Identical at td=1; mms_adaptec1 unmoved.
+    // Fixed baseline at exact size, CAPPED per bin at bin_area*target_density -- min(rho,td), via
+    // the shared capFixedDensity (Grid.h), the SAME arithmetic the solver field uses in
+    // Grid::clampFixedDensity (one definition now, so they can't drift -- TODO #34). DELIBERATE
+    // DIVERGENCE from XPlace's scale (initializer.py:82: min(rho,1)*td), Mark-authorized 2026-08-25
+    // (TODO #35), worth +2.38 pp of MMS mean; see CLAUDE.md's divergence registry and the canonical
+    // comment in Grid.cpp. The passes are ordered (the cap reads the fixed baseline); within a pass
+    // the nodes are independent. This overflow is the convergence signal (Output.cpp: the smoothed
+    // call), so it MUST use the same formula as the field the solver minimizes. Identical at td=1;
+    // mms_adaptec1 unmoved. (capFixedDensity recomputes bin_area*target_density == cap, bit-identical.)
     deposit_pass(db.getFixedComponents(), false);
     #pragma omp parallel for schedule(static)
     for (int i = 0; i < (int)density.size(); i++)
-        density[i] = std::min(density[i], cap);   // cap == bin_area * target_density (defined above)
+        density[i] = capFixedDensity(density[i], bin_area, target_density);
 
     // Movable real cells (clamped when requested). Fillers included only for the diagnostic
     // that mirrors XPlace's filler-inclusive GP stop signal (default: excluded). exclude_macros

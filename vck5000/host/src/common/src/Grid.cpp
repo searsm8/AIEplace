@@ -149,20 +149,19 @@ void Grid::depositNodeOverlaps(Node* node_p)
  * The two formulas differ wherever a bin is partially occupied: at td=0.65, rho=0.5 the scale
  * gives 0.325 and the cap gives 0.50, so under the cap we read HIGH in macro-perimeter bins.
  */
-// CLAUDE CODE: THIS IS THE CANONICAL fixed-density formulation -- min(rho, target_density), a
-// deliberate divergence from XPlace (see above). Three other places reproduce it and MUST be
-// changed with it, or they silently disagree (that was TODO #34):
-//   sw_only/src/placer/Density.cpp   Placer::computeOverflow   (the convergence signal)
-//   pl/src/pl_algo/src/modules/density_bin.hpp                 (the HLS module)
-//   test/density_bin_model.cpp                                 (both reference impls)
+// CLAUDE CODE: the canonical fixed-density ENTRY POINT (the solver field the DCT consumes). The
+// arithmetic min(rho, target_density) now lives in ONE place -- capFixedDensity (Grid.h) -- shared
+// with the convergence-signal copy in Placer::computeOverflow so the two can never drift (TODO #34).
+// The rationale for the divergence from XPlace lives above and at capFixedDensity. Two pl_algo HLS
+// copies (density_bin.hpp, test/density_bin_model.cpp) still mirror this by hand -- TODO #20 step 3.
 void Grid::clampFixedDensity(float target_density)
 {
     #pragma omp parallel for schedule(static)
     for (int col = 0; col < m_bins_per_row; col++)
         for (int row = 0; row < m_bins_per_col; row++) {
             float bin_area = m_bins[col][row].bb.getArea();
-            m_bins[col][row].total_overlap = std::min(m_bins[col][row].total_overlap,
-                                                      bin_area * target_density);
+            m_bins[col][row].total_overlap = capFixedDensity(m_bins[col][row].total_overlap,
+                                                             bin_area, target_density);
         }
 }
 

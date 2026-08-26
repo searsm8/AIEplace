@@ -86,8 +86,9 @@ static std::vector<float> bin_reference(const std::vector<NodeBox>& nodes, int M
     for (int n = M; n < (int)nodes.size(); n++)           // PASS 1: fixed [M,N)
         scatter(nodes[n], bin_w, bin_h, 0, GRID, add);
     clamped_bins = 0;
-    // CLAUDE CODE: min(rho,td) -- the cap, a deliberate divergence from XPlace's scale
-    // (TODO #35). clamped_bins counts bins whose FIXED deposit hits the cap bin_area*td.
+    // CLAUDE CODE: min(rho,td) -- the cap, a deliberate divergence from XPlace's scale (TODO #35).
+    // Spec matches the host's shared capFixedDensity (common/include/Grid.h); hand-mirrored until
+    // TODO #20 step 3. clamped_bins counts bins whose FIXED deposit hits the cap bin_area*td.
     const float cap = bin_area * target_density;
     for (float& v : ov) {
         if (v > cap) { v = cap; clamped_bins++; }

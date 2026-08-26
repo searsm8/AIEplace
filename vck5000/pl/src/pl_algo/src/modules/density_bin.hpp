@@ -73,9 +73,11 @@ static void density_bin(const NodeBox* node_box,    // [num_nodes]  movable [0,M
 #pragma HLS bind_storage variable=acc_URAM type=RAM_2P impl=URAM
     const float bin_area = bin_w * bin_h;
     // CLAUDE CODE: fixed baseline is CAPPED per bin at bin_area*target_density -- min(rho,td),
-    //  matching Grid::clampFixedDensity. Deliberate divergence from XPlace's scale
-    //  (min(rho,1)*td, initializer.py:82), Mark-authorized 2026-08-25 (TODO #35, +2.38 pp MMS);
-    //  see CLAUDE.md's divergence registry. The two differ on partly-blocked bins, equal at td=1.
+    //  matching the host's shared capFixedDensity (common/include/Grid.h), the single definition
+    //  the two host sites now share. Deliberate divergence from XPlace's scale (min(rho,1)*td,
+    //  initializer.py:82), Mark-authorized 2026-08-25 (TODO #35, +2.38 pp MMS); see CLAUDE.md's
+    //  divergence registry. This HLS copy is hand-mirrored (can't call a host helper) until TODO
+    //  #20 step 3 lands the shared header. The two differ on partly-blocked bins, equal at td=1.
     const float inv_area = 1.0f / bin_area;
 
 strip_loop:

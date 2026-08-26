@@ -9,8 +9,23 @@
 #include "Bin.h"
 #include "Node.h"
 //#include "Logger.h"
+#include <algorithm>
 
 AIEPLACE_NAMESPACE_BEGIN
+
+// CLAUDE CODE: THE fixed-macro density clamp -- min(overlap, bin_area*td) == min(rho, td). ONE
+// scalar definition of the arithmetic; every host site that caps a fixed-density map calls it, so
+// the two loops (which walk different containers -- Grid::clampFixedDensity over m_bins, and
+// Placer::computeOverflow over a flat vector) can never disagree again (that drift was TODO #34).
+// DELIBERATE DIVERGENCE from XPlace's scale min(rho,1)*td (initializer.py:82) -- the cap, not the
+// scale, Mark-authorized 2026-08-25 (TODO #35), worth +2.38 pp of MMS mean. See CLAUDE.md's
+// divergence registry and the canonical rationale block above Grid::clampFixedDensity. Do NOT
+// "fix" this back to the scale. The two pl_algo HLS copies (density_bin.hpp, density_bin_model.cpp)
+// are out of scope here (TODO #20 step 3) but hold the same spec.
+inline float capFixedDensity(float overlap, float bin_area, float target_density)
+{
+    return std::min(overlap, bin_area * target_density);
+}
 
 /// @brief A node's density footprint: the rectangle [xl,xh) x [yl,yh) its area is spread over,
 ///        and the area-conserving weight applied to each deposit.
