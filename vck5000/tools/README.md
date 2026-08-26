@@ -21,52 +21,43 @@ quote is tracked here; one-off experiment runners stay with their output** in `.
 
 ## Scoring pipeline — produces the numbers we quote
 
-Code is tracked; **results are not**. Every runner writes to `$ARTIFACTS`, defaulting to the
-repo-root `.claude/2_ARTIFACTS/` (gitignored, large). Override it to keep a throwaway run off the
-standing tables:
+**`dse.py` IS the scoring pipeline** (`make dse`, TODO #30, collapsed 2026-08-26): one command
+generates configs, runs GP, and legalizes + detailed-places each result through `lgdp.py`
+(XPlace's own legalizer), emitting `Our LG HPWL` / `Our DP HPWL` / `DP Ratio` — the legal-vs-legal
+headline. The seven-script pipeline it replaced (`gen_suite_configs.py` → `run_suite.sh` →
+`run_lgdp44.sh` / `run_lgdp_suite.sh` → `analyze_full44.py` / `analyze_lgdp_suite.py`) is retired;
+see *Removed 2026-08-26*. The tier1+tier2 cross-check reproduced its committed numbers exactly
+(TODO #30), and the tier3/MMS path was spot-checked against `_XPLACE_MMS_FINAL` (DP ratios
+0.98–1.02, bookshelf `--mixed_size` arm).
 
-```bash
-ARTIFACTS=/tmp/myrun bash tools/run_lgdp44.sh
-```
+Code is tracked; **results are not**. `dse.py` writes to `results/DSE_<ts>/` (gitignored); the
+XPlace reference runners default `$ARTIFACTS` to the repo-root `.claude/2_ARTIFACTS/`.
 
-Run order:
+The one piece still run **by hand**, feeding `benchmarks.py`:
 
-| step | file | status | output |
-|---|---|---|---|
-| 1. configs | `gen_suite_configs.py` | **live** | per-design `.toml` under a run dir |
-| 2. our GP | `run_suite.sh` | **live** | `full44_suite_results.tsv` |
-| 3. XPlace ref | `run_xplace_ref.sh` (ispd2005), `run_xplace_ref_2015.sh` (ispd2015) | **live** | `xplace_ref_ispd.tsv` |
-| 4. LG+DP ours | `run_lgdp44.sh` (ispd2005+2015), `run_lgdp_suite.sh` + `gen_lgdp_inputs.py` (mms) | **live** | `lgdp44_results.tsv`, `lgdp_suite_results.tsv` |
-| 5. scorecard | `analyze_full44.py`, `analyze_lgdp_suite.py` | **live** | the table you quote |
-
-Step 3 populates `benchmarks.py::_XPLACE_ISPD_FINAL` **by hand** — the TSV is the evidence, the
-dict is what the analyzers read.
+| file | status | output |
+|---|---|---|
+| XPlace ref | `run_xplace_ref.sh` (ispd2005), `run_xplace_ref_2015.sh` (ispd2015) | **live** | `xplace_ref_ispd.tsv` → populates `benchmarks.py::_XPLACE_ISPD_FINAL` by hand |
 
 Legalization runs through **XPlace's own legalizer** (`main.py --global_placement False`), not
 OpenROAD — see *Dormant* for the opendp island.
 
-> **`dse.py` now does steps 1+2+4 in one command** (`make dse`, TODO #30): it generates configs,
-> runs GP, and legalizes each result through `lgdp.py`, emitting `Our DP HPWL` / `DP Ratio` in its
-> own summary. This standing pipeline (`gen_suite_configs.py` → `run_suite.sh` → `run_lgdp44.sh` →
-> `analyze_full44.py`) is still the source of the committed `summary.md` numbers and stays until a
-> full-suite `dse.py` run is cross-checked against it, then folds in (TODO #30 step 2).
+Supporting converters, called by `lgdp.py`:
 
-Supporting converters, all **live** (called by step 4 and by `lgdp.py`):
-
-| file | what |
-|---|---|
-| `def_to_bookshelf_pl.py` | sw_only DEF → bookshelf `.pl` (bookshelf tiers). Frame is bit-perfect. |
-| `def_patch_placement.py` | the DEF analogue, for the LEF/DEF ISPD2015 tier. Patches placements into the **original** `floorplan.def` — sw_only writes no ROW statements and the legalizer needs the site rows. |
-| `post_dp_density.py` | density metrics on a legalized placement, both sides. Post-DP HPWL alone flatters an under-spread GP (TODO #3). Only discriminates below target_density 1.0. |
-| `fence_check.py` | how badly a placement violates DEF fence regions (TODO #26). We solve unconstrained; so does XPlace. |
-| `analyze_fence_cost.py` | separates "our placer is better" from "we ignore the fence". Kept with the pipeline because it re-answers a decision. |
+| file | status | what |
+|---|---|---|
+| `def_to_bookshelf_pl.py` | **live** | sw_only DEF → bookshelf `.pl` (bookshelf tiers). Frame is bit-perfect. |
+| `def_patch_placement.py` | **live** | the DEF analogue, for the LEF/DEF ISPD2015 tier. Patches placements into the **original** `floorplan.def` — sw_only writes no ROW statements and the legalizer needs the site rows. |
+| `post_dp_density.py` | **live** | density metrics on a legalized placement, both sides. Post-DP HPWL alone flatters an under-spread GP (TODO #3). Only discriminates below target_density 1.0. |
+| `fence_check.py` | **live** | how badly a placement violates DEF fence regions (TODO #26). We solve unconstrained; so does XPlace. |
+| `analyze_fence_cost.py` | **dormant** | separates "our placer is better" from "we ignore the fence" (#26, closed). Takes two `<suite>-schema` TSVs as args; its generator `run_lgdp44.sh` was retired 2026-08-26, so feed it hand-built TSVs (or re-derive from `dse_results.csv`'s `variant`/`DP` columns) to revive it. |
 
 ## Sweeps and sensitivity
 
 | file | status | what |
 |---|---|---|
 | `dse.py` | **live** | **The launch point for running many benchmarks / many configs** (`make dse`). `--designs tier1+tier2`, `--set K=v1,v2`, `--grid`, `--runset`, `--resume`, `--dry-run`; `--help` is the reference. Grid + target_density come from `benchmarks.py`. **Legalizes + detailed-places each GP result through XPlace by default** (TODO #30) so the headline is legal-vs-legal; `--gp-only` skips it. Every sweep writes `sweep.json` — the manifest of exactly what was launched — and (unless `--gp-only`) `lgdp.json`. |
-| `lgdp.py` | **live** | Legalize + detailed-place ONE sw_only GP `.def` through XPlace's own LG+DP, returning `{lg, dp, variant, status}`. Called per-run by `dse.py`; also runnable standalone (`lgdp.py <suite/design> <gp.def> <workdir>`). Handles the three format paths (bookshelf, ispd2015 custom_path, ispd2015_fix fence). Needs XPlace's CUDA env. The reusable core the monolithic `run_lgdp44.sh` / `run_lgdp_suite.sh` will fold into. |
+| `lgdp.py` | **live** | Legalize + detailed-place ONE sw_only GP `.def` through XPlace's own LG+DP, returning `{lg, dp, variant, status}`. Called per-run by `dse.py`; also runnable standalone (`lgdp.py <suite/design> <gp.def> <workdir>`). Handles the three format paths (bookshelf, ispd2015 custom_path, ispd2015_fix fence). Needs XPlace's CUDA env. The reusable core the monolithic `run_lgdp44.sh` / `run_lgdp_suite.sh` folded into (both retired 2026-08-26, TODO #30). |
 | `analyze_dse.py` | **live** | Re-renders a finished sweep's table (`analyze_dse.py results/DSE_<ts>`). A 10-line wrapper around `dse.py::summarize`, so there is one renderer, not two that drift. |
 | `morris.py`, `morris_factors.py`, `analyze_morris.py` | **live** | Morris elementary-effects screen. `morris_factors.py` is the editable source of truth for factor ranges; the other two import it. |
 | `sobol.py`, `analyze_sobol.py` | **live** | Sobol variance decomposition, same runner path. |
@@ -136,6 +127,20 @@ rather than being inferred from the CSV header, and `analyze_dse.py` is a wrappe
 renderer. `_full_suite()`'s duplicate 28-design grid table is gone — grid and `target_density` now
 come from `benchmarks.py`, closing the silent-`target_density` trap on MMS designs.
 </details>
+
+## Removed 2026-08-26
+
+The seven-script scoring pipeline, retired once `dse.py` subsumed it (TODO #30). The cross-check
+against it passed exactly on tier1+tier2, and the tier3/MMS path was spot-checked against
+`_XPLACE_MMS_FINAL` before deletion. Recoverable from git history; recorded here so nobody
+re-derives them.
+
+| file | folded into |
+|---|---|
+| `gen_suite_configs.py` | `dse.py::prepare` / `write_config` (grid + target_density + seed + `deterministic` from the template; the MMS movable-macros come from the bookshelf data, not a flag) |
+| `run_suite.sh` | `dse.py::run_all` (smallest-first, sequential GP, resumable) |
+| `run_lgdp44.sh` (ispd2005+2015), `run_lgdp_suite.sh` + `gen_lgdp_inputs.py` (mms) | `lgdp.py::legalize` — all three format paths (bookshelf, ispd2015 `--custom_path`, ispd2015_fix fence) plus the MMS `--mixed_size` arm; `dse.py` pipelines it behind the next GP |
+| `analyze_full44.py`, `analyze_lgdp_suite.py` | `dse.py::summarize` (rewrites `dse_results.csv` + the aggregate footer; `analyze_dse.py` re-renders a finished sweep) |
 
 ## Removed 2026-08-12
 

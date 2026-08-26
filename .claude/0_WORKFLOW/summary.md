@@ -150,9 +150,6 @@ advertising finished work as open. Their full text is in history.md; only live i
   (Mark's call). Provably a no-op at td=1, so all 8 ISPD2005 designs are untouched by it —
   `mms_adaptec1` re-baselined bit-identical. The remaining open item in #3 is the **per-row site
   model** (ragged cores on 11 of 16 MMS designs), unrelated. See tasks.md #3.
-- **#30 — collapse the two suite runners.** Unblocked by the passed cross-check; awaiting Mark's
-  go-ahead, MMS/tier-3 spot-check first. Everything else in #30 landed.
-
 ## Also open
 - **#21 — repo restructure** (host to top level, one host binary). Proposal only, nothing started.
   **Merge `origin/geert` before anything else** — one `.gitignore` conflict today, 25 hand-moved

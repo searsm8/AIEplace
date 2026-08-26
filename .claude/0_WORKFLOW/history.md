@@ -16,6 +16,8 @@ removed — it had been sitting in both files since 2026-07-30).
 
 **Compacted 2026-08-07:** the full pre-compaction text of the still-OPEN tasks (#1, #3, #6, #7, #9, #10, #11, #14, #15, #17, #19, #20, #21, #22, #23, Parked, Improvements) - first section below.
 
+**Closed 2026-08-26:** **#30** — legalization + detailed placement folded into `dse.py`, and the standing scoring pipeline collapsed onto it. All four items done: LG+DP runs in `dse.py` by default (`--gp-only` opts out) via a new per-design `lgdp.py::legalize`; DP columns land in the same `dse_results.csv`; the full-suite cross-check reproduced the committed tier1+tier2 numbers **exactly** to 4 decimals (`DSE_20260814_133037`); and the final item — **collapse the two suite runners** — landed here. The two "last bits" the task flagged were already in `dse.py`/`lgdp.py` (smallest-first ordering `dse.py:176`; the MMS `--mixed_size` arm `lgdp.py:93`), so this was verification + deletion, not new code. Tier-3/MMS was spot-checked first (`DSE_20260826_110926`, mms/adaptec1·newblue1·bigblue1 through the full GP+LG+DP path: all `bookshelf`/`done`, DP ratios 0.9835 / 1.0242 / 1.0036 vs `_XPLACE_MMS_FINAL` — frame-correct and consistent with the +0.2…+3.6% MMS reference). Then the seven-script pipeline was retired (`gen_suite_configs.py`, `run_suite.sh`, `run_lgdp44.sh`, `run_lgdp_suite.sh`, `gen_lgdp_inputs.py`, `analyze_full44.py`, `analyze_lgdp_suite.py`), recorded in `tools/README.md`'s *Removed 2026-08-26* with what each folded into. Kept: `def_patch_placement.py`/`def_to_bookshelf_pl.py` (called by `lgdp.py`), `run_xplace_ref*.sh` (populate the reference dicts by hand). One judgment call: `analyze_fence_cost.py` (#26, closed) is **not** deleted but marked **dormant** — its input generator `run_lgdp44.sh` is gone, so it now needs hand-built TSVs (or a re-derivation from `dse_results.csv`) to run.
+
 **Closed 2026-08-26:** **#36** — collapsed the fixed-density cap `min(ρ,td)` to **one shared host definition**, removing the *need* to keep the two host copies in sync by hand (which is exactly the drift that was #34). The arithmetic now lives in a single inline `capFixedDensity(overlap, bin_area, target_density)` in `common/include/Grid.h`; both host sites call it — `Grid::clampFixedDensity` (the solver field the DCT consumes) and `Placer::computeOverflow` (the convergence signal). The two loops stay in place because they walk different containers (2-D `Bin` array vs a flat `std::vector<float>`), so they can't share a buffer — only the formula. **Pure cleanup, bit-identical**: `capFixedDensity` recomputes `bin_area*target_density`, the same float multiply the sites already did, so `make test-regress` (`mgc_fft_a`, `mgc_pci_bridge32_b` — the two td<1 clamp-exercising designs) and `-slow` (+ td=1 control `mms_adaptec1`, 1274 iters) are bit-identical with **zero baseline changes**; `make test` tier-1 green. The helper carries the divergence warning (cap not scale, Mark-authorized, don't "fix" it back — see #35) so the single definition is also the single warning. The two **pl_algo** HLS copies (`density_bin.hpp`, `test/density_bin_model.cpp`) are comment-only here — pointed at the shared host spec, still hand-mirrored because HLS can't call a host helper; converging them onto an `#include`d header is **#20 step 3**. Commit `ba596ef`. Handoff: `_NEW_HANDOFF_combine_fixed_density_sites_20260825.md`.
 
 **Closed 2026-08-25:** **#35** — the MMS regression was root-caused to `#3`'s XPlace-faithful fixed-density scale (`min(ρ,1)·td`) and **fixed by landing experiment "D"**: the formula is reverted to the cap `min(ρ,td)` in all four sites (`Grid::clampFixedDensity` canonical, `Density.cpp::computeOverflow`, `density_bin.hpp`, `density_bin_model.cpp`). Experiment D (`DSE_20260824_161319`, formula-only, else HEAD, source reverted after) isolated `#3` cleanly: **D vs HEAD = −2.38 pp of MMS mean** (1.0347 → 1.0110), entirely on the 8 td<1 macro/mixed-size designs (adaptec5 −14.57 pp, newblue1 −8.47), every td=1 design flat because the two formulas are identical at td=1; D (1.0110) beats even pre-`#3` A (1.0161). **This is a DELIBERATE divergence from XPlace** — Mark-authorized 2026-08-25, overriding `CLAUDE.md`'s prefer-XPlace rule — registered in `CLAUDE.md`'s new "Deliberate divergences from XPlace" section and named as such in all four code comments so it is not reverted-to-faithful by accident. Regress baselines regenerated (`mgc_fft_a`, `mgc_pci_bridge32_b`; reason recorded in-file; reproduces D bit-for-bit, `pci_bridge32_b` sha `43fa7e73a889`); td=1 `mms_adaptec1` bit-identical at 1274 iters, verifying the no-op-at-td=1 claim. The handoff's leads 1–2 died in static reads (macro deposit weight is already 1.0 for macro-sized nodes; filler rebuild at the phase boundary is idempotent — `computeAreaBreakdown` holds `addFillers`'s inputs invariant). The **not-taken** alternative: keep the faithful scale and fix the fixed-node √2 field-inflation divergence instead — recorded in the entry, the lead if MMS returns to focus. Commits `24c500b` (record) + `271d024` (land). Physical reading: a frozen macro actually occupies its area, so scaling its contribution by td tells the optimizer there is room where there is none; the cap is conservative on macro-heavy designs, which is why the same faithful scale *helps* low-td ISPD (no frozen-macro/phase-2 path) and *hurts* MMS.
@@ -69,6 +71,63 @@ change (the denylist had been silently blanking `Best HPWL` on every row), and g
 label-keyed and what the summary joins swept parameters from. The two live defects it *found* and
 did not fix are now **#29** (the XPlace reference belongs in the placer, masked-vs-masked and
 site-width-correct) and **#30** (LG+DP inside `dse.py`).
+
+---
+
+## #30 — Legalization + detailed placement inside `dse.py` (opened 2026-08-12, CLOSED 2026-08-26)
+
+Mark, 2026-08-12: *"As a future goal, we also need to incorporate legalization and Detailed
+placement, which Xplace handles for us."*
+
+**Why it matters, not just tidiness:** GP-vs-GP is the *flattering* comparison — legalization costs
+1–8% HPWL and an under-spread GP pays more of it (TODO #3). Post-DP is the number the XPlace paper
+reports and the only one that settles whether we are actually better or worse. Today it takes a
+separate multi-step pipeline that a sweep does not touch, so most sweeps are scored on the metric
+that hides the defect.
+
+**Everything needed already existed — this was wiring, not new capability.**
+
+- [x] **LG+DP in `dse.py` — done 2026-08-13, and ON BY DEFAULT** (Mark's call, overriding the
+      opened-as "off by default" plan: *"I'd like dse to call the legalization and DP to run on our
+      GP solution by default. Add a param --gp-only as a way to NOT run LG+DP."*). Each GP result is
+      legalized + detailed-placed through XPlace; `--gp-only` stops after GP. Summary gains
+      `Our LG HPWL` / `Our DP HPWL` / `XPlace DP HPWL` / `DP Ratio`, with a median/mean/within-2%
+      footer. The per-design core is `tools/lgdp.py` (`legalize(bench_path, gp_def, work_dir)
+      -> {lg, dp, variant, status}`), porting the `run_one()` of both bash runners — all three
+      format paths (bookshelf, ispd2015 `--custom_path`, ispd2015_fix fence). Each run→DEF is mapped
+      via results.csv's `Output Dir` column, and the `.def` basename is globbed. LG is decoupled from
+      GP so `--resume` backfills a run whose GP finished but LG did not; results persist in
+      `lgdp.json`. **Verified** end-to-end on all three paths: adaptec1 **1.001** (the anchor),
+      mgc_fft_2 1.028, fenced mgc_des_perf_a 1.018. **Frame handled correctly:** post-DP HPWL is
+      scraped from XPlace's own log so it is already in XPlace's frame — the ratio needs **no**
+      ×site_width (analyze_full44.py's frame rule).
+- [x] **DP results in the SAME results.csv — done 2026-08-14** (`edd268f`). dse.py enriches
+      results.csv after LG+DP with `Our LG HPWL` / `Our DP HPWL` / `XPlace DP HPWL` / `DP Ratio`,
+      alongside the GP comparison (#29). One file, one reference table (`benchmarks.py`).
+- [x] **Full-suite cross-check — PASSED 2026-08-14.** A single `make dse` over all 28,
+      `results/DSE_20260814_133037`, reproduces the standing pipeline's committed numbers **exactly**
+      (to 4 decimals): ispd2005 1.0053/1.0052, ispd2015 1.0163/1.0189, **all 28 median 1.0106 / mean
+      1.0149, 21/28 within 2%, better on 4** — identical to `summary.md`. The falsification criterion
+      ("dse.py's per-design DP ratio == analyze_full44.py's within rounding") is met.
+- [x] **Collapse the two suite runners — DONE 2026-08-26** (this session, Mark's go-ahead: *"Let's
+      finish work on #30"*). The two "last bits" the entry flagged for folding were already present —
+      smallest-first ordering (`dse.py:176`, `sorted(..., key=design_bytes)`) and the MMS
+      `--mixed_size` arm (`lgdp.py:93`) — and dse.py's MMS GP config is equivalent to
+      `gen_suite_configs.py` (grid + target_density + seed + `deterministic=true` from the template;
+      movable macros come from the bookshelf data, not a flag). So this item was **verify then
+      delete**. Tier-3/MMS spot-check first (`DSE_20260826_110926`): mms/adaptec1·newblue1·bigblue1
+      through the full `dse.py` GP+LG+DP path, all `variant: bookshelf` / `status: done`, DP ratios
+      **0.9835 / 1.0242 / 1.0036** vs `_XPLACE_MMS_FINAL` (frame-correct, consistent with the known
+      +0.2…+3.6% MMS reference; newblue1's 2.4% is placer quality on the one td=0.8 design, its
+      overflow the highest of the three at 0.166 — not a pipeline defect). Then **retired**
+      `gen_suite_configs.py`, `run_suite.sh`, `run_lgdp44.sh`, `run_lgdp_suite.sh`,
+      `gen_lgdp_inputs.py`, `analyze_full44.py`, `analyze_lgdp_suite.py`, each recorded in
+      `tools/README.md`'s *Removed 2026-08-26* with what it folded into. **Kept:**
+      `def_patch_placement.py` / `def_to_bookshelf_pl.py` (called by `lgdp.py`), `run_xplace_ref*.sh`
+      (populate `benchmarks.py::_XPLACE_ISPD_FINAL` by hand). **Judgment call:** `analyze_fence_cost.py`
+      (#26 fence-cost, closed) was **not** in the retire list but consumes `run_lgdp44.sh`'s TSVs, so
+      it is marked **dormant** rather than deleted — it takes its inputs as CLI args and still runs on
+      a hand-built TSV or a re-derivation from `dse_results.csv`'s `variant`/`DP` columns.
 
 ---
 

@@ -290,10 +290,13 @@ refreshed the baseline" leaves a trace.
 
 **The scoring pipeline lives in `vck5000/tools/` and is TRACKED** (moved there 2026-08-12 from the
 gitignored `.claude/2_ARTIFACTS/`, where three stale paths had been silently producing empty or
-misfiled results). `tools/README.md` has the run order — configs → our GP → XPlace reference →
-LG+DP → scorecard — and the rule that decides where a script belongs: **anything that produces a
-number we quote is tracked; one-off experiment runners stay with the output.** Results still land in
-`.claude/2_ARTIFACTS/` via `$ARTIFACTS`; override it to keep a throwaway run off the standing tables.
+misfiled results). **`make dse` (`tools/dse.py`) IS the pipeline** — GP + XPlace LG+DP + scorecard
+in one command (#30 collapsed the old seven-script chain onto it, 2026-08-26; `tools/README.md`
+records what folded where). Only the XPlace *reference* runners (`run_xplace_ref*.sh`) still run
+by hand, to populate `benchmarks.py`. The rule that decides where a script belongs: **anything that
+produces a number we quote is tracked; one-off experiment runners stay with the output.** dse.py
+writes to `results/DSE_<ts>/` (gitignored); reference runners land in `.claude/2_ARTIFACTS/` via
+`$ARTIFACTS`, override it to keep a throwaway run off the standing tables.
 
 ## Coding style for this repo
 General style rules are in `~/.claude/CLAUDE.md`; this is the hardware-specific addition.
