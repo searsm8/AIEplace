@@ -1,0 +1,5 @@
+build/
+*.log
+.Xil/
+Work/
+test/golden_test
