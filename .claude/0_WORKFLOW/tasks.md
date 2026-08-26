@@ -24,7 +24,10 @@ them agree. **#35** (2026-08-25, Mark-authorized) then reverted `#3` outright �
 "D", the fixed-density **cap** `min(ρ,td)` — a **deliberate divergence from XPlace** (registered in
 `CLAUDE.md`), worth **−2.38 pp of MMS mean** at a cost of only **+0.03 pp on ISPD** (net-neutral:
 the formula is a no-op except on macro-bearing td<1 designs, where ISPD gains and losses cancel).
-That is the current frozen state above.
+That is the current frozen state above. **#36** (2026-08-26) then collapsed the cap's two **host**
+copies into a single `capFixedDensity` (`common/include/Grid.h`), so the #34 drift can no longer
+recur on the host by hand — bit-identical, zero baseline changes; the two pl_algo HLS copies stay
+hand-mirrored until **#20 step 3**.
 ⚠️ **The cap is a knowing divergence, not a bug.** Anyone tempted to "restore XPlace faithfulness"
 by reverting it is re-opening a closed, measured decision — see #35 in history.md and the
 divergence registry in `CLAUDE.md` first.
@@ -283,6 +286,8 @@ Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
 - [ ] **3. Tier-1 harnesses for the uncovered modules** — `node_footprint`, `density_bin` (include the
       real header; delete `density_bin_model`'s own stale copy), `iteration_update`, `bb_reduce`,
       `metrics`, `force_gather` — each against its named sw_only golden. **This is what makes 4–6 safe.**
+      For `density_bin`'s cap: the host is now a single `capFixedDensity` (`common/include/Grid.h`, #36)
+      and both pl_algo copies already point at it — converge them onto that spec here.
 - [ ] **4. Close the datapath divergences** under that coverage: `node_footprint.hpp` still does the
       in-die shift #11a deleted; it lacks #11b's movable-macro weight; `iteration_update.hpp` clamps to
       `[0, die−w]` where sw_only clamps to the √2-expanded box; **pl_algo has no fillers at all**.

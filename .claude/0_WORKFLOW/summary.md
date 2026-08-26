@@ -24,7 +24,8 @@
 - **MMS (16 designs) — #35 CLOSED 2026-08-25, regression fixed.** Root cause was `#3`'s faithful
   scale (`Grid::clampFixedDensity`, `min(ρ,1)·td`) hurting macro/mixed-size convergence. Fixed by
   **landing experiment D**: reverted the fixed-density formula to the cap `min(ρ,td)` in all four
-  sites — a **deliberate, Mark-authorized divergence from XPlace** (registered in `CLAUDE.md` under
+  sites (the two host copies since unified into one `capFixedDensity`, #36 2026-08-26) — a
+  **deliberate, Mark-authorized divergence from XPlace** (registered in `CLAUDE.md` under
   "Deliberate divergences from XPlace"), worth **+2.38 pp of MMS mean** (D vs HEAD: 1.0347 →
   **1.0110**, cleanly isolated; D beats even pre-`#3` 1.0161). Isolating run
   `vck5000/results/DSE_20260824_161319/`. Regress baselines regenerated; td=1 `mms_adaptec1`
