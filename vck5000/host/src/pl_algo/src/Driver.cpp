@@ -95,6 +95,11 @@ void runHpwlGradCU(const PackedDesign& pk,
     xrt::bo bo_npins = xrt::bo(device, npins_bytes, top.group_id(3));
     xrt::bo bo_lut   = xrt::bo(device, lut_bytes,   top.group_id(4));
     xrt::bo bo_bb    = xrt::bo(device, bb_bytes,    top.group_id(5));
+    // bb must start zeroed: hpwl_CU sums every entry for the HPWL by-product but only writes
+    // gradient-bearing nets, so masked entries must read as a zero-extent box. Once is enough
+    // (the net set is static). See host_interface.hpp NetBBox.
+    std::memset(bo_bb.map<void*>(), 0, bb_bytes);
+    bo_bb.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     xrt::bo bo_sums  = xrt::bo(device, sums_bytes,  top.group_id(6));
     xrt::bo bo_grad  = xrt::bo(device, grad_bytes,  top.group_id(7));
     xrt::bo bo_box   = xrt::bo(device, sizeof(NodeBox), top.group_id(8));  // inert dummy
@@ -926,6 +931,10 @@ int runPlacement(const PlacementConfig& cfg,
     xrt::bo b_npin = xrt::bo(device, (size_t)(num_npins>0?num_npins:1)*sizeof(NodePin), top.group_id(3));
     xrt::bo b_lut  = xrt::bo(device, lp4, top.group_id(4));      // exp_lut / precond
     xrt::bo b_bb   = xrt::bo(device, (size_t)num_nets*sizeof(NetBBox), top.group_id(5));
+    // Zero once: masked nets are never written by sweep_bbox and must read as a zero-extent
+    // box so they drop out of hpwl_CU's HPWL sum. See host_interface.hpp NetBBox.
+    std::memset(b_bb.map<void*>(), 0, (size_t)num_nets*sizeof(NetBBox));
+    b_bb.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     xrt::bo b_sums = xrt::bo(device, (size_t)num_nets*sizeof(NetSums), top.group_id(6));
     xrt::bo b_grad = xrt::bo(device, coordM, top.group_id(7));   // g_hpwl / g_density / node_grad
     xrt::bo b_box  = xrt::bo(device, (size_t)N*sizeof(NodeBox), top.group_id(8));

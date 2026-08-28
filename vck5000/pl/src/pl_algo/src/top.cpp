@@ -278,7 +278,12 @@ void top(
     }
 #endif
     else { // MODE_HPWL_GRAD
-        hpwl_CU(node_pos, net_ptr, pins, npins, exp_lut, bb, sums, node_grad,
+        // dct_out[0] carries the HPWL by-product (P1b): phase 1 already forms every net's
+        // bounding box, so its half-perimeter sum is free here and the host no longer needs a
+        // separate pass for it. Same output slot metrics uses for HPWL, so the readback
+        // contract is unchanged. The host's dummy dct_out in this mode is sizeof(float) --
+        // exactly the one element written (Driver.cpp:103).
+        hpwl_CU(node_pos, net_ptr, pins, npins, exp_lut, bb, sums, node_grad, dct_out,
                 inv_gamma, inv_lut_step, lut_size, num_nets, num_movable, num_npins);
     }
 }

@@ -22,7 +22,7 @@
 //   registers; write sums_DDR[net] at the next change. (Two passes, not one: B/C
 //   needs the net's final max, and re-streaming pins_DDR from DDR -- sequential,
 //   II=1 -- is cheaper than buffering a whole net on chip, and has no degree cap.)
-//   PHASE B  -- gradient, segmented over NODES (npins_DDR, node-major sorted).
+//   PHASE B  -- gradient, segmented over NODES (node_pins_DDR, node-major sorted).
 //   Read bb_DDR/sums_DDR[net] per pin (random READ-ONLY -> II=1); accumulate the WA
 //   partial in registers; write node_grad_DDR[node] once at the node change. The
 //   output is write-once in node order (-> sequential, burst), never read-modified.
@@ -40,6 +40,10 @@ namespace plalgo {
 
 constexpr int HPWL_CU_LUT_MAX = 1024;  // max LUT entries cached on-chip
 
+// Partial accumulators for the HPWL by-product sum in phase 1. Power of two so the rotation
+// is a mask, not a modulo. 8 spreads dependent double adds >= 16 pins apart -- see sweep_bbox.
+constexpr int HPWL_PARTIALS = 8;
+
 // compute exp(-d/gamma) via the cached LUT (d >= 0). Beyond the table -> ~0 (underflow).
 // Force-inline (the sweeps call it 4x/iteration): left as a shared instance HLS
 // serializes the 4 calls (14-cyc latency each); inlined they pipeline independently.
@@ -55,18 +59,19 @@ static inline float hpwl_lut_exp(const float lut_BRAM[HPWL_CU_LUT_MAX], int lut_
 
 static void hpwl_CU(const coord_t* node_pos_DDR,   // [num_nodes] AoS {x,y}
                     const int*     net_ptr_DDR,    // [num_nets+1] CSR (unused: kept for ABI)
-                    const NodePin* pins_DDR,       // [num_pins] NET-major (phase 1&2)
-                    const NodePin* npins_DDR,      // [num_npins] NODE-major (phase 3)
+                    const NodePin* net_pins_DDR,       // [num_pins] NET-major (phase 1&2)
+                    const NodePin* node_pins_DDR,      // [num_node_pins] NODE-major (phase 3)
                     const float*   exp_lut_DDR,    // [lut_size] exp(-t) table
                     NetBBox*       bb_DDR,         // [num_nets] scratch (A writes, B reads)
                     NetSums*       sums_DDR,       // [num_nets] scratch (A writes, B reads)
                     coord_t*       node_grad_DDR,  // [num_movable] gradient (output)
+                    float*         out_hpwl_DDR,   // [1] total HPWL at these positions (output)
                     float          inv_gamma,
                     float          inv_lut_step,
                     int            lut_size,
                     int            num_nets,
                     int            num_movable,
-                    int            num_npins) {
+                    int            num_node_pins) {
     const int num_pins = net_ptr_DDR[num_nets];   // CSR end == total pin records
 
     // Cache the LUT on-chip (avoids a DDR access per exp lookup).
@@ -78,12 +83,18 @@ cache_lut:
     }
 
     // ===== PHASE 1: bounding box, segmented over nets (register-accumulated) =====
+    // HPWL falls out of this pass for free: the half-perimeter of the box we are already
+    // flushing IS this net's HPWL contribution, so summing it here deletes a whole separate
+    // net-major sweep (metrics::hpwl_sweep, which re-derives the same box with its own random
+    // node_pos gather). Same nets, same mask, same positions -- see REPORT_20.
+    //
+    // The HPWL sum does NOT live in this loop -- see hpwl_reduce below for why.
     int   bb_net = -1;                              // current segment's net
     float maxx = -1e30f, minx = 1e30f, maxy = -1e30f, miny = 1e30f;
 sweep_bbox:
     for (int p = 0; p < num_pins; p++) {
 #pragma HLS PIPELINE
-        const NodePin r = pins_DDR[p];
+        const NodePin r = net_pins_DDR[p];
         if (r.net < 0) continue;                   // pin of a no-gradient net
         if (r.net != bb_net) {                      // net boundary -> flush previous
             if (bb_net >= 0) {
@@ -106,6 +117,58 @@ sweep_bbox:
         bb_DDR[bb_net] = b;
     }
 
+    // ===== HPWL by-product: sum the half-perimeters phase 1 just wrote =====
+    // Every net's HPWL contribution is the half-perimeter of the box already in bb_DDR, so this
+    // replaces a whole separate net-major pin sweep (metrics::hpwl_sweep, which re-derives the
+    // same boxes with its own random node_pos gather). Same nets, same mask, same positions.
+    //
+    // This is a SEPARATE loop over num_nets, not an accumulator inside sweep_bbox, and that is
+    // the entire design point. Both were built and C-synthesized (2026-08-28):
+    //   accumulate at the net boundary in sweep_bbox -> sweep_bbox II 2 -> 7 over num_pins.
+    //     HLS sees a distance-1 carried dependence on the double add. Rotating over 8 partials
+    //     does NOT help (with a dynamic index it treats the array as a memory and reports a
+    //     store->load dependence regardless of the rotation). metrics::hpwl_sweep has the
+    //     identical pathology on its own hpwl_total, which is why THAT loop is II~7 as well.
+    //   reduce here, over num_nets                   -> sweep_bbox stays II 2; this loop is
+    //     II 8 over num_nets/8 iterations = num_nets cycles total (221k on adaptec1).
+    // That is ~30x cheaper than the pass it replaces (metrics::hpwl_sweep, ~944k pins at II 7
+    // = 6.6M cycles), because num_nets < num_pins and the read is sequential and burstable.
+    //
+    // Unrolled HPWL_PARTIALS-wide with STATIC accumulator indices -- static is what makes each
+    // partial a register rather than a memory, so the 8 dependence chains run in parallel.
+    // Measured cost of this block: LUT +7941 (+2.4% of device), FF +5321, BRAM 0, timing slack
+    // unchanged. Nearly all of that is the 8 parallel double adders, so HPWL_PARTIALS is the
+    // knob if LUT gets tight -- halving it roughly halves the adder cost and doubles this
+    // loop's cycles, which is noise against the 6.6M it saves.
+    //
+    // ⚠️ REQUIRES bb_DDR TO BE ZEROED BEFORE FIRST USE. Masked nets are never written by
+    // sweep_bbox, so they keep whatever the buffer held; zeroed, they contribute a zero-extent
+    // box and drop out of the sum for free. One host-side memset at allocation is enough -- the
+    // net set is static, so masked entries stay zero for the whole run. See host_interface.hpp.
+    double hpwl_part[HPWL_PARTIALS];
+#pragma HLS ARRAY_PARTITION variable=hpwl_part complete dim=1
+hpwl_init:
+    for (int i = 0; i < HPWL_PARTIALS; i++) {
+#pragma HLS UNROLL
+        hpwl_part[i] = 0.0;
+    }
+hpwl_reduce:
+    for (int n = 0; n < num_nets; n += HPWL_PARTIALS) {
+#pragma HLS PIPELINE
+        for (int k = 0; k < HPWL_PARTIALS; k++) {
+#pragma HLS UNROLL
+            const int idx = n + k;
+            if (idx < num_nets) {
+                const NetBBox b = bb_DDR[idx];
+                hpwl_part[k] += (double)((b.mxx - b.mnx) + (b.mxy - b.mny));
+            }
+        }
+    }
+    double hpwl_total = 0.0;
+hpwl_combine:
+    for (int i = 0; i < HPWL_PARTIALS; i++) hpwl_total += hpwl_part[i];
+    *out_hpwl_DDR = (float)hpwl_total;              // narrow only at the boundary, as metrics does
+
     // ===== PHASE 2: B/C sums, segmented over nets (bb_DDR is final) =====
     int     bc_net = -1;
     NetBBox b{};                                    // current net's bbox (read at boundary)
@@ -113,7 +176,7 @@ sweep_bbox:
 sweep_sums:
     for (int p = 0; p < num_pins; p++) {
 #pragma HLS PIPELINE
-        const NodePin r = pins_DDR[p]; // Read pin data (one big data block, burstable)
+        const NodePin r = net_pins_DDR[p]; // Read pin data (one big data block, burstable)
         if (r.net < 0) continue;
         if (r.net != bc_net) {                      // net boundary -> flush previous
             if (bc_net >= 0) {
@@ -143,7 +206,7 @@ sweep_sums:
 
     // ===== PHASE 3: per-node gradient, segmented over nodes =====
     // node_grad is write-once per node; nodes with no gradient-bearing pin never
-    // appear in npins, so zero the output first (sequential -> burst).
+    // appear in node_pins, so zero the output first (sequential -> burst).
 clear_grad:
     for (int n = 0; n < num_movable; n++) {
 #pragma HLS PIPELINE II=1
@@ -154,9 +217,9 @@ clear_grad:
     int   cur_node = -1;
     float ax = 0.0f, ay = 0.0f;
 seg_reduce:
-    for (int p = 0; p < num_npins; p++) {
+    for (int p = 0; p < num_node_pins; p++) {
 #pragma HLS PIPELINE
-        const NodePin r = npins_DDR[p];
+        const NodePin r = node_pins_DDR[p];
         if (r.node_idx != cur_node) {               // node boundary -> flush previous
             if (cur_node >= 0) {
                 coord_t g; g.x = ax; g.y = ay;

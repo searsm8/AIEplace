@@ -25,8 +25,17 @@ include $(PL_DIR)/makeflags.mk
 .PHONY: all
 all: $(PL_KERNELS)
 
+# Every header the kernel pulls in. WITHOUT THIS the .xo depends only on the .cpp, so editing
+# a module header (where all the datapath actually lives) leaves make saying "Nothing to be
+# done" and the stale .xo in place -- and any synthesis result read afterwards describes the
+# PREVIOUS code. That silently invalidated two measurements on 2026-08-28 before it was caught.
+# design.cfg is included too: it is a v++ --config input, so it changes the build.
+PL_KERNEL_DEPS := $(wildcard src/$(PL)/src/*.hpp) \
+                  $(wildcard src/$(PL)/src/modules/*.hpp) \
+                  $(wildcard src/$(PL)/design.cfg)
+
 # Building kernel
-$(BUILD_DIR_PL)/%.xo: src/$(PL)/src/%.cpp
+$(BUILD_DIR_PL)/%.xo: src/$(PL)/src/%.cpp $(PL_KERNEL_DEPS)
 	$(dir_guard)
 	v++ -c --target $(TARGET) --platform $(PLATFORM) $(XO_COMPILE_OPTS) -k $* $< -o $@
 

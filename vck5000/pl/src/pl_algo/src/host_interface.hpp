@@ -80,6 +80,11 @@ struct NodePin {
 // to DDR (bb_DDR / sums_DDR, [num_nets]) so pass 3 -- which streams node-major --
 // can read any net's reduction. Kernel-internal scratch: the host only allocates
 // the DDR buffers (num_nets * sizeof), it neither fills nor reads them.
+// ⚠️ bb MUST BE ZEROED BEFORE FIRST USE. hpwl_CU sums every entry to produce the HPWL
+// by-product, but it only WRITES the entries of gradient-bearing nets -- a masked net (net
+// == -1) never reaches the flush. Zeroed, those entries are a zero-extent box and contribute
+// nothing; un-zeroed, they add garbage to the HPWL. One memset at allocation is sufficient:
+// the net set is static, so a masked entry stays zero for the whole run.
 struct NetBBox { float mxx, mnx, mxy, mny; };                     // bounding box
 struct NetSums { float Bpx, Bmx, Cpx, Cmx, Bpy, Bmy, Cpy, Cmy; }; // WA B/C sums
 

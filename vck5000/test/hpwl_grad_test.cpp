@@ -22,11 +22,13 @@
 //                      Bit-exact; this is what clear_grad is for. The design below deliberately
 //                      contains such nodes (isolated, and masked-net-only).
 //   [4] MASKING     -- total gradient must be unchanged when a masked net's pins are perturbed.
-//   [6] HPWL/BBOX   -- phase 1's bounding boxes must reduce to the correct HPWL. This is the P1b
-//                      prerequisite (REPORT_20): P1b deletes metrics::hpwl_sweep, a fourth pass
-//                      over net_pins recomputing a bounding box sweep_bbox already has, which is
-//                      only sound if the two agree -- same nets, same mask, same pin positions.
-//                      Asserted here BEFORE P1b is implemented, so the gate exists first.
+//   [6] HPWL        -- the HPWL that hpwl_CU EMITS (P1b), against a double golden, plus an
+//                      independent cross-check reducing bb_DDR directly. P1b lets
+//                      metrics::hpwl_sweep go: a fourth pass over net_pins that re-derives a
+//                      bounding box sweep_bbox already has, with its own random node_pos
+//                      gather. Sound only if the two agree -- same nets, same mask, same
+//                      positions -- which is what this asserts. It also guards the new
+//                      precondition that bb_DDR starts zeroed (see run_module).
 //   [5] MEMORY SAFETY -- `make test-asan` rebuilds this same file under
 //                      -fsanitize=address,undefined. It is a separate target because it is a
 //                      bounds check, not a value check, and nothing here can substitute for it:
@@ -55,6 +57,9 @@
 //     never indexes bb_DDR by r.net, and its one write is already guarded by `bb_net >= 0`, so
 //     letting masked pins through is genuinely a no-op there. The two `continue`s are NOT
 //     symmetric -- sweep_bbox's is an optimization, sweep_sums's is load-bearing.
+//   hpwl_reduce skips the tail group    -> [6]
+//   half-perimeter loses the y extent   -> [6]
+//   bb_DDR not zeroed by the caller     -> [6] (poisoned in run_module; fails at rel 1.27)
 //
 // The synthetic design mirrors the packing rules in host/src/pl_algo/src/Packer.cpp:42-74
 // (CSR net_ptr, net-major `pins` with net==-1 on masked nets, node-major `node_pins` holding
@@ -227,17 +232,23 @@ static void golden(const Design& d, float inv_gamma, const std::vector<float>& l
 // assertion [6] reduces to an HPWL.
 static void run_module(const Design& d, float inv_gamma, const std::vector<float>& lut,
                        int lut_size, float inv_lut_step, std::vector<coord_t>& grad,
-                       std::vector<NetBBox>* bb_out = nullptr) {
-    std::vector<NetBBox> bb(d.num_nets);
+                       std::vector<NetBBox>* bb_out = nullptr, float* hpwl_out = nullptr) {
+    // bb is ZEROED, and that is load-bearing, not incidental: hpwl_CU sums every entry for the
+    // HPWL by-product but only writes gradient-bearing nets, so masked entries must read as a
+    // zero-extent box (host_interface.hpp NetBBox; the host memsets it once at allocation).
+    // Verified 2026-08-28 by poisoning this with a non-zero box -- [6] fails at rel 1.27.
+    std::vector<NetBBox> bb(d.num_nets, NetBBox{0.0f, 0.0f, 0.0f, 0.0f});
     std::vector<NetSums> sums(d.num_nets);
+    float hpwl_emitted = -1.0f;
     // Poison the output, do NOT pre-zero it: clear_grad is the module's own zeroing pass and
     // assertion [3] is only meaningful if the harness is not doing that job for it.
     grad.assign(d.M, coord_t{-7.7e30f, -7.7e30f});
     hpwl_CU(d.node_pos.data(), d.net_ptr.data(), d.pins.data(), d.node_pins.data(),
-            lut.data(), bb.data(), sums.data(), grad.data(),
+            lut.data(), bb.data(), sums.data(), grad.data(), &hpwl_emitted,
             inv_gamma, inv_lut_step, lut_size,
             d.num_nets, d.M, (int)d.node_pins.size());
-    if (bb_out) *bb_out = bb;
+    if (bb_out)   *bb_out   = bb;
+    if (hpwl_out) *hpwl_out = hpwl_emitted;
 }
 
 // Golden HPWL: sum over unmasked nets of the pin bounding box half-perimeter. Mirrors
@@ -297,7 +308,8 @@ int main() {
 
     std::vector<coord_t> grad;
     std::vector<NetBBox> bb;
-    run_module(d, inv_gamma, lut, lut_size, inv_lut_step, grad, &bb);
+    float hpwl_emitted = -1.0f;
+    run_module(d, inv_gamma, lut, lut_size, inv_lut_step, grad, &bb, &hpwl_emitted);
 
     std::vector<double> gx, gy;
     bool ok = true;
@@ -380,13 +392,24 @@ int main() {
     }
     const double hpwl_ref = golden_hpwl(d);
     const double hpwl_rel = std::fabs(hpwl_from_bb - hpwl_ref) / hpwl_ref;
-    // Observed 2026-08-28: 0.0 exactly. The bounding box is a min/max over the same float pin
-    // positions, so it is bit-identical, and both sides accumulate in double in net order. The
-    // bound is not 0 only because a future reassociation of the sum (P3) is legitimate.
+    // bb_DDR cross-check: the boxes are a min/max over the same float pin positions, so this
+    // side is bit-identical to the golden and accumulates in double in net order.
+    // Observed 2026-08-28: 0.0 exactly.
     const double H_TOL = 1e-12;
     if (!(hpwl_rel < H_TOL)) {
         printf("FAIL [6] HPWL from bb_DDR = %.10e, golden = %.10e, rel = %.3e (tol %.0e)\n",
                hpwl_from_bb, hpwl_ref, hpwl_rel, H_TOL);
+        ok = false;
+    }
+    // The value the module actually EMITS. Looser than the bb_DDR cross-check for two reasons,
+    // both deliberate: it is summed over HPWL_PARTIALS rotating accumulators (so the addition
+    // order differs from net order), and it is narrowed to float on the way out, exactly as
+    // metrics.hpp does. Float has ~7 decimal digits, so the narrowing alone costs ~6e-8.
+    const double hpwl_emit_rel = std::fabs((double)hpwl_emitted - hpwl_ref) / hpwl_ref;
+    const double HE_TOL = 1e-6;   // observed 2026-08-28: 1.95e-8, consistent with float narrowing alone
+    if (!(hpwl_emit_rel < HE_TOL)) {
+        printf("FAIL [6] emitted HPWL = %.10e, golden = %.10e, rel = %.3e (tol %.0e)\n",
+               (double)hpwl_emitted, hpwl_ref, hpwl_emit_rel, HE_TOL);
         ok = false;
     }
 
@@ -397,8 +420,9 @@ int main() {
     printf("[3] zeroing    %d pinless movable nodes, %d non-zero\n", zero_checked, zero_bad);
     printf("[4] masking    %d masked pins perturbed, %d node gradients moved\n",
            (int)pert.masked_pin_idx.size(), mask_bad);
-    printf("[6] hpwl/bbox  from bb_DDR=%.8e  golden=%.8e  rel=%.3e (tol %.0e)\n",
-           hpwl_from_bb, hpwl_ref, hpwl_rel, H_TOL);
+    printf("[6] hpwl       emitted=%.8e  golden=%.8e  rel=%.3e (tol %.0e)\n",
+           (double)hpwl_emitted, hpwl_ref, hpwl_emit_rel, HE_TOL);
+    printf("               bb_DDR cross-check rel=%.3e (tol %.0e)\n", hpwl_rel, H_TOL);
     printf("%s\n", ok ? "PASS" : "FAIL");
     return ok ? 0 : 1;
 }
