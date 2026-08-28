@@ -417,10 +417,15 @@ int DataBase::freezeMovableMacros()
         if (comp_p->getStatus() == FIXED || !comp_p->isMovableMacro()) continue;
         comp_p->setPlacementStatus(PlacementStatus::FIXED);
         // Collapse all four state fields onto the committed position. This is NOT bookkeeping:
-        // restoreBestPlacement() writes only next.node_pos, and once frozen these macros leave
-        // getMovableComponents() and are never stepped or re-initialised again — so probe_pos
-        // would keep phase 1's last lookahead value forever. computeNodeFootprint deposits at
-        // the PROBE position, so the macro's density would land somewhere it no longer is.
+        // once frozen these macros leave getMovableComponents() and are never stepped or
+        // re-initialised again, so whatever is in probe_pos at this instant is what they keep
+        // forever — and computeNodeFootprint deposits at the PROBE position, so a stale probe_pos
+        // lands the macro's density somewhere it no longer is.
+        //
+        // The caller normally arrives here straight from restoreBestPlacement(), which since
+        // 2026-08-26 writes node_pos AND probe_pos to the same snapshot, making this a no-op. It
+        // is NOT redundant: beginFixedMacroPhase() skips that restore entirely when phase 1
+        // recorded no best solution, and then node_pos is u_k while probe_pos is v_k. Keep it.
         comp_p->initializeState(comp_p->next.node_pos);
         frozen++;
     }

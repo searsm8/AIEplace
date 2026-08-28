@@ -225,15 +225,30 @@ public:
     void runMacroLegalization();    ///< stage 2 proper; see MacroLegalize.cpp
     void reinitializeStdCells();    ///< XPlace randn_center: re-seed std cells, keep frozen macros
     void resetSolverState();        ///< lambda / precond / Nesterov / best-trackers / countdowns
-    void reportPhaseSummary();      ///< short per-phase report emitted at each phase boundary
+    /// @brief Short per-phase report emitted at each phase boundary. Call it AFTER the phase-1
+    ///        best has been restored and BEFORE the macros are frozen — that window is XPlace's
+    ///        Mixed-GP checkpoint, and it is the only point where the macro-excluded overflow
+    ///        means anything (see the call site in Phase2.cpp).
+    void reportPhaseSummary();
 
-    // Metrics captured at the end of phase 1, so the final report can show both phases.
+    // Metrics captured at the end of phase 1, so the final report can show both phases. Measured
+    // on the RESTORED phase-1 best with the macros still movable — XPlace's Mixed-GP checkpoint
+    // (see reportPhaseSummary's call site in Phase2.cpp).
     struct PhaseSummary {
         bool  valid = false;
         int   iterations = 0;
-        float hpwl = 0.0f;
+        float hpwl = 0.0f;         // masked (ignore_net_degree), same basis as every other HPWL here
+        // Unmasked, all nets — the other half of the _XPLACE_MMS_MIXED_GP pair. XPlace's
+        // "After Mixed-GP, best solution eval, exact HPWL" comes from get_obj_hpwl, which
+        // applies no net mask; mirrors "Final HPWL (exact, all nets)" for the end of the run.
+        float hpwl_exact = 0.0f;
         float overflow_smoothed = 0.0f;
         float overflow_exact = 0.0f;
+        // Sharp/no-filler with the movable macros dropped from the deposit. THE number comparable
+        // to _XPLACE_MMS_MIXED_GP (tools/benchmarks.py), and it only means anything here: after
+        // freezeMovableMacros() the macros are FIXED, so exclude_macros matches nothing and the
+        // same call collapses onto the plain exact overflow (that was the bug, fixed 2026-08-27).
+        float overflow_macro_excluded = 0.0f;
         StopReason stop_reason = StopReason::RUNNING;
     };
     PhaseSummary m_phase1_summary;

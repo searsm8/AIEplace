@@ -380,9 +380,11 @@ Placer::FinalMetrics Placer::computeFinalMetrics()
     // The smoothed overflow the run actually converged on — same filler policy as the
     // convergence signal (recordIterationResults), so the report explains why it stopped.
     m.final_smoothed_overflow = computeOverflow(true, nullptr, false);
-    // Macro-excluded, sharp, no filler: the number comparable to XPlace's Mixed-GP reference
-    // (see logOverflowDiagnostics). Zero-cost on non-mixed-size designs (no movable macros to
-    // exclude), so always computed rather than gated on mixed_size_mode.
+    // Macro-excluded, sharp, no filler. Meaningful ONLY on a single-phase mixed-size run: after
+    // phase 2 the macros are FIXED, so exclude_macros (which only skips inside the movable pass)
+    // matches nothing and this collapses onto final_overflow. The XPlace Mixed-GP comparison lives
+    // in m_phase1_summary.overflow_macro_excluded instead. Zero-cost with no movable macros, so
+    // always computed rather than gated; exportSummaryReports decides whether to print it.
     m.final_overflow_macro_excluded = computeOverflow(false, nullptr, false, true);
 
     m.total_runtime = getInterval(pgrm_start_time, getTime());
@@ -400,14 +402,14 @@ Placer::FinalMetrics Placer::computeFinalMetrics()
  *        (does not reuse FinalMetrics) so the labels stay truthful whatever filler policy the
  *        headline metrics use.
  *
- *        macro-excluded is the fifth, mixed-size-only number: sharp/no-filler with movable
- *        macros dropped from the deposit. This is the one directly comparable to
- *        tools/benchmarks.py::_XPLACE_MMS_MIXED_GP, which is evaluated after XPlace sets
- *        ps.zero_macro_grad=True (run_placement_nesterov.py:173, evaluator.py:26-45) and whose
- *        node_pos is reassembled from mov_node_pos[mov_lhs:mov_rhs] + data.node_pos[mov_rhs:]
- *        (run_placement_nesterov.py:180-181) -- i.e. filler-EXCLUDED too, not the "includes
- *        filler density" the old benchmarks.py comment claimed. On non-mixed-size designs
- *        (no movable macros) this is identical to sharp/no-filler and adds nothing.
+ *        macro-excluded is the fifth number: sharp/no-filler with movable macros dropped from the
+ *        deposit. It says something ONLY while the macros are still movable, i.e. on a run that
+ *        never reached phase 2 -- after freezeMovableMacros() they are FIXED, exclude_macros
+ *        matches nothing, and this equals sharp/no-filler exactly. The XPlace Mixed-GP comparison
+ *        (tools/benchmarks.py::_XPLACE_MMS_MIXED_GP, evaluated under ps.zero_macro_grad=True,
+ *        run_placement_nesterov.py:173/180-181, filler-EXCLUDED too) is the [PHASE] line's
+ *        ovfw_macro_excluded, measured at the phase-1 checkpoint. Kept here as a diagnostic so
+ *        the five ways line up on one placement; do not quote it against XPlace.
  */
 void Placer::logOverflowDiagnostics()
 {
@@ -416,8 +418,9 @@ void Placer::logOverflowDiagnostics()
         + "  clamp/+filler="   + PREC(computeOverflow(true,  nullptr, true))
         + "  sharp/+filler="   + PREC(computeOverflow(false, nullptr, true))
         + "  macro-excluded="  + PREC(computeOverflow(false, nullptr, false, true))
-        + "  (XPlace GP stop = clamp/no-filler, XPlace report = sharp/no-filler, "
-        + "XPlace Mixed-GP reference = macro-excluded)");
+        + "  (XPlace GP stop = clamp/no-filler, XPlace report = sharp/no-filler; "
+        + "XPlace Mixed-GP reference is the [PHASE] ovfw_macro_excluded, NOT this macro-excluded "
+        + "-- after phase 2 the macros are fixed and it equals sharp/no-filler)");
 }
 
 /// @brief Optional: dump the restored-best bin-density map (smoothed + exact) for offline
@@ -442,10 +445,16 @@ void Placer::exportSummaryReports(const BestChoice& chosen, const FinalMetrics& 
     if (m_phase1_summary.valid) {
         // TODO #13 two-phase run: without this, only the phase-2 endpoint shows and the
         // macro-placement quality phase 1 is responsible for is invisible.
+        // All measured on the RESTORED phase-1 best with the macros still movable, which is
+        // XPlace's Mixed-GP checkpoint (see reportPhaseSummary's call site).
         results.add_row(RowStream{} << "Phase 1 Iterations" << m_phase1_summary.iterations);
         results.add_row(RowStream{} << "Phase 1 HPWL" << std::scientific << std::setprecision(3) << m_phase1_summary.hpwl);
+        results.add_row(RowStream{} << "Phase 1 HPWL (exact, all nets)" << std::scientific << std::setprecision(3) << m_phase1_summary.hpwl_exact);
         results.add_row(RowStream{} << "Phase 1 Overflow (smoothed)" << std::scientific << std::setprecision(3) << m_phase1_summary.overflow_smoothed);
         results.add_row(RowStream{} << "Phase 1 Overflow (exact, no fillers)" << std::scientific << std::setprecision(3) << m_phase1_summary.overflow_exact);
+        // The XPlace-comparable pair is this row + "Phase 1 HPWL (exact, all nets)" above; see
+        // tools/benchmarks.py::_XPLACE_MMS_MIXED_GP.
+        results.add_row(RowStream{} << "Phase 1 Overflow (macro-excluded, exact, no fillers)" << std::scientific << std::setprecision(3) << m_phase1_summary.overflow_macro_excluded);
         results.add_row({"Phase 1 Stop reason", stopReasonName(m_phase1_summary.stop_reason)});
     }
     results.add_row(RowStream{} << "Total runtime (s)" << std::fixed << std::setprecision(3) << metrics.total_runtime);
@@ -457,13 +466,15 @@ void Placer::exportSummaryReports(const BestChoice& chosen, const FinalMetrics& 
     results.add_row(RowStream{} << "Final Overflow (smoothed, no fillers)"
                                 << std::scientific << std::setprecision(3) << metrics.final_smoothed_overflow);
     results.add_row(RowStream{} << "Final Overflow (exact, no fillers)" << std::scientific << std::setprecision(3) << metrics.final_overflow);
-    if (num_movable_macros > 0) {
-        // Gate on num_movable_macros, not mixed_size_mode -- the latter is set false at the
-        // phase-2 transition (Phase2.cpp:90), which would otherwise silently drop this row on
-        // every run that actually reached phase 2.
+    if (num_movable_macros > 0 && !m_phase1_summary.valid) {
+        // Only when phase 2 did NOT run. Once freezeMovableMacros() has fired the macros are
+        // FIXED, exclude_macros matches nothing, and this row is bit-identical to "Final Overflow
+        // (exact, no fillers)" above while claiming to be the XPlace-comparable number -- it was
+        // printed unconditionally until 2026-08-27. On a two-phase run the honest number is the
+        // "Phase 1 Overflow (macro-excluded, ...)" row instead.
+        //
         // Deliberately NOT prefixed "Final Overflow (exact" -- that substring is what
-        // tools/{run_footprint_ab,run_mms_ab}.sh grep for the row above; a second match would
-        // silently steal it (grep | tail -1 in run_footprint_ab.sh's num()).
+        // tools/dse.py::_our_exact_overflow greps for the row above; a second match could steal it.
         results.add_row(RowStream{} << "Macro-Excluded Overflow (exact, no fillers)" << std::scientific
                                     << std::setprecision(3) << metrics.final_overflow_macro_excluded);
     }

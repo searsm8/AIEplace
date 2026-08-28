@@ -62,8 +62,6 @@ bool Placer::beginFixedMacroPhase()
         return false;
     }
 
-    reportPhaseSummary();   // record + print phase 1 BEFORE anything is mutated
-
     // Phase 1's deliverable is where the macros ended up, and best-solution tracking usually holds
     // a better placement than the last iteration's. Same selection rule as the final restore, so
     // the macros get frozen at the placement the run would have shipped. Guard it: the snapshot
@@ -73,6 +71,17 @@ bool Placer::beginFixedMacroPhase()
     if (phase1_best.sol) restoreBestPlacement(phase1_best.slot);
     else Logger::log_warning("Phase 2: no best placement recorded in phase 1; "
                              "freezing the macros at their last iterated positions");
+
+    // AFTER the restore, BEFORE the freeze -- XPlace's Mixed-GP checkpoint exactly. XPlace calls
+    // ps.get_best_solution(), copies it into mov_node_pos, and only then runs evaluate_placement
+    // (run_placement_nesterov.py:172-179), so its "After Mixed-GP, best solution eval" numbers --
+    // the ones tools/benchmarks.py records as _XPLACE_MMS_MIXED_GP -- describe the RESTORED best
+    // with the macros still movable. Measuring here puts ours on the same placement. Meow.
+    //
+    // This used to run before the restore, on the last iterated placement, which is a different
+    // placement from the one phase 1 ships (2026-08-27). When no best was recorded the two
+    // coincide, because the restore above is skipped.
+    reportPhaseSummary();
 
     // Freeze BEFORE legalizing. The order matters: freezeMovableMacros() is what moves the macros
     // into getFixedComponents() and collapses their state onto the committed position, and the
@@ -215,16 +224,37 @@ void Placer::reportPhaseSummary()
 {
     float overflow_smoothed = computeOverflow(true,  nullptr, false);  // filler-EXCLUDED, as XPlace overflow_fn is
     float overflow_exact    = computeOverflow(false, nullptr, false);  // filler-EXCLUDED, as XPlace reports it
-    float hpwl              = hpwl_history.empty() ? 0.0f : hpwl_history.back();
+    // Macro-EXCLUDED as well: XPlace evaluates this checkpoint under ps.zero_macro_grad=True,
+    // which drops the is_mov_macro nodes (evaluator.py:26-45). Only computable while the macros
+    // are still movable, which is why it lives here and not in computeFinalMetrics.
+    float overflow_macro_ex = computeOverflow(false, nullptr, false, true);
+    // Measured on the restored best, so read HPWL from the tracker rather than hpwl_history --
+    // the history's last entry belongs to the last ITERATED placement, which the restore replaced.
+    BestChoice best = selectBestSolution();
+    float hpwl = best.sol ? best.sol->hpwl
+                          : (hpwl_history.empty() ? 0.0f : hpwl_history.back());
+    // Unmasked companion, recomputed on the geometry actually in the database (the huge cap
+    // includes every degree; -1 would exclude every net). Same call computeFinalMetrics makes.
+    float hpwl_exact = db.computeTotalWirelength(
+        ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), 1000000000);
 
-    m_phase1_summary = { true, iteration, hpwl, overflow_smoothed, overflow_exact, m_stop_reason };
+    m_phase1_summary = { .valid              = true,
+                         .iterations         = iteration,
+                         .hpwl               = hpwl,
+                         .hpwl_exact         = hpwl_exact,
+                         .overflow_smoothed  = overflow_smoothed,
+                         .overflow_exact     = overflow_exact,
+                         .overflow_macro_excluded = overflow_macro_ex,
+                         .stop_reason        = m_stop_reason };
 
     Logger::log_info("[PHASE] name=" + std::string(phaseName(m_phase)) +
                      " end_iteration=" + std::to_string(iteration) +
                      " reason=" + std::string(stopReasonName(m_stop_reason)) +
                      " hpwl=" + SCI(hpwl) +
+                     " hpwl_exact=" + SCI(hpwl_exact) +
                      " ovfw_smoothed=" + PREC(overflow_smoothed) +
                      " ovfw_exact=" + PREC(overflow_exact) +
+                     " ovfw_macro_excluded=" + PREC(overflow_macro_ex) +
                      " movable_macros=" + std::to_string(num_movable_macros));
 }
 

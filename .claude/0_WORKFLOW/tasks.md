@@ -598,6 +598,74 @@ baselines.
 
 ---
 
+## #37 — The "macro-excluded" overflow was never macro-excluded (opened+landed 2026-08-27)
+
+Found in a `/code-review` pass over `host/src/sw_only`. **Reporting-only; lands under the freeze's
+cleanup/docs carve-out.** `make test-regress` AND `test-regress-slow` bit-identical on all three
+designs, mms_adaptec1 (which exercises phase 2) included.
+
+**The bug.** `computeOverflow(..., exclude_macros=true)` skips macros only inside the
+`getMovableComponents()` pass. `computeFinalMetrics()` calls it at the END of the run — by which
+point `freezeMovableMacros()` has moved every movable macro into `getFixedComponents()`, so the
+flag matches nothing and the number collapses onto the plain exact overflow. The run's own
+diagnostic printed the proof for months: `sharp/no-filler=0.118  macro-excluded=0.118`.
+
+**Why it mattered.** `tools/benchmarks.py` instructs comparing exactly that row against
+`_XPLACE_MMS_MIXED_GP`, which XPlace measures at its phase-1 Mixed-GP checkpoint under
+`zero_macro_grad=True`. So a post-phase-2, macro-INCLUDED number was being quoted against a
+phase-1, macro-EXCLUDED reference.
+
+**The fix.** The number is now computed in `reportPhaseSummary()`, which moved to **after**
+`restoreBestPlacement()` and before `freezeMovableMacros()` — XPlace's exact checkpoint
+(`ps.get_best_solution()` → copy → `evaluate_placement`, `run_placement_nesterov.py:172-179`).
+Mark's call 2026-08-27, chosen over the minimal patch because the other three phase-1 numbers had
+the same defect: they were measured at the last ITERATED placement, not the one phase 1 ships.
+Also added `Phase 1 HPWL (exact, all nets)` — `_XPLACE_MMS_MIXED_GP` is a *pair* and its HPWL half
+is XPlace's unmasked `get_obj_hpwl`, so fixing only the overflow half left the comparison half-done.
+The post-phase-2 `Macro-Excluded Overflow` row is now suppressed rather than printed misleadingly.
+
+⚠️ **Every phase-1 number quoted before 2026-08-27 is on the old basis.** The correction is not
+cosmetic — mms/adaptec1 goes **0.118 → 0.0702** against XPlace's 0.1306. The old number read as
+"slightly better spread than XPlace"; the true one says we hand off *substantially* more spread.
+history.md's tier-3 flags (§ "Flag a tier-3 design only where OUR macro-excluded overflow
+materially exceeds its Mixed-GP") were computed on the wrong column and should be re-read, not
+trusted. Not re-run here — that is a suite job.
+
+- [ ] **Re-derive the tier-3 flags** from the `[PHASE] ovfw_macro_excluded` column across the 16
+      MMS designs. One `make dse` MMS pass; no code change. Until then treat the existing
+      macro-excluded comparisons in history.md as retracted rather than merely stale.
+
+## #38 — Is `MacroLegalize.cpp` redundant? (opened 2026-08-27, Mark's question)
+
+**Established, not yet decided.** ~600 lines porting XPlace's `macro_legalization.py`.
+
+**Yes for scoring.** `tools/lgdp.py` scores every GP through XPlace `main.py --global_placement
+False --given_solution <def>`, and XPlace's LG path calls `macro_legalization_main`
+**unconditionally** (`detail_placement.py:374`, inside `run_lg`, before greedy legalization). So
+XPlace re-legalizes our macros from scratch on the way to every LG/DP number we quote — our port
+contributes nothing to the scored result.
+
+**No for GP.** `legalizeMacros()` is not only a legalization deliverable: it runs *inside*
+`beginFixedMacroPhase()`, between the freeze and the std-cell re-seed, so phase 2 optimizes std
+cells against that macro floorplan and deposits macro density from it. Deleting it changes the GP
+result, not just the artifact. The disabled path already exists and says so: "macros frozen where
+GP left them (overlapping; phase-2 overflow is still meaningful, the placement is not legal)".
+
+**So it is an empirical question, and the switch already exists.**
+- [ ] **A/B `macro_legalization = true|false` over the 16 MMS designs**, scoring post-DP HPWL via
+      `make dse`. If post-DP is a wash, delete the file — XPlace does the job better on the way to
+      the score, and its version has three things ours explicitly does not (the
+      `macro_legalization_xy` variant, site/row alignment, retry-with-longer-CBC-time-limit).
+- [ ] **Known gap, relevant either way** (same review): `runMacroLegalization()` hard-codes
+      `m.fixed = false` and collects only `isMovableMacro()` components, so genuinely-fixed
+      macros/blockages never enter the constraint graph or the LP — every `MacroBox::fixed` branch
+      is dead code. XPlace includes them (`detail_placement.py:314-320`). Latent on MMS only
+      because every `terminal` in `data/raw/mms/*.nodes` is zero-area; it would bite on any
+      LEF/DEF mixed-size input with a sized fixed macro. **Don't fix this before the A/B** — if the
+      file goes, the gap goes with it.
+
+---
+
 # Improvements
 
 Algorithmic ideas beyond faithfulness cleanup — hypotheses, not yet scoped.
