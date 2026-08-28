@@ -110,14 +110,38 @@ void top(
 /* 
  * DDR AXI4 master interfaces (m_axi) buffers (data to be sent into PL)
  */
-#pragma HLS INTERFACE m_axi port=node_pos    offset=slave bundle=gmem0
+// CLAUDE CODE: HPWL-path adapter sizing (P5a, REPORT_20_hpwl_gradient_opt_20260828).
+// Two DIFFERENT problems share one pragma, and the right setting is opposite for each:
+//
+//   SEQUENTIAL ports stream and burst. One address buys N beats, so the burst itself hides
+//   the DDR round trip -- they want LONG BURSTS at the default queue depth (16).
+//   RANDOM ports gather: every element is its own transaction, so burst length cannot help
+//   at all and outstanding depth is the ONLY latency-hiding mechanism. Throughput is
+//   Little's law, in-flight/latency: at the default 16 and a ~150-cyc round trip that is
+//   ~0.107 txn/cyc; at 64 it is ~4x that until the controller saturates.
+//
+// Adapter buffer cost is num_outstanding * max_burst * (port_width/8), so raising BOTH on a
+// port pays twice for nothing. Each port below is tuned for the access pattern the HLS burst
+// log actually shows, not for symmetry. MEASURED cost of this block vs the defaults (full
+// v++ -c, 2026-08-28): LUT 323638 -> 337793 (+4.4%), BRAM 406 -> 406 (ZERO), FF +126, timing
+// slack unchanged at -0.58 ns, all loop IIs unchanged. Queue depth here comes out of LUT/FF,
+// not BRAM -- the opposite of what was predicted, so budget it as a LUT cost.
+//
+// gmem0 and gmem7 are SHARED between both kinds of consumer, so their burst length is left at
+// the default: node_pos is a random gather in hpwl_CU/metrics but a sequential burst in
+// iteration_update, and shortening the burst to suit the gather would cripple the stream.
+//
+// NOTE: there is no bank-spreading to be had here. This platform reports exactly two SP tags,
+// `BRAM` and `MC_NOC0` (platforminfo) -- ONE memory controller -- so every bundle necessarily
+// shares it and `sp=` tags cannot separate the gathers from the density path's bursts.
+#pragma HLS INTERFACE m_axi port=node_pos    offset=slave bundle=gmem0 num_read_outstanding=64
 #pragma HLS INTERFACE m_axi port=net_ptr     offset=slave bundle=gmem1
-#pragma HLS INTERFACE m_axi port=pins        offset=slave bundle=gmem2
-#pragma HLS INTERFACE m_axi port=npins       offset=slave bundle=gmem3
+#pragma HLS INTERFACE m_axi port=pins        offset=slave bundle=gmem2 max_read_burst_length=64
+#pragma HLS INTERFACE m_axi port=npins       offset=slave bundle=gmem3 max_read_burst_length=64
 #pragma HLS INTERFACE m_axi port=exp_lut     offset=slave bundle=gmem4
-#pragma HLS INTERFACE m_axi port=bb          offset=slave bundle=gmem5
-#pragma HLS INTERFACE m_axi port=sums        offset=slave bundle=gmem6
-#pragma HLS INTERFACE m_axi port=node_grad   offset=slave bundle=gmem7
+#pragma HLS INTERFACE m_axi port=bb          offset=slave bundle=gmem5 num_read_outstanding=64
+#pragma HLS INTERFACE m_axi port=sums        offset=slave bundle=gmem6 num_read_outstanding=64
+#pragma HLS INTERFACE m_axi port=node_grad   offset=slave bundle=gmem7 max_write_burst_length=64
 #pragma HLS INTERFACE m_axi port=node_box    offset=slave bundle=gmem8
 #pragma HLS INTERFACE m_axi port=bin_density offset=slave bundle=gmem9
 // gmem10/gmem11: transpose overlaps per-tile-row bursts (transpose.hpp Option (a)) --
