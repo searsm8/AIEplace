@@ -1,14 +1,42 @@
 # REPORT #20 — hpwl_gradient: measured bottleneck and proposed restructuring
 
 **Date:** 2026-08-28
-**Module:** [[hpwl_gradient.hpp]] (`hpwl_CU`), `vck5000/pl/src/pl_algo/src/modules/`
-**Status:** analysis + proposal. Nothing here is implemented. The prerequisite —
-tier-1 coverage — landed first as `0f9e9ef` ([[hpwl_grad_test.cpp]]).
+**Module:** [[hpwl_gradient.hpp]], `vck5000/pl/src/pl_algo/src/modules/`. NOTE: the function was named
+`hpwl_CU` when this report was written and was renamed to `hpwl_gradient` (matching the filename)
+on 2026-08-28; the two names are the same thing throughout.
+**Status (2026-08-28):** tier-1 coverage `0f9e9ef` + `aa007a7` → **P5a** `64a601a` → **P1b**
+`21adad6` → **P2** `ed25f1a`. **P1 investigated and BLOCKED** (see its section). P3/P4/P5b/P6
+remain proposals.
+
+> ### ▶ NEXT SESSION STARTS HERE
+> **The device side of P2 is complete and verified; the host does not yet drive it.**
+> `MODE_REFRESH_PINS` exists, synthesizes at II=1, and is exercised by the harness — but
+> `Driver.cpp`'s `eval_gradients` still does not issue it before `MODE_HPWL_GRAD` /
+> `MODE_METRICS`. Until it does, an on-device run would evaluate the gradient at **stale pin
+> positions**, which does not crash and does not look wrong. That is the one loose end.
+>
+> Two candidate next steps:
+> 1. **Wire the refresh call** into `eval_gradients` (small, finishes P2, unblocks sw_emu).
+> 2. **P3** — the II fixes. `sweep_bbox` is now a 73-deep pipeline instead of 146, so the
+>    landscape changed since P3 was written. **Apply the P1b lesson**: HLS will not see a
+>    rotating array index; partial accumulators only work with STATIC indices via unrolling.
+>
+> Everything below is measured against real `v++ -c --target hw` runs. Two cautions carried
+> forward: `make` reporting success is not evidence a build happened (§8b), and no wall-clock
+> speedup in this report is verified — that needs Geert's card.
+
 **Related:** [[DATAFLOW.md]], tasks.md #20 step 3, [[REPORT_pl_algo_stage5_assessment_20260806.md]]
 
 ---
 
 ## 1. Verdict
+
+> ⚠️ **Sections 1–3 describe the module AS FOUND, before any of this landed.** They are kept
+> verbatim because they are the evidence the proposals were argued from, and because the
+> retraction trail matters more than tidiness. For current state read the Status block at the
+> top and the per-proposal outcome boxes. In particular: **L2 is now fixed** — P1b + P2 removed
+> all three random `node_pos` gathers, so the burst table in §2.2 and the gather columns in §3
+> no longer describe the code.
 
 `hpwl_CU` is **memory-bound on random DDR gathers, not compute-bound**, and it occupies
 **~1 % of the VC1902** while doing it. The two reported II violations are real but are the
@@ -32,7 +60,7 @@ All from the last real `TARGET=hw` C-synthesis,
 (dated 2026-07-13; `hpwl_gradient.hpp`'s last functional commit is `c48fba0`, 2026-07-01,
 so the report still describes the current datapath).
 
-### 2.1 Loop initiation intervals — measured
+### 2.1 Loop initiation intervals — measured *(pre-P2 baseline; see P2 for current)*
 
 ```
 sweep_bbox  II = 2  (target 1)   depth 146
@@ -49,7 +77,7 @@ cache_lut   II = 1
 - `sweep_sums` — carried `fadd` on `Bpx` (line 135) against the `br` at line 118 (the
   `if (r.net < 0) continue`), plus a second violation on the `fmadd` for `Cpx`.
 
-### 2.2 Memory interfaces — measured
+### 2.2 Memory interfaces — measured *(pre-P2; all four of these gathers are now gone)*
 
 From the HLS burst-inference log:
 
@@ -129,9 +157,10 @@ exceeding the kernel itself (21.2 %). See [[dhar_fpga_accel_paper]].
 
 ---
 
-## 3. Current datapath
+## 3. Datapath as found *(pre-P2)*
 
-Five sequential loops, no `DATAFLOW`, one scalar pipeline each.
+Five sequential loops, no `DATAFLOW`, one scalar pipeline each. **The `random gathers` column
+is now empty in all three phases** (P2) and a sixth loop, `hpwl_reduce`, was added (P1b).
 
 | # | loop | trip | sequential streams | random gathers | writes |
 |---|---|---|---|---|---|
@@ -147,16 +176,32 @@ order. `bb`/`sums` are DDR scratch `[num_nets]` bridging the two orderings.
 ### 3.0 There is a fourth pass, in another module
 
 [[metrics.hpp]] `hpwl_sweep` (lines 38–53) is a **fourth pass over pin data** — the same
-`net_pins` array — running every iteration to produce the HPWL the scheduler consumes. It is a segmented
-bounding-box reduction over nets — its own comment says *"mirrors hpwl_CU phase A1"* — with
-its own **truly random** `node_pos[r.node_idx]` gather and the same `r.net < 0` mask.
+`net_pins` array. It is a segmented bounding-box reduction over nets — its own comment says
+*"mirrors hpwl_CU phase A1"* — with its own **truly random** `node_pos[r.node_idx]` gather and
+the same `r.net < 0` mask, evaluated at the same probe `v_k` as the gradient. It computes a
+bounding box `sweep_bbox` has already computed and thrown away. See P1b.
 
-It is a different module, so it is easy to miss when reading `hpwl_gradient.hpp` alone, but it
-is in the same per-iteration critical path (DATAFLOW.md resident-loop step 4) and it is
-evaluated at the same probe `v_k` as the gradient (step 1). Two consequences:
-
-- The per-iteration random-gather count is **three** truly-random `num_pins` passes, not two.
-- It computes a bounding box that `sweep_bbox` has already computed and thrown away. See P1b.
+> ### ⚠️ Correction (verified 2026-08-28): it does not run every iteration *today*.
+> An earlier revision of this section said `hpwl_sweep` runs "every iteration to produce the
+> HPWL the scheduler consumes". That is true of the **documented resident loop** (DATAFLOW.md
+> step 4) but **not of the path that is actually wired**. `MODE_METRICS` is reached only from
+> `runMetrics()` ([Driver.cpp:847](vck5000/host/src/pl_algo/src/Driver.cpp:847)), a standalone
+> bring-up entry point. The `--place` loop instead computes HPWL **on the host** —
+> `hostHPWL(node_pos, net_ptr, pins, num_nets)`
+> ([Driver.cpp:1102](vck5000/host/src/pl_algo/src/Driver.cpp:1102)), commented *"verified PL
+> metrics module replicated on host to save a pass"*.
+>
+> This does not weaken P1b; it splits the payoff in two, and the near half is the one that
+> exists today:
+> - **Today:** the host does a full CPU pass over all ~944k pins per iteration, with its own
+>   random gather, for a number the gradient kernel it *already launches* can return for free.
+>   P1b lets `hostHPWL` be deleted from the loop.
+> - **When the resident loop lands:** `hpwl_sweep` becomes step 4, a real on-device
+>   per-iteration pass. P1b means it never has to exist.
+>
+> So the truly-random `num_pins` gather count **on the device** is two today (`sweep_bbox`,
+> `sweep_sums`) and would have become three. §2.5's arithmetic is unaffected — it only ever
+> counted `hpwl_CU`'s own passes.
 
 ### 3.1 The gathers are NOT equally expensive
 
@@ -176,7 +221,56 @@ worth attacking.
 
 ## 4. Proposals
 
-### P1 — Fuse phases 1 and 2 behind a bounded FIFO
+### P1 — Fuse phases 1 and 2 behind a bounded FIFO  *(BLOCKED — see the investigation below)*
+
+> ### ⚠️ 2026-08-28: P1 as specified is not the right next step. Evidence, not opinion.
+>
+> Attempted after P1b. Two independent blockers, both measured:
+>
+> **1. The non-stream implementation is defeated by the degree distribution.** Fusing without
+> `hls::stream` means an inner drain loop over the buffered net at each boundary. Counted on
+> adaptec1's unmasked nets:
+>
+> ```
+> unmasked nets = 219,792   mean degree 4.28   MEDIAN DEGREE 2
+> deg 2: 53.3%      deg<=4: 76.1%      deg<=8: 90.9%
+> ```
+>
+> **Over half of all nets have exactly two pins.** A variable-trip inner loop cannot be pipelined
+> across nets, so each net pays the inner pipeline's fill/drain — and `sweep_sums`'s datapath
+> depth is 166. At ~20 cycles of overhead per net that is 219,792 × 20 ≈ **4.4M cycles against
+> phase 2's current 2.8M**. The fusion would be slower than the two passes it replaces. The
+> report's original framing ("re-streaming from DDR is cheaper than buffering a whole net on
+> chip, and has no degree cap") was arguing the wrong axis: the cap is fine, it is the *short*
+> nets that break it.
+>
+> **2. The stream implementation costs the tier-1 harness.** Done properly this is an
+> `#pragma HLS DATAFLOW` region with a bbox stage and a sums stage joined by an `hls::stream`
+> pin FIFO (depth ≥ IGNORE_NET_DEGREE) plus a per-net record stream. That puts `hls_stream.h`
+> into `hpwl_gradient.hpp`, and:
+> - It compiles under plain g++ **only** with `-I$XILINX_HLS/include`, i.e. a Vitis install —
+>   against the tier-1 contract at the top of `test/Makefile` ("no Vitis, no XRT, no device, no
+>   toolchain env"). This is the same wall that makes `metrics.hpp` untestable (§9).
+> - Worse, it would be **false confidence**: the csim `hls::stream` is **unbounded** (verified —
+>   it grows and reports its high-water mark; it never blocks). So the harness could not detect
+>   an undersized FIFO or a deadlock, which is precisely P1's principal risk. A green test would
+>   say nothing about the thing most likely to fail.
+>
+> **Recommendation: skip P1, go to P2.** P1's value was (a) one fewer `num_pins` sweep and
+> (b) one fewer random `node_pos` gather. (b) is the part that matters and **P2 delivers it
+> better** — no FIFO, no dataflow region, no new scratch buffer, and it fixes phases 1 *and* 2
+> *and* `metrics` at once, because they all read the same `NodePin` array. (a) is only the
+> sequential, burstable half of the cost. An intermediate was considered and rejected: having
+> phase 1 spill computed pin positions to a `pin_pos[num_pins]` scratch array for phase 2 to
+> read sequentially. It works and keeps the harness, but it is a strictly worse P2 — it needs a
+> new 7.5 MB (adaptec1) / 71 MB (bigblue4) buffer and a 13th `m_axi` port, and it fixes only
+> phase 2.
+>
+> If P1 is wanted anyway, the honest prerequisites are: stream stubs under `test/` that model
+> **bounded** FIFOs so depth and deadlock are testable, and hardware validation, since csim
+> cannot prove liveness.
+
+<details><summary>Original P1 proposal, kept because the FIFO-depth reasoning is still correct</summary>
 
 **What.** One pass over `net_pins`. Push each net's pin coordinates into a FIFO while
 reducing the bounding box in registers; at the net boundary, drain the FIFO and compute the
@@ -205,7 +299,44 @@ the harness is exactly this bug** and it fails loudly ([1], [2], [4]).
 
 ---
 
-### P1b — Emit HPWL as a by-product of the bbox pass  *(largest single saving; do this first)*
+</details>
+
+---
+
+### P1b — Emit HPWL as a by-product of the bbox pass  *(IMPLEMENTED 2026-08-28, `21adad6`)*
+
+> **Outcome.** `hpwl_CU` now emits HPWL. **Where the sum lives turned out to be the whole
+> problem**, and the obvious placement is the wrong one — both were built and C-synthesized:
+>
+> | placement | result |
+> |---|---|
+> | accumulate at the net boundary **inside `sweep_bbox`** | **`sweep_bbox` II 2 → 7** over `num_pins`. ~+4.7M cycles on adaptec1 — worse than the pass it saves. |
+> | separate `hpwl_reduce` over `num_nets`, unrolled 8 wide, **static** indices | `sweep_bbox` stays **II 2**; reduce is II 8 over `num_nets/8` = **221k cycles**. |
+>
+> HLS sees a distance-1 carried dependence on the double add. Rotating over 8 partials does
+> **not** help — with a dynamic index it treats the array as a memory and reports store→load
+> regardless — and neither does `DEPENDENCE … distance=8`. Only moving the reduction out, and
+> unrolling with *static* accumulator indices so each partial is a register, works.
+>
+> **`metrics::hpwl_sweep` has the identical pathology** on its own `hpwl_total`, which is why
+> that loop is II≈7. So the pass P1b replaces costs ~944k × 7 ≈ **6.6M cycles**, against 221k
+> here — roughly **30×**, materially better than this report originally estimated.
+>
+> **Measured cost** (vs the P5a build): LUT 337,793 → 345,734 (+7,941, +2.4 % device), FF
+> +5,321, BRAM 406 → 406 (**0**), DSP unchanged, timing slack unchanged at −0.58 ns, Fmax
+> 331.90 MHz, 0 errors. `sweep_sums` II 3 and `seg_reduce` II 1 unchanged. Almost all the LUT
+> is the 8 parallel double adders, so `HPWL_PARTIALS` is the knob if LUT gets tight.
+>
+> **New precondition: `bb_DDR` must be zeroed before first use.** `hpwl_CU` sums every entry but
+> writes only gradient-bearing nets, so a masked net must read as a zero-extent box. One memset
+> at allocation is enough (the net set is static) — documented at `NetBBox` in
+> `host_interface.hpp`, done at both `Driver.cpp` allocation sites, and enforced by assertion
+> [6] (a poisoned `bb` fails at rel 1.27).
+>
+> **NOT done, deliberately:** `metrics::hpwl_sweep` is still there and the host still calls
+> `hostHPWL`. `metrics` remains the only thing `runMetrics()` exercises, and deleting a verified
+> path before its consumer switches over would trade coverage for tidiness. The switch is a
+> host-side change: read HPWL from the gradient call's `dct_out[0]` and drop `hostHPWL`.
 
 **What.** `sweep_bbox` (or the fused P1 pass) already has each net's final `maxx/minx/maxy/miny`
 in registers at the net boundary. Accumulate `(maxx-minx)+(maxy-miny)` into a double there and
@@ -286,12 +417,78 @@ extents and has no such slack. M9 (drop the last-net flush) is likewise [6]-only
 
 ---
 
-### P2 — Denormalize absolute pin position into `NodePin`  *(the enabler for L3)*
+### P2 — Denormalize absolute pin position into `NodePin`  *(IMPLEMENTED 2026-08-28, `ed25f1a`)*
+
+> **Outcome: this is the change the report was pointing at, and it worked.** `NodePin`'s
+> `{off_x, off_y}` became `{x, y}` (absolute), and a new `modules/refresh_pin_pos.hpp` folds the
+> probe `v_k` in once per iteration. All **three** random `node_pos` gathers left
+> `hpwl_gradient`, and `metrics::hpwl_sweep`'s went with them for free.
+>
+> **The burst log is the evidence.** After:
+> ```
+> sweep_bbox   gmem2 (net_pins)   burst inferred     <- was a gather
+> sweep_sums   gmem2 (net_pins)   burst inferred     <- was a gather
+> seg_reduce   gmem3 (node_pins)  burst inferred     <- was a gather
+> metrics      gmem2 (net_pins)   burst inferred     <- was a gather
+> gmem0 (node_pos) -- no longer appears anywhere in the HPWL path
+> ```
+> The one surviving random gather is inside `refresh_net_pins`, where it was deliberately
+> concentrated. The node-major refresh is monotone (§3.1) and therefore much cheaper.
+>
+> **Measured** (full `v++ -c --target hw`, 0 errors, vs the P1b build):
+>
+> | | before | after |
+> |---|---|---|
+> | `sweep_bbox` | II 2, **depth 146** | II 2, **depth 73** |
+> | `sweep_sums` | II 3, depth 166 | II 3, depth 165 |
+> | `seg_reduce` | II 1, depth 173 | II 1, depth 172 |
+> | `refresh_net` / `refresh_node` | — | **II 1** each (new) |
+> | LUT | 345,734 (37 %) | 353,985 (39 %) — +8,251 |
+> | FF | 170,500 | 174,157 |
+> | BRAM / DSP / slack | 406 / 220 / −0.58 ns | **unchanged** |
+>
+> `sweep_bbox`'s depth halving is the clearest signal: ~73 cycles of DDR latency that used to
+> sit inside the pipeline on every pin.
+>
+> **Correctness:** tier-1 output is **bit-identical** to before the refactor — same gradient,
+> same HPWL, every error metric to the digit. That is the expected signature of a pure
+> data-layout change and is the main evidence here.
+>
+> ### Correction to the proposal below: "same size" does not make the offsets free
+> The original pitch (and Mark's framing) was that `NodePin` stays 16 B. True, but **the offsets
+> have to live somewhere** — whoever refreshes positions needs them on device every iteration
+> (`memory_writer`, once the resident loop exists). They moved to `PinOffset[]`, uploaded once.
+> **Per-pin device footprint is 24 B either way.** What actually changes, and what makes it
+> worth doing, is the hot/cold split: the three HOT passes now read 16 B and nothing else, while
+> the 8 B of static offset is touched only by a pure-data-movement loop with no float datapath
+> behind it — so a stalled read stalls nothing else, the port can be tuned purely for gather
+> throughput, and it can later overlap with the density solve in a DATAFLOW region.
+>
+> ### Why the refresh is on the device, not the host
+> Folding the offsets in host-side would have avoided the new module entirely, but it adds
+> **~30 MB/iteration of DMA** (two 15 MB pin arrays on adaptec1) to a v1 loop whose bottleneck
+> is already **~76 MB/iter of host DMA** (tasks.md #37). That is a net regression. Device-side
+> keeps per-iteration DMA unchanged — only `node_pos` (1.7 MB) still moves each iteration.
+>
+> ### ⚠️ New ordering requirement
+> `MODE_REFRESH_PINS` **must** run before `MODE_HPWL_GRAD` and `MODE_METRICS` at every new
+> probe. Skipping it does not fail — it silently evaluates the gradient at stale positions.
+> Documented at `NodePin`, in `refresh_pin_pos.hpp`, and in the mode enum. The harness calls the
+> real refresh module rather than folding offsets itself, so the ordering is exercised.
+> **The host does not issue it yet** — see NEXT SESSION at the top.
+>
+> Also landed: `Packer` now carries the offsets through the same permutation as the node-major
+> sort. Sorting the records alone would have silently decoupled `npins` from `npin_off` — a bug
+> that would have presented as a wrong gradient.
+
+<details><summary>Original P2 proposal, kept for the reasoning that led here</summary>
 
 Mark's proposal, analysed in full in §6. **Yes, it is a win**, and the constant-size form is
 better than the 24-byte variant I suggested verbally.
 
 ---
+
+</details>
 
 ### P3 — Fix the two II violations
 
@@ -622,6 +819,26 @@ L3. Mutation coverage relevant to these changes, already in place:
 Do **not** run only `make test` for P1 or P4 — both touch the masking path, and §5 is the
 worked example of a mask bug that leaves every value bit-identical. `make test-asan` is the
 gate for those two.
+
+## 8b. A build defect that invalidated two measurements in this report
+
+`vck5000/pl/Makefile` made `top.xo` depend only on `top.cpp`. **Every module header — where the
+entire datapath lives — was outside the dependency graph**, so editing one left `make` printing
+*"Nothing to be done"* and the stale `.xo` in place, and any synthesis report read afterwards
+described the *previous* code.
+
+Two results in this session were stale before it was caught: the `DEPENDENCE distance=8`
+experiment and the first `hpwl_reduce` build both silently re-read the earlier build's log. The
+earlier P5a and P1b-v1 numbers were valid only by luck — `top.cpp` itself had changed in both,
+which forced a rebuild.
+
+Fixed in `21adad6`: the `.xo` now depends on `src/$(PL)/src{,/modules}/*.hpp` and `design.cfg`.
+**Any synthesis claim in this repo made before 2026-08-28 that followed a header-only edit
+should be treated as unverified.**
+
+The general lesson, in the spirit of *"a test asserts"*: `make` reporting success is not
+evidence that anything was built. Check the artifact's mtime, or that the log contains the run
+you expect, before quoting numbers from it.
 
 ## 9. Not proposed
 
