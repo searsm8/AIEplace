@@ -68,7 +68,10 @@ test: $(BINS)
 	exit $$fail
 
 # Single harness: `make run-fft_pl_test`. sched_verify needs its trace argument.
-.PHONY: $(addprefix run-, $(HARNESSES))
+# Do NOT declare the run-% targets .PHONY: GNU make skips implicit/pattern-rule search for phony
+# targets, so `.PHONY: $(addprefix run-, $(HARNESSES))` silently disabled the `run-%` rule below
+# and every `make run-<name>` except run-sched_verify (which has an explicit rule) printed
+# "Nothing to be done" and exited 0. No file named run-* exists, so the rule always fires anyway.
 run-sched_verify: $(BUILD)/sched_verify
 	$(BUILD)/sched_verify $(TRACE)
 run-%: $(BUILD)/%

@@ -7,7 +7,7 @@
 // below is a line-for-line transcription -- if Partials.cpp's math changes, this must change
 // with it.
 //
-// FIVE ASSERTIONS, because hpwl_CU has two independent ways to be wrong and they need
+// SIX ASSERTIONS, because hpwl_CU has two independent ways to be wrong and they need
 // separating (a single end-to-end number cannot tell a restructuring bug from LUT error):
 //
 //   [1] STRUCTURE   -- module (float, LUT) vs golden (double, SAME LUT). Isolates the segmented
@@ -22,6 +22,11 @@
 //                      Bit-exact; this is what clear_grad is for. The design below deliberately
 //                      contains such nodes (isolated, and masked-net-only).
 //   [4] MASKING     -- total gradient must be unchanged when a masked net's pins are perturbed.
+//   [6] HPWL/BBOX   -- phase 1's bounding boxes must reduce to the correct HPWL. This is the P1b
+//                      prerequisite (REPORT_20): P1b deletes metrics::hpwl_sweep, a fourth pass
+//                      over net_pins recomputing a bounding box sweep_bbox already has, which is
+//                      only sound if the two agree -- same nets, same mask, same pin positions.
+//                      Asserted here BEFORE P1b is implemented, so the gate exists first.
 //   [5] MEMORY SAFETY -- `make test-asan` rebuilds this same file under
 //                      -fsanitize=address,undefined. It is a separate target because it is a
 //                      bounds check, not a value check, and nothing here can substitute for it:
@@ -40,6 +45,12 @@
 //   clear_grad deleted                   -> [1][2][3]   phase 2 given a stale bbox -> [1][2][4]
 //   final segment flush dropped          -> [1][2]      LUT interpolation dropped  -> [1][2]
 //   net mask dropped in sweep_sums       -> [5] ONLY
+//   sweep_bbox last-net flush dropped    -> [6] ONLY
+//   sweep_bbox y-extent perturbed by 1.0 -> [6] ONLY. Worth understanding: phases 2 and 4 both
+//     read the same corrupted bb_DDR, so the gradient stays self-consistent, and the WA partial
+//     is smooth enough in the bounding box that a 1.0-unit error on a 10000-unit die lands
+//     inside [1]'s tolerance. HPWL is a direct sum of extents and has no such slack. [6] is
+//     therefore not redundant with [1] -- it is strictly more sensitive to the bbox itself.
 //   net mask dropped in sweep_bbox       -> NOTHING, correctly: unlike sweep_sums, sweep_bbox
 //     never indexes bb_DDR by r.net, and its one write is already guarded by `bb_net >= 0`, so
 //     letting masked pins through is genuinely a no-op there. The two `continue`s are NOT
@@ -212,8 +223,11 @@ static void golden(const Design& d, float inv_gamma, const std::vector<float>& l
 // ---------------------------------------------------------------------------
 // Buffers are sized EXACTLY, never padded, because assertion [5] is the sanitizer: an
 // out-of-bounds index has to land outside a real allocation for ASan to see it.
+// bb_out, when given, receives the per-net bounding boxes phase 1 wrote -- that is what
+// assertion [6] reduces to an HPWL.
 static void run_module(const Design& d, float inv_gamma, const std::vector<float>& lut,
-                       int lut_size, float inv_lut_step, std::vector<coord_t>& grad) {
+                       int lut_size, float inv_lut_step, std::vector<coord_t>& grad,
+                       std::vector<NetBBox>* bb_out = nullptr) {
     std::vector<NetBBox> bb(d.num_nets);
     std::vector<NetSums> sums(d.num_nets);
     // Poison the output, do NOT pre-zero it: clear_grad is the module's own zeroing pass and
@@ -223,6 +237,29 @@ static void run_module(const Design& d, float inv_gamma, const std::vector<float
             lut.data(), bb.data(), sums.data(), grad.data(),
             inv_gamma, inv_lut_step, lut_size,
             d.num_nets, d.M, (int)d.node_pins.size());
+    if (bb_out) *bb_out = bb;
+}
+
+// Golden HPWL: sum over unmasked nets of the pin bounding box half-perimeter. Mirrors
+// DataBase::computeTotalWirelength("HPWL") and hpwlFromPacked (Placement.hpp:146). Pin positions
+// are formed in float exactly as the module forms them, so the bbox is bit-identical and only
+// the accumulation is promoted to double -- same as metrics.hpp, which sums in double on purpose.
+static double golden_hpwl(const Design& d) {
+    double total = 0.0;
+    for (int net_id = 0; net_id < d.num_nets; net_id++) {
+        const int beg = d.net_ptr[net_id], end = d.net_ptr[net_id + 1];
+        if (beg == end || d.pins[beg].net < 0) continue;      // masked (or empty) net
+        float mxx = -1e30f, mnx = 1e30f, mxy = -1e30f, mny = 1e30f;
+        for (int p = beg; p < end; p++) {
+            const NodePin& r = d.pins[p];
+            const float x = d.node_pos[r.node_idx].x + r.off_x;
+            const float y = d.node_pos[r.node_idx].y + r.off_y;
+            mxx = std::max(mxx, x); mnx = std::min(mnx, x);
+            mxy = std::max(mxy, y); mny = std::min(mny, y);
+        }
+        total += (double)((mxx - mnx) + (mxy - mny));
+    }
+    return total;
 }
 
 struct Err { double rel_rms, max_rel; };
@@ -259,7 +296,8 @@ int main() {
            d.M, d.N, d.num_nets, (int)d.pins.size(), (int)d.node_pins.size(), lut_size);
 
     std::vector<coord_t> grad;
-    run_module(d, inv_gamma, lut, lut_size, inv_lut_step, grad);
+    std::vector<NetBBox> bb;
+    run_module(d, inv_gamma, lut, lut_size, inv_lut_step, grad, &bb);
 
     std::vector<double> gx, gy;
     bool ok = true;
@@ -324,6 +362,34 @@ int main() {
     if (mask_bad) { printf("FAIL [4] perturbing %d masked pins changed %d/%d node gradients\n",
                            (int)pert.masked_pin_idx.size(), mask_bad, d.M); ok = false; }
 
+    // ---- [6] HPWL-FROM-BBOX: phase 1's bounding boxes must reduce to the correct HPWL.
+    // This is the P1b prerequisite (REPORT_20_hpwl_gradient_opt_20260828). P1b proposes emitting
+    // HPWL from the bbox pass and deleting metrics::hpwl_sweep, which is a fourth pass over
+    // net_pins recomputing a bounding box sweep_bbox already has. That is only sound if
+    // sweep_bbox's bbox IS the HPWL bbox -- same nets, same mask, same pin positions. Asserted
+    // here against a double golden, today, before any of it is implemented. When P1b lands, this
+    // assertion retargets from bb_DDR to the emitted scalar and the golden does not change.
+    // metrics.hpp itself cannot be #included here: it pulls formats.hpp -> ap_int.h/hls_stream.h,
+    // which a pure-g++ tier-1 harness does not have.
+    double hpwl_from_bb = 0.0;
+    for (int net_id = 0; net_id < d.num_nets; net_id++) {
+        const int beg = d.net_ptr[net_id], end = d.net_ptr[net_id + 1];
+        if (beg == end || d.pins[beg].net < 0) continue;   // masked: bb[net] never written
+        hpwl_from_bb += (double)((bb[net_id].mxx - bb[net_id].mnx) +
+                                 (bb[net_id].mxy - bb[net_id].mny));
+    }
+    const double hpwl_ref = golden_hpwl(d);
+    const double hpwl_rel = std::fabs(hpwl_from_bb - hpwl_ref) / hpwl_ref;
+    // Observed 2026-08-28: 0.0 exactly. The bounding box is a min/max over the same float pin
+    // positions, so it is bit-identical, and both sides accumulate in double in net order. The
+    // bound is not 0 only because a future reassociation of the sum (P3) is legitimate.
+    const double H_TOL = 1e-12;
+    if (!(hpwl_rel < H_TOL)) {
+        printf("FAIL [6] HPWL from bb_DDR = %.10e, golden = %.10e, rel = %.3e (tol %.0e)\n",
+               hpwl_from_bb, hpwl_ref, hpwl_rel, H_TOL);
+        ok = false;
+    }
+
     printf("[1] structure  rel_rms=%.3e  max_rel=%.3e   (tol %.0e / %.0e)\n",
            s.rel_rms, s.max_rel, S_RMS_TOL, S_MAX_TOL);
     printf("[2] lut budget rel_rms=%.3e  max_rel=%.3e   (tol %.0e / %.0e)\n",
@@ -331,6 +397,8 @@ int main() {
     printf("[3] zeroing    %d pinless movable nodes, %d non-zero\n", zero_checked, zero_bad);
     printf("[4] masking    %d masked pins perturbed, %d node gradients moved\n",
            (int)pert.masked_pin_idx.size(), mask_bad);
+    printf("[6] hpwl/bbox  from bb_DDR=%.8e  golden=%.8e  rel=%.3e (tol %.0e)\n",
+           hpwl_from_bb, hpwl_ref, hpwl_rel, H_TOL);
     printf("%s\n", ok ? "PASS" : "FAIL");
     return ok ? 0 : 1;
 }
