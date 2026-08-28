@@ -283,11 +283,74 @@ Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
 - [ ] **2. Re-verify `param_scheduler` against the new trace**, feeding **κ**, not dff. Fix what falls
       out: escalating `dff_coef`, the missing `overflow rising` conjunct on the coarse divergence
       test, phase-relative counters, jolt params read from config instead of hardcoded.
-- [ ] **3. Tier-1 harnesses for the uncovered modules** — `node_footprint`, `density_bin` (include the
+- [ ] **3. Tier-1 harnesses for the uncovered modules** — ~~`hpwl_gradient`~~ (**done 2026-08-28**,
+      `test/hpwl_grad_test.cpp`: 5 assertions vs a double-precision transcription of
+      `computeHpwlPartials_CPU`, mutation-tested — see the coverage table in its header. Memory
+      safety is a separate `make test-asan` target because ASan needs `setarch -R` under this WSL2
+      kernel), `node_footprint`, `density_bin` (include the
       real header; delete `density_bin_model`'s own stale copy), `iteration_update`, `bb_reduce`,
       `metrics`, `force_gather` — each against its named sw_only golden. **This is what makes 4–6 safe.**
       For `density_bin`'s cap: the host is now a single `capFixedDensity` (`common/include/Grid.h`, #36)
       and both pl_algo copies already point at it — converge them onto that spec here.
+- [ ] **3b. `hpwl_gradient` optimization — proposed, not implemented.** With coverage in place,
+      the module was profiled against the last real `TARGET=hw` csynth. It is **gather-bound, not
+      compute-bound**, at ~1% of the VC1902: three truly-random `num_pins` `node_pos` gathers per
+      iteration (one of them in `metrics::hpwl_sweep`, which recomputes a bbox `sweep_bbox`
+      already has), `sweep_bbox` II=2 / `sweep_sums` II=3, and pin streams running the 512-bit
+      bus at 128 bits. Seven ranked proposals with costs and per-proposal verification —
+      including Mark's absolute-position `NodePin` contract (**verdict: yes, and better than the
+      24-byte variant**) — in [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]]. Suggested order
+      **P5a → P1b → P1 → P2 → P3 → P4 → P5b → P6**, then spatial replication. P1b's prerequisite
+      HPWL assertion **landed 2026-08-28 as `[6]`** (`aa007a7`); it reduces the `bb_DDR` boxes
+      phase 1 already writes and matches the double golden exactly, and two mutations (perturbed
+      `maxy`, dropped last-net flush) are caught by `[6]` alone.
+      **P5a implemented 2026-08-28** (per-port `num_read_outstanding` / `max_read_burst_length` on
+      the HPWL bundles in `top.cpp`, each tuned to the pattern the burst log shows). Its proposed
+      second half — `sp=` bank tags — **was withdrawn: this platform has ONE memory controller**
+      (`platforminfo` reports only `BRAM` and `MC_NOC0`), so there are no banks to spread across
+      and the absence of `sp=` tags in the build is correct, not an oversight. ⚠️ **P5a's speedup
+      is UNVERIFIED and cannot be verified here** — C-synthesis shows cost, not latency, and the
+      experiment needs Geert's card. It is the cheapest test that can *falsify* the gather-bound
+      diagnosis, so run it before building P1/P2 on top of that diagnosis.
+      **P1b implemented 2026-08-28** (`21adad6`): `hpwl_gradient` emits HPWL from a separate
+      `hpwl_reduce` over `num_nets` (II 8, 221k cycles) — **not** an accumulator inside
+      `sweep_bbox`, which was built first and cost II 2→7. `metrics::hpwl_sweep` has the same
+      double-accumulator pathology (II≈7 over `num_pins`), so this is ~30× cheaper than the pass
+      it replaces. Cost: LUT +2.4%, BRAM 0, timing unchanged. ⚠️ **New precondition — `bb_DDR`
+      must be zeroed before first use** (`host_interface.hpp` NetBBox; both `Driver.cpp` sites do
+      it). Still TODO: delete `metrics::hpwl_sweep` and switch the host off `hostHPWL` — left in
+      place on purpose, `metrics` is the only thing `runMetrics()` covers.
+      ⚠️ **`pl/Makefile` did not track header dependencies until `21adad6`** — a module-header
+      edit left the stale `.xo` and `make` said "Nothing to be done". Two measurements in this
+      session were silently stale. Any pre-2026-08-28 synthesis claim that followed a
+      header-only edit is unverified.
+      **P1 (fuse phases 1+2) INVESTIGATED AND BLOCKED 2026-08-28 — do not just retry it.** Two
+      measured blockers: (a) adaptec1's unmasked nets have **median degree 2** (53.3% are
+      degree-2, mean 4.28), so the no-stream version's per-net inner drain loop pays pipeline
+      fill/drain on a 166-deep datapath and comes out ~4.4M cycles against phase 2's current
+      2.8M — slower than what it replaces; (b) the `hls::stream` DATAFLOW version puts
+      `hls_stream.h` into the module, which compiles under g++ only with `-I$XILINX_HLS/include`
+      (breaks the tier-1 no-Vitis contract) **and** the csim stream is unbounded, so the harness
+      could not detect the undersized-FIFO/deadlock risk that is P1's whole danger.
+      **Recommendation: skip to P2** — it delivers P1's gather saving without a FIFO, without a
+      new buffer, and fixes phases 1+2 *and* `metrics` at once.
+      **P2 LANDED 2026-08-28 (`ed25f1a`) — the main win of this thread.** `NodePin` now carries
+      the ABSOLUTE pin position (`{x,y}` replacing `{off_x,off_y}`), with the static offsets in a
+      new upload-once `PinOffset[]` and a new `modules/refresh_pin_pos.hpp` folding v_k in once
+      per iteration (`MODE_REFRESH_PINS`, II=1). **All three random `node_pos` gathers left
+      `hpwl_gradient`, and `metrics::hpwl_sweep`'s went too.** Burst log after: `sweep_bbox`,
+      `sweep_sums`, `seg_reduce`, `metrics` all burst; **gmem0 no longer appears in the HPWL
+      path**. `sweep_bbox` depth **146 → 73** (DDR latency out of the pipeline); IIs unchanged;
+      LUT +2.4%, BRAM/DSP/timing unchanged. Tier-1 output **bit-identical** before/after.
+      Note the proposal's "NodePin stays 16 B so it is free" was half right — the offsets still
+      need a device home (24 B/pin either way); the win is the hot/cold split.
+- [ ] **↪ pl_algo — finish P2: the host must issue `MODE_REFRESH_PINS`.** The device side is
+      built and verified but `Driver.cpp`'s `eval_gradients` does not yet call it before
+      `MODE_HPWL_GRAD` / `MODE_METRICS`. **Until it does, an on-device run silently evaluates the
+      gradient at stale pin positions** — no crash, no obvious symptom. Small change; do it
+      before any sw_emu run of the HPWL path. Then P3 (II fixes) is the next lever —
+      re-read the P1b lesson first: HLS cannot see a rotating array index, partial accumulators
+      need STATIC indices via unrolling. → [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]]
 - [ ] **4. Close the datapath divergences** under that coverage: `node_footprint.hpp` still does the
       in-die shift #11a deleted; it lacks #11b's movable-macro weight; `iteration_update.hpp` clamps to
       `[0, die−w]` where sw_only clamps to the √2-expanded box; **pl_algo has no fillers at all**.
@@ -316,9 +379,17 @@ no change — it is the snapshot and the HPWL metric that would otherwise inheri
 This is exactly the class of divergence that `sched_verify` cannot catch (it checks the schedule,
 not the geometry), so it needs a step-3 harness or it will not be noticed.
 
-**Open questions for Mark** (report §10): does "the same algorithm" include phase 2 and backtracking,
-or is v1 "phase-1 GP, device-resident, bit-comparable"? Pin pl_algo to a named sw_only commit rather
-than chasing HEAD? Pin sw_only to grid 1024 for the A/B, or build pl_algo per-design with `-DPL_GRID`?
+**Decisions (Mark, 2026-08-28)** — report §10's first two open questions are now settled:
+- **v1 = phase-1 GP, device-resident, bit-comparable. NO phase 2, NO backtracking.** Both are
+  deferred until a measured need appears ("worry about them later, if we need to"). This relaxes
+  step 6: phase-2 re-entrancy is no longer a v1 requirement (leave room for it, don't build it).
+  The no-backtracking call also makes P1b's by-product HPWL unconditionally safe (Report #20 P1b's
+  "take HPWL from the accepted trial" caveat only bit if backtracking existed).
+- **pl_algo pins to up-to-date sw_only** (the frozen golden HEAD). The freeze makes this cheap and
+  it is what makes `sched_verify` meaningful again — restore `dumpScheduleTrace()` against it (step 1).
+
+**Still open** (report §10, third question): pin sw_only to grid 1024 for the A/B, or build pl_algo
+per-design with `-DPL_GRID`?
 
 ---
 
