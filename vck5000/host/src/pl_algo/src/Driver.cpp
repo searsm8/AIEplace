@@ -1038,6 +1038,18 @@ int runPlacement(const PlacementConfig& cfg,
         b_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
         b_lut.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
+        // ---- P2: refresh both pin arrays to THIS probe before any sweep reads them ----
+        // NodePin now carries the absolute pin position (not a static offset), so it must be
+        // re-folded from node_pos (just synced above) + the static offsets on every new probe.
+        // Skipping this does not crash -- it silently evaluates the gradient at the previous
+        // probe. Device-to-device (b_pin/b_npin stay on the card); the r.wait() orders it before
+        // the sweep. See host_interface.hpp NodePin and refresh_net_pins in hpwl_gradient.hpp. Meow.
+        { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
+                           b_box, b_bd, b_din, b_dout, b_poff, b_npoff,
+                           inv_gamma, inv_lut_step, lut_size, num_nets, M, num_npins,
+                           N, cfg.bin_w, cfg.bin_h, cfg.target_density, 0, 0, (int)MODE_REFRESH_PINS);
+          r.wait(); }
+
         // ---- HPWL gradient at probe -> b_grad, read to host ----
         { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
                            b_box, b_bd, b_din, b_dout, b_poff, b_npoff,

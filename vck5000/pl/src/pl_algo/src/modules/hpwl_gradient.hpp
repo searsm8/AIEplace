@@ -44,9 +44,11 @@ namespace plalgo {
 
 constexpr int HPWL_GRADIENT_LUT_MAX = 1024;  // max LUT entries cached on-chip
 
-// Partial accumulators for the HPWL by-product sum in phase 1. Power of two so the rotation
-// is a mask, not a modulo. 8 spreads dependent double adds >= 16 pins apart -- see sweep_bbox.
-constexpr int HPWL_PARTIALS = 8;
+// Parallel accumulator lanes for the HPWL by-product reduction: the UNROLL factor, i.e. the
+// number of physical double-adders instantiated, each summing an independent slice of the nets.
+// Power of two so lane selection is a mask, not a modulo. 8 keeps each lane's dependent double
+// adds >= 8 nets apart, which hides the add latency -- see hpwl_reduce. Meow.
+constexpr int HPWL_LANES = 8;
 
 // compute exp(-d/gamma) via the cached LUT (d >= 0). Beyond the table -> ~0 (underflow).
 // Force-inline (the sweeps call it 4x/iteration): left as a shared instance HLS
@@ -63,7 +65,7 @@ static inline float hpwl_lut_exp(const float lut_BRAM[HPWL_GRADIENT_LUT_MAX], in
 
 // NOTE: takes no node_pos. Pin records carry their absolute position (P2), so every loop here
 // is a pure sequential stream -- the random gathers this used to do are now a single pass in
-// refresh_pin_pos.hpp, which must run first.
+// refresh_net_pins / refresh_node_pins (below in this file), which must run first.
 static void hpwl_gradient(const int*     net_ptr_DDR,    // [num_nets+1] CSR (unused: kept for ABI)
                     const NodePin* net_pins_DDR,       // [num_pins] NET-major (phase 1&2)
                     const NodePin* node_pins_DDR,      // [num_node_pins] NODE-major (phase 3)
@@ -139,10 +141,10 @@ sweep_bbox:
     // That is ~30x cheaper than the pass it replaces (metrics::hpwl_sweep, ~944k pins at II 7
     // = 6.6M cycles), because num_nets < num_pins and the read is sequential and burstable.
     //
-    // Unrolled HPWL_PARTIALS-wide with STATIC accumulator indices -- static is what makes each
+    // Unrolled HPWL_LANES-wide with STATIC accumulator indices -- static is what makes each
     // partial a register rather than a memory, so the 8 dependence chains run in parallel.
     // Measured cost of this block: LUT +7941 (+2.4% of device), FF +5321, BRAM 0, timing slack
-    // unchanged. Nearly all of that is the 8 parallel double adders, so HPWL_PARTIALS is the
+    // unchanged. Nearly all of that is the 8 parallel double adders, so HPWL_LANES is the
     // knob if LUT gets tight -- halving it roughly halves the adder cost and doubles this
     // loop's cycles, which is noise against the 6.6M it saves.
     //
@@ -150,28 +152,43 @@ sweep_bbox:
     // sweep_bbox, so they keep whatever the buffer held; zeroed, they contribute a zero-extent
     // box and drop out of the sum for free. One host-side memset at allocation is enough -- the
     // net set is static, so masked entries stay zero for the whole run. See host_interface.hpp.
-    double hpwl_part[HPWL_PARTIALS];
+    double hpwl_part[HPWL_LANES];
 #pragma HLS ARRAY_PARTITION variable=hpwl_part complete dim=1
 hpwl_init:
-    for (int i = 0; i < HPWL_PARTIALS; i++) {
+    for (int i = 0; i < HPWL_LANES; i++) {
 #pragma HLS UNROLL
         hpwl_part[i] = 0.0;
     }
+    // The two loops together just walk every net 0..num_nets-1: the outer strides by
+    // HPWL_LANES, the inner (fully unrolled) covers all HPWL_LANES of one stride, so
+    // idx = n + k enumerates them all. The pragmas only do their work BECAUSE of this shape: Meow.
+    //   PIPELINE (outer) issues one stride per cycle -- but a stride is HPWL_LANES adds, so
+    //     the pipeline only closes if those adds don't chain, which the split below guarantees.
+    //   UNROLL (inner) replicates the datapath into HPWL_LANES physical double-adders, and --
+    //     the load-bearing part -- makes k a COMPILE-TIME constant, so hpwl_part[k] is a distinct
+    //     register per lane, not an indexed memory. Each lane then has its own carried add whose
+    //     next use is HPWL_LANES strides away, hiding the double-add latency. A dynamic index
+    //     (hpwl_part[n % 8]) would defeat this -- HLS models the array as memory and reports one
+    //     shared store->load recurrence regardless of the rotation. Static index is the whole trick.
 hpwl_reduce:
-    for (int n = 0; n < num_nets; n += HPWL_PARTIALS) {
+    for (int n = 0; n < num_nets; n += HPWL_LANES) {
 #pragma HLS PIPELINE
-        for (int k = 0; k < HPWL_PARTIALS; k++) {
+        for (int k = 0; k < HPWL_LANES; k++) {
 #pragma HLS UNROLL
             const int idx = n + k;
-            if (idx < num_nets) {
-                const NetBBox b = bb_DDR[idx];
+            if (idx < num_nets) {                          // tail guard: num_nets need not divide
+                                                           // HPWL_LANES; static k -> per-lane
+                                                           // predication, not a data-dependent branch
+                const NetBBox b = bb_DDR[idx];             // sequential in idx -> burstable
+                // net's HPWL contribution = half-perimeter = x-extent + y-extent. Sum in double,
+                // net order, matching metrics so the harness bit-comparison holds (narrowed at *out).
                 hpwl_part[k] += (double)((b.mxx - b.mnx) + (b.mxy - b.mny));
             }
         }
     }
     double hpwl_total = 0.0;
 hpwl_combine:
-    for (int i = 0; i < HPWL_PARTIALS; i++)
+    for (int i = 0; i < HPWL_LANES; i++)
         hpwl_total += hpwl_part[i];
     *out_hpwl_DDR = (float)hpwl_total;              // narrow only at the boundary, as metrics does
 
@@ -256,6 +273,66 @@ seg_reduce:
     if (cur_node >= 0) {                             // flush last node
         coord_t g; g.x = ax; g.y = ay;
         node_grad_DDR[cur_node] = g;
+    }
+}
+
+// ===================================================================================
+// Pin-position refresh (P2) -- a subroutine of THIS compute unit, run once per iteration
+// before the sweeps above. It folds the current probe v_k into both pin arrays so every
+// sweep reads a pin's absolute position straight out of its NodePin record instead of
+// gathering node_pos[node_idx]. Those gathers WERE the measured bottleneck (REPORT_20 §2.2:
+// gmem0 was one of only three ports HLS could infer no burst for; §2.5 estimated the module
+// ran ~4.7x above its compute floor because of them). Concentrating the gather here buys:
+//   - it happens ONCE per iteration instead of three times (phases 1, 2, and metrics);
+//   - the loop has no dependent float datapath, so a stalled read stalls nothing but itself,
+//     and its port can be tuned (deep outstanding queues, top.cpp) purely for gather throughput;
+//   - it is a self-contained producer, so it can later overlap with the density solve in a
+//     DATAFLOW region -- impossible for a gather buried in an accumulator recurrence.
+// These were a separate refresh_pin_pos.hpp; they are only ever the prep pass for the sweeps
+// here, never called independently, so they live with the CU they feed. Meow.
+//
+// MUST RUN BEFORE THE SWEEPS, AT THE SAME PROBE. The arrays it writes are per-iteration state
+// carrying v_k; running a sweep without refreshing first evaluates it at stale positions, which
+// does not crash and does not look wrong -- it silently optimizes the previous iterate. See
+// host_interface.hpp NodePin.
+
+// NET-major refresh. node_idx is arbitrary here (pins are ordered by net), so node_pos_DDR is a
+// TRUE random gather -- the one that survives P2, and the reason gmem0 carries a deep
+// outstanding-request queue (top.cpp). Everything else is sequential and burstable: the record
+// is read, patched and written back in place. Meow.
+static void refresh_net_pins(const coord_t*   node_pos_DDR,   // [num_nodes] current probe v_k
+                             const PinOffset* pin_off_DDR,    // [num_pins] static, upload-once
+                             NodePin*         net_pins_DDR,   // [num_pins] patched in place
+                             int              num_pins) {
+refresh_net:
+    for (int p = 0; p < num_pins; p++) {
+#pragma HLS PIPELINE II=1
+        NodePin r = net_pins_DDR[p];
+        const PinOffset o = pin_off_DDR[p];
+        const coord_t   c = node_pos_DDR[r.node_idx];   // random READ-ONLY gather
+        r.x = c.x + o.off_x;
+        r.y = c.y + o.off_y;
+        net_pins_DDR[p] = r;
+    }
+}
+
+// NODE-major refresh. node_pins is sorted ascending by node_idx (Packer.cpp), so node_idx is
+// MONOTONE and this gather is forward-only with good page locality -- materially cheaper than
+// the net-major one above, which is why the two are separate loops rather than one parametrized
+// pass: they have different memory behaviour and want different port settings. Meow.
+static void refresh_node_pins(const coord_t*   node_pos_DDR,     // [num_nodes] current probe v_k
+                              const PinOffset* node_pin_off_DDR, // [num_node_pins] static
+                              NodePin*         node_pins_DDR,    // [num_node_pins] in place
+                              int              num_node_pins) {
+refresh_node:
+    for (int p = 0; p < num_node_pins; p++) {
+#pragma HLS PIPELINE II=1
+        NodePin r = node_pins_DDR[p];
+        const PinOffset o = node_pin_off_DDR[p];
+        const coord_t   c = node_pos_DDR[r.node_idx];   // monotone, forward-only
+        r.x = c.x + o.off_x;
+        r.y = c.y + o.off_y;
+        node_pins_DDR[p] = r;
     }
 }
 

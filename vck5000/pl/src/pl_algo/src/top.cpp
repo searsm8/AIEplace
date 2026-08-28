@@ -21,16 +21,14 @@
 
 #include "host_interface.hpp"
 #include "formats.hpp"
-#include "modules/hpwl_gradient.hpp"
-#include "modules/refresh_pin_pos.hpp"
+#include "modules/hpwl_gradient.hpp"   // also defines refresh_net_pins / refresh_node_pins (MODE_REFRESH_PINS)
 #include "modules/density_bin.hpp"
 #include "modules/dct_1d.hpp"
 #include "modules/transpose.hpp"
 #include "modules/dct_transpose.hpp"
 #include "modules/spectral.hpp"
 #include "modules/force_gather.hpp"
-#include "modules/iteration_update.hpp"
-#include "modules/memory_writer.hpp"
+#include "modules/iteration_update.hpp"   // also defines memory_writer (DATAFLOW consumer half)
 #include "modules/metrics.hpp"
 #ifdef PL_FIELD_SOLVE
 #include "modules/field_solve_pl.hpp"   // PL-only field solve (small-grid build only)
@@ -290,7 +288,7 @@ void top(
     else if (mode == MODE_REFRESH_PINS) {
         // P2: fold v_k into both pin arrays. The net-major pass is the one real random gather
         // left in the HPWL path; the node-major one is monotone. Separate loops on purpose --
-        // see refresh_pin_pos.hpp.
+        // see refresh_net_pins / refresh_node_pins in hpwl_gradient.hpp.
         refresh_net_pins(node_pos, pin_off, pins, net_ptr[num_nets]);
         refresh_node_pins(node_pos, npin_off, npins, num_npins);
     }

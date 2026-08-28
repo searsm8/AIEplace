@@ -15,7 +15,7 @@
 //
 // Position convention (matches sw_only State):
 //   u = committed "node" position; v = look-ahead "probe" position. The gradient
-//   pipeline (hpwl_CU, density solve) is evaluated at v, so v_k is the step anchor
+//   pipeline (hpwl_gradient, density solve) is evaluated at v, so v_k is the step anchor
 //   and node_box carries it (node_box[n].{x,y} == v_k, {w,h} == cell size). u_k is a
 //   separate committed buffer. This call emits u_{k+1} (owned Nesterov state) and
 //   STREAMS v_{k+1} to the Memory Writer, which is the single writer of the canonical
@@ -27,7 +27,10 @@
 // the host policy. Movable nodes only ([0,M)); fixed nodes never move.
 //
 // v1 is a straightforward per-node pass (natural coord_t pointers, like force_gather).
-// It is the producer half of a DATAFLOW pair with memory_writer (top.cpp wires them).
+// It is the producer half of a DATAFLOW pair with memory_writer, which lives at the bottom
+// of this file: the two were separate .hpp files but memory_writer is the consumer tail of
+// this exact stage (top.cpp already fuses them in one DATAFLOW function), never called on its
+// own, so keeping it here removes a file that was never an independent module. Meow.
 
 #include "../formats.hpp"
 #include "../host_interface.hpp"
@@ -79,6 +82,22 @@ node_loop:
         coord_t vo; vo.x = clampf(vx, 0.0f, mx); vo.y = clampf(vy, 0.0f, my);
         u_out[n] = uo;          // commit u_{k+1} to the owned Nesterov state
         v_out.write(vo);        // stream v_{k+1} to the Memory Writer
+    }
+}
+
+// memory_writer -- the SINGLE writer of the canonical node-coordinate buffer, and the consumer
+// half of the DATAFLOW pair above. The host loads coords once at startup; thereafter each
+// iteration iteration_update streams v_{k+1} here and this commits it into the coords buffer the
+// next iteration's gradient pipeline reads. Keeping coords single-writer is what lets the whole
+// iteration fuse into one kernel later; for v1 it is one stage of MODE_ITERATION_UPDATE.
+// v1 layout: one movable node per coord_t (see host_interface.hpp) = | x | y |. Meow.
+static void memory_writer(coord_t* coords,               // [M] canonical coords (v), gmem9
+                          hls::stream<coord_t>& v_in,    // v_{k+1} from iteration_update
+                          int num_movable) {
+write_back:
+    for (int n = 0; n < num_movable; n++) {
+#pragma HLS PIPELINE
+        coords[n] = v_in.read();
     }
 }
 

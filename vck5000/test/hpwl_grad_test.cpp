@@ -66,8 +66,7 @@
 // only movable gradient-bearing pins). Those rules are replicated, not called, for the same
 // reason as the golden -- so a Packer change must be mirrored here.
 
-#include "modules/hpwl_gradient.hpp"
-#include "modules/refresh_pin_pos.hpp"
+#include "modules/hpwl_gradient.hpp"   // refresh_net_pins / refresh_node_pins now live here too
 #include <vector>
 #include <algorithm>
 #include <random>
@@ -163,7 +162,7 @@ static Design build_design(unsigned seed) {
     return d;
 }
 
-// The device-side refresh (refresh_pin_pos.hpp) is what makes the pin records carry absolute
+// The device-side refresh (refresh_net_pins / refresh_node_pins in hpwl_gradient.hpp) is what makes the pin records carry absolute
 // positions. The harness calls the REAL module rather than folding offsets in itself, so a bug
 // in the refresh shows up in the gradient exactly as it would on device.
 static void refresh(Design& d) {
@@ -424,7 +423,7 @@ int main() {
         ok = false;
     }
     // The value the module actually EMITS. Looser than the bb_DDR cross-check for two reasons,
-    // both deliberate: it is summed over HPWL_PARTIALS rotating accumulators (so the addition
+    // both deliberate: it is summed over HPWL_LANES rotating accumulators (so the addition
     // order differs from net order), and it is narrowed to float on the way out, exactly as
     // metrics.hpp does. Float has ~7 decimal digits, so the narrowing alone costs ~6e-8.
     const double hpwl_emit_rel = std::fabs((double)hpwl_emitted - hpwl_ref) / hpwl_ref;
