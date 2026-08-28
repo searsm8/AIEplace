@@ -21,10 +21,11 @@ disagree, `DATAFLOW.md` wins.
   record types.
 - `src/formats.hpp` -- inter-stage data-flow formats (128-bit beat/AXIS layouts, HLS types).
 - `src/modules/*.hpp` -- one module per diagram block:
-  - *datapath, wired into `top.cpp`*: `hpwl_gradient` (`hpwl_CU`), `density_bin`,
+  - *datapath, wired into `top.cpp`*: `hpwl_gradient` (also holds the `refresh_net_pins` /
+    `refresh_node_pins` prep pass for `MODE_REFRESH_PINS`), `density_bin`,
     `node_footprint` (shared clamped-footprint geometry), `dct_1d`, `transpose`,
-    `dct_transpose`, `spectral`, `force_gather`, `iteration_update`, `memory_writer`,
-    `metrics`.
+    `dct_transpose`, `spectral`, `force_gather`, `iteration_update` (also holds `memory_writer`,
+    its DATAFLOW consumer half), `metrics`.
   - *control, built + verified but not yet wired into `top.cpp`*: `bb_reduce`,
     `param_scheduler` (see Status).
   - *PL-only alternates*: `fft_pl` + `field_solve_pl` -- the whole density solve with no

@@ -1,8 +1,9 @@
 # pl_algo data flow
 
-> **Block diagrams:** [[DIAGRAM_iteration.md]] (the per-iteration loop) and
-> [[DIAGRAM_density.md]] (the density branch expanded). This file stays authoritative
-> for the contract; the diagrams follow it.
+> **Block diagrams** now live in `.claude/2_ARTIFACTS/diagrams/`:
+> [[DIAGRAM_pl_overview.md]] (the whole PL region, simplified), [[DIAGRAM_iteration.md]]
+> (the per-iteration loop) and [[DIAGRAM_density.md]] (the density branch expanded).
+> This file stays authoritative for the contract; the diagrams follow it.
 
 One placement iteration, as data moves through the PL modules. Byte/word layouts are
 defined precisely in `src/formats.hpp`; this file is the narrative. All transport uses a
@@ -18,10 +19,42 @@ Hardware grid is **1024 x 1024**. Each real matrix (bin density, Ex, Ey) is 4 MB
 complex FFT scratch matrix is 8 MB, so all matrices are **DDR-resident** and streamed
 through the PL in row tiles; on-chip BRAM/URAM holds only the working tiles.
 
+## ⚠️ Pin records carry ABSOLUTE positions, and must be refreshed every iteration (P2, `ed25f1a`)
+
+`NodePin` is `{node_idx, x, y, net}` — `x,y` are the pin's **absolute position**, not the static
+offset it used to hold. The static offsets live in a parallel upload-once `PinOffset[]`.
+
+**The pin refresh must run at every new probe, before the gradient and before metrics.**
+`refresh_net_pins` / `refresh_node_pins` (in `hpwl_gradient.hpp` — they are the prep pass for
+that CU, not a standalone module) implement `MODE_REFRESH_PINS`, which folds `node_pos` (v_k) +
+`PinOffset[]` into both pin arrays. Skipping it does
+not crash and produces no obvious symptom — it silently evaluates the gradient at the *previous*
+iterate's positions. Per-iteration order is therefore: **refresh → HPWL gradient / metrics**.
+
+Why: this removed the three random `node_pos` gathers from `hpwl_gradient` phases 1/2/3 and the
+fourth from `metrics::hpwl_sweep`. Those gathers were the measured bottleneck (they were the only
+ports HLS could infer no burst for). All four loops now stream and burst; `sweep_bbox`'s pipeline
+depth halved 146 → 73. The one remaining random gather is inside `refresh_net_pins`, deliberately
+concentrated there because it has no float datapath behind it and can be tuned on its own. The
+node-major refresh is monotone and much cheaper. Full evidence:
+[[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]].
+
+**Not yet wired:** the host does not issue `MODE_REFRESH_PINS` in `eval_gradients` yet. Do that
+before any sw_emu run of the HPWL path.
+
+**In the resident loop this becomes Memory Writer's job** — it already owns writing v_{k+1}, and
+it is the only place that knows a node moved. That is why the offsets must be device-resident.
+
+`hpwl_gradient` also now emits total HPWL as a by-product of its bbox pass (P1b, `21adad6`), so
+`metrics::hpwl_sweep` is redundant and can be deleted once its consumer switches over. That path
+requires `bb_DDR` to be **zeroed before first use** (masked nets are never written; zeroed, they
+contribute a zero-extent box). Both `Driver.cpp` allocation sites memset it.
+
 ## Stage-by-stage
 
 | # | Stage | Producer -> Consumer | Format |
 |---|-------|----------------------|--------|
+| 0 | **Pin refresh** | node_pos + PinOffset -> `refresh_pin_pos` -> net_pins, node_pins | DDR in place, `NodePin{node_idx,x,y,net}` |
 | 1 | Node coords | (Memory Writer / host) -> HPWL Mgr, Density Mgr | DDR, 1 beat/node `{x,y,_,_}` |
 | 2 | HPWL gradient | HPWL Mgr -> Iteration Update | DDR, 1 beat/node `{gx,gy,_,_}` (scatter-accumulated) |
 | 2a| HPWL packet | HPWL Mgr <-> AIE HPWL graph | stream: pin coords out `{x,y,...}`, partials back `{dW/dx,dW/dy,...}` |
@@ -48,7 +81,7 @@ once. This removes ~8 XRT kernel-launches/iter (~50-100us each) + the schedule s
 the reason the schedule was moved on-chip (residency, not speed).
 
 **Per-iteration order (one gradient eval per iteration, at the current probe v_k):**
-1. HPWL gradient: `hpwl_CU(v_k, inv_gamma_k)` -> g_hpwl        (inv_gamma_k from scheduler, iter k-1)
+1. HPWL gradient: `hpwl_gradient(v_k, inv_gamma_k)` -> g_hpwl        (inv_gamma_k from scheduler, iter k-1)
 2. Density solve: bin_scatter(v_k) -> DCT/IDCT/IDXST via AIE FFT -> `force_gather` -> g_density
 3. `bb_reduce(v_k, v_{k-1}, g_hpwl, g_density, g_total_{k-1}, precond, lambda_k)`
    -> pos_norm_sq, grad_norm_sq, and materializes g_total_k (= g_total_prev for iter k+1)
@@ -87,9 +120,10 @@ iteration, then sw_emu-verify the trajectory vs the golden (needs the Vitis/AIE 
 > could see the coupling. So the fixture cannot be regenerated, and `sched_verify` passes against a
 > 2026-07-18 golden and always will. It is not evidence about the current algorithm.
 >
-> Also: only 3 of 17 modules are covered at tier 1 (`fft_pl`, `field_solve_pl`, `param_scheduler` are
-> the only ones a harness `#include`s; `density_bin_model.cpp` holds its own stale copy of
-> `node_footprint`), so every module Stage 5 must change is unverifiable without a full sw_emu cycle.
+> Also: only 4 of 18 modules are covered at tier 1 (`fft_pl`, `field_solve_pl`, `param_scheduler`,
+> and `hpwl_gradient` as of 2026-08-28 — the only ones a harness `#include`s; `density_bin_model.cpp`
+> holds its own stale copy of `node_footprint`), so most modules Stage 5 must change are still
+> unverifiable without a full sw_emu cycle.
 >
 > Restore the trace + the tier-1 coverage first. Full assessment, including the known datapath
 > divergences and the structural gaps (second movable-only density map for the convergence overflow,
