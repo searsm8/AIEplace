@@ -113,11 +113,17 @@ _ROWS = [
 #     (run_placement_nesterov.py:173/180-181) runs under ps.zero_macro_grad=True (drops
 #     is_mov_macro nodes, evaluator.py:26-45) and reassembles node_pos as
 #     mov_node_pos[mov_lhs:mov_rhs] + data.node_pos[mov_rhs:] -- the filler positions appended
-#     past mov_rhs by get_mov_node_info() are sliced off. Compare against sw_only's
-#     "macro-excluded" number (Placer::computeOverflow(clamp=false, include_fillers=false,
-#     exclude_macros=true); logged as [OVFW-DIAG] macro-excluded=, or the "Macro-Excluded
-#     Overflow (exact, no fillers)" summary row on mixed-size runs), NOT "Final Overflow
-#     (exact, +fillers)" -- that one is both filler- and macro-INCLUDED.
+#     past mov_rhs by get_mov_node_info() are sliced off. XPlace also evaluates this checkpoint
+#     AFTER restoring its best solution (ps.get_best_solution(), run_placement_nesterov.py:172-179),
+#     not at the last iterated placement.
+#   - Compare against the "Phase 1 HPWL (exact, all nets)" + "Phase 1 Overflow (macro-excluded,
+#     exact, no fillers)" summary rows, or the `[PHASE] ... hpwl_exact= ovfw_macro_excluded=` log
+#     line. Those are measured at our own restored phase-1 best with the macros still movable --
+#     the same checkpoint. NOT "Final Overflow (exact, +fillers)" (filler- and macro-INCLUDED),
+#     and NOT the "Macro-Excluded Overflow" row, which only appears on runs that never reached
+#     phase 2: once the macros are frozen they are FIXED, so excluding "movable macros" excludes
+#     nothing and that row silently equals the plain exact overflow. (Fixed 2026-08-27; runs
+#     before that date logged the post-phase-2 value under the macro-excluded label.)
 #
 # Source: local XPlace runs 2026-07-17, `--dataset mms --mixed_size True --seed 42`,
 # ~/phd/Xplace/result/<ts>_<design>/log/test.log. Same seed as our sweeps.
@@ -405,7 +411,9 @@ def to_markdown():
                       "- **Mixed-GP** = phase 1, macros movable — NOT the `GP Stop!` line. Its "
                       "overflow EXCLUDES both fillers and movable macros (XPlace's "
                       "zero_macro_grad at this checkpoint); compare against sw_only's "
-                      "macro-excluded overflow, not \"Final Overflow (exact, +fillers)\". "
+                      "\"Phase 1 Overflow (macro-excluded, exact, no fillers)\" row — the "
+                      "post-phase-2 \"Macro-Excluded Overflow\" row is not macro-excluded at "
+                      "all, since the macros are FIXED by then. "
                       "See `_XPLACE_MMS_MIXED_GP`.",
                       "- **post-GP / post-LG / post-DP** = the end of the flow (phase 2, then "
                       "legalization, then detailed placement). **post-DP HPWL is the headline "
