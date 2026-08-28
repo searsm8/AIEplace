@@ -26,7 +26,7 @@ BUILD     = build
 # match that run's config_used.json, or the stop check will fail against the wrong threshold.
 TRACE ?= fixtures/schedule_trace_adaptec1.csv
 
-HARNESSES = density_model density_bin_model fft_pl_test field_solve_test sched_verify
+HARNESSES = density_model density_bin_model fft_pl_test field_solve_test hpwl_grad_test sched_verify
 BINS      = $(addprefix $(BUILD)/, $(HARNESSES))
 
 .PHONY: all test clean
@@ -36,9 +36,27 @@ $(BUILD)/%: %.cpp
 	@mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -o $@
 
+# hpwl_grad_test's assertion [5] is a bounds check, not a value check: dropping either net-mask
+# `continue` in hpwl_CU leaves the gradient BIT-IDENTICAL but indexes bb_DDR[-1] and then
+# lut_BRAM[negative], so only a sanitizer can see it. That needs its own target because ASan
+# does not run out of the box here -- WSL2's ASLR entropy breaks its shadow mapping and the
+# binary spins on AddressSanitizer:DEADLYSIGNAL, so it is run under `setarch -R`. Kept OUT of
+# `make test` so the default suite stays fast and needs nothing but g++.
+#   make test-asan
+ASAN_FLAGS = -std=c++17 -O1 -g -fsanitize=address,undefined
+
+.PHONY: test-asan
+test-asan: $(BUILD)/hpwl_grad_test_asan
+	@echo "=== hpwl_grad_test (address,undefined) ==="
+	@setarch $$(uname -m) -R $(BUILD)/hpwl_grad_test_asan
+
+$(BUILD)/hpwl_grad_test_asan: hpwl_grad_test.cpp
+	@mkdir -p $(BUILD)
+	$(CXX) $(ASAN_FLAGS) $(INCLUDES) $< -o $@
+
 test: $(BINS)
 	@fail=0; \
-	for h in density_model density_bin_model fft_pl_test field_solve_test; do \
+	for h in density_model density_bin_model fft_pl_test field_solve_test hpwl_grad_test; do \
 		printf '\n=== %s ===\n' "$$h"; \
 		$(BUILD)/$$h || fail=1; \
 	done; \
