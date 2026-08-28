@@ -16,6 +16,8 @@ removed — it had been sitting in both files since 2026-07-30).
 
 **Compacted 2026-08-07:** the full pre-compaction text of the still-OPEN tasks (#1, #3, #6, #7, #9, #10, #11, #14, #15, #17, #19, #20, #21, #22, #23, Parked, Improvements) - first section below.
 
+**Closed 2026-08-27:** **#39** — position-dump **format v2**: the channels that make a placement GIF a diagnostic rather than a movie. **Started by checking the premise, and half of it was already built** — `default_config.toml` described the dump as "positions only", but the static record already carried x/y/w/h and a **six**-way kind byte, `names_gen<N>.txt` already gave stable cross-frame IDs (#14, 08-17), the manifest already indexed frame → iteration, `generate_viz.py` already burned HPWL/overflow/α/λ into every frame, and `BkSteps` (rejected backtracking trials) was already column 6 of `iterations.dat`. That stale comment is now corrected. **Four channels were genuinely missing** and landed, each its own file per generation, in lockstep with the frame stream: `u4 net_degree` on the static record; `probe_gen<N>.bin` (Nesterov **v_k**, where HPWL/overflow/best-solution are all actually measured — #32); `density_gen<N>.bin` (+ opt-in `field_gen<N>.bin`) read from the solver's OWN `Bin::total_overlap`/`eField`, box-averaged by an integer factor to ≤256×256; and `forces_gen<N>.bin`, the per-node wirelength/density gradient split + preconditioner. The force split is captured **inside `combineGradients()` and nowhere else** — `g -= electro` is destructive, so that one expression is the only point in the run where the two terms exist separately; both are stored as gradient contributions so `wl + den == next.probe_grad` is an exact checkable invariant. Three frames per run (`legalized`, `reseeded`, `best_solution`) sit where the map or the gradients describe a *different* placement, so their records are zero-filled and flagged in a new per-frame `frame_valid` bitmask rather than omitted — omitting would break the lockstep that makes frame index a seek key. **Bit-identical with every channel ON**, which is the claim that mattered and is stronger than `make test-regress` alone (the frozen configs dump nothing): `mgc_fft_a` (126 frames, all 5 channels) and `mms/adaptec1` (131 frames, **3 generations**, grid 512→256 box-average) both reproduce their committed `iterations.dat` row-for-row and their `.def` sha256 exactly. New tracked **`tools/check_viz_dump.py`** asserts stream lockstep from the reader's side plus four structural invariants that catch a misaligned record (fillers have net degree 0; fillers have zero wirelength gradient; precond ≥ 1.0; density mass constant within a generation) and the `frame_valid` table exactly — **negative-tested**: a 4-byte truncation and a one-float stride shift both exit 1. `generate_viz.py` gains `--underlay density`, `--color-by force|precond`, `--positions probe`, and now builds the static dtype **from the manifest**, so one reader opens both v1 and v2. One defect found by looking at the output: the channel label was appended to a caption line already ~99 chars on MMS and ran off the canvas, clipping `color=force=stale` to `color=force` — captioning a stale frame as measured, the exact failure the label exists to prevent; it now takes its own header line. **Disk is the live constraint**: forces are 20 B/node/frame and dominate, so the 14-design suite at cadence 5 is **32.2 GB all-channels vs 9.6 GB with `dump_forces = false`**, against 40 GB free — each run now prints its own MB/frame at startup. Instrumentation, not behaviour, so within the freeze. → [[_NEW_REPORT_39_dump_v2_channels_20260827.md]]
+
 **Closed 2026-08-26:** **#30** — legalization + detailed placement folded into `dse.py`, and the standing scoring pipeline collapsed onto it. All four items done: LG+DP runs in `dse.py` by default (`--gp-only` opts out) via a new per-design `lgdp.py::legalize`; DP columns land in the same `dse_results.csv`; the full-suite cross-check reproduced the committed tier1+tier2 numbers **exactly** to 4 decimals (`DSE_20260814_133037`); and the final item — **collapse the two suite runners** — landed here. The two "last bits" the task flagged were already in `dse.py`/`lgdp.py` (smallest-first ordering `dse.py:176`; the MMS `--mixed_size` arm `lgdp.py:93`), so this was verification + deletion, not new code. Tier-3/MMS was spot-checked first (`DSE_20260826_110926`, mms/adaptec1·newblue1·bigblue1 through the full GP+LG+DP path: all `bookshelf`/`done`, DP ratios 0.9835 / 1.0242 / 1.0036 vs `_XPLACE_MMS_FINAL` — frame-correct and consistent with the +0.2…+3.6% MMS reference). Then the seven-script pipeline was retired (`gen_suite_configs.py`, `run_suite.sh`, `run_lgdp44.sh`, `run_lgdp_suite.sh`, `gen_lgdp_inputs.py`, `analyze_full44.py`, `analyze_lgdp_suite.py`), recorded in `tools/README.md`'s *Removed 2026-08-26* with what each folded into. Kept: `def_patch_placement.py`/`def_to_bookshelf_pl.py` (called by `lgdp.py`), `run_xplace_ref*.sh` (populate the reference dicts by hand). One judgment call: `analyze_fence_cost.py` (#26, closed) is **not** deleted but marked **dormant** — its input generator `run_lgdp44.sh` is gone, so it now needs hand-built TSVs (or a re-derivation from `dse_results.csv`) to run.
 
 **Closed 2026-08-26:** **#36** — collapsed the fixed-density cap `min(ρ,td)` to **one shared host definition**, removing the *need* to keep the two host copies in sync by hand (which is exactly the drift that was #34). The arithmetic now lives in a single inline `capFixedDensity(overlap, bin_area, target_density)` in `common/include/Grid.h`; both host sites call it — `Grid::clampFixedDensity` (the solver field the DCT consumes) and `Placer::computeOverflow` (the convergence signal). The two loops stay in place because they walk different containers (2-D `Bin` array vs a flat `std::vector<float>`), so they can't share a buffer — only the formula. **Pure cleanup, bit-identical**: `capFixedDensity` recomputes `bin_area*target_density`, the same float multiply the sites already did, so `make test-regress` (`mgc_fft_a`, `mgc_pci_bridge32_b` — the two td<1 clamp-exercising designs) and `-slow` (+ td=1 control `mms_adaptec1`, 1274 iters) are bit-identical with **zero baseline changes**; `make test` tier-1 green. The helper carries the divergence warning (cap not scale, Mark-authorized, don't "fix" it back — see #35) so the single definition is also the single warning. The two **pl_algo** HLS copies (`density_bin.hpp`, `test/density_bin_model.cpp`) are comment-only here — pointed at the shared host spec, still hand-mirrored because HLS can't call a host helper; converging them onto an `#include`d header is **#20 step 3**. Commit `ba596ef`. Handoff: `_NEW_HANDOFF_combine_fixed_density_sites_20260825.md`.
@@ -73,6 +75,62 @@ did not fix are now **#29** (the XPlace reference belongs in the placer, masked-
 site-width-correct) and **#30** (LG+DP inside `dse.py`).
 
 ---
+
+## #39 — Position dump v2: mechanism channels (opened+CLOSED 2026-08-27)
+
+Extends #16 (rendering moved offline) and #14 (per-generation `names_gen<N>.txt`). Evidence and
+the full rationale: [[_NEW_REPORT_39_dump_v2_channels_20260827.md]]. Artifacts (4 PNGs + a
+3-generation manifest): `.claude/2_ARTIFACTS/dump_v2_20260827/`.
+
+**Verify the premise before building** — the request was written against
+`default_config.toml`'s "positions only", which was stale by three weeks. Already present:
+per-node w/h/kind (6 classes, incl. `frozen_macro`), stable cross-frame IDs, the frame→iteration
+manifest, the HUD burn-in, and the rejected-backtracking count. Missing, and built here:
+
+- [x] `u4 net_degree` on the static record. Area deliberately **not** a field — it is `w*h`, and a
+      second copy can only disagree.
+- [x] `probe_gen<N>.bin` — Nesterov `v_k`. Not cosmetic: #32 settled that HPWL, overflow and the
+      best-solution tracker are all measured at `v`, so the frames (`u`) and the HUD scalars
+      described different placements.
+- [x] `density_gen<N>.bin`, opt-in `field_gen<N>.bin` — the solver's own `Bin::total_overlap` /
+      `Bin::eField`, box-averaged by an integer factor to ≤256×256 (bigblue3 at grid 2048 would
+      be 16 MB/frame). Divided by the block's ACTUAL member count so a non-multiple grid does not
+      get a dimmed top/right edge. The existing one-shot `dump_density` flag was checked for reuse
+      and **rejected**: it calls `computeOverflow()`, which re-deposits into a private buffer —
+      a metric, not the map the optimizer used.
+- [x] `forces_gen<N>.bin` — per-node wl gradient, density gradient, preconditioner. Captured in
+      `combineGradients()` and nowhere else.
+- [x] `frame_valid` per-frame bitmask; the stale `default_config.toml` comment corrected.
+- [x] `tools/check_viz_dump.py` (new, tracked) + the placer's own stream-length self-check.
+- [x] `generate_viz.py`: `--underlay density`, `--color-by force|precond`, `--positions probe`,
+      manifest-driven static dtype.
+
+**Traps this left behind, for whoever touches the dump next.**
+
+1. **The auxiliary channels are written on EVERY frame, valid or not.** Skipping the invalid ones
+   would save ~3 records per run and destroy the property that frame index is a seek key into
+   every stream. `frame_valid` (bit 0 density/field, bit 1 forces) is the flag; `check_viz_dump.py`
+   asserts the whole table — every untagged frame fully valid, `legalized`→0, `reseeded`→1,
+   `best_solution`→0 — so a change to the phase-2 boundary has to come here and say so.
+2. **Freshness is producer-set, consumer-cleared.** `computeElectricFields` and `combineGradients`
+   set it; `beginPositionDumpGeneration` and `restoreBestPlacement` clear it. A new site that
+   moves nodes without re-solving must clear it too, or a frame gets a heatmap of somewhere else.
+3. **`wl + den == next.probe_grad` exactly.** `den` is stored as `-electro` for that reason. If a
+   future reader wants the electrostatic FORCE rather than its gradient contribution, negate —
+   do not change the file, the invariant is what makes the record checkable.
+4. **Disk, not CPU, is the binding constraint.** forces = 20 B/node/frame, ~5× everything else
+   combined; `mgc_superblue12` alone is 8.5 GB at cadence 5 with forces on.
+
+**Not done, deliberately:** quiver rendering of the two vectors (renderer work; the full float32
+vectors are in the file); the mini convergence plot with a frame marker (pure indexing on data
+that already exists, gated on nothing); float32/delta encoding (deprioritized by Mark — and the
+measurements say the lever is `dump_forces` and cadence, not encoding); velocity / displacement /
+per-net HPWL / overflow (derivable from stable IDs + the netlist).
+
+**Adjacent staleness fixed while here, both of which were routing work wrongly:** the `viz-gif`
+skill's *description* still said node-lock and multi-view were "not implemented yet (TODO #16
+step 4)", false since #14 closed on 2026-08-17; and `.claude/2_ARTIFACTS/check_position_dump.py`
+hard-coded the 17-byte static record, so it would have silently misparsed every v2 dump.
 
 ## #30 — Legalization + detailed placement inside `dse.py` (opened 2026-08-12, CLOSED 2026-08-26)
 

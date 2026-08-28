@@ -142,6 +142,13 @@ void Placer::snapshotBestPlacement(BestSlot slot)
 /// which is the state XPlace is always in. This subsumes the old separate syncProbeToCommitted().
 void Placer::restoreBestPlacement(BestSlot slot)
 {
+    // CLAUDE CODE: the nodes are about to jump to a placement the last density solve and the last
+    // gradient evaluation never saw, so both auxiliary dump channels stop describing them. The
+    // final "best_solution" frame is exactly this case: without clearing here it would carry the
+    // last ITERATED placement's heatmap under the RESTORED placement's cells.
+    m_pos_dump.density_fresh = false;
+    m_pos_dump.forces_fresh  = false;
+
     const auto& nodes = db.getMovableNodes();
     #pragma omp parallel for schedule(static)
     for (int i = 0; i < (int)nodes.size(); i++) {

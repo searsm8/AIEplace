@@ -108,11 +108,38 @@ quiet = false       # if true, suppress all std output. Errors still printed. Us
 iterations_per_status = 10 # live-status table cadence: print every Nth iteration (plus iteration 1)
 results_dir = "results/single_runs" # overridden by DSE
 
-# Node-position dump for the offline visualizer (TODO #16). Writes <run_dir>/coord_dump/ -- positions
-# only; every per-iteration scalar is already in iterations.dat. tools/generate_viz.py (placement
-# GIFs/PNGs, full-die or zoom) and tools/plot_histories.py (HPWL/overflow/step/lambda charts)
-# render it afterwards, so a new zoom, window or node-locked view costs seconds instead of a
-# re-run. OFF by default because the dump is large and grows with the design: ~96 MB for an
-# adaptec1 run at the cadence below, ~480 MB for bigblue4. Nothing should pay that unasked.
+# Node-position dump for the offline visualizer (TODO #16). Writes <run_dir>/coord_dump/; every
+# per-iteration SCALAR is already in iterations.dat and is not duplicated there.
+# tools/generate_viz.py (placement GIFs/PNGs, full-die or zoom) and tools/plot_histories.py
+# (HPWL/overflow/step/lambda charts) render it afterwards, so a new zoom, window or node-locked
+# view costs seconds instead of a re-run. OFF by default because the dump is large and grows with
+# the design: ~96 MB for an adaptec1 run at the cadence below, ~480 MB for bigblue4, before the
+# optional channels below. Nothing should pay that unasked.
 dump_positions = false
 iterations_per_dump = 20 # dump cadence; more dumps = more disk, but more frames for the GIFs. Must be a multiple of iterations_per_status.
+
+# Optional dump channels (format v2), all ignored unless dump_positions = true. Each exists
+# because it is NOT derivable from positions + netlist after the fact; anything that is derivable
+# (velocity, displacement, per-net HPWL, overflow) is deliberately absent. The run logs the
+# resulting MB/frame at startup -- read it before launching a suite on a full disk.
+#
+# The Nesterov PROBE position v_k beside the committed u_k. Costs 4 B/node/frame (it doubles the
+# position stream). Worth it: HPWL, overflow and the best-solution tracker are all measured at v
+# (TODO #32), so without this the HUD scalars describe a placement the frame is not drawing, and
+# an iteration that moved u barely at all reads as a stall rather than as momentum.
+dump_probe_positions = true
+# Per-frame bin density rho, the SOLVER'S OWN map, box-averaged to at most 256x256 (so a 2048 grid
+# costs 256 KB/frame instead of 16 MB). A heatmap underlay for the cell scatter. Dumped rather
+# than recomputed offline because the deposit carries the sqrt(2) footprint clamp, the
+# area-conserving weight and the fixed-density cap -- each of which has been a source of subtle
+# mismatch, and a Python reimplementation would drift from what the optimizer used.
+dump_bin_density = true
+# The (Ex, Ey) field from the same DCT solve, same box-average. Twice density's bytes for a
+# narrower question (where the field points, not just where the mass is), so opt-in.
+dump_field = false
+# Per-node wirelength gradient, density gradient and preconditioner value. 20 B/node/frame -- the
+# most expensive channel by far, and the only one that cannot be reconstructed at all:
+# combineGradients() forms the total gradient in place, so the two terms exist separately for the
+# length of one expression. Lets a renderer colour each cell by which term dominates, or quiver
+# the two, and shows which nodes the preconditioner is scaling down (the MMS macro question).
+dump_forces = true

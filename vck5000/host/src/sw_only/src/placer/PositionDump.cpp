@@ -11,14 +11,33 @@
  * .claude/1_REVIEW/handoffs/_NEW_HANDOFF_viz_offline_tool_20260805.md §4):
  *
  *   manifest.json      text  -- dtypes, die frame, quantization box, per-generation frame index
- *   nodes_gen<N>.bin   bin   -- static per-node record (position, size, kind) for generation N
- *   frames_gen<N>.bin  bin   -- concatenated uint16 position frames for generation N
+ *   nodes_gen<N>.bin   bin   -- static per-node record (position, size, kind, net degree)
+ *   frames_gen<N>.bin  bin   -- concatenated uint16 u_k position frames for generation N
  *   names_gen<N>.txt   text  -- sparse "<index> <name>" for the named nodes of generation N,
  *                               i.e. everything except the anonymous fillers (TODO #14 node-lock)
  *
- * Only POSITIONS live here. Every per-iteration scalar the overlay prints (HPWL, overflow, step
- * length, lambda) is already in iterations.dat and is not duplicated -- the offline tool reads
- * that file and joins on the iteration number.
+ * CLAUDE CODE: format v2 adds four OPTIONAL channels, each its own file per generation and each
+ * written in lockstep with frames_gen<N>.bin, so frame index i seeks identically in all of them:
+ *
+ *   probe_gen<N>.bin   bin   -- uint16 Nesterov PROBE positions v_k, same quantization box
+ *   density_gen<N>.bin bin   -- float32 bin density rho, box-averaged to at most 256x256
+ *   field_gen<N>.bin   bin   -- float32 (Ex, Ey) from the same solve, same box-average
+ *   forces_gen<N>.bin  bin   -- float32 per node: wl.x, wl.y, den.x, den.y, precond_weight
+ *
+ * Why these four and not others: everything else a renderer wants is a pure function of positions
+ * plus the netlist, so dumping it would be duplicating derivable data. These are not.
+ *   - v_k is a SECOND position variable, not a function of u_k. The metrics in iterations.dat are
+ *     all measured at v (TODO #32), so without it the HUD describes a placement the frame is not
+ *     showing, and an iteration that moved u barely at all looks like a stall.
+ *   - rho and E are the placer's OWN map. Recomputing them offline means reimplementing the
+ *     sqrt(2) footprint clamp, the fixed-density cap and the filler policy in Python, where they
+ *     would silently drift from what the optimizer actually used.
+ *   - combineGradients() forms the total gradient IN PLACE (g -= electro), so the wirelength and
+ *     density terms exist separately for the length of one expression and are unrecoverable
+ *     afterwards. Capturing them there is the only chance.
+ *
+ * Per-iteration SCALARS still live in iterations.dat (HPWL, overflow, step length, lambda,
+ * backtracking retries) and are not duplicated -- the offline tool joins on the iteration number.
  */
 
 #include "AIEplace.h"
@@ -28,6 +47,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iomanip>
+#include <system_error>
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -50,13 +70,24 @@ enum NodeKind : uint8_t {
 /// exact coordinates for the nodes that never move are worth more than the bytes.
 #pragma pack(push, 1)
 struct StaticNodeRecord {
-    float   x, y, w, h;
-    uint8_t kind;
+    float    x, y, w, h;
+    uint8_t  kind;
+    // CLAUDE CODE: pins on this node. Static for the life of a generation and near-free to write
+    // (4 B x one file per generation), and it is the one piece of netlist the renderer would
+    // otherwise have to re-parse the benchmark for. Area is deliberately NOT a field -- it is
+    // exactly w*h and duplicating it invites the two to disagree.
+    uint32_t net_degree;
 };
 #pragma pack(pop)
-static_assert(sizeof(StaticNodeRecord) == 17, "nodes_gen<N>.bin record layout is a wire format");
+static_assert(sizeof(StaticNodeRecord) == 21, "nodes_gen<N>.bin record layout is a wire format");
 
 constexpr float QUANT_MAX = 65535.0f;
+
+/// CLAUDE CODE: cap on the density/field frames written to disk, per axis. The solver grid runs
+/// to 2048x2048 (bigblue3), which is 16 MB of float32 per frame and ~2 GB over a run -- far past
+/// any usable heatmap resolution, since the renderer paints at most ~2048 px across. Box-averaged
+/// down by an INTEGER factor so each output cell covers a whole number of solver bins.
+constexpr int VIZ_BINS_MAX = 256;
 
 } // namespace
 
@@ -75,6 +106,23 @@ void Placer::initializePositionDump()
     m_pos_dump.dir = output_dir / "coord_dump";
     fs::create_directories(m_pos_dump.dir);
 
+    // CLAUDE CODE: the optional v2 channels. Each defaults the way its cost/value ratio points:
+    // probe and forces are what make the frames diagnostic rather than decorative, density is a
+    // cheap underlay, and the field is twice density's bytes for a much narrower question.
+    m_pos_dump.probe_enabled   = cfg["output"]["dump_probe_positions"].value_or(true);
+    m_pos_dump.density_enabled = cfg["output"]["dump_bin_density"].value_or(true);
+    m_pos_dump.field_enabled   = cfg["output"]["dump_field"].value_or(false);
+    m_pos_dump.forces_enabled  = cfg["output"]["dump_forces"].value_or(true);
+
+    // Integer block factor, so an output cell is the exact mean of a whole number of solver bins
+    // and no bin is counted twice or dropped. ceil() on both, so a grid that is not a multiple of
+    // VIZ_BINS_MAX gets a short final block rather than an out-of-range read.
+    const int nx = grid.getBinsPerRow(), ny = grid.getBinsPerCol();
+    m_pos_dump.viz_fx = std::max(1, (nx + VIZ_BINS_MAX - 1) / VIZ_BINS_MAX);
+    m_pos_dump.viz_fy = std::max(1, (ny + VIZ_BINS_MAX - 1) / VIZ_BINS_MAX);
+    m_pos_dump.viz_nx = (nx + m_pos_dump.viz_fx - 1) / m_pos_dump.viz_fx;
+    m_pos_dump.viz_ny = (ny + m_pos_dump.viz_fy - 1) / m_pos_dump.viz_fy;
+
     // Quantization box: the die, inflated 2x about its centre.
     //
     // Anchoring it on the die itself would clamp any node that leaves the die -- and cells leaving
@@ -92,8 +140,27 @@ void Placer::initializePositionDump()
 
     beginPositionDumpGeneration();
 
+    // Bytes per frame, up front. A run that is about to write 20 MB a frame should say so before
+    // it fills the disk, not after -- the box this was built on sat at 96% full.
+    const long long frame_nodes = (long long)db.getMovableNodes().size();
+    const long long viz_bins    = (long long)m_pos_dump.viz_nx * m_pos_dump.viz_ny;
+    long long bytes_per_frame = 4 * frame_nodes;
+    if (m_pos_dump.probe_enabled)   bytes_per_frame += 4 * frame_nodes;
+    if (m_pos_dump.density_enabled) bytes_per_frame += 4 * viz_bins;
+    if (m_pos_dump.field_enabled)   bytes_per_frame += 8 * viz_bins;
+    if (m_pos_dump.forces_enabled)  bytes_per_frame += 4 * FORCE_FLOATS_PER_NODE * frame_nodes;
+
     Logger::log_info("Position dump (TODO #16): every " + std::to_string(m_pos_dump.interval) +
                      " iterations -> " + m_pos_dump.dir.string());
+    Logger::log_info("Position dump channels: u_k" +
+                     std::string(m_pos_dump.probe_enabled   ? " +v_k"     : "") +
+                     std::string(m_pos_dump.density_enabled ? " +density" : "") +
+                     std::string(m_pos_dump.field_enabled   ? " +field"   : "") +
+                     std::string(m_pos_dump.forces_enabled  ? " +forces"  : "") +
+                     "  (" + std::to_string(bytes_per_frame >> 20) + " MB/frame; density " +
+                     std::to_string(m_pos_dump.viz_nx) + "x" + std::to_string(m_pos_dump.viz_ny) +
+                     " box-averaged from " + std::to_string(grid.getBinsPerRow()) + "x" +
+                     std::to_string(grid.getBinsPerCol()) + ")");
 }
 
 /**
@@ -135,7 +202,8 @@ void Placer::beginPositionDumpGeneration()
     // follow it. Frame slot i and static record i are then the same node by construction.
     auto emit = [&nodes, &names, &gen](Node* node_p, uint8_t kind) {
         StaticNodeRecord rec{node_p->getX(), node_p->getY(),
-                             node_p->getXsize(), node_p->getYsize(), kind};
+                             node_p->getXsize(), node_p->getYsize(), kind,
+                             (uint32_t)node_p->getNets().size()};
         nodes.write(reinterpret_cast<const char*>(&rec), sizeof(rec));
         const std::string& name = node_p->getName();
         if (kind != KIND_FILLER && !name.empty())
@@ -160,6 +228,29 @@ void Placer::beginPositionDumpGeneration()
 
     m_pos_dump.frames.open(m_pos_dump.dir / ("frames_gen" + std::to_string(gen.id) + ".bin"),
                            std::ios::binary);
+
+    // CLAUDE CODE: one file per channel per generation, opened together so a frame written to one
+    // is written to all and the frame index stays a valid seek key in every stream.
+    auto open_channel = [&](std::ofstream& stream, bool enabled, const char* prefix) {
+        if (stream.is_open()) stream.close();
+        if (enabled)
+            stream.open(m_pos_dump.dir / (prefix + std::to_string(gen.id) + ".bin"),
+                        std::ios::binary);
+    };
+    open_channel(m_pos_dump.probe,   m_pos_dump.probe_enabled,   "probe_gen");
+    open_channel(m_pos_dump.density, m_pos_dump.density_enabled, "density_gen");
+    open_channel(m_pos_dump.field,   m_pos_dump.field_enabled,   "field_gen");
+    open_channel(m_pos_dump.forces,  m_pos_dump.forces_enabled,  "forces_gen");
+
+    // The capture buffer is indexed by the same i as the frame, so a node-set change resizes it.
+    // Both auxiliary channels are stale until their producer runs again at the new positions:
+    // freezeMovableMacros/legalizeMacros moved nodes with no re-solve, and rebuildFillers made
+    // node i a different node. Marking them stale here is what puts the 0 bits in frame_valid.
+    if (m_pos_dump.forces_enabled)
+        m_pos_dump.force_capture.assign((size_t)gen.frame_nodes * FORCE_FLOATS_PER_NODE, 0.0f);
+    m_pos_dump.density_fresh = false;
+    m_pos_dump.forces_fresh  = false;
+
     m_pos_dump.generations.push_back(std::move(gen));
 }
 
@@ -198,19 +289,127 @@ void Placer::dumpIterationPositions(const std::string& tag)
     const float scale_x = QUANT_MAX / m_pos_dump.qw;
     const float scale_y = QUANT_MAX / m_pos_dump.qh;
 
-    for (int i = 0; i < gen.frame_nodes; i++) {
-        const float u = (movable[i]->getX() - m_pos_dump.qx0) * scale_x;
-        const float v = (movable[i]->getY() - m_pos_dump.qy0) * scale_y;
-        if (u < 0.0f || u > QUANT_MAX || v < 0.0f || v > QUANT_MAX) gen.clamped++;
-        buffer[2 * i]     = (uint16_t)std::lround(std::clamp(u, 0.0f, QUANT_MAX));
-        buffer[2 * i + 1] = (uint16_t)std::lround(std::clamp(v, 0.0f, QUANT_MAX));
-    }
+    // CLAUDE CODE: quantize one position list into `buffer`. A lambda because the probe channel
+    // runs it a second time over v_k, and the two streams MUST share the quantization box -- a
+    // renderer that draws u and v in one frame is comparing them directly.
+    // (The locals are qx/qy, not u/v: since v2 this file carries the actual Nesterov u_k and v_k,
+    // so reusing those two letters for "quantized x, quantized y" no longer reads.)
+    auto quantize = [&](bool probe) {
+        for (int i = 0; i < gen.frame_nodes; i++) {
+            const Position pos = probe ? movable[i]->getProbePos() : movable[i]->getPos();
+            const float qx = (pos.x - m_pos_dump.qx0) * scale_x;
+            const float qy = (pos.y - m_pos_dump.qy0) * scale_y;
+            // Counted on the committed positions only, so the number keeps the meaning it had in
+            // v1 and stays comparable with runs made before the probe channel existed.
+            if (!probe && (qx < 0.0f || qx > QUANT_MAX || qy < 0.0f || qy > QUANT_MAX))
+                gen.clamped++;
+            buffer[2 * i]     = (uint16_t)std::lround(std::clamp(qx, 0.0f, QUANT_MAX));
+            buffer[2 * i + 1] = (uint16_t)std::lround(std::clamp(qy, 0.0f, QUANT_MAX));
+        }
+    };
+    auto flush = [&](std::ofstream& stream) {
+        stream.write(reinterpret_cast<const char*>(buffer.data()),
+                     (std::streamsize)(buffer.size() * sizeof(uint16_t)));
+    };
 
-    m_pos_dump.frames.write(reinterpret_cast<const char*>(buffer.data()),
-                            (std::streamsize)(buffer.size() * sizeof(uint16_t)));
+    quantize(false);
+    flush(m_pos_dump.frames);
+    if (m_pos_dump.probe_enabled) { quantize(true); flush(m_pos_dump.probe); }
+
+    // The auxiliary channels are written on EVERY frame whether or not they are fresh, so that
+    // frame index i stays a valid seek key in every stream; the validity bits below are what tell
+    // a renderer that a given frame's record is zero-filled rather than measured.
+    const bool density_valid = m_pos_dump.density_enabled && m_pos_dump.density_fresh;
+    const bool forces_valid  = m_pos_dump.forces_enabled  && m_pos_dump.forces_fresh;
+    if (m_pos_dump.density_enabled) writeDumpDensityFrame(density_valid);
+    if (m_pos_dump.forces_enabled)  writeDumpForceFrame(gen.frame_nodes, forces_valid);
 
     gen.frame_iters.push_back(iteration);
     gen.frame_tags.push_back(tag);
+    gen.frame_valid.push_back((density_valid ? 1 : 0) | (forces_valid ? 2 : 0));
+}
+
+/**
+ * @brief CLAUDE CODE: write one box-averaged density frame, and the field frame beside it.
+ *
+ * Reads the SOLVER'S OWN bins -- Bin::total_overlap as deposited by computeOverlaps() and
+ * Bin::eField as solved by the DCT -- rather than recomputing anything. That is the point: the
+ * deposit carries the sqrt(2) footprint clamp, the area-conserving weight and the fixed-density
+ * cap, three things that have each been a source of subtle mismatch, and a Python reimplementation
+ * would drift from what the optimizer actually used without anyone noticing.
+ *
+ * Both maps describe the PROBE positions v_k, since that is where computeElectricFields deposits.
+ * The committed frame in frames_gen<N>.bin is u_k, which is one more reason the probe channel
+ * exists: overlaying this heatmap on the u frame compares two different placements.
+ *
+ * @param valid false when the grid no longer describes the placement being framed; the record is
+ *              zero-filled and the frame's validity bit is cleared.
+ */
+void Placer::writeDumpDensityFrame(bool valid)
+{
+    const int nx = grid.getBinsPerRow(), ny = grid.getBinsPerCol();
+    const int out_nx = m_pos_dump.viz_nx, out_ny = m_pos_dump.viz_ny;
+    const int fx = m_pos_dump.viz_fx, fy = m_pos_dump.viz_fy;
+    const float bin_area_inv = 1.0f / (grid.getBinWidth() * grid.getBinHeight());
+
+    // Row-major with y as the row, matching dumpBinDensity()'s CSV so the two are comparable.
+    std::vector<float> rho((size_t)out_nx * out_ny, 0.0f);
+    std::vector<float> efield;
+    if (m_pos_dump.field_enabled) efield.assign(2 * (size_t)out_nx * out_ny, 0.0f);
+
+    if (valid) {
+        for (int oy = 0; oy < out_ny; oy++) {
+            const int row_lo = oy * fy, row_hi = std::min(ny, row_lo + fy);
+            for (int ox = 0; ox < out_nx; ox++) {
+                const int col_lo = ox * fx, col_hi = std::min(nx, col_lo + fx);
+                float sum_area = 0.0f, sum_ex = 0.0f, sum_ey = 0.0f;
+                for (int col = col_lo; col < col_hi; col++)
+                    for (int row = row_lo; row < row_hi; row++) {
+                        // Grid::m_bins is indexed [col][row] -- see Grid::getBinDensities.
+                        Bin& bin = grid.getBin(col, row);
+                        sum_area += bin.total_overlap;
+                        sum_ex   += bin.eField.x;
+                        sum_ey   += bin.eField.y;
+                    }
+                // Divide by the block's ACTUAL member count, not fx*fy: a grid that is not a
+                // multiple of VIZ_BINS_MAX has a short final block, and the nominal factor would
+                // dim exactly the top and right edges of the map.
+                const float inv_count = 1.0f / (float)((col_hi - col_lo) * (row_hi - row_lo));
+                const size_t o = (size_t)oy * out_nx + ox;
+                rho[o] = sum_area * bin_area_inv * inv_count;
+                if (!efield.empty()) {
+                    efield[2 * o]     = sum_ex * inv_count;
+                    efield[2 * o + 1] = sum_ey * inv_count;
+                }
+            }
+        }
+    }
+
+    m_pos_dump.density.write(reinterpret_cast<const char*>(rho.data()),
+                             (std::streamsize)(rho.size() * sizeof(float)));
+    if (m_pos_dump.field_enabled)
+        m_pos_dump.field.write(reinterpret_cast<const char*>(efield.data()),
+                               (std::streamsize)(efield.size() * sizeof(float)));
+}
+
+/**
+ * @brief CLAUDE CODE: write one per-node force frame from the buffer combineGradients() filled.
+ *
+ * No computation here. The wirelength/density split exists only inside combineGradients(), which
+ * forms the total gradient in place, so the capture has to happen there and this just spills it.
+ *
+ * @param valid false when no combineGradients() has run at the framed positions; zero-filled.
+ */
+void Placer::writeDumpForceFrame(int frame_nodes, bool valid)
+{
+    const size_t floats = (size_t)frame_nodes * FORCE_FLOATS_PER_NODE;
+    if (m_pos_dump.force_capture.size() != floats)
+        m_pos_dump.force_capture.assign(floats, 0.0f);
+    else if (!valid)
+        std::fill(m_pos_dump.force_capture.begin(), m_pos_dump.force_capture.end(), 0.0f);
+
+    m_pos_dump.forces.write(reinterpret_cast<const char*>(m_pos_dump.force_capture.data()),
+                            (std::streamsize)(floats * sizeof(float)));
 }
 
 /// @brief Close the frame stream and write manifest.json — the file that makes the binaries
@@ -218,14 +417,16 @@ void Placer::dumpIterationPositions(const std::string& tag)
 void Placer::finalizePositionDump()
 {
     if (!m_pos_dump.enabled) return;
-    if (m_pos_dump.frames.is_open()) m_pos_dump.frames.close();
+    for (std::ofstream* stream : {&m_pos_dump.frames, &m_pos_dump.probe, &m_pos_dump.density,
+                                  &m_pos_dump.field, &m_pos_dump.forces})
+        if (stream->is_open()) stream->close();
 
     Box die = db.getDieArea();
     std::ofstream manifest(m_pos_dump.dir / "manifest.json");
     manifest << std::setprecision(9);
 
     manifest << "{\n"
-             << "  \"format_version\": 1,\n"
+             << "  \"format_version\": 2,\n"
              << "  \"benchmark\": \"" << db.getBenchmarkName() << "\",\n"
              << "  \"die\": {\"x0\": " << die.getPosBottomLeft().x
              << ", \"y0\": " << die.getPosBottomLeft().y
@@ -244,9 +445,45 @@ void Placer::finalizePositionDump()
              << "  \"quant\": {\"x0\": " << m_pos_dump.qx0 << ", \"y0\": " << m_pos_dump.qy0
              << ", \"w\": " << m_pos_dump.qw << ", \"h\": " << m_pos_dump.qh
              << ", \"max\": " << (int)QUANT_MAX << "},\n"
-             << "  \"static_record\": [\"f4 x\", \"f4 y\", \"f4 w\", \"f4 h\", \"u1 kind\"],\n"
+             << "  \"static_record\": [\"f4 x\", \"f4 y\", \"f4 w\", \"f4 h\", \"u1 kind\", "
+                "\"u4 net_degree\"],\n"
              << "  \"kinds\": {\"0\": \"movable_stdcell\", \"1\": \"movable_macro\", "
                 "\"2\": \"fixed\", \"3\": \"iopad\", \"4\": \"filler\", \"5\": \"frozen_macro\"},\n"
+             // CLAUDE CODE: which optional channels this run wrote, and how to decode each. A
+             // reader should key off THIS rather than probing for files, so that "channel was
+             // disabled" and "channel is stale on this frame" stay distinguishable -- the second
+             // is frame_valid, and only a per-frame flag can express it.
+             << "  \"channels\": {\n"
+             << "    \"frames\":  {\"file\": \"frames_gen<N>.bin\", \"per\": \"frame_node\", "
+                "\"record\": [\"u2 x\", \"u2 y\"], \"position\": \"u_k committed\"},\n"
+             << "    \"probe\":   {\"present\": " << (m_pos_dump.probe_enabled ? "true" : "false")
+             << ", \"file\": \"probe_gen<N>.bin\", \"per\": \"frame_node\", "
+                "\"record\": [\"u2 x\", \"u2 y\"], \"position\": \"v_k Nesterov probe\"},\n"
+             << "    \"density\": {\"present\": " << (m_pos_dump.density_enabled ? "true" : "false")
+             << ", \"file\": \"density_gen<N>.bin\", \"per\": \"viz_bin\", "
+                "\"record\": [\"f4 rho\"], \"valid_bit\": 1, \"at\": \"v_k\"},\n"
+             << "    \"field\":   {\"present\": " << (m_pos_dump.field_enabled ? "true" : "false")
+             << ", \"file\": \"field_gen<N>.bin\", \"per\": \"viz_bin\", "
+                "\"record\": [\"f4 Ex\", \"f4 Ey\"], \"valid_bit\": 1, \"at\": \"v_k\"},\n"
+             << "    \"forces\":  {\"present\": " << (m_pos_dump.forces_enabled ? "true" : "false")
+             << ", \"file\": \"forces_gen<N>.bin\", \"per\": \"frame_node\", "
+                "\"record\": [\"f4 wl_x\", \"f4 wl_y\", \"f4 den_x\", \"f4 den_y\", "
+                "\"f4 precond\"], \"valid_bit\": 2, \"at\": \"v_k\"}\n"
+             << "  },\n"
+             // The density/field maps are box-averaged from the solver grid by an integer factor;
+             // viz_bin (bx, by) covers solver bins [bx*factor_x, (bx+1)*factor_x) x likewise in y,
+             // clipped at the grid edge. Stored row-major with y as the row.
+             << "  \"viz_grid\": {\"nx\": " << m_pos_dump.viz_nx
+             << ", \"ny\": " << m_pos_dump.viz_ny
+             << ", \"factor_x\": " << m_pos_dump.viz_fx
+             << ", \"factor_y\": " << m_pos_dump.viz_fy
+             << ", \"solver_nx\": " << grid.getBinsPerRow()
+             << ", \"solver_ny\": " << grid.getBinsPerCol() << "},\n"
+             // frame_valid is a per-frame bitmask over the auxiliary channels: bit 0 (=1) the
+             // density/field record was measured at this frame's placement, bit 1 (=2) the force
+             // record was. A cleared bit means the record is zero-filled -- see frame_valid in
+             // AIEplace.h for which frames break which channel and why.
+             << "  \"frame_valid_bits\": {\"1\": \"density,field\", \"2\": \"forces\"},\n"
              << "  \"generations\": [\n";
 
     for (size_t g = 0; g < m_pos_dump.generations.size(); g++) {
@@ -266,16 +503,47 @@ void Placer::finalizePositionDump()
         manifest << "], \"frame_tags\": [";
         for (size_t i = 0; i < gen.frame_tags.size(); i++)
             manifest << (i ? ", " : "") << "\"" << gen.frame_tags[i] << "\"";
+        manifest << "], \"frame_valid\": [";
+        for (size_t i = 0; i < gen.frame_valid.size(); i++)
+            manifest << (i ? ", " : "") << gen.frame_valid[i];
         manifest << "]}" << (g + 1 < m_pos_dump.generations.size() ? "," : "") << "\n";
     }
 
     manifest << "  ]\n}\n";
     manifest.close();
 
+    // CLAUDE CODE: every channel is indexed by frame number, so a stream of the wrong length does
+    // not fail -- it silently returns a neighbouring frame, or half of two. Check the lengths the
+    // manifest implies rather than trusting that the writes happened, and say which file is wrong.
+    auto check_stream = [this](const std::string& name, bool present, long long expect) {
+        if (!present) return;
+        std::error_code ec;
+        const long long actual = (long long)fs::file_size(m_pos_dump.dir / name, ec);
+        if (ec)
+            Logger::log_error("Position dump: cannot stat " + name + " (" + ec.message() + ").");
+        else if (actual != expect)
+            Logger::log_error("Position dump: " + name + " is " + std::to_string(actual) +
+                              " bytes but the manifest implies " + std::to_string(expect) +
+                              " -- this channel is out of lockstep with frames_gen<N>.bin, so a "
+                              "frame index into it reads the wrong frame.");
+    };
+
     long long total_frames = 0, total_clamped = 0;
     for (const DumpGeneration& gen : m_pos_dump.generations) {
         total_frames  += (long long)gen.frame_iters.size();
         total_clamped += gen.clamped;
+
+        const std::string id = std::to_string(gen.id) + ".bin";
+        const long long frames    = (long long)gen.frame_iters.size();
+        const long long pos_bytes = frames * gen.frame_nodes * 2 * (long long)sizeof(uint16_t);
+        const long long viz_bins  = (long long)m_pos_dump.viz_nx * m_pos_dump.viz_ny;
+        check_stream("nodes_gen"   + id, true, (long long)gen.num_static_nodes * sizeof(StaticNodeRecord));
+        check_stream("frames_gen"  + id, true, pos_bytes);
+        check_stream("probe_gen"   + id, m_pos_dump.probe_enabled,   pos_bytes);
+        check_stream("density_gen" + id, m_pos_dump.density_enabled, frames * viz_bins * 4);
+        check_stream("field_gen"   + id, m_pos_dump.field_enabled,   frames * viz_bins * 8);
+        check_stream("forces_gen"  + id, m_pos_dump.forces_enabled,
+                     frames * gen.frame_nodes * FORCE_FLOATS_PER_NODE * 4);
     }
 
     Logger::log_info("Position dump: " + std::to_string(total_frames) + " frames in " +

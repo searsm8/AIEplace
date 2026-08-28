@@ -76,6 +76,17 @@ void Placer::combineGradients()
     const auto& nodes = db.getMovableNodes();
     const int filler_start = db.getFillerStartIndex();
 
+    // CLAUDE CODE: the offline visualizer's force channel is captured HERE and nowhere else. The
+    // `g -= electro` below is destructive, so this expression is the only point in the whole run
+    // where the wirelength and density terms exist as separate quantities -- everything after it
+    // sees one summed gradient, and no amount of post-processing can pull them back apart.
+    // Pure stores into a buffer sized by beginPositionDumpGeneration(); no arithmetic is added or
+    // reordered, so the trajectory is bit-identical whether the dump is on or off. The size test
+    // is the guard: it is false for the frames between a node-set change and the resize.
+    const bool capture_forces = m_pos_dump.enabled && m_pos_dump.forces_enabled &&
+                                m_pos_dump.force_capture.size() ==
+                                    (size_t)nodes.size() * FORCE_FLOATS_PER_NODE;
+
     m_ordered_reduce.sum2((int)nodes.size(),
         [&](int i, float& gwl_term, float& gden_term) {
             Gradient& g = nodes[i]->next.probe_grad;
@@ -83,8 +94,24 @@ void Placer::combineGradients()
             gwl_term = (i < filler_start) ? fabsf(g.x) + fabsf(g.y) : 0.0f;
             Gradient electro = computeElectrostaticForce(nodes[i]);
             gden_term = fabsf(electro.x) + fabsf(electro.y);
+            if (capture_forces) {
+                // Both stored as GRADIENT contributions, so wl + den == next.probe_grad exactly,
+                // for every node, after the subtraction below -- an invariant a reader can check
+                // rather than a sign convention it has to be told. (den is therefore -electro:
+                // the electrostatic force points the way the cell moves, the gradient term
+                // opposes it.) Fillers are on no nets and Partials.cpp clears probe_grad every
+                // iteration, so their wl entry is structurally zero, not merely masked.
+                float* record = &m_pos_dump.force_capture[(size_t)i * FORCE_FLOATS_PER_NODE];
+                record[0] =  g.x;
+                record[1] =  g.y;
+                record[2] = -electro.x;
+                record[3] = -electro.y;
+                record[4] = nodes[i]->precond_weight;
+            }
             g -= electro;
         }, last_gwl_L1, last_gden_L1);
+
+    if (capture_forces) m_pos_dump.forces_fresh = true;
 }
 
 

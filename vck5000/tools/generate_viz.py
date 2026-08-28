@@ -11,6 +11,13 @@ took an hour, which is the whole point -- a new window or a new cadence no longe
     python3 tools/generate_viz.py <run_dir> --gif           # ...and animate the result
     python3 tools/generate_viz.py <run_dir> --view zoom --center 0.4,0.6 --span 0.02
     python3 tools/generate_viz.py <run_dir> --add-view full --add-view zoom:0.4,0.6,0.02  # many
+    python3 tools/generate_viz.py <run_dir> --underlay density --color-by force  # mechanism
+
+Format v2 (2026-08-27) added four optional channels to the dump, and three flags read them:
+--underlay density paints the solver's own bin-density map under the cells, --color-by
+force|precond repaints the movable cells by which gradient term dominates or by their
+preconditioner weight, and --positions probe draws the Nesterov lookahead v_k instead of the
+committed u_k. All three are no-ops on a v1 dump, which simply has no such channel.
 
 At MMS scale a full-die frame is 200k-1M cells in ~2000 px, so everything below the macro scale is
 a grey wash; the zoom is where the standard-cell rows, the filler distribution and the macro edges
@@ -71,7 +78,35 @@ LAYERS = [
 ]
 OUTLINE = {"border": ((0, 0, 0), 0.001), "zoom": ((38, 38, 38), 0.0006)}
 
-STATIC_DTYPE = np.dtype([("x", "<f4"), ("y", "<f4"), ("w", "<f4"), ("h", "<f4"), ("kind", "u1")])
+# nodes_gen<N>.bin record layout, derived from the manifest rather than hard-coded: the record
+# grew a net_degree field in format v2, and reading the declared layout is what lets one renderer
+# open both. NP_CODE is the whole vocabulary the writer uses.
+NP_CODE = {"f4": "<f4", "u4": "<u4", "u2": "<u2", "u1": "u1"}
+
+
+def static_dtype(manifest):
+    return np.dtype([(name, NP_CODE[code])
+                     for code, name in (e.split() for e in manifest["static_record"])])
+
+
+# Per-node colouring (--color-by) is painted in BANDS rather than per node: one fill_rects call
+# per band instead of one per cell, which is the difference between a second and a minute on a
+# 371k-node frame. 16 steps is past what a reader resolves in a ramp on a 2048 px canvas.
+COLOR_BANDS = 16
+
+# Density underlay ramp (ColorBrewer YlOrBr), white at empty. Anchored on TARGET density, not on
+# the frame's own maximum: the question this underlay answers is "which bins are overfull", and a
+# per-frame autoscale makes iteration 1 (everything in one bin) look like the converged frame.
+DENSITY_STOPS = np.array([[255, 255, 255], [255, 247, 188], [254, 196, 79],
+                          [217, 95, 14], [140, 45, 4]], dtype=np.float64)
+
+# Force-dominance ramp: blue where the wirelength gradient dominates, red where the density
+# gradient does, through a muted violet rather than through white -- a balanced cell is the
+# interesting case and must not vanish into the background.
+FORCE_STOPS = np.array([[30, 60, 200], [120, 60, 140], [210, 40, 30]], dtype=np.float64)
+
+# Preconditioner ramp, low to high, over the frame's own log range (see precond_bands).
+PRECOND_STOPS = np.array([[240, 240, 240], [90, 170, 90], [10, 60, 10]], dtype=np.float64)
 
 # Cells small enough to paint by broadcasting instead of by slicing. At full-die scale MIN_SIZE
 # floors essentially every standard cell to ~2 px, so this covers all but the macros -- which is
@@ -93,14 +128,28 @@ def load_run(run_dir):
         sys.exit(f"{dump} not found -- was the run made with output.dump_positions = true?")
     manifest = json.loads((dump / "manifest.json").read_text())
 
+    sdtype = static_dtype(manifest)
+
     frames = []   # (generation, index within its frame stream, iteration, tag)
     for gen in manifest["generations"]:
-        gen["static"] = np.fromfile(dump / f"nodes_gen{gen['id']}.bin", dtype=STATIC_DTYPE)
+        gen["static"] = np.fromfile(dump / f"nodes_gen{gen['id']}.bin", dtype=sdtype)
         gen["path"] = dump / f"frames_gen{gen['id']}.bin"
         gen["names_path"] = dump / gen.get("names", f"names_gen{gen['id']}.txt")
+        # Optional v2 channels. Each is in lockstep with frames_gen<N>.bin, so the same frame
+        # index seeks into all of them; frame_valid says whether that record was measured at this
+        # frame's placement or is the zero-fill written to keep the streams aligned.
+        for name, prefix in (("probe", "probe_gen"), ("density", "density_gen"),
+                             ("forces", "forces_gen")):
+            gen[f"{name}_path"] = dump / f"{prefix}{gen['id']}.bin"
+        gen["valid"] = gen.get("frame_valid", [3] * len(gen["frame_iters"]))
         for i, (it, tag) in enumerate(zip(gen["frame_iters"], gen["frame_tags"])):
             frames.append((gen, i, it, tag))
     return manifest, frames
+
+
+def has_channel(manifest, name):
+    """Whether the run wrote an optional channel. False for every format-v1 dump."""
+    return bool(manifest.get("channels", {}).get(name, {}).get("present", False))
 
 
 def name_to_index(gen):
@@ -160,14 +209,20 @@ def resolve_lock(manifest, frames, target):
     return target
 
 
-def read_frame(manifest, gen, index):
+def read_frame(manifest, gen, index, probe=False):
     """Positions of EVERY node for one frame, in static-record order.
 
     The frame stream holds only the movable prefix; the nodes that never move keep the exact
     float32 coordinates in the static file rather than a quantized copy.
+
+    `probe` reads the Nesterov lookahead v_k instead of the committed u_k. The two streams share
+    a quantization box, so they are directly comparable. Worth knowing which you are looking at:
+    HPWL, overflow and the best-solution tracker are all measured at v (TODO #32), so the HUD
+    scalars describe the PROBE frame, not the committed one.
     """
     n = gen["frame_nodes"]
-    raw = np.fromfile(gen["path"], dtype="<u2", count=2 * n, offset=index * 4 * n)
+    path = gen["probe_path"] if probe else gen["path"]
+    raw = np.fromfile(path, dtype="<u2", count=2 * n, offset=index * 4 * n)
     quant = manifest["quant"]
     # Per-axis step: the box is the die inflated 2x and dies are not square, so one step for both
     # axes is a silent skew (~11 die units at the far edge of mms/adaptec1).
@@ -178,6 +233,102 @@ def read_frame(manifest, gen, index):
     pos[:n] = origin + raw.reshape(-1, 2).astype(np.float64) * step
     pos[n:] = np.stack([gen["static"]["x"][n:], gen["static"]["y"][n:]], axis=1)
     return pos
+
+
+def read_density(manifest, gen, index):
+    """One frame of the box-averaged bin density, or None if this frame has no measured record.
+
+    The placer's OWN map, as deposited by computeOverlaps and read straight out of the solver's
+    bins -- not recomputed here. That is deliberate: the deposit carries the sqrt(2) footprint
+    clamp, the area-conserving weight and the fixed-density cap, and a Python reimplementation of
+    those would drift from what the optimizer used without anyone noticing.
+    """
+    if not gen["valid"][index] & 1:
+        return None
+    viz = manifest["viz_grid"]
+    count = viz["nx"] * viz["ny"]
+    raw = np.fromfile(gen["density_path"], dtype="<f4", count=count, offset=index * count * 4)
+    return raw.reshape(viz["ny"], viz["nx"])
+
+
+def read_forces(manifest, gen, index):
+    """One frame of the per-node force split, shape (frame_nodes, 5), or None if not measured.
+
+    Columns are wl.x, wl.y, den.x, den.y, precond_weight. wl + den is exactly the total gradient
+    the step used, so the two are directly comparable in magnitude and direction.
+    """
+    if not gen["valid"][index] & 2:
+        return None
+    width = len(manifest["channels"]["forces"]["record"])
+    n = gen["frame_nodes"]
+    raw = np.fromfile(gen["forces_path"], dtype="<f4", count=width * n,
+                      offset=index * width * n * 4)
+    return raw.reshape(n, width)
+
+
+def ramp(stops, t):
+    """Piecewise-linear colour ramp over `stops`, sampled at t in [0, 1]. -> uint8 RGB."""
+    t = np.clip(np.asarray(t, dtype=np.float64), 0.0, 1.0) * (len(stops) - 1)
+    lo = np.clip(np.floor(t).astype(int), 0, len(stops) - 2)
+    frac = (t - lo)[..., None]
+    return np.rint(stops[lo] * (1.0 - frac) + stops[lo + 1] * frac).astype(np.uint8)
+
+
+def density_underlay(canvas, view, manifest, rho):
+    """Paint the density heatmap into the die box, beneath everything else.
+
+    Mapped by inverting View's die->canvas transform per pixel column and row, so the underlay
+    lands on the same geometry as the cells in BOTH the full-die and the zoom window. Bins outside
+    the die (the full-die view's margin) are left as background.
+    """
+    bx0, by0, bx1, by1 = view.box
+    if bx1 <= bx0 or by1 <= by0:
+        return
+    die_w, die_h = view.die_w, view.die_h
+    ny, nx = rho.shape
+
+    # Canvas pixel -> die coordinate -> viz bin. Nearest-bin, not interpolated: these ARE the
+    # solver's bins (box-averaged), and smoothing them would draw a field the placer never had.
+    px = (np.arange(bx0, bx1) + 0.5) / view.px_w
+    py = (np.arange(by0, by1) + 0.5) / view.px_h
+    die_x = view.xl + (px - DIE_START) * view.width / DIE_SCALE
+    die_y = view.yl + (DIE_START + DIE_SCALE - py) * view.height / DIE_SCALE
+
+    col = np.floor(die_x / die_w * nx).astype(np.int64)
+    row = np.floor(die_y / die_h * ny).astype(np.int64)
+    inside = np.outer((row >= 0) & (row < ny), (col >= 0) & (col < nx))
+
+    heat = ramp(DENSITY_STOPS, rho / max(manifest.get("target_density", 1.0), 1e-12) * 0.5)
+    tile = heat[np.clip(row, 0, ny - 1)][:, np.clip(col, 0, nx - 1)]
+    region = canvas[by0:by1, bx0:bx1]
+    region[inside] = tile[inside]
+
+
+def force_bands(forces):
+    """Per-node band index into a blue->red ramp: which gradient term dominates this cell.
+
+    0 means the wirelength gradient carries the whole force, COLOR_BANDS-1 means the density
+    gradient does. This is the one thing in the dump that cannot be reconstructed after the fact,
+    since combineGradients() sums the two in place.
+    """
+    wl = np.hypot(forces[:, 0], forces[:, 1])
+    den = np.hypot(forces[:, 2], forces[:, 3])
+    frac = den / (wl + den + 1e-30)
+    return np.clip((frac * COLOR_BANDS).astype(np.int64), 0, COLOR_BANDS - 1)
+
+
+def precond_bands(forces):
+    """Per-node band index over the preconditioner, on a LOG scale across the frame's own range.
+
+    Log because the weight is max(1, pins + lambda*area) and spans decades between a 2-pin cell
+    and a macro; linear bands would put every standard cell in band 0. Ranged per frame because
+    lambda grows monotonically, so a fixed range would saturate by the endgame.
+    """
+    weight = np.log10(np.maximum(forces[:, 4], 1.0))
+    top = weight.max()
+    if top <= 0.0:
+        return np.zeros(len(weight), dtype=np.int64)   # preconditioning off: every weight is 1.0
+    return np.clip((weight / top * COLOR_BANDS).astype(np.int64), 0, COLOR_BANDS - 1)
 
 
 def fill_rects(canvas, x0, y0, x1, y1, color, clip=None):
@@ -443,7 +594,8 @@ def load_font(px):
     return ImageFont.load_default()
 
 
-def draw_overlay(image, view, manifest, iteration, tag, phase, phase_iter, scalars, lock_label=""):
+def draw_overlay(image, view, manifest, iteration, tag, phase, phase_iter, scalars,
+                 lock_label="", mode_label=""):
     """The text overlay from Visualizer::drawPlacementInfoOverlay, in the same canvas positions."""
     draw = ImageDraw.Draw(image)
     W, H = view.out_w, view.out_h
@@ -465,6 +617,16 @@ def draw_overlay(image, view, manifest, iteration, tag, phase, phase_iter, scala
     # Optional header lines, each its OWN line rather than a suffix on the one above: past ~70
     # characters a line runs off the canvas and neither renderer wraps or warns.
     header_y, HEADER_LINE = 0.075, 0.035
+
+    # Which optional channels this frame was drawn from. Not decoration: a force-coloured frame
+    # and a kind-coloured one are the same picture in different colours, a probe frame is a
+    # different placement entirely, and a frame whose channel was stale must not be read as if it
+    # were measured. Given its own line only when there is no zoom line to ride, so the header
+    # never grows to the third line that renders inside the die box.
+    if mode_label and not view.zoomed:
+        text(0.01, header_y, f"Channels: {mode_label}")
+        header_y += HEADER_LINE
+
     # Where on the die this window is, and how much of it. Without this a zoom frame is
     # unreadable -- a few hundred cells with nothing to locate them by.
     if view.zoomed:
@@ -480,7 +642,8 @@ def draw_overlay(image, view, manifest, iteration, tag, phase, phase_iter, scala
         text(0.01, header_y,
              f"Zoom: {100.0 * view.width / view.die_w:.2g}% x "
              f"{100.0 * view.height / view.die_h:.2g}% of die @ "
-             f"({cx:.3f}, {cy:.3f})" + (f"   Locked: {lock_label}" if lock_label else ""))
+             f"({cx:.3f}, {cy:.3f})" + (f"   Locked: {lock_label}" if lock_label else "")
+             + (f"   {mode_label}" if mode_label else ""))
         header_y += HEADER_LINE
 
     # The footer is now the same four scalars in every view and on every frame, tagged or not.
@@ -512,7 +675,8 @@ def locked_view(manifest, gen, pos, lock_name, span, canvas_px, supersample):
     return View(die, canvas_px, center=(cx, cy), span=span, supersample=supersample)
 
 
-def render_frame(manifest, view, gen, pos, iteration, tag, scalars, lock_label=""):
+def render_frame(manifest, view, gen, pos, iteration, tag, scalars, lock_label="",
+                 rho=None, bands=None, palette=None, mode_label=""):
     """Draw one already-decoded frame into one view.
 
     `pos` is passed in rather than read here so that rendering N views of a run decodes each frame
@@ -525,6 +689,11 @@ def render_frame(manifest, view, gen, pos, iteration, tag, scalars, lock_label="
 
     canvas = np.full((view.px_h, view.px_w, 3), 255, dtype=np.uint8)
     bx0, by0, bx1, by1 = view.box
+
+    # Underneath everything, including the boundary stroke and the grid lines: it is a field, and
+    # a field that paints over the structures drawn on it stops being a background.
+    if rho is not None:
+        density_underlay(canvas, view, manifest, rho)
 
     # View boundary first, so cells paint over it -- same order as drawPlacement. Never clipped:
     # it IS the clip region.
@@ -539,15 +708,30 @@ def render_frame(manifest, view, gen, pos, iteration, tag, scalars, lock_label="
 
     keep = view.visible(pos, size)
     x0, y0, x1, y1 = view.rects(pos, size)
-    for kind, color, outline in LAYERS:
-        sel = keep & (kinds == kind)
-        if not sel.any():
-            continue
+
+    def paint(sel, color, outline):
         rect = (x0[sel], y0[sel], x1[sel], y1[sel])
         fill_rects(canvas, *rect, color, view.clip)
         if outline == "border" or (outline == "zoom" and view.zoomed):
             oc, ow = OUTLINE[outline]
             stroke_rects(canvas, *rect, oc, view.px_f(ow), view.clip)
+
+    # --color-by repaints only the two MOVABLE layers. Fillers are on no net, so a dominance ramp
+    # would paint every one of them "pure density" and flood the frame with a fact that is true by
+    # construction; the fixed layers have no force record at all.
+    banded = {K_STDCELL, K_MOV_MACRO} if bands is not None else set()
+
+    for kind, color, outline in LAYERS:
+        sel = keep & (kinds == kind)
+        if not sel.any():
+            continue
+        if kind in banded:
+            for band in range(len(palette)):
+                band_sel = sel & (bands == band)
+                if band_sel.any():
+                    paint(band_sel, tuple(int(c) for c in palette[band]), outline)
+        else:
+            paint(sel, color, outline)
 
     image = Image.fromarray(canvas)
     if view.ss > 1:
@@ -567,8 +751,37 @@ def render_frame(manifest, view, gen, pos, iteration, tag, scalars, lock_label="
 
     phase = gen["phase"] if len(manifest["generations"]) > 1 else ""
     draw_overlay(image, view, manifest, iteration, tag, phase,
-                 iteration - gen["first_iter"], scalars, lock_label)
+                 iteration - gen["first_iter"], scalars, lock_label, mode_label)
     return image
+
+
+def frame_channels(manifest, gen, index, args):
+    """The optional-channel arguments for one frame: (rho, bands, palette, mode_label).
+
+    Returns None for any channel the run did not write or this frame did not measure -- the three
+    tagged frames each break one (see frame_valid in the manifest), and rendering them from the
+    zero-fill would paint a stale field under a moved placement.
+    """
+    rho = read_density(manifest, gen, index) if args.underlay == "density" else None
+
+    bands = palette = None
+    if args.color_by != "kind":
+        forces = read_forces(manifest, gen, index)
+        if forces is not None:
+            bands = np.full(len(gen["static"]), -1, dtype=np.int64)
+            stops = FORCE_STOPS if args.color_by == "force" else PRECOND_STOPS
+            bands[:gen["frame_nodes"]] = (force_bands(forces) if args.color_by == "force"
+                                          else precond_bands(forces))
+            palette = ramp(stops, np.arange(COLOR_BANDS) / (COLOR_BANDS - 1))
+
+    label = []
+    if args.positions == "probe":
+        label.append("v_k")
+    if args.underlay == "density":
+        label.append("rho" if rho is not None else "rho(stale)")
+    if args.color_by != "kind":
+        label.append(args.color_by if bands is not None else f"{args.color_by}(stale)")
+    return rho, bands, palette, ", ".join(label)
 
 
 def parse_iters(spec):
@@ -611,12 +824,44 @@ def main():
                          "staying put. TARGET is a node name, 'index:N', or 'most-moved' (the "
                          "named movable cell that travels furthest across generation 0). Implies "
                          "a zoom window of --span; incompatible with --add-view.")
+    ap.add_argument("--underlay", choices=("none", "density"), default="none",
+                    help="paint the placer's own bin-density map beneath the cells. White at "
+                         "empty through to dark red at twice the target density -- anchored on "
+                         "TARGET density, not on the frame's own maximum, so the colour means the "
+                         "same thing in every frame. Needs output.dump_bin_density.")
+    ap.add_argument("--color-by", choices=("kind", "force", "precond"), default="kind",
+                    help="repaint the MOVABLE cells (standard cells and movable macros; fillers "
+                         "and fixed layers keep their kind colour). 'force': blue where the "
+                         "wirelength gradient dominates, red where the density gradient does -- "
+                         "the split cannot be recovered from positions, since combineGradients() "
+                         "sums the two in place. 'precond': the per-node preconditioner weight on "
+                         "a log scale, i.e. which cells get their step scaled down. Needs "
+                         "output.dump_forces.")
+    ap.add_argument("--positions", choices=("committed", "probe"), default="committed",
+                    help="which position variable to draw. 'probe' is the Nesterov lookahead "
+                         "v_k, which is where HPWL, overflow and the best-solution tracker are "
+                         "all measured (TODO #32) -- so the HUD scalars describe the probe frame. "
+                         "Needs output.dump_probe_positions.")
     ap.add_argument("--gif", action="store_true", help="animate the output with gif_builder.py")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
 
     manifest, frames = load_run(args.run_dir)
     scalars = read_iteration_scalars(args.run_dir)
+
+    # Checked up front rather than per frame: silently rendering a kind-coloured GIF because the
+    # run had no force channel is exactly the failure that wastes an afternoon.
+    for flag, value, channel, key in (("--underlay", args.underlay, "density", "dump_bin_density"),
+                                      ("--color-by", args.color_by, "forces", "dump_forces"),
+                                      ("--positions", args.positions, "probe",
+                                       "dump_probe_positions")):
+        default = {"--underlay": "none", "--color-by": "kind", "--positions": "committed"}[flag]
+        if value != default and not has_channel(manifest, channel):
+            ap.error(f"{flag} {value} needs the '{channel}' channel, which this dump does not "
+                     f"have (format v{manifest.get('format_version', 1)}). Re-run the placement "
+                     f"with output.{key} = true.")
+
+    probe = args.positions == "probe"
 
     def build_view(mode, center, span):
         ss = args.supersample if args.supersample else SUPERSAMPLE_DEFAULT[mode]
@@ -641,14 +886,16 @@ def main():
 
         written, skipped = [], 0
         for gen, index, iteration, tag in selected:
-            pos = read_frame(manifest, gen, index)
+            pos = read_frame(manifest, gen, index, probe)
             view = locked_view(manifest, gen, pos, lock_name, args.span, args.canvas, lock_ss)
             if view is None:
                 skipped += 1
                 continue
             name = (f"{BEST_PNG_PREFIX}iter{iteration}.png" if tag == "best_solution"
                     else f"iter_{iteration}" + (f"_{tag}" if tag else "") + ".png")
-            image = render_frame(manifest, view, gen, pos, iteration, tag, scalars, lock_name)
+            rho, bands, palette, label = frame_channels(manifest, gen, index, args)
+            image = render_frame(manifest, view, gen, pos, iteration, tag, scalars, lock_name,
+                                 rho, bands, palette, label)
             image.save(out_dirs[0] / name)
             written.append(out_dirs[0] / name)
             if not args.quiet:
@@ -714,14 +961,17 @@ def main():
 
     written = [[] for _ in views]
     for gen, index, iteration, tag in selected:
-        pos = read_frame(manifest, gen, index)   # decoded ONCE, drawn into every view
+        pos = read_frame(manifest, gen, index, probe)   # decoded ONCE, drawn into every view
+        # Likewise the auxiliary channels: read once per frame, drawn into every window.
+        rho, bands, palette, label = frame_channels(manifest, gen, index, args)
         # The two files worth reaching for first are named to sort first: the GIF, then the
         # best-solution frame. Everything else keeps the cairo renderer's iter_<N> naming, so the
         # rest of the folder still reads in trajectory order below them.
         name = (f"{BEST_PNG_PREFIX}iter{iteration}.png" if tag == "best_solution"
                 else f"iter_{iteration}" + (f"_{tag}" if tag else "") + ".png")
         for i, (view, out_dir) in enumerate(zip(views, out_dirs)):
-            image = render_frame(manifest, view, gen, pos, iteration, tag, scalars)
+            image = render_frame(manifest, view, gen, pos, iteration, tag, scalars, "",
+                                 rho, bands, palette, label)
             image.save(out_dir / name)
             written[i].append(out_dir / name)
         if not args.quiet:

@@ -5,9 +5,10 @@ description: >
   dump (TODO #16), using tools/generate_viz.py. Trigger on requests like "make a zoom gif of this
   run", "show me what's happening at region X", "animate the placement", "render the viz dump",
   or any mention of placement_zoom / viz_render / node-position dump. Covers picking a good zoom
-  window, phase-2 (two-generation) runs, and known performance/quality tradeoffs.
-  Do NOT use this for: node-locked "follow one cell" views or multi-view sweeps (not implemented
-  yet, TODO #16 step 4); the convergence-history charts (HPWL/overflow/step/lambda vs iteration --
+  window, phase-2 (two-generation) runs, node-locked "follow one cell" views (--lock), the
+  mechanism views that colour cells by force balance or paint the density field (--color-by /
+  --underlay), and known performance/quality tradeoffs.
+  Do NOT use this for: the convergence-history charts (HPWL/overflow/step/lambda vs iteration --
   that is tools/plot_histories.py reading iterations.dat); or any visualization outside
   vck5000/sw_only (pl_algo has no equivalent). If the run has no dump, this skill cannot help
   after the fact -- see step 0.
@@ -84,6 +85,44 @@ python3 tools/generate_viz.py <run_dir> --view zoom --center X,Y --span S --gif
   a frame looks noticeably jaggier than the equivalent cairo PNG would, at N² cost in time/memory.
 - `--canvas N` — longest side in pixels, default 2048.
 
+## 4. Mechanism views — showing WHY, not just where
+
+Dump format v2 (2026-08-27) added four optional channels, and three flags read them. They turn a
+GIF of cells drifting into a diagnostic of what is driving them. All three need the run to have
+written the channel; `generate_viz.py` refuses up front with the config key to set, rather than
+silently rendering the plain view.
+
+```bash
+python3 tools/generate_viz.py <run_dir> --underlay density --color-by force --gif
+```
+
+- `--underlay density` — paints the placer's **own** bin-density map under the cells (white empty
+  → dark red at 2x target density). Anchored on target density, not the frame maximum, so the
+  colour means the same thing in every frame. Needs `output.dump_bin_density` (default on).
+- `--color-by force` — repaints the movable cells blue where the **wirelength** gradient dominates,
+  red where the **density** gradient does. This is the one thing that cannot be recovered after
+  the fact: `combineGradients()` sums the two in place. Expect near-solid blue early (lambda is
+  tiny) turning red as lambda ramps — a run that never turns red never started spreading.
+- `--color-by precond` — the per-node preconditioner weight, log-scaled over the frame's own
+  range. Which cells get their step scaled down; the MMS macro-vs-standard-cell question.
+- `--positions probe` — draw the Nesterov lookahead **v_k** instead of the committed u_k. Worth
+  knowing: HPWL, overflow and the best-solution tracker are all measured at v (TODO #32), so the
+  HUD scalars burned into every frame describe the PROBE frame, not the committed one.
+
+Needs `output.dump_forces` / `output.dump_probe_positions` (both default on). Every frame is
+labelled in its top line with the channels it was drawn from, so a folder holding both a plain
+and a force-coloured render is still readable.
+
+**Check the dump before rendering from it:**
+
+```bash
+python3 tools/check_viz_dump.py <run_dir>
+```
+
+Asserts every stream is in lockstep and four structural invariants hold (fillers on no net,
+fillers with zero wirelength gradient, preconditioner >= 1, density mass conserved within a
+generation). Exits non-zero on failure. Cheap; run it once after any run you intend to render.
+
 ## Gotchas
 
 - **Two-phase (MMS macro) runs have multiple generations.** The node SET changes at the phase-1 →
@@ -99,6 +138,18 @@ python3 tools/generate_viz.py <run_dir> --view zoom --center X,Y --span S --gif
   of pre-filtering by window the way `View.visible()` does here.
 - **A GIF is ~100 MB at 140 frames / 2048 px.** Worth mentioning to the user when you hand one
   over, along with the lever: `--canvas 1024` or an `--iters` stride cuts it a lot.
+- **The force channel is the expensive one on disk: 20 B/node/frame.** On a 371k-node design at
+  cadence 5 that is ~1 GB for one run, several times everything else combined. The run prints its
+  MB/frame at startup — read it before launching a suite. `output.dump_forces = false` is the
+  lever if a design is only going to be rendered plainly.
+- **Three frames per run carry no auxiliary data, by design.** `legalized`, `reseeded` and
+  `best_solution` each sit at a point where the density map or the gradients describe a different
+  placement from the one being drawn, so their records are zero-filled and flagged in the
+  manifest's `frame_valid`. The renderer skips the underlay/colouring on them and says `=stale` in
+  the caption; that is correct, not a missing frame.
+- **The force ramp's red and the fixed-macro layer's red are the same red.** Size tells them
+  apart (macros are the big bordered blocks), but on a design with small fixed cells prefer
+  `--color-by precond`, whose green ramp collides with nothing.
 - **Size the frame count at run time, not render time.** Frames come from whatever
   `output.iterations_per_dump` the run used; the renderer can only subset what is there. A typical
   ISPD2005 run is 600-800 iterations, so cadence 20 yields a choppy ~35 frames and cadence 5 a

@@ -335,6 +335,14 @@ public:
         long long clamped = 0;     // positions that hit the quantization clamp (see dumpIterationPositions)
         std::vector<int> frame_iters;
         std::vector<std::string> frame_tags;  // "" or a boundary caption, parallel to frame_iters
+        // CLAUDE CODE: per-frame validity bitmask for the AUXILIARY channels, parallel to
+        // frame_iters. bit 0 = density/field describes THIS frame's placement, bit 1 = forces do.
+        // The three tagged frames each break one or both: "legalized" moves macros with no
+        // re-solve, "reseeded" re-solves the field but never re-combines the gradients, and
+        // "best_solution" restores a placement the last solve never saw. Those frames still get
+        // a zero-filled record so every channel stays seekable by frame index; this flag is what
+        // stops a renderer painting a stale heatmap under a moved placement.
+        std::vector<int> frame_valid;
     };
     struct PositionDump {
         bool enabled = false;
@@ -343,12 +351,41 @@ public:
         std::ofstream frames;      // frames_gen<N>.bin for the generation currently open
         std::vector<DumpGeneration> generations;
         float qx0 = 0.0f, qy0 = 0.0f, qw = 1.0f, qh = 1.0f;  // uint16 quantization box
+
+        // CLAUDE CODE: optional channels (format v2). Each is one extra file per generation,
+        // written in lockstep with frames_gen<N>.bin so frame index i seeks the same way in all
+        // of them. Sizes per frame, which is why each is its own knob: probe = 4 B/node,
+        // density = 4 B/viz-bin, field = 8 B/viz-bin, forces = 20 B/node.
+        bool probe_enabled   = true;   // output.dump_probe_positions -- Nesterov v_k beside u_k
+        bool density_enabled = true;   // output.dump_bin_density
+        bool field_enabled   = false;  // output.dump_field
+        bool forces_enabled  = true;   // output.dump_forces
+        std::ofstream probe, density, field, forces;
+
+        // Box-averaged density/field resolution. The solver grid is up to 2048x2048 (16 MB of
+        // float32 per frame at 2048); VIZ_BINS_MAX caps what reaches the disk. Integer block
+        // factor only, so a block maps to a whole number of solver bins and the average is exact.
+        int viz_nx = 0, viz_ny = 0, viz_fx = 1, viz_fy = 1;
+
+        // Per-node force capture, filled by combineGradients() at stride FORCE_FLOATS_PER_NODE:
+        // wl.x, wl.y, den.x, den.y, precond_weight. Interleaved at capture time so writing a
+        // frame is one contiguous write rather than a gather.
+        std::vector<float> force_capture;
+
+        // Freshness of the two auxiliary channels w.r.t. the CURRENT node positions. Set by the
+        // producer (computeElectricFields / combineGradients), cleared by anything that moves
+        // nodes without re-running it. See DumpGeneration::frame_valid.
+        bool density_fresh = false;
+        bool forces_fresh  = false;
     };
     PositionDump m_pos_dump;
+    static constexpr int FORCE_FLOATS_PER_NODE = 5;  // wl.x, wl.y, den.x, den.y, precond_weight
 
     void beginPositionDumpGeneration();   ///< close the open generation, open the next one
     void dumpIterationPositions(const std::string& tag = "");  ///< one frame; forced when tagged
     void finalizePositionDump();          ///< close the stream and write manifest.json
+    void writeDumpDensityFrame(bool valid);   ///< CLAUDE CODE: box-averaged rho (+ optional Ex,Ey)
+    void writeDumpForceFrame(int frame_nodes, bool valid);  ///< CLAUDE CODE: per-node force split
 
     // Constructor
     Placer(std::string);
