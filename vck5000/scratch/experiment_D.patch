@@ -1,0 +1,70 @@
+diff --git a/vck5000/host/src/common/src/Grid.cpp b/vck5000/host/src/common/src/Grid.cpp
+index 22ca20a..2a30721 100644
+--- a/vck5000/host/src/common/src/Grid.cpp
++++ b/vck5000/host/src/common/src/Grid.cpp
+@@ -152,8 +152,9 @@ void Grid::clampFixedDensity(float target_density)
+     for (int col = 0; col < m_bins_per_row; col++)
+         for (int row = 0; row < m_bins_per_col; row++) {
+             float bin_area = m_bins[col][row].bb.getArea();
+-            float saturated = std::min(m_bins[col][row].total_overlap, bin_area);
+-            m_bins[col][row].total_overlap = saturated * target_density;
++            // EXPERIMENT D (TODO #35): reverted to the pre-#3 cap min(rho,td). THROWAWAY -- revert.
++            m_bins[col][row].total_overlap = std::min(m_bins[col][row].total_overlap,
++                                                      bin_area * target_density);
+         }
+ }
+ 
+diff --git a/vck5000/host/src/sw_only/src/placer/Density.cpp b/vck5000/host/src/sw_only/src/placer/Density.cpp
+index fd31cfd..a226a84 100644
+--- a/vck5000/host/src/sw_only/src/placer/Density.cpp
++++ b/vck5000/host/src/sw_only/src/placer/Density.cpp
+@@ -334,7 +334,7 @@ float Placer::computeOverflow(bool smooth, std::vector<float>* out_density, bool
+     deposit_pass(db.getFixedComponents(), false);
+     #pragma omp parallel for schedule(static)
+     for (int i = 0; i < (int)density.size(); i++)
+-        density[i] = std::min(density[i], bin_area) * target_density;
++        density[i] = std::min(density[i], bin_area * target_density);  // EXPERIMENT D (TODO #35): reverted to the pre-#3 cap min(rho,td). THROWAWAY -- revert.
+ 
+     // Movable real cells (clamped when requested). Fillers included only for the diagnostic
+     // that mirrors XPlace's filler-inclusive GP stop signal (default: excluded). exclude_macros
+diff --git a/vck5000/pl/src/pl_algo/src/modules/density_bin.hpp b/vck5000/pl/src/pl_algo/src/modules/density_bin.hpp
+index cef2f7b..ec0b406 100644
+--- a/vck5000/pl/src/pl_algo/src/modules/density_bin.hpp
++++ b/vck5000/pl/src/pl_algo/src/modules/density_bin.hpp
+@@ -100,8 +100,9 @@ strip_loop:
+             for (int y = 0; y < GRID; y++) {
+ #pragma HLS PIPELINE II=1
+                 // CLAUDE CODE: one compare + one multiply, still II=1.
+-                const float sat = (acc_URAM[i][y] > bin_area) ? bin_area : acc_URAM[i][y];
+-                acc_URAM[i][y]  = sat * target_density;
++                // EXPERIMENT D (TODO #35): reverted to the pre-#3 cap min(rho,td). THROWAWAY -- revert.
++                const float cap = bin_area * target_density;
++                acc_URAM[i][y]  = (acc_URAM[i][y] > cap) ? cap : acc_URAM[i][y];
+             }
+ 
+     pass2_movable:
+diff --git a/vck5000/test/density_bin_model.cpp b/vck5000/test/density_bin_model.cpp
+index 7a05ad7..66adb61 100644
+--- a/vck5000/test/density_bin_model.cpp
++++ b/vck5000/test/density_bin_model.cpp
+@@ -88,9 +88,9 @@ static std::vector<float> bin_reference(const std::vector<NodeBox>& nodes, int M
+     clamped_bins = 0;
+     // CLAUDE CODE: min(rho,1)*td (TODO #34). clamped_bins now counts bins whose FIXED deposit
+     // saturates a full bin -- the point where the two formulas used to coincide.
++    const float cap_D = bin_area * target_density;   // EXPERIMENT D (TODO #35): reverted to the pre-#3 cap min(rho,td). THROWAWAY -- revert.
+     for (float& v : ov) {
+-        if (v > bin_area) { v = bin_area; clamped_bins++; }
+-        v *= target_density;
++        if (v > cap_D) { v = cap_D; clamped_bins++; }
+     }
+     for (int n = 0; n < M; n++)                           // PASS 2: movable [0,M)
+         scatter(nodes[n], bin_w, bin_h, 0, GRID, add);
+@@ -112,7 +112,7 @@ static std::vector<float> bin_strip_tiled(const std::vector<NodeBox>& nodes, int
+         for (int n = M; n < (int)nodes.size(); n++)       // PASS 1: fixed
+             scatter(nodes[n], bin_w, bin_h, c0, c0 + STRIP, add);
+         // CLAUDE CODE: min(rho,1)*td (TODO #34), strip-local; each bin lives in exactly one strip.
+-        for (float& v : acc) v = std::min(v, bin_area) * target_density;
++        for (float& v : acc) v = std::min(v, bin_area * target_density);  // EXPERIMENT D (TODO #35): reverted to the pre-#3 cap min(rho,td). THROWAWAY -- revert.
+         for (int n = 0; n < M; n++)                       // PASS 2: movable
+             scatter(nodes[n], bin_w, bin_h, c0, c0 + STRIP, add);
+         for (int i = 0; i < STRIP; i++)                   // write strip -> rho (x-major)
