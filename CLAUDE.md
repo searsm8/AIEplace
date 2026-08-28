@@ -299,10 +299,10 @@ writes to `results/DSE_<ts>/` (gitignored); reference runners land in `.claude/2
 `$ARTIFACTS`, override it to keep a throwaway run off the standing tables.
 
 ## Coding style for this repo
-General style rules are in `~/.claude/CLAUDE.md`; this is the hardware-specific addition.
-
-**When you author a new comment, prefix it with your signature, e.g.
-// CLAUDE CODE: comment
+General style rules are in `~/.claude/CLAUDE.md`; this is the hardware-specific addition. The
+AI-comment signature is the global `Meow.` suffix (see `~/.claude/CLAUDE.md`) — no separate
+`// CLAUDE CODE:` prefix in this repo. (Two such prefixes survive in `density_bin.hpp`; leave
+them until that file is next touched.)
 
 **HLS code reads differently from pure software.** Annotate the datapath: pragmas,
 memory-resource intent (`_URAM`/`_BRAM`/`_DDR` suffixes), and a short note on why a loop is
@@ -333,6 +333,15 @@ test could see it. When you rename on one side, rename on the other in the same 
 function.** The κ bug sat under a doc-block that said it was computing `weighted_weight` while the
 next line assigned something else. Prefer to make the claim checkable (see *A test asserts*) over
 asserting it in prose.
+
+### Naming a PL module (`pl/src/pl_algo/src/modules/*.hpp`)
+**Each module file should contain one major function that matches the filename, and the name
+should express what is being computed (i.e. the primary output) — not an implementation detail
+like "CU" (compute unit).** `hpwl_gradient.hpp`'s top-level function is `hpwl_gradient`, not
+`hpwl_CU`; `density_bin.hpp`'s is `density_bin`. Helper functions in the same file (LUT lookups,
+per-node inner loops) don't need to match — only the one function `top.cpp` calls. This is what
+makes `grep -rn "<module>" vck5000/pl` and the module-name-in-a-comment convention above actually
+round-trip, and it's what a reader scanning `modules/` for "what computes X" can rely on.
 
 ## Keeping `.claude/0_WORKFLOW/tasks.md` true
 tasks.md is the **source of truth for project state** — `summary.md` points at it and every

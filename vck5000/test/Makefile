@@ -37,7 +37,7 @@ $(BUILD)/%: %.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -o $@
 
 # hpwl_grad_test's assertion [5] is a bounds check, not a value check: dropping either net-mask
-# `continue` in hpwl_CU leaves the gradient BIT-IDENTICAL but indexes bb_DDR[-1] and then
+# `continue` in hpwl_gradient leaves the gradient BIT-IDENTICAL but indexes bb_DDR[-1] and then
 # lut_BRAM[negative], so only a sanitizer can see it. That needs its own target because ASan
 # does not run out of the box here -- WSL2's ASLR entropy breaks its shadow mapping and the
 # binary spins on AddressSanitizer:DEADLYSIGNAL, so it is run under `setarch -R`. Kept OUT of

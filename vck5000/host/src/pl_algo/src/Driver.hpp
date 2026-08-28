@@ -19,7 +19,7 @@ namespace plalgo {
 // boundary is what lets the two ABIs coexist in one binary (see PackedDesign.hpp).
 float runHpwlKernel(const PackedDesign& pk, const char* xclbin_path);
 
-// Run the PL HPWL gradient compute unit (hpwl_CU) on the device. Uploads the
+// Run the PL HPWL gradient compute unit (hpwl_gradient) on the device. Uploads the
 // packed design + the exp LUT, executes top(), and writes the per-movable-node
 // gradient (dW/dx, dW/dy) into node_grad (caller-allocated, num_movable entries).
 // PL-only path (AIE=none) -- no graph.
@@ -133,7 +133,7 @@ void runMetrics(const coord_t* node_pos, const int* net_ptr, const NodePin* pins
                 float* out_hpwl, float* out_overflow_sum, const char* xclbin_path);
 
 // Stage 5c.5: the full ePlace placement loop, run in ONE device/graph session (sw_emu can't
-// reopen the device/AIE-sim in one process). Per iteration, at the probe positions v: hpwl_CU
+// reopen the device/AIE-sim in one process). Per iteration, at the probe positions v: hpwl_gradient
 // -> g_hpwl, density solve -> g_density, host metrics {hpwl, overflow}, host policy (λ/α/γ/
 // precond/momentum, all from Placement.hpp), then iteration_update -> new u,v. Trajectory is
 // written to out_hpwl_hist / out_ovfl_hist (caller-allocated [max_iters]); the final committed

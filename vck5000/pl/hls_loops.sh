@@ -2,12 +2,12 @@
 # hls_loops.sh [kernel] -- summarize HLS per-loop II / latency for a pl build,
 # so you don't have to type the _x_*/temp/top/.../syn/report path by hand.
 #
-#   ./hls_loops.sh            # default kernel hpwl_CU, newest build under build/
-#   ./hls_loops.sh hpwl_CU    # explicit kernel
+#   ./hls_loops.sh                  # default kernel hpwl_gradient, newest build under build/
+#   ./hls_loops.sh hpwl_gradient    # explicit kernel
 # Reads the per-loop *_csynth.rpt files and prints loop name, II, iteration
 # latency, and trip count -- the three numbers worth scanning first.
 
-kernel="${1:-hpwl_CU}"
+kernel="${1:-hpwl_gradient}"
 
 # build/ lives one level up (vck5000/build), regardless of cwd.
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

@@ -1,7 +1,7 @@
 #ifndef PL_ALGO_HPWL_GRAD_VERIFY_HPP
 #define PL_ALGO_HPWL_GRAD_VERIFY_HPP
 
-// HpwlGradVerify -- verify the PL HPWL gradient compute unit (hpwl_CU) against a
+// HpwlGradVerify -- verify the PL HPWL gradient compute unit (hpwl_gradient) against a
 // CPU golden on a real packed design.
 //
 // Builds the exp LUT, picks gamma from the design's coordinate span, runs the PL

@@ -16,7 +16,7 @@
 // model/density_bin_model.cpp; verified vs the Grid golden (real benchmark) in sw_emu.
 //
 // NOTE: acc_URAM[][] += in bin_scatter is a float-accumulator RMW (same hazard class
-// as hpwl_CU's scatter); the node-loop II is measured in C-synth before optimizing.
+// as hpwl_gradient's scatter); the node-loop II is measured in C-synth before optimizing.
 // (DDR traffic is benign: node_box read is sequential->burst, bin_density write is
 //  sequential->burst and write-only -- the accumulation RMW stays on-chip in URAM.)
 
