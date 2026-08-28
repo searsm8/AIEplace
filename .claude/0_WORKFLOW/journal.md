@@ -17,6 +17,101 @@ status. **Never rewrite an entry; annotate.** The retraction trail is the point.
 
 ---
 
+## 2026-08-28 — evicted from summary.md: #14, #32, #39 closed-task narration, stale under the soft cap
+
+All three closed **before** 2026-08-27 and have full task-indexed records in [[history.md]] (search
+`#14`, `#32`, `#39` there); this was the still-inline detailed narration summary.md carried past its
+usefulness. Moved verbatim, one warning kept behind (see below).
+
+> - **#14 — zoomable visualizer: CLOSED 2026-08-17**, archived to [[history.md]]. Node-lock
+>   (`generate_viz.py --lock <name>|index:N|most-moved`) re-centres the window on one tracked cell
+>   every frame — verified at **0.0000 px** from the reticle across all 31 newblue1 frames and all
+>   three generations. `--add-view` renders N windows in one pass (byte-identical to N separate
+>   invocations). `MIN_SIZE` cleared: at zoom it floors **0%** of std cells, fillers and macros; the
+>   only nodes floored are 337 **zero-area** bookshelf terminals, where that is correct.
+>   ⚠️ **The dump format grew a file**: `names_gen<N>.txt` (sparse `<index> <name>`, no fillers),
+>   written per generation because the phase-2 boundary reshuffles indices. Dumps made before
+>   2026-08-17 have no names and `--lock` will refuse them — re-run the placement.
+>
+> *Rewritten 2026-08-17. This section was headed "Newly open" and 4 of its 6 entries (#25, #28, #29,
+> #31) were **closed and already archived to [[history.md]]** — the most-read file in the repo was
+> advertising finished work as open. Their full text is in history.md; only live items are below.*
+>
+> - **#32 — CLOSED 2026-08-17**, archived to [[history.md]]. All three items done. **The u-vs-v
+>   question is settled: we track on `v`.** `snapshotBestPlacement()` stores `probe_pos` and HPWL is
+>   measured there too (new `at_probe` arg on `computeTotalWirelength`/`computeWirelength_HPWL`), so
+>   HPWL, overflow and the stored solution describe **one** position — XPlace's single `p`/`v_k`.
+>   `BEST_SOL_MIN_ITER` is phase-relative. `syncProbeToCommitted()` deleted, folded into
+>   `restoreBestPlacement()` (restores both halves) after its blocking comment's claimed perturbation
+>   measured **bit-exact identical** — retracted in the code.
+>   **A/B settled: KEEP 1.005** (`DSE_20260818_113716`, 28 designs × 2 arms, 56/56, 159.6 min).
+>   1.005 → 1.0097 / 1.0126; 1.010 → 1.0097 / 1.0128 (median / mean DP).
+>   ⚠️ **The real finding is that the knob barely binds: 1 design of 28 selects differently**
+>   (ISPD2005 byte-identical across arms). So the effective n is **1, not 28**, and widening the
+>   design set cannot help — the set was already everything. Where it binds (`mgc_des_perf_a`) 1.005
+>   wins by 0.71 pp post-DP, and **DP amplified the penalty rather than absorbing it**, reversing the
+>   #24 report §5 story that "more spread legalizes better". Unexplained: the three designs that
+>   flipped in the 2026-08-10 A/B no longer do — plausibly #31's grid cap moving the overflow gate,
+>   but that is a hypothesis, untested.
+>   ⚠️ **pl_algo inherits the u-vs-v decision** — flagged in tasks.md #20 step 6, with the specific
+>   trap: `sched_verify` checks the schedule, not the geometry, so it cannot catch a wrong choice.
+
+The u-vs-v warning is kept live in summary.md's pl_algo section (not just here) since it bears on
+the still-open #20 step 6.
+
+> - **#39 — position dump format v2: CLOSED 2026-08-27**, archived to [[history.md]]. The dump now
+>   carries what a GIF needs to show *mechanism*: `net_degree`, the Nesterov probe `v_k`, the
+>   solver's own bin density (+ opt-in field, box-averaged to ≤256×256), and the per-node
+>   wirelength/density gradient split + preconditioner — that last one captured inside
+>   `combineGradients()`, the only place the two terms ever exist separately. `generate_viz.py`
+>   reads them via `--underlay density` / `--color-by force|precond` / `--positions probe`, and
+>   `tools/check_viz_dump.py` (new) asserts the dump against four structural invariants.
+>   **Bit-identical with every channel ON**, verified on both a single-phase and a 3-generation
+>   mixed-size run against their committed baselines — stronger than `make test-regress`, whose
+>   frozen configs dump nothing. ⚠️ **Disk, not CPU, is the constraint**: forces are 20 B/node/frame,
+>   so the 14-design suite at cadence 5 is **32 GB all-channels vs 9.6 GB with `dump_forces = false`**
+>   against ~40 GB free. ⚠️ **Half of the original request was already built** — the "positions only"
+>   comment in `default_config.toml` was three weeks stale (now fixed); check `PositionDump.cpp`
+>   before scoping dump work. → [[_NEW_REPORT_39_dump_v2_channels_20260827.md]]
+
+## 2026-08-27 — evicted from summary.md: the `#3` cap→scale entry, WRONG since 2026-08-25
+
+Found while landing #37. summary.md still carried `#3` as closed-in-favour-of-the-**scale**, which
+`#35` reverted eight days earlier — and summary.md is injected into every session, so this was the
+one always-loaded file actively contradicting `CLAUDE.md`'s divergence registry, `tasks.md`, and
+the code. A session trusting it would have "restored XPlace faithfulness" by reverting a closed,
+measured, Mark-authorized decision. Exactly the failure mode the one-in-one-out rule exists to
+prevent. Replaced in summary.md with a pointer to the registry; original verbatim:
+
+> - **#3 — fixed-density cap-vs-scale: CLOSED 2026-08-17.** Now a scale (`min(ρ,1)·td`), matching
+>   `initializer.py:82`; was a cap (`min(ρ,td)`). Bundled into the same suite re-run as #32's 7a/7b
+>   (Mark's call). Provably a no-op at td=1, so all 8 ISPD2005 designs are untouched by it —
+>   `mms_adaptec1` re-baselined bit-identical. The remaining open item in #3 is the **per-row site
+>   model** (ragged cores on 11 of 16 MMS designs), unrelated. See tasks.md #3.
+
+**Current truth:** the fixed-density treatment is a per-bin **CAP**, `min(ρ, td)` — `#35`,
+2026-08-25, the project's first registered deliberate divergence from XPlace, worth −2.38 pp of MMS
+mean. `#36` (08-26) collapsed the two host copies onto `capFixedDensity`. See the journal entries
+of 2026-08-25 and the divergence registry in `CLAUDE.md`.
+
+## 2026-08-27 — #37: the "macro-excluded" overflow was never macro-excluded
+
+Superseded number, recorded because it was quoted. `computeOverflow(exclude_macros=true)` was
+called at the END of the run, after `freezeMovableMacros()` had made every movable macro FIXED — so
+the flag matched nothing and the "macro-excluded" row was the plain exact overflow wearing a label.
+`tools/benchmarks.py` pointed the XPlace Mixed-GP comparison straight at it.
+
+On mms/adaptec1 the correction is **0.118 → 0.0702** against XPlace's 0.1306. The old number read
+as "spread slightly better than XPlace at the handoff"; the true one says substantially better.
+Any tier-3 flag in history.md derived from the macro-excluded column predates this and was computed
+on the wrong quantity — **retracted, not merely stale**; see tasks.md #37.
+
+The fix also moved `reportPhaseSummary()` after the phase-1 restore, so Phase 1 HPWL / Overflow
+(smoothed) / Overflow (exact) now describe the placement phase 1 *ships* rather than its last
+iterated one — XPlace's own Mixed-GP checkpoint. Those three values shift on every MMS run_summary
+from this date. Reporting only: `test-regress` and `test-regress-slow` bit-identical, mms_adaptec1
+(phase 2) included.
+
 ## 2026-08-17 (later) — evicted from summary.md when #32 and #14 closed
 
 Moved verbatim under the soft cap. These closed on 2026-08-12; their task-indexed records are
@@ -264,3 +359,20 @@ via `beginFixedMacroPhase`. The MMS suite was re-run 2026-08-14 (16/16, DP ratio
 The A/B's n=2 and the two further faithfulness gaps found while auditing the close (u-vs-v
 snapshot position, `BEST_SOL_MIN_ITER` absolute-vs-phase-relative) carry forward as **#32**. Full
 record: `history.md` #24.
+
+
+## 2026-08-27 — evicted from summary.md (one in, one out)
+
+Displaced by #39's entry. Verbatim as it stood; the full record is `history.md` #24, and the
+narration it itself superseded is above under the 2026-08-17 entry.
+
+## Closed 2026-08-17
+- **#24 CLOSED** — best-solution tracking now matches XPlace's `get_best_solution`: three trackers
+  (`best_primary`/`best_aux`/`best_rollback`), each with its own geometry buffer, one shared
+  selection rule. Fixed a shared-buffer defect (17/29 runs shipped a placement the log didn't name)
+  and a torn-restore defect (reported overflow described the last iteration, not the shipped one).
+  MMS suite re-run 2026-08-14: 16/16, DP ratio median 1.0138 / mean 1.0161. Two remaining
+  faithfulness gaps (snapshot position u-vs-v; `BEST_SOL_MIN_ITER` absolute-vs-phase-relative) and
+  the A/B's n=2 spun off to **#32** rather than left open here.
+  → [[_NEW_REPORT_24_best_solution_trackers_20260810.md]]. Superseded prior narration: [[journal.md]].
+

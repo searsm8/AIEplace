@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-08-25. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-08-28. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 > **Soft cap — one in, one out.** Current state only, ~2 screens. To add a line, remove one:
 > superseded snapshots & dated "Closed" narration → [[journal.md]]; finished task sections → [[history.md]].
 > If it's done and no longer live context, it isn't "where things stand" — evict it.
@@ -75,12 +75,12 @@
     legal solutions by 2.6% on the 11 unfenced designs and 12.5% on the fenced 9.
   → [[_NEW_REPORT_26_fence_regions_20260811.md]]
 
-## Where pl_algo stands — THE ACTIVE THREAD as of 2026-08-17
+## Where pl_algo stands — THE ACTIVE THREAD as of 2026-08-28
 - All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
-- **Start at #20 step 1.** Two decisions are still open and step 1 wants them answered (#20 §10):
-  is v1 *"phase-1 GP, device-resident, bit-comparable"* or does it include phase 2 + backtracking;
-  and does pl_algo pin to a named sw_only commit or chase HEAD? The freeze makes pinning cheap —
-  pin to the frozen HEAD and `sched_verify` becomes meaningful again.
+- **v1 scope DECIDED (Mark, 2026-08-28):** phase-1 GP, device-resident, bit-comparable. **No phase 2,
+  no backtracking** (deferred until needed). **pl_algo pins to the frozen sw_only HEAD.** So #20 step 1
+  is now unblocked — restore `dumpScheduleTrace()` against that HEAD and `sched_verify` is meaningful
+  again. (Third §10 question — grid-1024 A/B vs per-design `-DPL_GRID` — still open.)
 - Items re-filed here from the sw_only list on 2026-08-17 (marked **↪ pl_algo** in tasks.md):
   **#15** entirely (net-local frames — PL precision, expects no sw_only HPWL movement), **#23**'s
   initial-step mirror, **#19**'s two remaining bullets (the live pre-#19 dff gate in
@@ -89,67 +89,53 @@
 - **#20 — do NOT compose Stage 5 first.** pl_algo's algorithm is frozen at the **2026-07-14**
   sw_only, and `dumpScheduleTrace()` — the mechanism that would catch the drift — was deleted from
   sw_only as dead code on 07-28. So `make test`'s green `sched_verify` checks a **07-18 golden and
-  always will**. Restore the trace and the tier-1 coverage (**3 of 17 modules today**) first.
+  always will**. Restore the trace and the tier-1 coverage (**4 of 17 modules today** — `hpwl_gradient`
+  landed 2026-08-28, `make test-asan` alongside it) first.
   → [[_NEW_REPORT_pl_algo_stage5_assessment_20260806.md]]
+- **`hpwl_gradient` de-gathered (P1b+P2, 2026-08-28, `21adad6`/`ed25f1a`) — the main win of the #20
+  step 3b optimization thread.** `NodePin` now carries the ABSOLUTE pin position (`{x,y}`, replacing
+  per-node `{off_x,off_y}`); a new `refresh_pin_pos` module folds `v_k` in once per iteration
+  (`MODE_REFRESH_PINS`, II=1). All three random `node_pos` gathers left the HPWL datapath (and
+  `metrics::hpwl_sweep`'s went too) — burst log confirms `gmem0` no longer appears in the HPWL path;
+  `sweep_bbox` pipeline depth **146 → 73**. LUT +2.4%, BRAM/DSP/timing unchanged, tier-1 bit-identical.
+  ⚠️ **Not yet load-bearing on device**: `Driver.cpp`'s `eval_gradients` does not yet issue
+  `MODE_REFRESH_PINS` before `MODE_HPWL_GRAD`/`MODE_METRICS` — until it does, an on-device run
+  silently evaluates the gradient at stale pin positions. Small fix, do it before any sw_emu run of
+  the HPWL path. → [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]]
 - `top.cpp` is still a mode-switch bring-up scaffold; the host owns the γ/λ schedule, one
   round-trip per iteration.
 - `make host HOST=pl_algo` needs one `make clean HOST=pl_algo` first (stale `.d`, not a source break).
-
-## Closed 2026-08-17
-- **#24 CLOSED** — best-solution tracking now matches XPlace's `get_best_solution`: three trackers
-  (`best_primary`/`best_aux`/`best_rollback`), each with its own geometry buffer, one shared
-  selection rule. Fixed a shared-buffer defect (17/29 runs shipped a placement the log didn't name)
-  and a torn-restore defect (reported overflow described the last iteration, not the shipped one).
-  MMS suite re-run 2026-08-14: 16/16, DP ratio median 1.0138 / mean 1.0161. Two remaining
-  faithfulness gaps (snapshot position u-vs-v; `BEST_SOL_MIN_ITER` absolute-vs-phase-relative) and
-  the A/B's n=2 spun off to **#32** rather than left open here.
-  → [[_NEW_REPORT_24_best_solution_trackers_20260810.md]]. Superseded prior narration: [[journal.md]].
+- ⚠️ **pl_algo inherits sw_only's u-vs-v decision (settled by #32, closed 2026-08-17): track on `v`.**
+  HPWL, overflow and the stored solution all describe the lookahead `v_k`, not the committed `u` —
+  flagged in tasks.md #20 step 6, with the specific trap that `sched_verify` checks the schedule,
+  not the geometry, so it cannot catch a wrong choice there.
 
 ## Open
-- **#14 — zoomable visualizer: CLOSED 2026-08-17**, archived to [[history.md]]. Node-lock
-  (`generate_viz.py --lock <name>|index:N|most-moved`) re-centres the window on one tracked cell
-  every frame — verified at **0.0000 px** from the reticle across all 31 newblue1 frames and all
-  three generations. `--add-view` renders N windows in one pass (byte-identical to N separate
-  invocations). `MIN_SIZE` cleared: at zoom it floors **0%** of std cells, fillers and macros; the
-  only nodes floored are 337 **zero-area** bookshelf terminals, where that is correct.
-  ⚠️ **The dump format grew a file**: `names_gen<N>.txt` (sparse `<index> <name>`, no fillers),
-  written per generation because the phase-2 boundary reshuffles indices. Dumps made before
-  2026-08-17 have no names and `--lock` will refuse them — re-run the placement.
-
-*Rewritten 2026-08-17. This section was headed "Newly open" and 4 of its 6 entries (#25, #28, #29,
-#31) were **closed and already archived to [[history.md]]** — the most-read file in the repo was
-advertising finished work as open. Their full text is in history.md; only live items are below.*
-
-- **#32 — CLOSED 2026-08-17**, archived to [[history.md]]. All three items done. **The u-vs-v
-  question is settled: we track on `v`.** `snapshotBestPlacement()` stores `probe_pos` and HPWL is
-  measured there too (new `at_probe` arg on `computeTotalWirelength`/`computeWirelength_HPWL`), so
-  HPWL, overflow and the stored solution describe **one** position — XPlace's single `p`/`v_k`.
-  `BEST_SOL_MIN_ITER` is phase-relative. `syncProbeToCommitted()` deleted, folded into
-  `restoreBestPlacement()` (restores both halves) after its blocking comment's claimed perturbation
-  measured **bit-exact identical** — retracted in the code.
-  **A/B settled: KEEP 1.005** (`DSE_20260818_113716`, 28 designs × 2 arms, 56/56, 159.6 min).
-  1.005 → 1.0097 / 1.0126; 1.010 → 1.0097 / 1.0128 (median / mean DP).
-  ⚠️ **The real finding is that the knob barely binds: 1 design of 28 selects differently**
-  (ISPD2005 byte-identical across arms). So the effective n is **1, not 28**, and widening the
-  design set cannot help — the set was already everything. Where it binds (`mgc_des_perf_a`) 1.005
-  wins by 0.71 pp post-DP, and **DP amplified the penalty rather than absorbing it**, reversing the
-  #24 report §5 story that "more spread legalizes better". Unexplained: the three designs that
-  flipped in the 2026-08-10 A/B no longer do — plausibly #31's grid cap moving the overflow gate,
-  but that is a hypothesis, untested.
-  ⚠️ **pl_algo inherits the u-vs-v decision** — flagged in tasks.md #20 step 6, with the specific
-  trap: `sched_verify` checks the schedule, not the geometry, so it cannot catch a wrong choice.
 - **#33 — the aux ACCEPT budget is hardcoded and has never been swept** (opened 2026-08-17, from
   #32). XPlace has **two** 0.5% budgets: an accept rule in `update_best_sol`
   (`param_scheduler.py:436` — ours is a hardcoded `1.005f` in `Output.cpp`) and the preference test
-  #32 just settled (`:567` — our `best_aux_max_hpwl_ratio`). They are independent knobs that share
+  #32 just settled (`:568` — our `aux_select_hpwl_ratio`). They are independent knobs that share
   a literal upstream. Next step is a cheap diagnostic (how often does the accept rule fire?) before
   spending another suite on it. ⚠️ Do **not** collapse the two onto one config value — that asserts
   an equality XPlace does not.
-- **#3 — fixed-density cap-vs-scale: CLOSED 2026-08-17.** Now a scale (`min(ρ,1)·td`), matching
-  `initializer.py:82`; was a cap (`min(ρ,td)`). Bundled into the same suite re-run as #32's 7a/7b
-  (Mark's call). Provably a no-op at td=1, so all 8 ISPD2005 designs are untouched by it —
-  `mms_adaptec1` re-baselined bit-identical. The remaining open item in #3 is the **per-row site
-  model** (ragged cores on 11 of 16 MMS designs), unrelated. See tasks.md #3.
+- **#3 — fixed-density: the CAP `min(ρ,td)` is current, and it is a KNOWING divergence.** #3's
+  cap→scale close (08-17) was reverted by **#35** (08-25, Mark-authorized, −2.38 pp MMS mean) and
+  the two host copies collapsed onto `capFixedDensity` by **#36** (08-26). ⚠️ Do not "restore
+  faithfulness" here — see `CLAUDE.md`'s divergence registry first. *(The old scale entry said the
+  opposite and stood for 2 days after #35; evicted to journal.md 2026-08-27.)* #3's remaining open
+  item is the **per-row site model** (ragged cores on 11 of 16 MMS designs), unrelated.
+- **#37 — the "macro-excluded" overflow was never macro-excluded** (landed 2026-08-27). It ran
+  after the phase-2 freeze, when the macros are FIXED and the flag matches nothing, so it equalled
+  the plain exact overflow while `benchmarks.py` aimed the XPlace Mixed-GP comparison at it. Now
+  measured at the phase-1 checkpoint, after the best-solution restore, like XPlace's. mms/adaptec1
+  **0.118 → 0.0702** vs XPlace 0.1306. ⚠️ **Macro-excluded comparisons in history.md are retracted,
+  not stale** — re-derive before quoting. Phase 1 HPWL/overflow rows also shift (they now describe
+  the shipped placement, not the last iterated one). Bit-identical on all three regress designs.
+- **#38 — is `MacroLegalize.cpp` (~600 lines) redundant?** XPlace re-legalizes our macros itself on
+  every scored run (`detail_placement.py:374`, unconditional in `run_lg`), so it earns nothing at
+  scoring time — but it runs *inside* phase 2 and conditions the GP result, so deleting it is not
+  free. `macro_legalization = true|false` A/B over MMS decides it. See tasks.md #38.
+
 ## Also open
 - **#21 — repo restructure** (host to top level, one host binary). Proposal only, nothing started.
   **Merge `origin/geert` before anything else** — one `.gitignore` conflict today, 25 hand-moved
