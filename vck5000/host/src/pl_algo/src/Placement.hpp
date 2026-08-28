@@ -154,8 +154,8 @@ static inline double hostHPWL(const coord_t* node_pos, const int32_t* net_ptr,
         float maxx = -1e30f, minx = 1e30f, maxy = -1e30f, miny = 1e30f;
         for (int p = beg; p < end; p++) {
             const NodePin& r = pins[p];
-            const float x = node_pos[r.node_idx].x + r.off_x;
-            const float y = node_pos[r.node_idx].y + r.off_y;
+            const float x = r.x;   // NodePin carries the absolute position (P2)
+            const float y = r.y;
             if (x > maxx) maxx = x; if (x < minx) minx = x;
             if (y > maxy) maxy = y; if (y < miny) miny = y;
         }

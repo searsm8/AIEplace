@@ -49,7 +49,13 @@ PackedDesign packDesign(AIEplace::DataBase& db) {
         for (const NetPin& pin : net->getPins()) {
             auto it = idx.find(pin.node_p);
             if (it == idx.end()) { ++unresolved; continue; } // not in v0 index space
-            pk.pins.push_back(NodePin{ it->second, pin.offset.x, pin.offset.y, net_id });
+            // NodePin carries the ABSOLUTE position (P2); the constant offset goes to pin_off
+            // and the position is filled in by refresh_pin_pos on the device each iteration.
+            // Seeded here from the initial node positions so a caller that reads pk before the
+            // first refresh sees a consistent design rather than zeros.
+            const coord_t np = pk.node_pos[it->second];
+            pk.pins.push_back(NodePin{ it->second, np.x + pin.offset.x, np.y + pin.offset.y, net_id });
+            pk.pin_off.push_back(PinOffset{ pin.offset.x, pin.offset.y });
         }
         // Tag pins of masked nets (net=-1) so the PL gradient/metrics skip them: degree <= 1
         // (no gradient) OR degree > IGNORE_NET_DEGREE (XPlace net_mask, high-degree clock/reset
@@ -67,11 +73,17 @@ PackedDesign packDesign(AIEplace::DataBase& db) {
     // Node-major pin stream for the gradient's segmented reduction (pass 3): the
     // movable, gradient-bearing pins, sorted ascending by node so each node's pins
     // are contiguous (and node_grad writes come out in node order -> sequential).
-    pk.npins.reserve(pk.pins.size());
-    for (const NodePin& r : pk.pins)
-        if (r.net >= 0 && r.node_idx < M) pk.npins.push_back(r);
-    std::stable_sort(pk.npins.begin(), pk.npins.end(),
-                     [](const NodePin& a, const NodePin& b){ return a.node_idx < b.node_idx; });
+    // The offsets are carried through the same permutation so npin_off stays parallel to npins;
+    // sorting the records alone would silently decouple them (P2).
+    std::vector<int32_t> order;
+    order.reserve(pk.pins.size());
+    for (int32_t p = 0; p < (int32_t)pk.pins.size(); ++p)
+        if (pk.pins[p].net >= 0 && pk.pins[p].node_idx < M) order.push_back(p);
+    std::stable_sort(order.begin(), order.end(),
+                     [&](int32_t a, int32_t b){ return pk.pins[a].node_idx < pk.pins[b].node_idx; });
+    pk.npins.reserve(order.size());
+    pk.npin_off.reserve(order.size());
+    for (int32_t p : order) { pk.npins.push_back(pk.pins[p]); pk.npin_off.push_back(pk.pin_off[p]); }
 
     pk.header = DesignHeader{ M, N, (int32_t)nets.size(), (int32_t)pk.pins.size() };
     return pk;
@@ -84,12 +96,12 @@ double hpwlFromPacked(const PackedDesign& pk) {
         if (beg == end) continue;
         const NodePin& f = pk.pins[beg];
         if (f.net < 0) continue;   // masked net (degree<=1 or >IGNORE_NET_DEGREE); skip like the PL kernels
-        float min_x = pk.node_pos[f.node_idx].x + f.off_x, max_x = min_x;
-        float min_y = pk.node_pos[f.node_idx].y + f.off_y, max_y = min_y;
+        float min_x = f.x, max_x = min_x;   // NodePin carries the absolute position (P2)
+        float min_y = f.y, max_y = min_y;
         for (int p = beg + 1; p < end; ++p) {
             const NodePin& r = pk.pins[p];
-            const float x = pk.node_pos[r.node_idx].x + r.off_x;
-            const float y = pk.node_pos[r.node_idx].y + r.off_y;
+            const float x = r.x;
+            const float y = r.y;
             min_x = std::min(min_x, x); max_x = std::max(max_x, x);
             min_y = std::min(min_y, y); max_y = std::max(max_y, y);
         }

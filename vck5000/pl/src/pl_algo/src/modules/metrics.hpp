@@ -8,21 +8,21 @@
 // overflow ratio (sw_only Grid::computeTotalOverflow: rho*bin_area is the bin overlap,
 // capacity is target*bin_area, so excess = bin_area*(rho-target); the bin_area and the
 // movable-area normalization stay on the host, matching "host owns the schedule").
-// HPWL mirrors DataBase::computeTotalWirelength("HPWL") and hpwl_CU's bbox pass exactly:
-// pin position = node_pos[node_idx] + {off_x, off_y}. Totals accumulate in double (a
+// HPWL mirrors DataBase::computeTotalWirelength("HPWL") and hpwl_gradient's bbox pass exactly:
+// Pin records carry their absolute position (P2), so this takes no node_pos and does no
+// gather; refresh_pin_pos must have run at this iteration's probe. Totals accumulate in double (a
 // float sum over ~1e6 nets/bins is order-dependent to ~0.3%; the metric drives
 // convergence, so it must be reproducible), then narrow to float for readback.
 //
-// node_pos here carries the probe positions v (the same positions the gradient pipeline
-// was evaluated at this iteration); the host binds them before this call.
+// The pin records carry the probe positions v -- the same positions the gradient pipeline was
+// evaluated at this iteration -- because refresh_pin_pos folded them in before both ran.
 
 #include "../formats.hpp"
 #include "../host_interface.hpp"
 
 namespace plalgo {
 
-static void metrics(const coord_t* node_pos,     // [num_nodes] positions (gmem0)
-                    const int*     net_ptr,      // [num_nets+1] CSR offsets (gmem1)
+static void metrics(const int*     net_ptr,      // [num_nets+1] CSR offsets (gmem1)
                     const NodePin* pins,         // [num_pins] NET-major (gmem2)
                     const float*   bin_density,  // [GRID*GRID] rho (gmem9)
                     int            num_nets,
@@ -31,7 +31,7 @@ static void metrics(const coord_t* node_pos,     // [num_nodes] positions (gmem0
 {
     const int num_pins = net_ptr[num_nets];      // CSR end == total pin records
 
-    // ---- HPWL: segmented bounding-box reduce over nets (mirrors hpwl_CU phase A1) ----
+    // ---- HPWL: segmented bounding-box reduce over nets (mirrors hpwl_gradient phase A1) ----
     double hpwl_total = 0.0;
     int    cur_net = -1;
     float  maxx = -1e30f, minx = 1e30f, maxy = -1e30f, miny = 1e30f;
@@ -45,8 +45,7 @@ hpwl_sweep:
             cur_net = r.net;
             maxx = -1e30f; minx = 1e30f; maxy = -1e30f; miny = 1e30f;
         }
-        const coord_t c = node_pos[r.node_idx];
-        const float x = c.x + r.off_x, y = c.y + r.off_y;
+        const float x = r.x, y = r.y;            // absolute position (P2); no gather
         if (x > maxx) maxx = x;
         if (x < minx) minx = x;
         if (y > maxy) maxy = y;

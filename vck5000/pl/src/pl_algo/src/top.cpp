@@ -7,7 +7,7 @@
 // One kernel, modules selected by `mode` (host_interface.hpp top_mode). Bring-up
 // scaffold: each module is verified independently through one kernel while we
 // build toward the unified per-iteration datapath (Stage 5).
-//   MODE_HPWL_GRAD   -> hpwl_CU    : HPWL gradient (vs sw_only computeHpwlPartials_CPU).
+//   MODE_HPWL_GRAD   -> hpwl_gradient : HPWL gradient (vs sw_only computeHpwlPartials_CPU).
 //   MODE_DENSITY_BIN -> density_bin : bin density rho (vs sw_only computeOverlaps).
 //   MODE_DCT_1D      -> dct_1d     : 1D DCT via the AIE FFT (PL shuffle/twiddle, AIE
 //                                    does only the forward FFT). First AIE-using mode.
@@ -22,6 +22,7 @@
 #include "host_interface.hpp"
 #include "formats.hpp"
 #include "modules/hpwl_gradient.hpp"
+#include "modules/refresh_pin_pos.hpp"
 #include "modules/density_bin.hpp"
 #include "modules/dct_1d.hpp"
 #include "modules/transpose.hpp"
@@ -58,8 +59,8 @@ void top(
     // ---- HPWL gradient buffers (group_id 0-7) ----
     const coord_t* node_pos,
     const int*     net_ptr,
-    const NodePin* pins,
-    const NodePin* npins,
+    NodePin*       pins,           // IN/OUT: absolute pin positions, patched by MODE_REFRESH_PINS
+    NodePin*       npins,
     const float*   exp_lut,
     NetBBox*       bb,
     NetSums*       sums,
@@ -70,6 +71,9 @@ void top(
     // ---- 1D DCT buffers (group_id 10-11) ----
     const float*   dct_in,
     float*         dct_out,
+    // ---- static pin offsets (group_id 12-13), P2: read only by MODE_REFRESH_PINS ----
+    const PinOffset* pin_off,
+    const PinOffset* npin_off,
     // ---- HPWL scalars ----
     float          inv_gamma,
     float          inv_lut_step,
@@ -128,7 +132,7 @@ void top(
 // not BRAM -- the opposite of what was predicted, so budget it as a LUT cost.
 //
 // gmem0 and gmem7 are SHARED between both kinds of consumer, so their burst length is left at
-// the default: node_pos is a random gather in hpwl_CU/metrics but a sequential burst in
+// the default: node_pos is a random gather in hpwl_gradient/metrics but a sequential burst in
 // iteration_update, and shortening the burst to suit the gather would cripple the stream.
 //
 // NOTE: there is no bank-spreading to be had here. This platform reports exactly two SP tags,
@@ -144,6 +148,10 @@ void top(
 #pragma HLS INTERFACE m_axi port=node_grad   offset=slave bundle=gmem7 max_write_burst_length=64
 #pragma HLS INTERFACE m_axi port=node_box    offset=slave bundle=gmem8
 #pragma HLS INTERFACE m_axi port=bin_density offset=slave bundle=gmem9
+// gmem12/13: static pin offsets, streamed once per refresh alongside the pin records. Purely
+// sequential, so they want burst length rather than queue depth (see the P5a note above).
+#pragma HLS INTERFACE m_axi port=pin_off    offset=slave bundle=gmem12 max_read_burst_length=64
+#pragma HLS INTERFACE m_axi port=npin_off   offset=slave bundle=gmem13 max_read_burst_length=64
 // gmem10/gmem11: transpose overlaps per-tile-row bursts (transpose.hpp Option (a)) --
 // size the outstanding-request buffers so the m_axi adapter keeps a tile's worth of row
 // bursts in flight, hiding the ~70-cyc DDR latency instead of paying it per tile-row.
@@ -162,6 +170,8 @@ void top(
 #pragma HLS INTERFACE s_axilite port=bb             bundle=control
 #pragma HLS INTERFACE s_axilite port=sums           bundle=control
 #pragma HLS INTERFACE s_axilite port=node_grad      bundle=control
+#pragma HLS INTERFACE s_axilite port=pin_off       bundle=control
+#pragma HLS INTERFACE s_axilite port=npin_off      bundle=control
 #pragma HLS INTERFACE s_axilite port=node_box       bundle=control
 #pragma HLS INTERFACE s_axilite port=bin_density    bundle=control
 #pragma HLS INTERFACE s_axilite port=dct_in         bundle=control
@@ -257,7 +267,7 @@ void top(
     } else if (mode == MODE_METRICS) {
         // Stage 5c: reduce {HPWL, overflow_sum}. HPWL from node_pos(0)/net_ptr(1)/pins(2);
         // overflow_sum from bin_density(9). Out: dct_out[0]=HPWL, dct_out[1]=overflow_sum.
-        metrics(node_pos, net_ptr, pins, bin_density, num_nets, target_density, dct_out);
+        metrics(net_ptr, pins, bin_density, num_nets, target_density, dct_out);
     }
 #ifdef PL_FIELD_SOLVE
     else if (mode == MODE_FIELD_SOLVE_PL) {
@@ -277,13 +287,20 @@ void top(
         }
     }
 #endif
+    else if (mode == MODE_REFRESH_PINS) {
+        // P2: fold v_k into both pin arrays. The net-major pass is the one real random gather
+        // left in the HPWL path; the node-major one is monotone. Separate loops on purpose --
+        // see refresh_pin_pos.hpp.
+        refresh_net_pins(node_pos, pin_off, pins, net_ptr[num_nets]);
+        refresh_node_pins(node_pos, npin_off, npins, num_npins);
+    }
     else { // MODE_HPWL_GRAD
         // dct_out[0] carries the HPWL by-product (P1b): phase 1 already forms every net's
         // bounding box, so its half-perimeter sum is free here and the host no longer needs a
         // separate pass for it. Same output slot metrics uses for HPWL, so the readback
         // contract is unchanged. The host's dummy dct_out in this mode is sizeof(float) --
         // exactly the one element written (Driver.cpp:103).
-        hpwl_CU(node_pos, net_ptr, pins, npins, exp_lut, bb, sums, node_grad, dct_out,
+        hpwl_gradient(net_ptr, pins, npins, exp_lut, bb, sums, node_grad, dct_out,
                 inv_gamma, inv_lut_step, lut_size, num_nets, num_movable, num_npins);
     }
 }

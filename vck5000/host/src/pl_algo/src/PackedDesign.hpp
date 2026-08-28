@@ -22,6 +22,11 @@ struct PackedDesign {
     std::vector<int32_t> net_ptr;   // [num_nets+1] CSR prefix offsets
     std::vector<NodePin> pins;      // [num_pins]   flattened, NET-major (CSR order)
     std::vector<NodePin> npins;     // [num_npins]  movable pins, NODE-major (sorted)
+    // Static pin offsets, parallel to the two arrays above (P2). NodePin now carries the
+    // ABSOLUTE position, refreshed each iteration by refresh_pin_pos on the device; these hold
+    // the constant part and are uploaded once. See host_interface.hpp NodePin/PinOffset.
+    std::vector<PinOffset> pin_off;   // [num_pins]
+    std::vector<PinOffset> npin_off;  // [num_npins]
 };
 
 } // namespace plalgo

@@ -58,29 +58,51 @@ struct DesignHeader {
 // ===========================================================================
 //  Buffer 4: flattened pins  (host -> PL)    NodePin pins[num_pins]
 // ===========================================================================
-// One record per (net, node) connection. Absolute pin position =
-// node_pos[node_idx] + {off_x, off_y}. A plain cell pin has offset (0,0); only
-// macro pins carry nonzero offsets. The `net` field (was 16 B alignment padding)
-// carries the owning net id so the PL needs no separate pin->net map; net == -1
-// marks a pin whose net has no gradient (degree <= 1) -> the kernel skips it.
+// One record per (net, node) connection, carrying the pin's ABSOLUTE position -- already
+// node_pos[node_idx] + the static offset. The `net` field carries the owning net id so the PL
+// needs no separate pin->net map; net == -1 marks a pin whose net has no gradient (degree <= 1
+// or degree > IGNORE_NET_DEGREE) -> the kernel skips it.
 //
 // The SAME record type backs two DDR arrays in two different orderings:
 //   pins  -- NET-major (CSR order, matches net_ptr): used by passes 1-2 (bbox/sums)
 //   npins -- NODE-major (sorted ascending by node_idx): used by pass 3 (the
 //            segmented reduction). Only movable, gradient-bearing pins appear in
 //            npins. Same data, reshuffled so a node's pins are contiguous.
+//
+// ---- Why absolute, and what it costs (P2, REPORT_20) ------------------------
+// This field used to be {off_x, off_y}, the STATIC offset, and every consumer re-derived the
+// pin position as node_pos[node_idx] + offset. That put a RANDOM gather of node_pos in the
+// inner loop of hpwl_gradient phases 1, 2 and 3 and of metrics -- and those gathers, not the
+// arithmetic, are what the module is actually waiting on (REPORT_20 §2.2/§2.5: they are the
+// only ports HLS could not infer a burst for). Carrying the position instead makes every one
+// of those loops a pure sequential stream.
+//
+// The offsets do not vanish -- they move to `PinOffset[]` below, which only the refresh pass
+// touches. Net device footprint is 24 B per pin either way; what changes is that the three HOT
+// passes now read 16 B and nothing else, while the 8 B of static offset is touched once per
+// iteration by a single pure-data-movement loop that can be tuned on its own.
+//
+// ⚠️ THESE ARRAYS ARE NOW PER-ITERATION STATE, not static design data. Whoever moves a node
+// owns refreshing them -- see refresh_pin_pos. Getting that wrong is silent: the gradient is
+// simply evaluated at stale positions. The arrays must carry the PROBE v_k, matching
+// node_box.{x,y}, not the committed u_k.
 struct NodePin {
-    int32_t node_idx;      // index into node_pos[]
-    float   off_x;         // NetPin.offset.x
-    float   off_y;         // NetPin.offset.y
+    int32_t node_idx;      // index into node_pos[] -- still needed to address node_grad[]
+    float   x;             // ABSOLUTE pin position = node_pos[node_idx].x + offset.x
+    float   y;
     int32_t net;           // owning net id, or -1 if the net has no gradient
 };
+
+// Static pin offsets, parallel to the NodePin arrays (pin_off to pins, node_pin_off to npins).
+// Uploaded ONCE -- they never change -- and read only by the refresh pass, never by the
+// gradient datapath. Kept out of NodePin so the hot passes do not pay for them.
+struct PinOffset { float off_x, off_y; };
 
 // Per-net reduction results. Computed on-chip in passes 1-2 (net-tiled), spilled
 // to DDR (bb_DDR / sums_DDR, [num_nets]) so pass 3 -- which streams node-major --
 // can read any net's reduction. Kernel-internal scratch: the host only allocates
 // the DDR buffers (num_nets * sizeof), it neither fills nor reads them.
-// ⚠️ bb MUST BE ZEROED BEFORE FIRST USE. hpwl_CU sums every entry to produce the HPWL
+// ⚠️ bb MUST BE ZEROED BEFORE FIRST USE. hpwl_gradient sums every entry to produce the HPWL
 // by-product, but it only WRITES the entries of gradient-bearing nets -- a masked net (net
 // == -1) never reaches the flush. Zeroed, those entries are a zero-extent box and contribute
 // nothing; un-zeroed, they add garbage to the HPWL. One memset at allocation is sufficient:
@@ -243,6 +265,14 @@ enum top_mode { MODE_HPWL_GRAD = 0, MODE_DENSITY_BIN = 1, MODE_DCT_1D = 2,
                                          // + pins (gmem2); overflow_sum from bin_density (gmem9).
                                          // OUT: dct_out[0]=HPWL, dct_out[1]=overflow_sum (gmem11).
                                          // scalars: num_nets, target_density.
+                MODE_REFRESH_PINS = 11,  // P2: fold the current probe v_k into both pin arrays'
+                                         // absolute positions, so the gradient and metrics need
+                                         // no node_pos gather. MUST run before MODE_HPWL_GRAD
+                                         // and MODE_METRICS at every new probe -- skipping it
+                                         // does not fail, it silently evaluates stale positions.
+                                         // IN: node_pos(0), pin_off(12), npin_off(13);
+                                         // IN/OUT: pins(2), npins(3). scalars: num_nets (for
+                                         // num_pins via net_ptr), num_npins.
                 MODE_FIELD_SOLVE_PL = 10 }; // PL-only field solve: forward 2D DCT -> spectral ->
                                          // inverse (IDCT/IDXST), the whole density solve on the PL
                                          // via fft_pl (NO AIE). rho = dct_in (gmem10) -> Ex =
@@ -273,7 +303,7 @@ struct NodeBox { float x; float y; float w; float h; };
 //   float bin_density[GRID*GRID], row-major FIRST-INDEX(x)-major:
 //     bin_density[x*GRID + y]   x horizontal in [0,GRID), y vertical in [0,GRID)
 //   to match sw_only density[x][y] and make a fixed-x "row" contiguous (the DCT's
-//   row direction). Natural float (128-bit beat packing deferred, like hpwl_CU).
+//   row direction). Natural float (128-bit beat packing deferred, like hpwl_gradient).
 //   bin_w = die_xsize/GRID, bin_h = die_ysize/GRID; bin indexing assumes die
 //   origin (0,0) (sw_only convention). rho = clamped_overlap / (bin_w*bin_h);
 //   fixed overlap saturates at bin_area then scales by target_density (min(rho,1)*td,

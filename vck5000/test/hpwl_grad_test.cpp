@@ -1,4 +1,4 @@
-// Verify hpwl_gradient.hpp (hpwl_CU) against the sw_only WA-HPWL gradient golden.
+// Verify hpwl_gradient.hpp (hpwl_gradient) against the sw_only WA-HPWL gradient golden.
 //
 // The golden is computeHpwlPartials_CPU (host/src/sw_only/src/placer/Partials.cpp:200),
 // re-derived here in double precision. It is re-derived rather than #included because that
@@ -7,7 +7,7 @@
 // below is a line-for-line transcription -- if Partials.cpp's math changes, this must change
 // with it.
 //
-// SIX ASSERTIONS, because hpwl_CU has two independent ways to be wrong and they need
+// SIX ASSERTIONS, because hpwl_gradient has two independent ways to be wrong and they need
 // separating (a single end-to-end number cannot tell a restructuring bug from LUT error):
 //
 //   [1] STRUCTURE   -- module (float, LUT) vs golden (double, SAME LUT). Isolates the segmented
@@ -22,7 +22,7 @@
 //                      Bit-exact; this is what clear_grad is for. The design below deliberately
 //                      contains such nodes (isolated, and masked-net-only).
 //   [4] MASKING     -- total gradient must be unchanged when a masked net's pins are perturbed.
-//   [6] HPWL        -- the HPWL that hpwl_CU EMITS (P1b), against a double golden, plus an
+//   [6] HPWL        -- the HPWL that hpwl_gradient EMITS (P1b), against a double golden, plus an
 //                      independent cross-check reducing bb_DDR directly. P1b lets
 //                      metrics::hpwl_sweep go: a fourth pass over net_pins that re-derives a
 //                      bounding box sweep_bbox already has, with its own random node_pos
@@ -67,6 +67,7 @@
 // reason as the golden -- so a Packer change must be mirrored here.
 
 #include "modules/hpwl_gradient.hpp"
+#include "modules/refresh_pin_pos.hpp"
 #include <vector>
 #include <algorithm>
 #include <random>
@@ -88,10 +89,12 @@ struct Design {
     std::vector<int>     net_ptr;            // [num_nets+1] CSR
     std::vector<NodePin> pins;               // [num_pins] net-major
     std::vector<NodePin> node_pins;          // node-major, movable + gradient-bearing only
-    std::vector<int>     masked_pin_idx;     // indices into pins[] belonging to masked nets
+    std::vector<int>       masked_pin_idx;   // indices into pins[] belonging to masked nets
+    std::vector<PinOffset> pin_off;          // [num_pins] static, parallel to pins
+    std::vector<PinOffset> node_pin_off;     // [num_node_pins] static, parallel to node_pins
 };
 
-// Degrees are chosen to straddle every branch hpwl_CU has: deg 1 and deg > IGNORE_NET_DEGREE
+// Degrees are chosen to straddle every branch hpwl_gradient has: deg 1 and deg > IGNORE_NET_DEGREE
 // are masked (net = -1), deg 2 is the smallest gradient-bearing net, and the first and last
 // nets are forced masked so the segmented flush at both ends is exercised on a masked segment.
 static Design build_design(unsigned seed) {
@@ -132,10 +135,13 @@ static Design build_design(unsigned seed) {
             }
             NodePin r;
             r.node_idx = nd;
-            r.off_x = (coin(rng) == 0) ? off(rng) : 0.0f;   // ~10% macro pins carry an offset
-            r.off_y = (coin(rng) == 0) ? off(rng) : 0.0f;
+            r.x = r.y = 0.0f;                               // filled by refresh_net_pins
             r.net   = net_id;
             d.pins.push_back(r);
+            PinOffset o;
+            o.off_x = (coin(rng) == 0) ? off(rng) : 0.0f;   // ~10% macro pins carry an offset
+            o.off_y = (coin(rng) == 0) ? off(rng) : 0.0f;
+            d.pin_off.push_back(o);
         }
         // Packer.cpp:57 -- mask degree <= 1 and degree > IGNORE_NET_DEGREE (XPlace net_mask).
         if (deg <= 1 || deg > IGNORE_NET_DEGREE)
@@ -147,11 +153,23 @@ static Design build_design(unsigned seed) {
     }
 
     // Packer.cpp:70 -- node-major stream: movable, gradient-bearing pins, stable-sorted by node.
-    for (const NodePin& r : d.pins)
-        if (r.net >= 0 && r.node_idx < d.M) d.node_pins.push_back(r);
-    std::stable_sort(d.node_pins.begin(), d.node_pins.end(),
-                     [](const NodePin& a, const NodePin& b) { return a.node_idx < b.node_idx; });
+    // The offsets ride along so node_pin_off stays parallel to node_pins after the sort.
+    std::vector<int> order;
+    for (int p = 0; p < (int)d.pins.size(); p++)
+        if (d.pins[p].net >= 0 && d.pins[p].node_idx < d.M) order.push_back(p);
+    std::stable_sort(order.begin(), order.end(),
+                     [&](int a, int b) { return d.pins[a].node_idx < d.pins[b].node_idx; });
+    for (int p : order) { d.node_pins.push_back(d.pins[p]); d.node_pin_off.push_back(d.pin_off[p]); }
     return d;
+}
+
+// The device-side refresh (refresh_pin_pos.hpp) is what makes the pin records carry absolute
+// positions. The harness calls the REAL module rather than folding offsets in itself, so a bug
+// in the refresh shows up in the gradient exactly as it would on device.
+static void refresh(Design& d) {
+    refresh_net_pins(d.node_pos.data(), d.pin_off.data(), d.pins.data(), (int)d.pins.size());
+    refresh_node_pins(d.node_pos.data(), d.node_pin_off.data(), d.node_pins.data(),
+                      (int)d.node_pins.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -195,8 +213,8 @@ static void golden(const Design& d, float inv_gamma, const std::vector<float>& l
         float mxx = -1e30f, mnx = 1e30f, mxy = -1e30f, mny = 1e30f;
         for (int k = 0; k < deg; k++) {
             const NodePin& r = d.pins[beg + k];
-            px[k] = d.node_pos[r.node_idx].x + r.off_x;
-            py[k] = d.node_pos[r.node_idx].y + r.off_y;
+            px[k] = r.x;                       // absolute, filled by refresh_pin_pos
+            py[k] = r.y;
             mxx = std::max(mxx, px[k]); mnx = std::min(mnx, px[k]);
             mxy = std::max(mxy, py[k]); mny = std::min(mny, py[k]);
         }
@@ -233,7 +251,7 @@ static void golden(const Design& d, float inv_gamma, const std::vector<float>& l
 static void run_module(const Design& d, float inv_gamma, const std::vector<float>& lut,
                        int lut_size, float inv_lut_step, std::vector<coord_t>& grad,
                        std::vector<NetBBox>* bb_out = nullptr, float* hpwl_out = nullptr) {
-    // bb is ZEROED, and that is load-bearing, not incidental: hpwl_CU sums every entry for the
+    // bb is ZEROED, and that is load-bearing, not incidental: hpwl_gradient sums every entry for the
     // HPWL by-product but only writes gradient-bearing nets, so masked entries must read as a
     // zero-extent box (host_interface.hpp NetBBox; the host memsets it once at allocation).
     // Verified 2026-08-28 by poisoning this with a non-zero box -- [6] fails at rel 1.27.
@@ -243,7 +261,7 @@ static void run_module(const Design& d, float inv_gamma, const std::vector<float
     // Poison the output, do NOT pre-zero it: clear_grad is the module's own zeroing pass and
     // assertion [3] is only meaningful if the harness is not doing that job for it.
     grad.assign(d.M, coord_t{-7.7e30f, -7.7e30f});
-    hpwl_CU(d.node_pos.data(), d.net_ptr.data(), d.pins.data(), d.node_pins.data(),
+    hpwl_gradient(d.net_ptr.data(), d.pins.data(), d.node_pins.data(),
             lut.data(), bb.data(), sums.data(), grad.data(), &hpwl_emitted,
             inv_gamma, inv_lut_step, lut_size,
             d.num_nets, d.M, (int)d.node_pins.size());
@@ -263,8 +281,8 @@ static double golden_hpwl(const Design& d) {
         float mxx = -1e30f, mnx = 1e30f, mxy = -1e30f, mny = 1e30f;
         for (int p = beg; p < end; p++) {
             const NodePin& r = d.pins[p];
-            const float x = d.node_pos[r.node_idx].x + r.off_x;
-            const float y = d.node_pos[r.node_idx].y + r.off_y;
+            const float x = r.x;
+            const float y = r.y;
             mxx = std::max(mxx, x); mnx = std::min(mnx, x);
             mxy = std::max(mxy, y); mny = std::min(mny, y);
         }
@@ -294,6 +312,9 @@ static Err compare(const std::vector<coord_t>& g, const std::vector<double>& gx,
 
 int main() {
     Design d = build_design(20260828u);
+    // P2: pin records carry absolute positions, so the refresh pass has to run before anything
+    // reads them -- exactly the ordering the device must honour each iteration.
+    refresh(d);
 
     const int lut_size = (int)(GAMMA_MULT / PLACE_STEP_NORM) + 2;      // 242
     std::vector<float> lut(lut_size);
@@ -364,7 +385,8 @@ int main() {
 
     // ---- [4] MASKING: moving a masked net's pins must not move the gradient at all.
     Design pert = d;
-    for (int p : pert.masked_pin_idx) pert.pins[p].off_x += 777.0f;   // only masked nets shift
+    for (int p : pert.masked_pin_idx) pert.pin_off[p].off_x += 777.0f;  // only masked nets shift
+    refresh(pert);                      // the refresh must carry that into pins[].x
     std::vector<coord_t> grad_pert;
     run_module(pert, inv_gamma, lut, lut_size, inv_lut_step, grad_pert);
     int mask_bad = 0;

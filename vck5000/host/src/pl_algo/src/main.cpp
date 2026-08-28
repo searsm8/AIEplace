@@ -38,7 +38,7 @@ static plalgo::PackedDesign makeSyntheticDesign() {
     pk.node_pos = { {10,10}, {30,20}, {20,40}, {50,30}, {5,5}, {60,60} };
     pk.node_box = { {10,10,2,2}, {30,20,2,2}, {20,40,2,2}, {50,30,2,2}, {5,5,4,4}, {60,60,4,4} };
     pk.net_ptr  = { 0, 3, 6, 9 };                  // net0={0,1,2} net1={1,3,4} net2={2,3,5}
-    auto P = [](int n, int net){ NodePin p; p.node_idx=n; p.off_x=0; p.off_y=0; p.net=net; return p; };
+    auto P = [](int n, int net){ NodePin p; p.node_idx=n; p.x=0; p.y=0; p.net=net; return p; };
     pk.pins  = { P(0,0),P(1,0),P(2,0),  P(1,1),P(3,1),P(4,1),  P(2,2),P(3,2),P(5,2) };
     // NODE-major, movable pins only, sorted ascending by node_idx (pass B input)
     pk.npins = { P(0,0), P(1,0),P(1,1), P(2,0),P(2,2), P(3,1),P(3,2) };
@@ -179,7 +179,7 @@ int main(int argc, char** argv) {
 
 #ifdef USE_XILINX_XRT
     // Verify the PL HPWL gradient compute unit on a real benchmark: parse + pack,
-    // run hpwl_CU on the device, compare per-node gradient vs the CPU golden.
+    // run hpwl_gradient on the device, compare per-node gradient vs the CPU golden.
     if (argc >= 4 && std::strcmp(argv[1], "--hpwl-grad") == 0) {
         plalgo::PackedDesign pk;
         if (std::strcmp(argv[2], "synthetic") == 0) {

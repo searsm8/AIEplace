@@ -77,6 +77,8 @@ void runHpwlGradCU(const PackedDesign& pk,
     const size_t pins_bytes  = pk.pins.size()     * sizeof(NodePin);
     const size_t npins_bytes = pk.npins.size()    * sizeof(NodePin);
     const size_t lut_bytes   = (size_t)lut_size   * sizeof(float);
+    const size_t poff_bytes  = (size_t)pk.pins.size()  * sizeof(PinOffset);
+    const size_t npoff_bytes = (size_t)(pk.npins.size() ? pk.npins.size() : 1) * sizeof(PinOffset);
     const size_t bb_bytes    = (size_t)num_nets   * sizeof(NetBBox);
     const size_t sums_bytes  = (size_t)num_nets   * sizeof(NetSums);
     const size_t grad_bytes  = (size_t)M          * sizeof(coord_t);
@@ -95,7 +97,7 @@ void runHpwlGradCU(const PackedDesign& pk,
     xrt::bo bo_npins = xrt::bo(device, npins_bytes, top.group_id(3));
     xrt::bo bo_lut   = xrt::bo(device, lut_bytes,   top.group_id(4));
     xrt::bo bo_bb    = xrt::bo(device, bb_bytes,    top.group_id(5));
-    // bb must start zeroed: hpwl_CU sums every entry for the HPWL by-product but only writes
+    // bb must start zeroed: hpwl_gradient sums every entry for the HPWL by-product but only writes
     // gradient-bearing nets, so masked entries must read as a zero-extent box. Once is enough
     // (the net set is static). See host_interface.hpp NetBBox.
     std::memset(bo_bb.map<void*>(), 0, bb_bytes);
@@ -105,22 +107,30 @@ void runHpwlGradCU(const PackedDesign& pk,
     xrt::bo bo_box   = xrt::bo(device, sizeof(NodeBox), top.group_id(8));  // inert dummy
     xrt::bo bo_bd    = xrt::bo(device, sizeof(float),   top.group_id(9));  // inert dummy
     xrt::bo bo_din   = xrt::bo(device, sizeof(float),   top.group_id(10)); // inert dummy
-    xrt::bo bo_dout  = xrt::bo(device, sizeof(float),   top.group_id(11)); // inert dummy
+    xrt::bo bo_dout  = xrt::bo(device, sizeof(float),   top.group_id(11)); // HPWL by-product (P1b)
+    // Static pin offsets (P2): uploaded once, read only by MODE_REFRESH_PINS.
+    xrt::bo bo_poff  = xrt::bo(device, poff_bytes,  top.group_id(12));
+    xrt::bo bo_npoff = xrt::bo(device, npoff_bytes, top.group_id(13));
 
     std::memcpy(bo_node.map<void*>(),  pk.node_pos.data(), node_bytes);
     std::memcpy(bo_nptr.map<void*>(),  pk.net_ptr.data(),  nptr_bytes);
     std::memcpy(bo_pins.map<void*>(),  pk.pins.data(),     pins_bytes);
     std::memcpy(bo_npins.map<void*>(), pk.npins.data(),    npins_bytes);
     std::memcpy(bo_lut.map<void*>(),   exp_lut,            lut_bytes);
+    std::memcpy(bo_poff.map<void*>(),  pk.pin_off.data(),  poff_bytes);
+    if (!pk.npin_off.empty())
+        std::memcpy(bo_npoff.map<void*>(), pk.npin_off.data(), npoff_bytes);
 
     bo_node.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     bo_nptr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     bo_pins.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     bo_npins.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     bo_lut.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_poff.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    bo_npoff.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
     xrt::run run = top(bo_node, bo_nptr, bo_pins, bo_npins, bo_lut, bo_bb, bo_sums, bo_grad,
-                       bo_box, bo_bd, bo_din, bo_dout,
+                       bo_box, bo_bd, bo_din, bo_dout, bo_poff, bo_npoff,
                        inv_gamma, inv_lut_step, lut_size, num_nets, M, num_npins,
                        pk.header.num_nodes, 1.0f, 1.0f, 1.0f,   // density scalars (unused here)
                        0, 0,                                    // dct scalars (unused here)
@@ -158,12 +168,15 @@ void runDensityBin(const PackedDesign& pk,
     xrt::bo bo_bd  = xrt::bo(device, bd_bytes,  top.group_id(9));
     xrt::bo bo_din  = xrt::bo(device, sizeof(float), top.group_id(10)); // inert dummy
     xrt::bo bo_dout = xrt::bo(device, sizeof(float), top.group_id(11)); // inert dummy
+    // P2 inert dummies: this mode never reads the static pin offsets.
+    xrt::bo bo_poff  = xrt::bo(device, sizeof(PinOffset), top.group_id(12));
+    xrt::bo bo_npoff = xrt::bo(device, sizeof(PinOffset), top.group_id(13));
 
     std::memcpy(bo_box.map<void*>(), pk.node_box.data(), box_bytes);
     bo_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
     xrt::run run = top(d_node, d_nptr, d_pins, d_npin, d_lut, d_bb, d_sums, d_grad,
-                       bo_box, bo_bd, bo_din, bo_dout,
+                       bo_box, bo_bd, bo_din, bo_dout, bo_poff, bo_npoff,
                        0.0f, 0.0f, 0, 0, M, 0,                 // HPWL scalars (unused here)
                        N, bin_w, bin_h, target_density,
                        0, 0,                                   // dct scalars (unused here)
@@ -652,6 +665,9 @@ void runDensityGradient(const NodeBox* node_box, int num_nodes, int num_movable,
     xrt::bo bo_bd   = xrt::bo(device, mat_bytes,  top.group_id(9));   // rho, then eField_x
     xrt::bo bo_din  = xrt::bo(device, mat_bytes,  top.group_id(10));  // field in/out, then eField_y
     xrt::bo bo_dout = xrt::bo(device, mat_bytes,  top.group_id(11));  // field out
+    // P2 inert dummies: this mode never reads the static pin offsets.
+    xrt::bo bo_poff  = xrt::bo(device, sizeof(PinOffset), top.group_id(12));
+    xrt::bo bo_npoff = xrt::bo(device, sizeof(PinOffset), top.group_id(13));
 
     std::memcpy(bo_box.map<void*>(), node_box, box_bytes);
     bo_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
@@ -659,7 +675,7 @@ void runDensityGradient(const NodeBox* node_box, int num_nodes, int num_movable,
     // ---- density_bin: node_box -> bin_density (bo_bd) = rho ----
     {
         xrt::run run = top(d_node, d_nptr, d_pins, d_npin, d_lut, d_bb, d_sums, bo_grad,
-                           bo_box, bo_bd, bo_din, bo_dout,
+                           bo_box, bo_bd, bo_din, bo_dout, bo_poff, bo_npoff,
                            0.0f, 0.0f, 0, 0, num_movable, 0,
                            num_nodes, bin_w, bin_h, target_density,
                            0, 0, (int)MODE_DENSITY_BIN);
@@ -675,7 +691,7 @@ void runDensityGradient(const NodeBox* node_box, int num_nodes, int num_movable,
         bo_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
         if (mode == (int)MODE_DCT_TRANSPOSE) fft.run(N / DENSITY_LANES);
         xrt::run run = top(d_node, d_nptr, d_pins, d_npin, d_lut, d_bb, d_sums, bo_grad,
-                           bo_box, bo_bd, bo_din, bo_dout,
+                           bo_box, bo_bd, bo_din, bo_dout, bo_poff, bo_npoff,
                            0.0f, 0.0f, 0, 0, 0, 0,
                            0, 1.0f, 1.0f, 1.0f,
                            sub, N, mode);
@@ -703,7 +719,7 @@ void runDensityGradient(const NodeBox* node_box, int num_nodes, int num_movable,
     bo_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     {
         xrt::run run = top(d_node, d_nptr, d_pins, d_npin, d_lut, d_bb, d_sums, bo_grad,
-                           bo_box, bo_bd, bo_din, bo_dout,
+                           bo_box, bo_bd, bo_din, bo_dout, bo_poff, bo_npoff,
                            0.0f, 0.0f, 0, 0, num_movable, 0,
                            num_nodes, bin_w, bin_h, 0.0f,
                            0, 0, (int)MODE_FORCE_GATHER);
@@ -874,6 +890,9 @@ void runMetrics(const coord_t* node_pos, const int* net_ptr, const NodePin* pins
     xrt::bo d_box   = xrt::bo(device, sizeof(NodeBox), top.group_id(8));
     xrt::bo bo_bd   = xrt::bo(device, bd_bytes,  top.group_id(9));
     xrt::bo d_din   = xrt::bo(device, sizeof(float), top.group_id(10));
+    // P2 inert dummies: this mode never reads the static pin offsets.
+    xrt::bo d_poff  = xrt::bo(device, sizeof(PinOffset), top.group_id(12));
+    xrt::bo d_npoff = xrt::bo(device, sizeof(PinOffset), top.group_id(13));
     xrt::bo bo_out  = xrt::bo(device, out_bytes, top.group_id(11));
 
     std::memcpy(bo_node.map<void*>(), node_pos,    node_bytes);
@@ -886,7 +905,7 @@ void runMetrics(const coord_t* node_pos, const int* net_ptr, const NodePin* pins
     bo_bd.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
     xrt::run run = top(bo_node, bo_nptr, bo_pins, d_npin, d_lut, d_bb, d_sums, d_grad,
-                       d_box, bo_bd, d_din, bo_out,
+                       d_box, bo_bd, d_din, bo_out, d_poff, d_npoff,
                        0.0f, 0.0f, 0, num_nets, 0, 0,         // num_nets used
                        0, 1.0f, 1.0f, target_density,         // target_density used
                        0, 0, (int)MODE_METRICS);
@@ -932,7 +951,7 @@ int runPlacement(const PlacementConfig& cfg,
     xrt::bo b_lut  = xrt::bo(device, lp4, top.group_id(4));      // exp_lut / precond
     xrt::bo b_bb   = xrt::bo(device, (size_t)num_nets*sizeof(NetBBox), top.group_id(5));
     // Zero once: masked nets are never written by sweep_bbox and must read as a zero-extent
-    // box so they drop out of hpwl_CU's HPWL sum. See host_interface.hpp NetBBox.
+    // box so they drop out of hpwl_gradient's HPWL sum. See host_interface.hpp NetBBox.
     std::memset(b_bb.map<void*>(), 0, (size_t)num_nets*sizeof(NetBBox));
     b_bb.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     xrt::bo b_sums = xrt::bo(device, (size_t)num_nets*sizeof(NetSums), top.group_id(6));
@@ -941,6 +960,12 @@ int runPlacement(const PlacementConfig& cfg,
     xrt::bo b_bd   = xrt::bo(device, big, top.group_id(9));      // rho / Ex / v_out
     xrt::bo b_din  = xrt::bo(device, big, top.group_id(10));     // field / Ey / g_density
     xrt::bo b_dout = xrt::bo(device, big, top.group_id(11));     // field / u_out
+    // Static pin offsets (P2): uploaded ONCE. NodePin now carries the absolute position and
+    // MODE_REFRESH_PINS folds v_k in on the device, so this adds no per-iteration DMA.
+    const size_t poffB  = (size_t)num_pins * sizeof(PinOffset);
+    const size_t npoffB = (size_t)(num_npins > 0 ? num_npins : 1) * sizeof(PinOffset);
+    xrt::bo b_poff  = xrt::bo(device, poffB,  top.group_id(12));
+    xrt::bo b_npoff = xrt::bo(device, npoffB, top.group_id(13));
 
     // Static uploads (never change across iterations).
     std::memcpy(b_ptr.map<void*>(),  net_ptr, (size_t)(num_nets+1)*sizeof(int32_t));
@@ -987,7 +1012,7 @@ int runPlacement(const PlacementConfig& cfg,
         b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
         if (mode == (int)MODE_DCT_TRANSPOSE) fft.run(G / DENSITY_LANES);
         xrt::run run = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
-                           b_box, b_bd, b_din, b_dout,
+                           b_box, b_bd, b_din, b_dout, b_poff, b_npoff,
                            0.0f, 0.0f, 0, 0, 0, 0, 0, 1.0f, 1.0f, 1.0f, sub, G, mode);
         run.wait();
         if (mode == (int)MODE_DCT_TRANSPOSE) fft.wait();
@@ -1015,7 +1040,7 @@ int runPlacement(const PlacementConfig& cfg,
 
         // ---- HPWL gradient at probe -> b_grad, read to host ----
         { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
-                           b_box, b_bd, b_din, b_dout,
+                           b_box, b_bd, b_din, b_dout, b_poff, b_npoff,
                            inv_gamma, inv_lut_step, lut_size, num_nets, M, num_npins,
                            N, cfg.bin_w, cfg.bin_h, cfg.target_density, 0, 0, (int)MODE_HPWL_GRAD);
           r.wait(); }
@@ -1024,7 +1049,7 @@ int runPlacement(const PlacementConfig& cfg,
 
         // ---- density gradient at probe: density_bin -> rho, field solve, force_gather -> g_density ----
         { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
-                           b_box, b_bd, b_din, b_dout,
+                           b_box, b_bd, b_din, b_dout, b_poff, b_npoff,
                            0.0f, 0.0f, 0, 0, M, 0, N, cfg.bin_w, cfg.bin_h, cfg.target_density,
                            0, 0, (int)MODE_DENSITY_BIN);
           r.wait(); }
@@ -1045,7 +1070,7 @@ int runPlacement(const PlacementConfig& cfg,
         b_bd.sync(XCL_BO_SYNC_BO_TO_DEVICE);
         b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
         { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
-                           b_box, b_bd, b_din, b_dout,
+                           b_box, b_bd, b_din, b_dout, b_poff, b_npoff,
                            0.0f, 0.0f, 0, 0, M, 0, N, cfg.bin_w, cfg.bin_h, 0.0f,
                            0, 0, (int)MODE_FORCE_GATHER);
           r.wait(); }
@@ -1072,7 +1097,7 @@ int runPlacement(const PlacementConfig& cfg,
         b_grad.sync(XCL_BO_SYNC_BO_TO_DEVICE);
         b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
         { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
-                           b_box, b_bd, b_din, b_dout,
+                           b_box, b_bd, b_din, b_dout, b_poff, b_npoff,
                            lambda, cfg.init_step_seed * cfg.site_width, 0, 0, M, 0, 0, /*coeff=*/0.0f,
                            cfg.die_x, cfg.die_y, 0, 0, (int)MODE_ITERATION_UPDATE);
           r.wait(); }
@@ -1149,7 +1174,7 @@ int runPlacement(const PlacementConfig& cfg,
         b_grad.sync(XCL_BO_SYNC_BO_TO_DEVICE);
         b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
         { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
-                           b_box, b_bd, b_din, b_dout,
+                           b_box, b_bd, b_din, b_dout, b_poff, b_npoff,
                            lambda, alpha, 0, 0, M, 0, 0, coeff, cfg.die_x, cfg.die_y,
                            0, 0, (int)MODE_ITERATION_UPDATE);
           r.wait(); }

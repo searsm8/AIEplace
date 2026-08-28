@@ -1,7 +1,7 @@
-#ifndef PL_ALGO_HPWL_CU_HPP
-#define PL_ALGO_HPWL_CU_HPP
+#ifndef PL_ALGO_HPWL_GRADIENT_HPP
+#define PL_ALGO_HPWL_GRADIENT_HPP
 
-// HPWL compute unit (PL).
+// HPWL gradient compute unit (PL).
 //
 // Computes the weighted-average HPWL gradient (dW/dx, dW/dy) for every movable
 // node, entirely on the PL -- no AIE. Math mirrors sw_only computeHpwlPartials_CPU,
@@ -19,9 +19,13 @@
 //   pin coords to a bounding box in registers; write bb_DDR[net] at the net change.
 //   PHASE A2 -- B/C sums, segmented over NETS (pins_DDR again). At each net change
 //   read that net's final bb_DDR[net]; accumulate exp-weighted B/C sums in
-//   registers; write sums_DDR[net] at the next change. (Two passes, not one: B/C
-//   needs the net's final max, and re-streaming pins_DDR from DDR -- sequential,
-//   II=1 -- is cheaper than buffering a whole net on chip, and has no degree cap.)
+//   registers; write sums_DDR[net] at the next change.
+//   Two passes, not one, and it is NOT because of a degree cap -- a cap exists
+//   (IGNORE_NET_DEGREE = 100, host-enforced). Fusing them behind a FIFO was
+//   investigated and rejected on measurement: adaptec1's unmasked nets have MEDIAN
+//   DEGREE 2 (53% are degree-2), so a per-net drain loop pays pipeline fill/drain on
+//   a 166-deep datapath and lands ~4.4M cycles against phase 2's 2.8M. Re-streaming
+//   net_pins is sequential and burstable; it is the cheap half. See REPORT_20 P1.
 //   PHASE B  -- gradient, segmented over NODES (node_pins_DDR, node-major sorted).
 //   Read bb_DDR/sums_DDR[net] per pin (random READ-ONLY -> II=1); accumulate the WA
 //   partial in registers; write node_grad_DDR[node] once at the node change. The
@@ -38,7 +42,7 @@
 
 namespace plalgo {
 
-constexpr int HPWL_CU_LUT_MAX = 1024;  // max LUT entries cached on-chip
+constexpr int HPWL_GRADIENT_LUT_MAX = 1024;  // max LUT entries cached on-chip
 
 // Partial accumulators for the HPWL by-product sum in phase 1. Power of two so the rotation
 // is a mask, not a modulo. 8 spreads dependent double adds >= 16 pins apart -- see sweep_bbox.
@@ -47,7 +51,7 @@ constexpr int HPWL_PARTIALS = 8;
 // compute exp(-d/gamma) via the cached LUT (d >= 0). Beyond the table -> ~0 (underflow).
 // Force-inline (the sweeps call it 4x/iteration): left as a shared instance HLS
 // serializes the 4 calls (14-cyc latency each); inlined they pipeline independently.
-static inline float hpwl_lut_exp(const float lut_BRAM[HPWL_CU_LUT_MAX], int lut_size,
+static inline float hpwl_lut_exp(const float lut_BRAM[HPWL_GRADIENT_LUT_MAX], int lut_size,
                                  float inv_lut_step, float d) {
 #pragma HLS INLINE
     float idx_f = d * inv_lut_step;
@@ -57,8 +61,10 @@ static inline float hpwl_lut_exp(const float lut_BRAM[HPWL_CU_LUT_MAX], int lut_
     return lut_BRAM[idx] * (1.0f - frac) + lut_BRAM[idx + 1] * frac;
 }
 
-static void hpwl_CU(const coord_t* node_pos_DDR,   // [num_nodes] AoS {x,y}
-                    const int*     net_ptr_DDR,    // [num_nets+1] CSR (unused: kept for ABI)
+// NOTE: takes no node_pos. Pin records carry their absolute position (P2), so every loop here
+// is a pure sequential stream -- the random gathers this used to do are now a single pass in
+// refresh_pin_pos.hpp, which must run first.
+static void hpwl_gradient(const int*     net_ptr_DDR,    // [num_nets+1] CSR (unused: kept for ABI)
                     const NodePin* net_pins_DDR,       // [num_pins] NET-major (phase 1&2)
                     const NodePin* node_pins_DDR,      // [num_node_pins] NODE-major (phase 3)
                     const float*   exp_lut_DDR,    // [lut_size] exp(-t) table
@@ -75,7 +81,7 @@ static void hpwl_CU(const coord_t* node_pos_DDR,   // [num_nodes] AoS {x,y}
     const int num_pins = net_ptr_DDR[num_nets];   // CSR end == total pin records
 
     // Cache the LUT on-chip (avoids a DDR access per exp lookup).
-    float lut_BRAM[HPWL_CU_LUT_MAX];
+    float lut_BRAM[HPWL_GRADIENT_LUT_MAX];
 cache_lut:
     for (int i = 0; i < lut_size; i++) {
 #pragma HLS PIPELINE II=1
@@ -104,9 +110,8 @@ sweep_bbox:
             bb_net = r.net;
             maxx = -1e30f; minx = 1e30f; maxy = -1e30f; miny = 1e30f;
         }
-        const coord_t c = node_pos_DDR[r.node_idx];
-        const float x = c.x + r.off_x;
-        const float y = c.y + r.off_y;
+        const float x = r.x;                        // absolute position, already folded in
+        const float y = r.y;
         if (x > maxx) maxx = x;
         if (x < minx) minx = x;
         if (y > maxy) maxy = y;
@@ -166,7 +171,8 @@ hpwl_reduce:
     }
     double hpwl_total = 0.0;
 hpwl_combine:
-    for (int i = 0; i < HPWL_PARTIALS; i++) hpwl_total += hpwl_part[i];
+    for (int i = 0; i < HPWL_PARTIALS; i++)
+        hpwl_total += hpwl_part[i];
     *out_hpwl_DDR = (float)hpwl_total;              // narrow only at the boundary, as metrics does
 
     // ===== PHASE 2: B/C sums, segmented over nets (bb_DDR is final) =====
@@ -188,9 +194,8 @@ sweep_sums:
             b = bb_DDR[r.net];                       // this net's final bbox (once/net)
             Bpx = Bmx = Cpx = Cmx = Bpy = Bmy = Cpy = Cmy = 0.0f;
         }
-        const coord_t c = node_pos_DDR[r.node_idx]; // Random access, slow but read-only -> II=1
-        const float x = c.x + r.off_x;
-        const float y = c.y + r.off_y;
+        const float x = r.x;                        // absolute position, already folded in
+        const float y = r.y;
         const float apx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, b.mxx - x);
         const float amx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, x - b.mnx);
         const float apy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, b.mxy - y);
@@ -227,11 +232,10 @@ seg_reduce:
             }
             cur_node = r.node_idx; ax = 0.0f; ay = 0.0f;
         }
-        const coord_t c = node_pos_DDR[r.node_idx];
-        const float x = c.x + r.off_x;
-        const float y = c.y + r.off_y;
+        const float x = r.x;                        // absolute position, already folded in
+        const float y = r.y;
 
-        // 
+
         const NetBBox bb = bb_DDR[r.net];           // random READ-ONLY -> II=1
         const NetSums s  = sums_DDR[r.net];
 
@@ -257,4 +261,4 @@ seg_reduce:
 
 } // namespace plalgo
 
-#endif // PL_ALGO_HPWL_CU_HPP
+#endif // PL_ALGO_HPWL_GRADIENT_HPP
