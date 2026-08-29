@@ -126,6 +126,10 @@ public:
                                  // (0.5, 0.95) throttle window once and then leaves it for good.
     float precond_a1_norm = 0.0f; // ||alpha_1||_1 = sum of movable num_pins (preconditioner pin-mass; diag) [instrumentation]
     float precond_a2_norm = 0.0f; // ||alpha_2||_1 = sum of precond_coef*lambda*area (preconditioner density-mass) [instrumentation]
+    // Last Barzilai-Borwein norms from computeLipschitzEstimate: alpha = sqrt(pos)/sqrt(grad).
+    // Recorded verbatim (no behaviour change) only so dumpScheduleTrace can emit the scheduler's
+    // BB inputs for the PL param_scheduler verify (test/sched_verify). Meow.
+    float last_pos_norm_sq = 0.0f, last_grad_norm_sq = 0.0f; // [instrumentation]
 
     // Committed wirelength/density gradient L1 norms from the previous iteration, refreshed each
     // combineGradients (seeded by initializeDensityWeight on iteration 1). Drive density_force_fraction.
@@ -466,6 +470,7 @@ public:
     void printDSEInfoTable();                             // config output.DSE_info
     void printIterationSummaryTable(float hpwl, float overflow);
     void appendIterationLog(float hpwl, float overflow);  // iterations.dat
+    void dumpScheduleTrace(); // schedule_trace.csv golden for test/sched_verify (output.dump_schedule_trace)
 
     // printFinalResults's steps, broken out for readability
     struct FinalMetrics {

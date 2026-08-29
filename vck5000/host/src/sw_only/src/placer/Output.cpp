@@ -149,6 +149,43 @@ void Placer::appendIterationLog(float hpwl, float overflow)
     hpwl_file.close();
 }
 
+/// @brief Append this iteration's schedule inputs+outputs to schedule_trace.csv -- the golden that
+///        test/sched_verify replays through the PL param_scheduler, row for row.
+///
+/// Config-gated (output.dump_schedule_trace, default false), so it is a pure no-op observer on
+/// every normal/regress run -- it only reads existing state and appends a line. Called at the END
+/// of performIteration, AFTER updateSchedule(), so the schedule scalars (inv_gamma, density_weight,
+/// precond_kappa, ...) hold the values the NEXT iteration consumes, paired with the inputs
+/// (hpwl/overflow/BB norms/kappa) that produced them: exactly one param_scheduler input->output
+/// tuple per row.
+///
+/// stop_reason is the StopReason enum as an int (RUNNING=0 CONVERGED=1 MAX_ITERATIONS=2
+/// NAN_METRICS=3 NAN_PARTIALS=4 DIVERGED_HPWL=5 DIVERGENCE_GUARD=6); phase is 1-based. Meow.
+void Placer::dumpScheduleTrace() {
+    std::ofstream f;
+    fs::path path = output_dir;
+    f.open(path.append("schedule_trace.csv"), std::ios_base::app);
+    if (iteration == 1)
+        f << "iter,hpwl,overflow,pos_norm_sq,grad_norm_sq,density_force_fraction,"
+             "base_gamma,gamma,inv_gamma,step_length,nesterov_ak,momentum_coeff,density_weight,"
+             "precond_coef,precond_a1_norm,precond_a2_norm,"
+             "precond_kappa,phase,phase_iteration,stop_reason,backtrack_steps\n";
+    f << std::scientific << std::setprecision(9)
+      << iteration              << ','
+      << hpwl_history.back()    << ',' << ovfw_history.back()   << ','
+      << last_pos_norm_sq       << ',' << last_grad_norm_sq     << ','
+      << density_force_fraction << ',' << base_gamma            << ','
+      << gamma                  << ',' << inv_gamma             << ','
+      << step_length            << ',' << nesterov_ak           << ','
+      << momentum_coeff         << ',' << density_weight        << ','
+      << precond_coef           << ',' << precond_a1_norm       << ','
+      << precond_a2_norm        << ','
+      << precond_kappa          << ',' << ((int)m_phase + 1)    << ','
+      << phaseIteration()       << ',' << (int)m_stop_reason    << ','
+      << backtrack_steps        << '\n';
+    f.close();
+}
+
 // Enhanced function to create organized output structure
 void Placer::createRunOutputStructure()
 {

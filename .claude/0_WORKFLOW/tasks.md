@@ -275,14 +275,26 @@ validates the device scheduler against sw_only as of 2026-07-18 and will keep pa
 
 Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
 
-- [ ] **1. Restore `dumpScheduleTrace()` in sw_only** with today's columns (`precond_kappa`,
-      `precond_coef`, phase, `phaseIteration`, stop reason, `backtrack_steps`) and regenerate the
-      adaptec1 fixture + its `config_used.toml`. Verify `make test-regress` is bit-identical before
-      and after — the dump is config-gated, so it MUST be a no-op. **Do this before touching pl_algo:
-      it is the instrument every later step is measured with.**
-- [ ] **2. Re-verify `param_scheduler` against the new trace**, feeding **κ**, not dff. Fix what falls
-      out: escalating `dff_coef`, the missing `overflow rising` conjunct on the coarse divergence
-      test, phase-relative counters, jolt params read from config instead of hardcoded.
+- [x] **1. Restore `dumpScheduleTrace()` in sw_only — DONE 2026-08-28.** Config-gated
+      (`output.dump_schedule_trace`, default false), hooked at the end of `performIteration` after
+      `updateSchedule()`; emits 21 columns (the original 16 + `precond_kappa`, `phase`,
+      `phase_iteration`, `stop_reason`, `backtrack_steps`). `computeLipschitzEstimate` now records
+      its two BB norms into members so the dump can emit them (verbatim capture, no behaviour change).
+      `make test-regress` **bit-identical** before/after on both designs (proven no-op). Fixture
+      regenerated: adaptec1 grid 512 / td 1.0 / seed 42, **converges 652 iters**, replacing the
+      2026-07-18 trace; `config_used.toml` committed (config is TOML now, `.config.json` deleted).
+- [~] **2. Re-verify `param_scheduler` against the new trace — CORE DONE 2026-08-28.** `sched_verify`
+      now feeds **κ** (`precond_kappa` column), not the dff hack. Schedule scalars verify
+      **bit-exact** (inv_gamma/alpha/coeff/lambda all 0.0), convergence fires exactly at 652.
+      **Escalating `precond_coef` (the "escalating dff_coef" item) handled and now EXERCISED
+      (pc 1→256):** κ[i] is produced by `precond_coef[i-1]` (at an x2 boundary the row logs the new
+      pc but its κ reflects the old one), so the c-derivation groups by the *producing* pc and the
+      closed-form check uses a per-regime c; every plateau holds to ~1.1% and c scales cleanly with
+      pc. The old fixture pinned pc=1.0 and never tested this. **Still open (need other fixtures, not
+      adaptec1):** the `overflow rising` conjunct on the coarse divergence test (needs a *diverging*
+      trace — adaptec1 converges), phase-relative counters (needs a *mixed-size/phase-2* trace —
+      adaptec1 is phase-1 only), and jolt params read from config vs hardcoded (a param_scheduler
+      cleanup). → [[REPORT_pl_algo_stage5_assessment_20260806.md]]
 - [ ] **3. Tier-1 harnesses for the uncovered modules** — ~~`hpwl_gradient`~~ (**done 2026-08-28**,
       `test/hpwl_grad_test.cpp`: 5 assertions vs a double-precision transcription of
       `computeHpwlPartials_CPU`, mutation-tested — see the coverage table in its header. Memory

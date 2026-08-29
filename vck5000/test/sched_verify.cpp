@@ -21,11 +21,12 @@
 // missing. c is derived per precond_coef plateau, since c carries precond_coef (which escalates
 // x2/20 iters on a real run; this fixture holds it at 1.0 throughout).
 //
-// NOTE the replay below still feeds the golden's dff column into param_scheduler's `kappa`
-// parameter. That is deliberate: this fixture was produced by the pre-#19 sw_only, which gated on
-// dff, so feeding kappa would diverge from the golden it is checked against. The argument name and
-// the value passed disagree ON PURPOSE and only here. Regenerating the fixture is blocked on TODO
-// #20 step 1 (dumpScheduleTrace() was deleted from sw_only 2026-07-28).
+// The replay feeds the golden's precond_kappa column into param_scheduler's `kappa` parameter --
+// the SAME quantity sw_only's skip_update gate reads. This is the whole point of TODO #20 step 1:
+// dumpScheduleTrace() was deleted from sw_only 2026-07-28, so the only fixture available was a
+// pre-#19 trace that gated on dff, and this replay had to feed dff to match it. The fixture was
+// regenerated 2026-08-28 from post-#19 sw_only (which gates on precond_kappa), so the argument name
+// and the value passed now agree. The dff column is still present and printed [info] below.
 //
 // lambda on iteration 1 is the golden init value (the L1 norms that produce it are not in the
 // trace), so it is seeded, not recomputed; the trend is verified from iteration 2 on.
@@ -45,8 +46,12 @@ using namespace plalgo;
 struct Row {
     int iter; float hpwl, overflow, pos2, grad2, dff, base_gamma, gamma, inv_gamma,
         step_length, nesterov_ak, coeff, density_weight;
-    float precond_coef, a1_norm, a2_norm;   // cols 14-16: the kappa inputs (XPlace alpha_1/alpha_2)
-    // kappa == XPlace's weighted_weight (param_scheduler.py:386), == sw_only's precond_kappa.
+    float precond_coef, a1_norm, a2_norm;   // cols 13-15: the kappa inputs (XPlace alpha_1/alpha_2)
+    float precond_kappa;                     // col 16: sw_only's precond_kappa == XPlace weighted_weight (the gate it feeds)
+    int phase, phase_iteration, stop_reason, backtrack_steps; // cols 17-20: phase-relative + termination context
+    // kappa == XPlace's weighted_weight (param_scheduler.py:386). The dumped precond_kappa column is
+    // what sw_only actually gated on; a2/(a1+a2) recomputes the same quantity and is kept as an
+    // independent cross-check (they agree to ~9 digits -- precond_kappa's denominator adds 1e-8).
     double kappa() const { return (double)a2_norm / ((double)a1_norm + (double)a2_norm); }
 };
 
@@ -57,14 +62,17 @@ static std::vector<Row> load(const char* path) {
     std::string line; std::getline(f, line); // header
     while (std::getline(f, line)) {
         if (line.empty()) continue;
-        std::stringstream ss(line); std::string c; Row r; float v[16] = {0}; int i = 0;
-        while (std::getline(ss, c, ',') && i < 16) v[i++] = std::stof(c);
-        if (i < 16) { fprintf(stderr, "trace row %d has %d columns, need 16 (precond_coef, "
-                             "precond_a1_norm, precond_a2_norm are required)\n", r.iter, i); exit(1); }
+        std::stringstream ss(line); std::string c; Row r; float v[21] = {0}; int i = 0;
+        while (std::getline(ss, c, ',') && i < 21) v[i++] = std::stof(c);
+        if (i < 21) { fprintf(stderr, "trace row %d has %d columns, need 21 (precond_kappa and the "
+                             "phase/stop context columns were added when the fixture was regenerated "
+                             "from post-#19 sw_only -- TODO #20 step 1)\n", r.iter, i); exit(1); }
         r.iter=(int)v[0]; r.hpwl=v[1]; r.overflow=v[2]; r.pos2=v[3]; r.grad2=v[4]; r.dff=v[5];
         r.base_gamma=v[6]; r.gamma=v[7]; r.inv_gamma=v[8]; r.step_length=v[9];
         r.nesterov_ak=v[10]; r.coeff=v[11]; r.density_weight=v[12];
         r.precond_coef=v[13]; r.a1_norm=v[14]; r.a2_norm=v[15];
+        r.precond_kappa=v[16]; r.phase=(int)v[17]; r.phase_iteration=(int)v[18];
+        r.stop_reason=(int)v[19]; r.backtrack_steps=(int)v[20];
         rows.push_back(r);
     }
     return rows;
@@ -80,20 +88,28 @@ int main(int argc, char** argv) {
     auto rows = load(argv[1]);
     if (rows.size() < 2) { fprintf(stderr, "trace too short\n"); return 1; }
 
-    // Derive c from KAPPA: kappa/(1-kappa) = c*lambda_prev.  c carries precond_coef, so it is only
-    // constant WITHIN a precond_coef plateau -- group by it and check each group separately.
-    // Bound: the observed spread is 1.12%; a genuine break here is orders of magnitude (the dff
+    // Derive c from KAPPA: kappa/(1-kappa) = c*lambda_prev.  c carries precond_coef (c = pc*K/P), so
+    // it is constant only WITHIN one precond_coef regime -- group by pc and check each group.
+    // ALIGNMENT: kappa[i] is produced by the pc in force when its a2 was formed, which is
+    // precond_coef[i-1], NOT the pc logged on row i. At an escalation boundary (pc x2 every 20 iters
+    // once overflow<0.3) the row logs the NEW pc while its kappa still reflects the OLD one -- group
+    // by the logged pc and that one boundary row sits at half its plateau's c, inflating the spread
+    // to ~51%. Grouping by the PRODUCING pc (rows[i-1].precond_coef) holds every plateau, pc=1..256,
+    // to ~1% and makes c scale cleanly with pc. Each regime's median c is stored per row so the
+    // closed-form check below uses the c that actually produced that row's kappa.
+    // Bound: observed spread ~1.1% on every plateau; a genuine break is orders of magnitude (the dff
     // quantity this replaced reads 2136%), so 5% is a real margin, not a rubber stamp.
     const double KAPPA_C_TOL_PCT = 5.0;
     double worst_plateau_pct = 0.0; int worst_plateau_n = 0; float worst_plateau_pc = 0;
     double c_med = 0;
+    std::vector<double> c_for_row(rows.size(), 0.0);   // regime median c, indexed by row (for closed form)
     {
         std::vector<double> all;
-        size_t g0 = 1;
+        size_t g0 = 1;                                  // first row of the current producing-pc regime
         for (size_t i = 1; i <= rows.size(); i++) {
-            const bool end_of_plateau =
-                (i == rows.size()) || (rows[i].precond_coef != rows[g0].precond_coef);
-            if (!end_of_plateau) continue;
+            const bool end_of_regime =
+                (i == rows.size()) || (rows[i-1].precond_coef != rows[g0-1].precond_coef);
+            if (!end_of_regime) continue;
             std::vector<double> cs;
             for (size_t j = g0; j < i; j++) {
                 double k = rows[j].kappa(), lam_prev = rows[j-1].density_weight;
@@ -105,8 +121,9 @@ int main(int argc, char** argv) {
                 double pct = 100.0 * (cs.back() - cs.front()) / med;
                 if (pct > worst_plateau_pct) {
                     worst_plateau_pct = pct; worst_plateau_n = (int)cs.size();
-                    worst_plateau_pc = rows[g0].precond_coef;
+                    worst_plateau_pc = rows[g0-1].precond_coef;
                 }
+                for (size_t j = g0; j < i; j++) c_for_row[j] = med;  // this regime's c
                 all.insert(all.end(), cs.begin(), cs.end());
             }
             g0 = i;
@@ -156,10 +173,13 @@ int main(int argc, char** argv) {
         const Row& r = rows[i];
         float inv_gamma, alpha, coeff, lambda; int stop;
         float g_wl = 0, g_den = 0;
-        // Feed the golden density_force_fraction into the `kappa` parameter (see NOTE at the top --
-        // pre-#19 fixture) to isolate the lambda-trend logic; the closed form that produces kappa on
-        // the PL (sched_kappa) is validated separately below.
-        param_scheduler(st, p, r.hpwl, r.overflow, r.pos2, r.grad2, r.dff, g_wl, g_den,
+        // Feed the golden precond_kappa into param_scheduler's `kappa` parameter -- the same
+        // quantity sw_only's skip_update gate reads (Schedule.cpp), so the throttle fires on the
+        // same iterations and the schedule reproduces the golden. (The pre-#19 fixture had no such
+        // column and gated on dff, which is why this used to pass r.dff; TODO #20 step 1 regenerated
+        // the fixture from post-#19 sw_only.) The closed form that produces kappa on the PL
+        // (sched_kappa) is validated separately below.
+        param_scheduler(st, p, r.hpwl, r.overflow, r.pos2, r.grad2, r.precond_kappa, g_wl, g_den,
                         inv_gamma, alpha, coeff, lambda, stop);
         if (stop) {
             if (first_stop < 0) first_stop = r.iter;
@@ -191,19 +211,20 @@ int main(int argc, char** argv) {
            premature_stop >= 0 ? "  [PREMATURE]" : (first_stop < 0 ? "  [NEVER]" : ""));
 
     // Closed-form fidelity: sched_kappa(lambda_prev, c) vs KAPPA derived from the trace's own
-    // a1/a2 norms. sched_kappa computes c*l/(1+c*l), which IS kappa (TODO #19b) -- so this is the
-    // check that the PL's closed form reproduces the golden's preconditioner ratio, and it is
-    // asserted. It was previously compared against the dff column, where it read 1.608 (161%) and
-    // fixtures/README.md explained that away as a precond-on artifact. It was not an artifact.
-    // (The real PL uses the exact c = precond_coef*K/total_pins; here c is fit from the trace.)
-    // Bound: observed 5.33e-3. This CANNOT be tighter than the plateau spread above -- sched_kappa is
-    // fed one median c, so each row inherits that row's deviation from the median (1.12% spread =>
-    // ~0.56% worst-case here, which is what it reads). Same phenomenon, not an independent budget.
-    // 2e-2 leaves ~4x margin; the dff column this replaced reads 1.608, i.e. 80x ABOVE this bound.
+    // a1/a2 norms. sched_kappa computes c*l/(1+c*l), which IS kappa -- so this checks that the PL's
+    // closed form reproduces the golden's preconditioner ratio, and it is asserted. c is the
+    // PER-REGIME value from the derivation above (c_for_row), NOT a single median: c = precond_coef*
+    // K/P scales with precond_coef, so one median across this escalating run (pc 1->256) would be
+    // wrong by up to 256x. Each row gets the c of the pc that produced its kappa (c_for_row also
+    // aligns the escalation-boundary rows), so this stays a real check across the whole ladder.
+    // Bound: observed max 5.5e-3 -- it cannot beat the per-regime plateau spread above, since
+    // sched_kappa is fed one median c per regime and each row inherits its deviation from that
+    // median. 2e-2 leaves ~4x margin; the dff column this replaced read 1.608, i.e. 80x ABOVE it.
     const double KAPPA_TOL = 2e-2;
     double e_kappa = 0; int worst_kappa = 0;
     for (size_t i = 1; i < rows.size(); i++) {
-        float got = sched_kappa(rows[i-1].density_weight, (float)c_med);
+        if (c_for_row[i] <= 0) continue;             // regime too small to fit a c (never on a real run)
+        float got = sched_kappa(rows[i-1].density_weight, (float)c_for_row[i]);
         double e = relerr(got, rows[i].kappa());
         if (e > e_kappa) { e_kappa = e; worst_kappa = rows[i].iter; }
     }

@@ -39,8 +39,10 @@ concentrated there because it has no float datapath behind it and can be tuned o
 node-major refresh is monotone and much cheaper. Full evidence:
 [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]].
 
-**Not yet wired:** the host does not issue `MODE_REFRESH_PINS` in `eval_gradients` yet. Do that
-before any sw_emu run of the HPWL path.
+**Wired (`3a26da1`):** `eval_gradients` issues `MODE_REFRESH_PINS` before `MODE_HPWL_GRAD` at
+every probe, so the `--place` path folds v_k into the pin arrays on the device each iteration.
+(`runMetrics()` is a standalone verifier that uploads pre-folded pins with inert offset buffers,
+so it neither can nor should refresh.)
 
 **In the resident loop this becomes Memory Writer's job** — it already owns writing v_{k+1}, and
 it is the only place that knows a node moved. That is why the offsets must be device-resident.

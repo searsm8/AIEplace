@@ -47,6 +47,7 @@ float Placer::computeLipschitzEstimate()
             grad_term = dgx*dgx + dgy*dgy;
         }, pos_norm_sq, grad_norm_sq);
 
+    last_pos_norm_sq = pos_norm_sq; last_grad_norm_sq = grad_norm_sq; // instrumentation for the schedule trace. Meow.
     float estimate = sqrtf(pos_norm_sq) / sqrtf(grad_norm_sq + 1e-8f);
     Logger::log_detail("New steplength estimate: " + PREC_P(estimate, 4));
     // No magnitude clamp — mirrors XPlace (nesterov_optimizer.py), which uses the raw

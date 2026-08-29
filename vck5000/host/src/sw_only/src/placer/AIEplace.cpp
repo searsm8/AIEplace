@@ -57,6 +57,12 @@ void Placer::performIteration()
 
     updateSchedule();
 
+    // After the γ/λ update: the scalars now hold what the NEXT iteration consumes. Dump them with
+    // the inputs that produced them, so the PL param_scheduler port can be verified offline against
+    // this golden (test/sched_verify). Config-gated -> no-op on every normal/regress run. Meow.
+    if (cfg["output"]["dump_schedule_trace"].value_or(false))
+        dumpScheduleTrace();
+
     if (m_nan_detected)
         Logger::log_error("Stopping: NaN in HPWL partials at iteration " +
                           std::to_string(iteration) + " (hard divergence)");

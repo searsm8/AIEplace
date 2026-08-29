@@ -6,13 +6,17 @@ is gitignored and therefore cannot be depended on by an automated test.
 
 ## `schedule_trace_adaptec1.csv`
 
-A full sw_only run of **adaptec1** (ISPD-2005), 692 iterations, produced with
-`"dump_schedule_trace": true`. `sched_verify` replays it through the PL
+A full sw_only run of **adaptec1** (ISPD-2005), 652 iterations, produced with
+`dump_schedule_trace = true`. `sched_verify` replays it through the PL
 `modules/param_scheduler.hpp` and asserts the four schedule scalars match row-for-row.
 
-Copied from `results/regress_ispd2005/adaptec1/20260718_015453_141_cpu_cpu/`.
-`schedule_trace_adaptec1.config.json` is that run's `config_used.json`, committed alongside
-because the harness's convergence settings **must** match it.
+**Regenerated 2026-08-28 (TODO #20 step 1)** from post-#19 sw_only, replacing the 2026-07-18
+trace. The old trace predated #19: sw_only gated on `density_force_fraction`, so `sched_verify`
+had to feed dff into the scheduler's `kappa` parameter to reproduce it. Current sw_only gates on
+`precond_kappa`, which this trace now carries as its own column, so the replay feeds κ directly.
+`schedule_trace_adaptec1.config.toml` is that run's `config_used.toml` (config is TOML now, not
+JSON), committed alongside because the harness's convergence settings **must** match it. Grid 512,
+target_density 1.0, seed 42, from `tools/benchmarks.py`.
 
 Two things to know before swapping in a different trace:
 
@@ -23,9 +27,18 @@ Two things to know before swapping in a different trace:
   This run used 0.07. A mismatch shows up as `schedule ok, convergence FAIL` -- the scalars
   still verify bit-exact while the stop check compares against the wrong threshold.
 
-- **The trace needs all 16 columns**, including `precond_coef`, `precond_a1_norm` and
-  `precond_a2_norm`. `sched_verify` derives κ (XPlace's `weighted_weight`) from the last two and
-  asserts the closed form against it; a 13-column trace is rejected rather than silently skipped.
+- **The trace needs all 21 columns.** The first 16 are the original set (through `precond_coef`,
+  `precond_a1_norm`, `precond_a2_norm`); the regeneration appended `precond_kappa`, `phase`,
+  `phase_iteration`, `stop_reason`, `backtrack_steps`. `sched_verify` feeds `precond_kappa` into the
+  scheduler's gate and cross-checks it against κ derived from a1/a2; a short trace is rejected, not
+  silently skipped. `stop_reason` is the per-iteration in-progress reason (RUNNING=0 for a clean
+  converged run — the terminal CONVERGED is a run-level fact set after the last dump, so it is not
+  on any row; a divergence guard that trips mid-run *would* show).
+- **`precond_coef` escalation is now exercised (pc 1→256).** κ is produced by the pc in force when
+  its a2 was formed — `precond_coef[i-1]`, not the pc logged on the row. At each x2 boundary the row
+  logs the new pc while its κ still reflects the old one, so `sched_verify` groups by the *producing*
+  pc; grouping by the logged pc puts each boundary row at half its plateau's `c` and blows the spread
+  to ~51%. The old trace held `precond_coef` at 1.0 throughout and never tested this.
 
 > ### ⛔ CORRECTED 2026-08-07 — the old note here was wrong, and it hid TODO #19b
 >
