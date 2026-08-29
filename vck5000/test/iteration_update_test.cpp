@@ -3,18 +3,21 @@
 //   combineGradients()   : g_total = g_wl - lambda * g_density
 //   Node::step()         : precondition, u_{k+1} = v_k - alpha*P*g_total,
 //                          then v_{k+1} = u_{k+1} + coeff*(u_{k+1} - u_k)
-//   enforceDieBoundaries : clamp BOTH u_{k+1} and v_{k+1} into [0, die - size]
+//   enforceDieBoundaries : clamp BOTH u_{k+1} and v_{k+1} to the sqrt(2)-EXPANDED box
+//                          [0.5(cw-w), die-0.5(cw+w)] (Step.cpp:131; #20 step 4). bin_w=die/GRID.
 // (sign is `-`: the eField sign convention bakes Xplace's `+=` into the field; no per-bin
 // local_density_weight -- see pl_algo_5c_algo_audit.)
 //
-// FOUR ASSERTIONS:
+// FIVE ASSERTIONS:
 //   [1] U_OUT     -- committed u_{k+1} vs a double re-derivation of the whole chain. rel_rms.
 //   [2] V_OUT     -- the streamed look-ahead v_{k+1} vs the same golden (adds the momentum term).
 //   [3] CLAMP     -- nodes driven hard past each of the four die edges must land EXACTLY on the
-//                    bound (0 or die-size), bit-exact, for both u and v. clampf returns the bound
-//                    float, so this is exact; a dropped clamp or wrong bound is caught here.
+//                    expanded bound (0.5(cw-w) or die-0.5(cw+w)), bit-exact, for both u and v.
 //   [4] WRITER    -- feeding iteration_update's v stream into memory_writer reproduces those v
 //                    values in the coords buffer, in order, BIT-EXACT (the single-writer contract).
+//   [5] ON-GRID   -- node_footprint at the CLAMPED output stays in [0, die]. This is what the
+//                    expanded clamp buys: node_footprint no longer shifts (#20 step 4), so the
+//                    clamp is now what keeps the centered deposit legal -- the two are one contract.
 //
 // Branches driven: precond == 1 and > 1 (inv_p == 1 vs < 1); coeff == 0 (warm-up, v == u) mixed
 // with coeff > 0; lambda > 0 so the density term actually contributes.
@@ -89,7 +92,7 @@ int main() {
 
     // ---- golden (double) + assertions ----
     double su = 0, sv = 0, sr = 0;
-    int clamp_bad = 0, writer_bad = 0;
+    int clamp_bad = 0, writer_bad = 0, off_grid = 0;
     std::vector<int> is_edge(M, 0);
     for (const EdgeCase& e : edges) is_edge[e.idx] = 1;
 
@@ -102,10 +105,22 @@ int main() {
         const double uy = vky - (double)alpha * gy * inv_p;
         const double vx = ux + (double)coeff * (ux - (double)u_in[n].x);
         const double vy = uy + (double)coeff * (uy - (double)u_in[n].y);
-        const double mx = (double)die_xmax - node_box[n].w;      // float bound, promoted
-        const double my = (double)die_ymax - node_box[n].h;
-        const double uox = clampd(ux, 0.0, mx), uoy = clampd(uy, 0.0, my);
-        const double vox = clampd(vx, 0.0, mx), voy = clampd(vy, 0.0, my);
+        // Expanded-box bounds, computed in FLOAT exactly as the module does (so a clamped node
+        // matches bit-exactly; only unclamped nodes carry the double-vs-float arithmetic gap).
+        const float w = node_box[n].w, h = node_box[n].h;
+        float cw = w, ch = h;
+        if (ENABLE_DENSITY_CLAMP) {
+            const float SQRT2 = 1.41421356f;
+            const float min_w = (die_xmax / GRID) * SQRT2, min_h = (die_ymax / GRID) * SQRT2;
+            cw = w > min_w ? w : min_w;
+            ch = h > min_h ? h : min_h;
+        }
+        float fmin_x = 0.5f * (cw - w), fmax_x = die_xmax - 0.5f * (cw + w);
+        float fmin_y = 0.5f * (ch - h), fmax_y = die_ymax - 0.5f * (ch + h);
+        if (fmin_x > fmax_x) fmin_x = fmax_x = 0.5f * (die_xmax - w);
+        if (fmin_y > fmax_y) fmin_y = fmax_y = 0.5f * (die_ymax - h);
+        const double uox = clampd(ux, fmin_x, fmax_x), uoy = clampd(uy, fmin_y, fmax_y);
+        const double vox = clampd(vx, fmin_x, fmax_x), voy = clampd(vy, fmin_y, fmax_y);
 
         const double eux = (double)u_out[n].x - uox, euy = (double)u_out[n].y - uoy;
         const double evx = (double)v_out[n].x - vox, evy = (double)v_out[n].y - voy;
@@ -114,11 +129,18 @@ int main() {
         sr += uox * uox + uoy * uoy;
 
         if (is_edge[n]) {
-            // The shoved axis must sit exactly on a bound. clampf returns the float bound value.
-            const float fmx = die_xmax - node_box[n].w, fmy = die_ymax - node_box[n].h;
-            auto on_bound = [](float v, float hi) { return v == 0.0f || v == hi; };
-            if (g_hpwl[n].x != 0.0f && !(on_bound(u_out[n].x, fmx) && on_bound(v_out[n].x, fmx))) clamp_bad++;
-            if (g_hpwl[n].y != 0.0f && !(on_bound(u_out[n].y, fmy) && on_bound(v_out[n].y, fmy))) clamp_bad++;
+            // The shoved axis must sit exactly on an expanded bound (clampf returns the float bound).
+            auto on_bound = [](float v, float lo, float hi) { return v == lo || v == hi; };
+            if (g_hpwl[n].x != 0.0f && !(on_bound(u_out[n].x, fmin_x, fmax_x) && on_bound(v_out[n].x, fmin_x, fmax_x))) clamp_bad++;
+            if (g_hpwl[n].y != 0.0f && !(on_bound(u_out[n].y, fmin_y, fmax_y) && on_bound(v_out[n].y, fmin_y, fmax_y))) clamp_bad++;
+        }
+        // [5] ON-GRID COUPLING: node_footprint at the CLAMPED output stays in [0, die]. This is the
+        // whole point of the expanded clamp -- it makes the centered (unshifted) footprint legal.
+        for (const coord_t& p : { u_out[n], v_out[n] }) {
+            NodeBox nb{ p.x, p.y, w, h };
+            float xl, yl, xh, yh, wt;
+            node_footprint(nb, die_xmax / GRID, die_ymax / GRID, xl, yl, xh, yh, wt);
+            if (xl < -1e-3f || yl < -1e-3f || xh > die_xmax + 1e-3f || yh > die_ymax + 1e-3f) off_grid++;
         }
         if (coords[n].x != v_out[n].x || coords[n].y != v_out[n].y) writer_bad++;
     }
@@ -137,14 +159,16 @@ int main() {
     const double TOL = 1e-6;   // double-vs-float per-node arithmetic; observed below
     if (!(u_rel < TOL)) { printf("FAIL [1] u_out rel_rms=%.3e (tol %.0e)\n", u_rel, TOL); ok = false; }
     if (!(v_rel < TOL)) { printf("FAIL [2] v_out rel_rms=%.3e (tol %.0e)\n", v_rel, TOL); ok = false; }
-    if (clamp_bad)  { printf("FAIL [3] %d edge nodes not clamped onto a bound\n", clamp_bad); ok = false; }
+    if (clamp_bad)  { printf("FAIL [3] %d edge nodes not clamped onto an expanded bound\n", clamp_bad); ok = false; }
     if (writer_bad) { printf("FAIL [4] memory_writer mismatched %d/%d coords\n", writer_bad, M); ok = false; }
+    if (off_grid)   { printf("FAIL [5] %d clamped positions gave an off-grid footprint\n", off_grid); ok = false; }
     if (warmup_bad) { printf("FAIL [warmup] coeff==0 gave v != u for %d nodes\n", warmup_bad); ok = false; }
 
     printf("[1] u_out      rel_rms=%.3e (tol %.0e)   [%d movable]\n", u_rel, TOL, M);
     printf("[2] v_out      rel_rms=%.3e (tol %.0e)\n", v_rel, TOL);
     printf("[3] clamp      %d edge cases (4 edges + 2 corners), %d off-bound\n", (int)(sizeof(edges)/sizeof(edges[0])), clamp_bad);
     printf("[4] writer     %d/%d coords match streamed v\n", M - writer_bad, M);
+    printf("[5] on-grid    %d clamped footprints off-grid (expanded clamp keeps them in-die)\n", off_grid);
     printf("[info] warm-up coeff==0: v==u for %d/%d nodes\n", M - warmup_bad, M);
     printf("%s\n", ok ? "PASS" : "FAIL");
     return ok ? 0 : 1;

@@ -3,12 +3,15 @@
 
 // node_footprint -- shared density footprint geometry for the density solve.
 //
-// Mirrors sw_only Grid::computeBinOverlaps (the software golden). When clamping, each cell
-// is inflated to at least sqrt(2) bins per dimension and its deposited density is scaled by
+// Mirrors sw_only computeNodeFootprint (Grid.cpp:9, the software golden). When clamping, each
+// cell is inflated to at least sqrt(2) bins per dimension and its deposited density is scaled by
 // weight = real_area / clamped_area, so total area is conserved but a sub-bin cell is smeared
-// across the grid resolution instead of spiking a single bin. The footprint is centered on the
-// cell and shifted to stay on-grid so edge cells still deposit their full mass. Macros already
-// exceed the clamp, so weight stays 1 and they are unchanged.
+// across the grid resolution instead of spiking a single bin. The footprint is CENTERED on the
+// cell, with NO in-die shift: legality is guaranteed upstream by iteration_update's expanded-box
+// position clamp (the same sqrt(2)-expanded size), exactly as sw_only relies on
+// enforceDieBoundaries (Step.cpp:131) -- so the deposited mass stays centred on the cell it
+// belongs to and needs no deposit-time correction (TODO #11a, #20 step 4). Macros already exceed
+// the clamp, so weight stays 1 and they are unchanged.
 //
 // This is the density FORCE smoothing (XPlace expand_ratio): the field solved from the
 // smoothed rho -- and its adjoint force gather -- have no sub-bin gradient spikes, which is
@@ -38,13 +41,11 @@ static inline void node_footprint(const NodeBox& nd, float bin_w, float bin_h,
         ch = h > min_h ? h : min_h;
         weight = (cw > 0.0f && ch > 0.0f) ? (w * h) / (cw * ch) : 0.0f;  // conserve total area
     }
-    const float grid_w = GRID * bin_w, grid_h = GRID * bin_h;
-    xl = nd.x + 0.5f * w - 0.5f * cw;                        // centered on the cell, then
+    // Centered on the cell; NO in-die shift (matches computeNodeFootprint). The upstream expanded
+    // clamp keeps this box in-die; a footprint that still reaches past the grid is clipped by the
+    // caller's bin-range intersection (fixed nodes), never translated. Meow.
+    xl = nd.x + 0.5f * w - 0.5f * cw;
     yl = nd.y + 0.5f * h - 0.5f * ch;
-    if (xl + cw > grid_w) xl = grid_w - cw;                  // shifted to stay on-grid
-    if (yl + ch > grid_h) yl = grid_h - ch;
-    if (xl < 0.0f) xl = 0.0f;
-    if (yl < 0.0f) yl = 0.0f;
     xh = xl + cw;
     yh = yl + ch;
 }

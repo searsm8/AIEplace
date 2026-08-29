@@ -5,7 +5,8 @@
 // The golden replicates, in order, sw_only's per-node update:
 //   combineGradients : g_total = g_wl - lambda*g_density
 //   Node::step       : pg = g_total/precond; u = v_k - alpha*pg; v' = u + coeff*(u - u_k)
-//   enforceDieBounds : clamp u and v' independently into [0, die - size]
+//   enforceDieBounds : clamp u and v' to the sqrt(2)-expanded box [0.5(cw-w), die-0.5(cw+w)]
+//                      (Step.cpp:131; #20 step 4), bin_w = die/GRID
 // A wrong combine sign, a missing preconditioner, or the wrong clamp order would each shift
 // the stepped positions, so a PASS validates all three (5c.1 combine + 5c.2 step).
 
@@ -72,10 +73,19 @@ int runIterUpdateVerify(const char* xclbin_path) {
         const double uyr = (double)node_box[n].y - (double)alpha * pgy;
         const double vxr = uxr + (double)coeff * (uxr - u_k[n].x);
         const double vyr = uyr + (double)coeff * (uyr - u_k[n].y);
-        const double mx = (double)die_x - node_box[n].w;
-        const double my = (double)die_y - node_box[n].h;
-        const double gux = clampd(uxr, 0.0, mx), guy = clampd(uyr, 0.0, my);
-        const double gvx = clampd(vxr, 0.0, mx), gvy = clampd(vyr, 0.0, my);
+        // Expanded-box clamp (enable_density_clamp on), matching iteration_update: bin = die/GRID,
+        // cw = max(w, bin*sqrt2), bound = [0.5(cw-w), die-0.5(cw+w)] (collapses to [0,die-w] for macros).
+        const double w = node_box[n].w, h = node_box[n].h;
+        const double SQRT2 = 1.41421356;
+        const double bin_w = (double)die_x / DENSITY_GRID, bin_h = (double)die_y / DENSITY_GRID;
+        const double cw = w > bin_w * SQRT2 ? w : bin_w * SQRT2;
+        const double ch = h > bin_h * SQRT2 ? h : bin_h * SQRT2;
+        double min_x = 0.5 * (cw - w), max_x = (double)die_x - 0.5 * (cw + w);
+        double min_y = 0.5 * (ch - h), max_y = (double)die_y - 0.5 * (ch + h);
+        if (min_x > max_x) min_x = max_x = 0.5 * ((double)die_x - w);
+        if (min_y > max_y) min_y = max_y = 0.5 * ((double)die_y - h);
+        const double gux = clampd(uxr, min_x, max_x), guy = clampd(uyr, min_y, max_y);
+        const double gvx = clampd(vxr, min_x, max_x), gvy = clampd(vyr, min_y, max_y);
         if (gux != uxr || guy != uyr || gvx != vxr || gvy != vyr) clamped++;
 
         const double du0 = (double)u_out[n].x - gux, du1 = (double)u_out[n].y - guy;

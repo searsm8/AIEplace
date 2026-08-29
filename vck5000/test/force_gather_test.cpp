@@ -65,15 +65,20 @@ int main() {
     std::uniform_real_distribution<float> wbig(100.0f, 1200.0f);  // multi-bin macros
     std::normal_distribution<float>       fld(0.0f, 1.0f);        // signed field, both directions
 
+    // node_footprint no longer shifts in-die (#20 step 4); legality comes from iteration_update's
+    // expanded clamp. So place movable nodes inside that legal region -- a >1-bin margin keeps the
+    // centered clamped footprint fully on-grid, matching the real flow, so [2] (area conservation)
+    // is not confounded by boundary clipping.
+    const float mgn = 2.0f * bin_w;
     const int M = 6000, Nfixed = 20, N = M + Nfixed;
     std::vector<NodeBox> nodes(N);
     for (int i = 0; i < M; i++) {                                 // movable: mostly std cells...
         float w = wsmall(rng), h = wsmall(rng);
-        nodes[i] = { pos(rng) * (die - w), pos(rng) * (die - h), w, h };
+        nodes[i] = { mgn + pos(rng) * (die - w - 2 * mgn), mgn + pos(rng) * (die - h - 2 * mgn), w, h };
     }
     for (int i = 0; i < 50 && i < M; i++) {                       // ...plus some movable macros
         float w = wbig(rng), h = wbig(rng);
-        nodes[i] = { pos(rng) * (die - w), pos(rng) * (die - h), w, h };
+        nodes[i] = { mgn + pos(rng) * (die - w - 2 * mgn), mgn + pos(rng) * (die - h - 2 * mgn), w, h };
     }
     for (int i = M; i < N; i++) nodes[i] = { 1000.0f, 1000.0f, 200.0f, 200.0f };  // fixed: no grad
 

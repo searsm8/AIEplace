@@ -8,7 +8,9 @@
 //   combineGradients()   : g_total = g_wl - lambda * g_density          (in-place -=)
 //   Node::step()         : precondition, then u_{k+1} = v_k - alpha*P*g_total,
 //                          then v_{k+1} = u_{k+1} + coeff*(u_{k+1} - u_k)
-//   enforceDieBoundaries : clamp BOTH u_{k+1} and v_{k+1} into [0, die - size]
+//   enforceDieBoundaries : clamp BOTH u_{k+1} and v_{k+1} to the sqrt(2)-EXPANDED box
+//                          [0.5(cw-w), die - 0.5(cw+w)] (Step.cpp:131), so node_footprint's
+//                          centered deposit is in-die by construction (no deposit-time shift)
 // See CHECKPOINT.md "Stage 5c plan" and the 5c algorithm audit (memory
 // pl_algo_5c_algo_audit) for why the sign is `-` (the eField sign convention bakes
 // Xplace's `+=` into the field) and why there is no per-bin local_density_weight.
@@ -34,6 +36,7 @@
 
 #include "../formats.hpp"
 #include "../host_interface.hpp"
+#include "node_footprint.hpp"    // ENABLE_DENSITY_CLAMP -- the expanded-box clamp must track it
 
 namespace plalgo {
 
@@ -75,11 +78,26 @@ node_loop:
         const float ukx = u_in[n].x, uky = u_in[n].y;
         const float vx = ux + coeff * (ux - ukx);
         const float vy = uy + coeff * (uy - uky);
-        // die clamp both, independently, into [0, die - size] (lower-left anchor convention)
-        const float mx = die_xmax - node_box[n].w;
-        const float my = die_ymax - node_box[n].h;
-        coord_t uo; uo.x = clampf(ux, 0.0f, mx); uo.y = clampf(uy, 0.0f, my);
-        coord_t vo; vo.x = clampf(vx, 0.0f, mx); vo.y = clampf(vy, 0.0f, my);
+        // die clamp both, independently, to the sqrt(2)-EXPANDED box -- matches sw_only
+        // enforceDieBoundaries (Step.cpp:131). The bound uses the expanded footprint size cw so
+        // node_footprint's centered deposit is in-die by construction (that is why node_footprint
+        // does no deposit-time shift). Collapses to [0, die-size] when cw==w (macros / clamp off).
+        // bin size derives from die + the compile-time GRID (bin_w = die/GRID), same as the host
+        // (main.cpp:261) -- no extra scalar crosses the top() ABI.
+        const float w = node_box[n].w, h = node_box[n].h;
+        float cw = w, ch = h;
+        if (ENABLE_DENSITY_CLAMP) {
+            const float SQRT2 = 1.41421356f;                 // == (float)M_SQRT2; matches node_footprint
+            const float min_w = (die_xmax / GRID) * SQRT2, min_h = (die_ymax / GRID) * SQRT2;
+            cw = w > min_w ? w : min_w;
+            ch = h > min_h ? h : min_h;
+        }
+        float min_x = 0.5f * (cw - w), max_x = die_xmax - 0.5f * (cw + w);
+        float min_y = 0.5f * (ch - h), max_y = die_ymax - 0.5f * (ch + h);
+        if (min_x > max_x) min_x = max_x = 0.5f * (die_xmax - w);   // footprint wider than die: center
+        if (min_y > max_y) min_y = max_y = 0.5f * (die_ymax - h);
+        coord_t uo; uo.x = clampf(ux, min_x, max_x); uo.y = clampf(uy, min_y, max_y);
+        coord_t vo; vo.x = clampf(vx, min_x, max_x); vo.y = clampf(vy, min_y, max_y);
         u_out[n] = uo;          // commit u_{k+1} to the owned Nesterov state
         v_out.write(vo);        // stream v_{k+1} to the Memory Writer
     }

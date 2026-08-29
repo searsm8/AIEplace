@@ -12,24 +12,23 @@
 //                     this is the tight one that catches a restructuring or sign bug.
 //   [2] AREA       -- weight * clamped_area == real_area (w*h). The invariant the smoothing must
 //                     satisfy no matter how the box is placed; independent of [1]'s re-derivation.
-//   [3] ON-GRID    -- for a cell whose clamped footprint fits in the die, 0 <= xl and xh <= grid_w
-//                     (and y). Drives the in-die shift on all four edges (a dropped shift escapes
-//                     the grid and indexes a bin off the end in the callers).
+//   [3] CENTERING  -- the footprint is CENTERED on the cell: (xl+xh)/2 == cell centre x + w/2, and
+//                     likewise y. This is the property the no-shift geometry guarantees (a
+//                     reintroduced in-die shift would break it for edge cells); it holds regardless
+//                     of position, so it is driven at the die edges too.
 //   [4] PASSTHROUGH-- an interior macro (already bigger than sqrt(2) bins) gets NO smoothing:
 //                     weight == 1.0f BIT-EXACT (cw==w, ch==h, so weight = w*h/(w*h), an exact
 //                     x/x == 1.0 in float). A stray inflation or weight!=1 is caught exactly. The
 //                     coords are NOT bit-exact (xl = x + 0.5w - 0.5w != x in float); [1] covers
 //                     them against the double golden.
 //
-// KNOWN DIVERGENCES from the sw_only golden computeNodeFootprint (Grid.cpp:9), both TODO #20
-// step 4, deliberately NOT asserted here because the module has not yet been changed to match:
-//   * sw_only does NO in-die shift (Grid.cpp:35-37) -- enforceDieBoundaries pre-projects nodes so
-//     the footprint is legal by construction; the PL module shifts instead. Assertion [3] tests
-//     the PL behaviour, which is a SUPERSET (shift only moves an already-legal box less).
-//   * sw_only overwrites weight with target_density for a movable macro when td < 1
-//     (Grid.cpp:31-32, TODO #11b); the PL module has no movable-macro concept in v1 (no filler /
-//     macro flag crosses the boundary). When step 4 lands that, add a [5] here.
-// When step 4 reconciles these, this file is where the golden retargets to computeNodeFootprint.
+// DIVERGENCES from the sw_only golden computeNodeFootprint (Grid.cpp:9):
+//   * in-die shift -- RESOLVED 2026-08-29 (#20 step 4). The PL module no longer shifts; it centres
+//     the footprint exactly like computeNodeFootprint, and iteration_update's expanded-box clamp
+//     (Step.cpp:131 enforceDieBoundaries) keeps it in-die. The golden above and [3] now assert that.
+//   * movable-macro weight override -- STILL OPEN (#20 step 4, TODO #11b): sw_only overwrites weight
+//     with target_density for a movable macro when td < 1 (Grid.cpp:31-32); the PL module has no
+//     macro flag crossing the boundary in v1. When that lands, add a [5] here.
 
 #include "tier1_stub.hpp"                  // PL_TIER1_STUB (guards formats.hpp's HLS headers)
 #include "modules/node_footprint.hpp"      // the real module
@@ -55,13 +54,8 @@ static FP golden(const NodeBox& nd, double bin_w, double bin_h) {
         ch = h > min_h ? h : min_h;
         weight = (cw > 0.0 && ch > 0.0) ? (w * h) / (cw * ch) : 0.0;
     }
-    const double grid_w = (double)GRID * bin_w, grid_h = (double)GRID * bin_h;
-    double xl = nd.x + 0.5 * w - 0.5 * cw;
-    double yl = nd.y + 0.5 * h - 0.5 * ch;
-    if (xl + cw > grid_w) xl = grid_w - cw;
-    if (yl + ch > grid_h) yl = grid_h - ch;
-    if (xl < 0.0) xl = 0.0;
-    if (yl < 0.0) yl = 0.0;
+    const double xl = nd.x + 0.5 * w - 0.5 * cw;   // centered, NO in-die shift (computeNodeFootprint)
+    const double yl = nd.y + 0.5 * h - 0.5 * ch;
     return FP{ xl, yl, xl + cw, yl + ch, weight };
 }
 
@@ -95,11 +89,13 @@ int main() {
         cases.push_back({ 2000.0f + pos(rng) * 4000.0f, 2000.0f + pos(rng) * 4000.0f, w, h });
         passthrough_seen++;
     }
-    // Designed edge cells: a sub-bin cell pinned to each die edge forces the in-die shift there.
-    const float s = 3.0f;                                 // sub-bin -> clamp inflates -> must shift
+    // Designed edge cells: a sub-bin cell pinned to each die edge. With the shift gone these test
+    // that centering (and the spec) still hold at the boundary -- the footprint is allowed to reach
+    // past the die here (the upstream clamp is what keeps real positions legal; see the header).
+    const float s = 3.0f;                                 // sub-bin -> clamp inflates cw > w
     cases.push_back({ grid_w - s, 5000.0f,     s, s });   // +x edge
     cases.push_back({ 5000.0f,    grid_h - s,  s, s });   // +y edge
-    cases.push_back({ 0.0f,       5000.0f,     s, s });   // -x edge (centre shift pushes xl<0)
+    cases.push_back({ 0.0f,       5000.0f,     s, s });   // -x edge
     cases.push_back({ 5000.0f,    0.0f,        s, s });   // -y edge
     cases.push_back({ 0.0f,       0.0f,        s, s });   // corner (both)
     cases.push_back({ 5000.0f,    5000.0f,     0.0f, 0.0f }); // degenerate: weight -> 0 guard
@@ -130,14 +126,18 @@ int main() {
     if (!(spec_max_rel < SPEC_TOL)) { printf("FAIL [1] spec max_rel=%.3e (tol %.0e)\n", spec_max_rel, SPEC_TOL); ok = false; }
     if (!(area_max_rel < AREA_TOL)) { printf("FAIL [2] area  max_rel=%.3e (tol %.0e)\n", area_max_rel, AREA_TOL); ok = false; }
 
-    // ---- [3] ON-GRID for every case (all fit in the die) ----
-    int off_grid = 0;
+    // ---- [3] CENTERING: footprint centre == cell centre, for every case (edges included) ----
+    // xl = x + 0.5w - 0.5cw and xh = xl + cw, so (xl+xh)/2 must equal x + 0.5w. Reconstructed from
+    // absolute coords, so the same ~1e-4 cancellation as [2] applies -> normalise by die.
+    double center_max = 0.0;
     for (const NodeBox& nd : cases) {
         FP m = run(nd, bin_w, bin_h);
-        if (m.xl < 0.0 || m.yl < 0.0 || m.xh > (double)grid_w + 1e-3 || m.yh > (double)grid_h + 1e-3)
-            off_grid++;
+        const double cxf = 0.5 * (m.xl + m.xh), cyf = 0.5 * (m.yl + m.yh);
+        const double cxc = (double)nd.x + 0.5 * nd.w, cyc = (double)nd.y + 0.5 * nd.h;
+        center_max = std::max(center_max, std::max(std::fabs(cxf - cxc), std::fabs(cyf - cyc)) / die);
     }
-    if (off_grid) { printf("FAIL [3] %d footprints left the grid\n", off_grid); ok = false; }
+    const double CENTER_TOL = 1e-5;
+    if (!(center_max < CENTER_TOL)) { printf("FAIL [3] centering max_rel=%.3e (tol %.0e)\n", center_max, CENTER_TOL); ok = false; }
 
     // ---- [4] PASSTHROUGH: interior macros come back bit-exact ----
     int pass_bad = 0;
@@ -151,7 +151,7 @@ int main() {
 
     printf("[1] spec       max_rel=%.3e (tol %.0e)   [%d clamp-firing cells]\n", spec_max_rel, SPEC_TOL, clamp_fired);
     printf("[2] area       max_rel=%.3e (tol %.0e)\n", area_max_rel, AREA_TOL);
-    printf("[3] on-grid    %d/%d footprints off-grid (incl. 5 edge-pinned cells)\n", off_grid, (int)cases.size());
+    printf("[3] centering  max_rel=%.3e (tol %.0e)  (footprint centre == cell centre, edges incl.)\n", center_max, CENTER_TOL);
     printf("[4] passthru   %d interior macros, %d with weight != 1.0f\n", passthrough_seen, pass_bad);
     printf("%s\n", ok ? "PASS" : "FAIL");
     return ok ? 0 : 1;
