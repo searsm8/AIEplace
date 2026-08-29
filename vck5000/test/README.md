@@ -21,6 +21,7 @@ than print — is in `AIEplace/CLAUDE.md` § *Verification Loop*. Read that befo
 | `force_gather_test` | `force_gather.hpp` | double gather + adjoint/area | 1e-5 / 5e-4 |
 | `metrics_test` | `metrics.hpp` | double HPWL + overflow + masking | 1e-6 |
 | `iteration_update_test` | `iteration_update.hpp` (+ `memory_writer`) | double Nesterov chain | 1e-6 |
+| `spectral_test` | `spectral.hpp` | double `compute_eField_DCT` multiply | 1e-6 |
 | `fft_pl_test` | `fft_pl.hpp` | naive double transforms | 1e-6 |
 | `field_solve_test` | `field_solve_pl.hpp` | naive double field solve | 2e-6 |
 | `hpwl_grad_test` | `hpwl_gradient.hpp` | double `computeHpwlPartials_CPU` | 1e-5 (+ `test-asan`) |
