@@ -1,17 +1,24 @@
-// density_bin_model.cpp -- pl_algo density-solve Stage 1 binning algorithm model.
+// density_bin_model.cpp -- tier-1 coverage of the REAL density_bin module (Stage 1 binning).
 //
-// Proves, in pure host C++ (no HLS), that the STRIP-TILED two-pass binning the PL
-// kernel will use reproduces a naive full-grid scatter: same exact rect-intersection
-// as sw_only Grid::computeBinOverlaps (fast path for sub-bin cells, else exact rect
-// area), same two-pass order (fixed -> clamp -> movable), fillers excluded. Each bin
-// is in exactly one strip and is accumulated from the same node set in the same order
-// in both versions, so the match should be BIT-EXACT; any off-by-one in the strip
-// x-clipping or the intersection breaks it.
+// Proves the strip-tiled two-pass scatter the PL kernel actually runs (modules/density_bin.hpp,
+// density_bin()) reproduces a naive full-grid scatter, BIT-EXACT. Each bin lives in exactly one
+// strip and is accumulated from the same node set in the same order (fixed [M,N) -> per-bin cap
+// min(rho,td) -> movable [0,M)) in both, so any off-by-one in the strip x-clipping or the
+// rectangle intersection breaks the match.
 //
-// The real module density_bin.hpp mirrors this algorithm; the sw_emu gate later
-// verifies that module against the actual Grid golden on a real benchmark.
+// Before TODO #20 step 3 this file kept its OWN hand-copy of node_footprint / NodeBox / GRID
+// because a pure-g++ TU could not include formats.hpp (its HLS transport headers). The wall is
+// gone (formats.hpp guards those behind PL_TIER1_STUB): this now #includes the real module via
+// tier1_stub.hpp and the naive reference shares the SAME node_footprint the module uses, so the
+// test isolates the strip decomposition -- the geometry itself is covered by node_footprint_test.
 //
-// Build + run (WSL):  g++ -O2 -std=c++17 density_bin_model.cpp -o density_bin_model && ./density_bin_model
+// This is the algorithm/decomposition check. The sw_emu gate verifies density_bin against the
+// actual Grid golden (Grid::computeBinOverlaps + clampFixedDensity) on a real benchmark. Note the
+// PL node_footprint has two KNOWN divergences from that Grid golden -- the in-die shift and the
+// movable-macro weight override -- both TODO #20 step 4; see node_footprint_test.cpp.
+
+#include "tier1_stub.hpp"                 // PL_TIER1_STUB + hls::stream stand-in, BEFORE the module
+#include "modules/density_bin.hpp"        // the real module: density_bin(), STRIP, node_footprint
 
 #include <vector>
 #include <cstdio>
@@ -19,109 +26,46 @@
 #include <random>
 #include <algorithm>
 
-constexpr int GRID    = 1024;          // bins per row/col (formats.hpp)
-constexpr int STRIP   = 64;            // x-values per strip; 1024/64 = 16 strips
-constexpr int N_BINS  = GRID * GRID;
+using namespace plalgo;                   // NodeBox, GRID, STRIP, node_footprint, density_bin
 
-struct NodeBox { float x, y, w, h; };  // lower-left anchor + size (host_interface.hpp)
-
-constexpr bool ENABLE_DENSITY_CLAMP = true;   // mirror node_footprint.hpp
-
-// Clamped, area-conserving, on-grid footprint (mirrors modules/node_footprint.hpp).
-static void node_footprint(const NodeBox& nd, float bin_w, float bin_h,
-                           float& xl, float& yl, float& xh, float& yh, float& weight) {
-    const float w = nd.w, h = nd.h;
-    float cw = w, ch = h;
-    weight = 1.0f;
-    if (ENABLE_DENSITY_CLAMP) {
-        const float SQRT2 = 1.41421356f;
-        const float min_w = bin_w * SQRT2, min_h = bin_h * SQRT2;
-        cw = std::max(w, min_w);
-        ch = std::max(h, min_h);
-        weight = (cw > 0.0f && ch > 0.0f) ? (w * h) / (cw * ch) : 0.0f;
-    }
-    const float grid_w = GRID * bin_w, grid_h = GRID * bin_h;
-    xl = nd.x + 0.5f * w - 0.5f * cw;
-    yl = nd.y + 0.5f * h - 0.5f * ch;
-    if (xl + cw > grid_w) xl = grid_w - cw;
-    if (yl + ch > grid_h) yl = grid_h - ch;
-    if (xl < 0.0f) xl = 0.0f;
-    if (yl < 0.0f) yl = 0.0f;
-    xh = xl + cw;
-    yh = yl + ch;
-}
-
-// Per-node scatter over the clamped footprint, restricted to columns (x-bins) in
-// [clip_lo, clip_hi). add(col,row,area) accumulates one bin's area-conserving deposit.
-template <class AddFn>
-static void scatter(const NodeBox& nd, float bin_w, float bin_h,
-                    int clip_lo, int clip_hi, AddFn add) {
-    float xl, yl, xh, yh, weight;
-    node_footprint(nd, bin_w, bin_h, xl, yl, xh, yh, weight);
-    const int col_lo = std::max(0, (int)(xl / bin_w));
-    const int col_hi = std::min(GRID - 1, (int)(xh / bin_w));
-    const int row_lo = std::max(0, (int)(yl / bin_h));
-    const int row_hi = std::min(GRID - 1, (int)(yh / bin_h));
-
-    const int cs = std::max(col_lo, clip_lo), ce = std::min(col_hi, clip_hi - 1);
-    for (int col = cs; col <= ce; col++) {
-        const float ox = std::min(xh, (col + 1) * bin_w) - std::max(xl, col * bin_w);
-        if (ox <= 0) continue;
-        for (int row = row_lo; row <= row_hi; row++) {
-            const float oy = std::min(yh, (row + 1) * bin_h) - std::max(yl, row * bin_h);
-            if (oy <= 0) continue;
-            add(col, row, ox * oy * weight);
-        }
-    }
-}
-
-// Naive reference: full GRID x GRID overlap accumulator, two-pass + clamp.
+// Naive reference: full GRID x GRID overlap accumulator, two-pass + per-bin cap, using the SAME
+// node_footprint geometry as the module (so this checks the strip decomposition, not the footprint).
 static std::vector<float> bin_reference(const std::vector<NodeBox>& nodes, int M,
                                         float bin_w, float bin_h, float target_density,
                                         int& clamped_bins) {
     const float bin_area = bin_w * bin_h;
-    std::vector<float> ov(N_BINS, 0.0f);
-    auto add = [&](int c, int r, float a){ ov[c * GRID + r] += a; };
+    std::vector<float> ov(GRID * GRID, 0.0f);
 
-    for (int n = M; n < (int)nodes.size(); n++)           // PASS 1: fixed [M,N)
-        scatter(nodes[n], bin_w, bin_h, 0, GRID, add);
+    // One node's exact-rectangle scatter over the full grid (mirrors bin_scatter with c0=0,
+    // strip=GRID -- i.e. no column clipping).
+    auto scatter = [&](const NodeBox& nd) {
+        float xl, yl, xh, yh, weight;
+        node_footprint(nd, bin_w, bin_h, xl, yl, xh, yh, weight);
+        int col_lo = (int)(xl / bin_w); if (col_lo < 0)        col_lo = 0;
+        int col_hi = (int)(xh / bin_w); if (col_hi > GRID - 1) col_hi = GRID - 1;
+        int row_lo = (int)(yl / bin_h); if (row_lo < 0)        row_lo = 0;
+        int row_hi = (int)(yh / bin_h); if (row_hi > GRID - 1) row_hi = GRID - 1;
+        for (int col = col_lo; col <= col_hi; col++) {
+            const float lx = col * bin_w, rx = lx + bin_w;
+            const float ox = (xh < rx ? xh : rx) - (xl > lx ? xl : lx);
+            if (ox <= 0) continue;
+            for (int row = row_lo; row <= row_hi; row++) {
+                const float ly = row * bin_h, ry = ly + bin_h;
+                const float oy = (yh < ry ? yh : ry) - (yl > ly ? yl : ly);
+                if (oy <= 0) continue;
+                ov[col * GRID + row] += ox * oy * weight;
+            }
+        }
+    };
+
+    for (int n = M; n < (int)nodes.size(); n++) scatter(nodes[n]);   // PASS 1: fixed [M,N)
+    const float cap = bin_area * target_density;                     // min(rho,td) cap (TODO #35)
     clamped_bins = 0;
-    // CLAUDE CODE: min(rho,td) -- the cap, a deliberate divergence from XPlace's scale (TODO #35).
-    // Spec matches the host's shared capFixedDensity (common/include/Grid.h); hand-mirrored until
-    // TODO #20 step 3. clamped_bins counts bins whose FIXED deposit hits the cap bin_area*td.
-    const float cap = bin_area * target_density;
-    for (float& v : ov) {
-        if (v > cap) { v = cap; clamped_bins++; }
-    }
-    for (int n = 0; n < M; n++)                           // PASS 2: movable [0,M)
-        scatter(nodes[n], bin_w, bin_h, 0, GRID, add);
-
-    for (float& v : ov) v /= bin_area;                    // rho
+    for (float& v : ov) if (v > cap) { v = cap; clamped_bins++; }
+    for (int n = 0; n < M; n++) scatter(nodes[n]);                   // PASS 2: movable [0,M)
+    const float inv_area = 1.0f / bin_area;                          // multiply, matching the
+    for (float& v : ov) v *= inv_area;                               // module (rho); x*(1/a) != x/a
     return ov;
-}
-
-// Strip-tiled: 256 KB on-chip strip, nodes re-streamed per strip.
-static std::vector<float> bin_strip_tiled(const std::vector<NodeBox>& nodes, int M,
-                                          float bin_w, float bin_h, float target_density) {
-    const float bin_area = bin_w * bin_h;
-    std::vector<float> rho(N_BINS, 0.0f);
-    std::vector<float> acc(STRIP * GRID);                 // the on-chip strip accumulator
-
-    for (int c0 = 0; c0 < GRID; c0 += STRIP) {
-        std::fill(acc.begin(), acc.end(), 0.0f);
-        auto add = [&](int c, int r, float a){ acc[(c - c0) * GRID + r] += a; };
-        for (int n = M; n < (int)nodes.size(); n++)       // PASS 1: fixed
-            scatter(nodes[n], bin_w, bin_h, c0, c0 + STRIP, add);
-        // CLAUDE CODE: min(rho,td) -- the cap (deliberate divergence from XPlace, TODO #35),
-        // strip-local; each bin lives in exactly one strip.
-        for (float& v : acc) v = std::min(v, bin_area * target_density);
-        for (int n = 0; n < M; n++)                       // PASS 2: movable
-            scatter(nodes[n], bin_w, bin_h, c0, c0 + STRIP, add);
-        for (int i = 0; i < STRIP; i++)                   // write strip -> rho (x-major)
-            for (int r = 0; r < GRID; r++)
-                rho[(c0 + i) * GRID + r] = acc[i * GRID + r] / bin_area;
-    }
-    return rho;
 }
 
 int main() {
@@ -133,36 +77,44 @@ int main() {
     const float target_density = 0.9f;
 
     std::vector<NodeBox> nodes;
-    // Movable [0,M): mostly sub-bin std cells, some multi-bin.
-    const int M = 8000;
+    const int M = 8000;                                   // movable [0,M): mostly sub-bin std cells
     std::uniform_real_distribution<float> wsmall(2.0f, 30.0f);
     for (int i = 0; i < M; i++) {
         float w = wsmall(rng), h = wsmall(rng);
         nodes.push_back({ upos(rng) * (die - w), upos(rng) * (die - h), w, h });
     }
-    // Fixed [M,N): big macros -> fully cover interior bins -> exercise the clamp.
-    const int Nfixed = 40;
+    const int Nfixed = 40;                                // fixed [M,N): macros -> exercise the cap
     std::uniform_real_distribution<float> wbig(100.0f, 1500.0f);
     for (int i = 0; i < Nfixed; i++) {
         float w = wbig(rng), h = wbig(rng);
         nodes.push_back({ upos(rng) * (die - w), upos(rng) * (die - h), w, h });
     }
-
-    printf("== Stage 1: binning model (strip-tiled vs naive scatter) ==\n");
-    printf("   GRID=%d STRIP=%d  movable=%d fixed=%d  bin=%.4fx%.4f td=%.2f\n",
-           GRID, STRIP, M, Nfixed, bin_w, bin_h, target_density);
+    const int N = M + Nfixed;
 
     int clamped = 0;
-    std::vector<float> ref   = bin_reference(nodes, M, bin_w, bin_h, target_density, clamped);
-    std::vector<float> strip = bin_strip_tiled(nodes, M, bin_w, bin_h, target_density);
+    std::vector<float> ref = bin_reference(nodes, M, bin_w, bin_h, target_density, clamped);
+
+    std::vector<float> rho(GRID * GRID, -1.0f);           // poison; density_bin must write every bin
+    density_bin(nodes.data(), rho.data(), M, N, bin_w, bin_h, target_density);
 
     double max_abs = 0, sum_ref = 0;
-    for (int i = 0; i < N_BINS; i++) {
-        max_abs = std::max(max_abs, (double)std::fabs(strip[i] - ref[i]));
+    for (int i = 0; i < GRID * GRID; i++) {
+        max_abs = std::max(max_abs, (double)std::fabs(rho[i] - ref[i]));
         sum_ref += ref[i];
     }
-    printf("   fixed-capped bins (rho_fixed >= td) = %d\n", clamped);
-    printf("   total density mass = %.6g   max_abs_diff(strip - ref) = %.3e\n", sum_ref, max_abs);
-    printf("   -> %s\n", max_abs < 1e-12 ? "PASS (bit-exact)" : "FAIL");
-    return max_abs < 1e-12 ? 0 : 1;
+
+    printf("[info] GRID=%d STRIP=%d  movable=%d fixed=%d  bin=%.4fx%.4f td=%.2f\n",
+           GRID, STRIP, M, Nfixed, bin_w, bin_h, target_density);
+    printf("[info] fixed-capped bins (rho_fixed >= td) = %d  total density mass = %.6g\n",
+           clamped, sum_ref);
+    printf("[1] strip-tiled vs naive scatter  max_abs_diff = %.3e (tol bit-exact)\n", max_abs);
+
+    bool ok = true;
+    // Bit-exact: same nodes, same order, same footprint into each single-strip bin.
+    if (!(max_abs == 0.0)) { printf("FAIL [1] not bit-exact (max_abs=%.3e)\n", max_abs); ok = false; }
+    // Guard the design still exercises the cap; a cap that silently stops firing must fail here.
+    if (clamped < 100) { printf("FAIL [2] only %d capped bins -- design lost cap coverage\n", clamped); ok = false; }
+
+    printf("%s\n", ok ? "PASS" : "FAIL");
+    return ok ? 0 : 1;
 }

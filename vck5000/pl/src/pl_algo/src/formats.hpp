@@ -16,9 +16,15 @@
 //   - DDR buffers are arrays of beat_t (ap_int<128>), 4 floats per beat.
 //   - PL<->AIE streams are qdma_axis<128,...> (axis_t), 4 floats / 2 cfloats per beat.
 
+// HLS transport headers. A pure-g++ tier-1 harness (test/*.cpp) has none of these, and the
+// modules it verifies touch only the constexpr/enum sizing below -- not axis_t/beat_t -- so a
+// harness #defines PL_TIER1_STUB (via test/tier1_stub.hpp) to guard them out and supplies its
+// own hls::stream stand-in. The real HLS build never defines PL_TIER1_STUB: no-op there. Meow.
+#ifndef PL_TIER1_STUB
 #include <ap_int.h>
 #include <hls_stream.h>
 #include <ap_axi_sdata.h>
+#endif
 
 namespace plalgo {
 
@@ -44,8 +50,12 @@ constexpr int BEAT_BITS      = 128;
 constexpr int FLOATS_PER_BEAT = BEAT_BITS / 32;   // = 4
 
 // ---- Transport types -------------------------------------------------------
+// Need the guarded HLS headers, so they are guarded too. No tier-1 module references them; a
+// harness that ever does must provide its own stand-in (none does today). Meow.
+#ifndef PL_TIER1_STUB
 typedef qdma_axis<BEAT_BITS, 0, 0, 0> axis_t;     // PL<->AIE AXI-stream beat
 typedef ap_int<BEAT_BITS>             beat_t;      // DDR word (4 packed floats)
+#endif
 
 // ---- Node coordinate buffer (DDR) ------------------------------------------
 // Canonical, single-writer buffer (written only by Memory Writer).
