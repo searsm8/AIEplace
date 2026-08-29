@@ -295,19 +295,31 @@ Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
       trace — adaptec1 converges), phase-relative counters (needs a *mixed-size/phase-2* trace —
       adaptec1 is phase-1 only), and jolt params read from config vs hardcoded (a param_scheduler
       cleanup). → [[REPORT_pl_algo_stage5_assessment_20260806.md]]
-- [ ] **3. Tier-1 harnesses for the uncovered modules** — ~~`hpwl_gradient`~~ (**done 2026-08-28**,
-      `test/hpwl_grad_test.cpp`: 5 assertions vs a double-precision transcription of
-      `computeHpwlPartials_CPU`, mutation-tested — see the coverage table in its header. Memory
-      safety is a separate `make test-asan` target because ASan needs `setarch -R` under this WSL2
-      kernel), `node_footprint`, `density_bin` (include the
-      real header; delete `density_bin_model`'s own stale copy), `iteration_update`,
-      ~~`bb_reduce`~~ (**done 2026-08-28**, `test/bb_reduce_test.cpp`: 3 assertions vs a double
-      reference of the BB norms + a bit-exact g_total check, ~50% preconditioned; dropped bb_reduce's
-      unused `formats.hpp` include so a pure-g++ harness compiles it — the residency-critical module
-      is now covered), `metrics`, `force_gather` — each against its named sw_only golden.
-      **This is what makes 4–6 safe.**
-      For `density_bin`'s cap: the host is now a single `capFixedDensity` (`common/include/Grid.h`, #36)
-      and both pl_algo copies already point at it — converge them onto that spec here.
+- [x] **3. Tier-1 harnesses for the uncovered modules — DONE 2026-08-28.** All the step-3 modules
+      are covered; `make test` runs **11 harnesses**, coverage 10 of ~14 real modules. Each is vs an
+      independent double golden per the `bb_reduce` template.
+      - `hpwl_gradient` (`hpwl_grad_test.cpp`, 6 assertions + mutation table), `bb_reduce`
+        (`bb_reduce_test.cpp`) — done earlier this session.
+      - **The `formats.hpp` wall (the "decide once" blocker) is gone (`b4130e6`).** formats.hpp
+        guards its HLS transport includes + `axis_t`/`beat_t` behind `#ifndef PL_TIER1_STUB`
+        (no-op for the real HLS build; byte-identical preprocessed output). `test/tier1_stub.hpp`
+        sets the macro and supplies a `std::deque`-backed `hls::stream<T>` — the only HLS surface a
+        module signature exposes. This unblocked all four remaining modules at once (option (a)).
+      - `node_footprint` (`node_footprint_test.cpp`): independent double spec golden + area/on-grid/
+        macro-passthrough invariants, all four in-die-shift edges driven.
+      - `density_bin` (`density_bin_model.cpp`, upgraded): now calls the **real** `density_bin()` and
+        the **real** `node_footprint` — its stale hand-copies deleted (the duplication the wall
+        forced). Naive full-grid golden, bit-exact. Cap is the shared `capFixedDensity` spec
+        (`min(rho,td)`, #36/#35).
+      - `force_gather` (`force_gather_test.cpp`): gather vs double reference (1.7e-6) + adjoint/area
+        conservation with field==1 (7.4e-5).
+      - `metrics` (`metrics_test.cpp`): HPWL CSR reduce (6e-9) + overflow_sum (2e-8) + masked-net
+        invariance.
+      - `iteration_update` + `memory_writer` (`iteration_update_test.cpp`): full combine+precond+BB+
+        momentum+clamp chain for u and streamed v (2.5e-8/4.3e-8), four-edge clamp exact, writer
+        bit-exact, coeff==0 warm-up v==u.
+      → [[_NEW_HANDOFF_20_pl_algo_stage3_20260828.md]] carried the plan; this closes its "NEXT
+      SESSION STARTS HERE" (the wall + the four modules).
 - [ ] **3b. `hpwl_gradient` optimization — proposed, not implemented.** With coverage in place,
       the module was profiled against the last real `TARGET=hw` csynth. It is **gather-bound, not
       compute-bound**, at ~1% of the VC1902: three truly-random `num_pins` `node_pos` gathers per

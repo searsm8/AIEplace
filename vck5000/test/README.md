@@ -16,9 +16,15 @@ than print — is in `AIEplace/CLAUDE.md` § *Verification Loop*. Read that befo
 | harness | verifies | golden | tolerance |
 |---|---|---|---|
 | `density_model` | Makhoul FFT/DCT recipe | sw_only CPU transforms | 1e-12 |
-| `density_bin_model` | strip-tiled binning | naive full-grid scatter | bit-exact |
+| `density_bin_model` | `density_bin.hpp` (real module) | naive full-grid scatter | bit-exact |
+| `node_footprint_test` | `node_footprint.hpp` | independent double spec + invariants | 1e-5 / 5e-4 |
+| `force_gather_test` | `force_gather.hpp` | double gather + adjoint/area | 1e-5 / 5e-4 |
+| `metrics_test` | `metrics.hpp` | double HPWL + overflow + masking | 1e-6 |
+| `iteration_update_test` | `iteration_update.hpp` (+ `memory_writer`) | double Nesterov chain | 1e-6 |
 | `fft_pl_test` | `fft_pl.hpp` | naive double transforms | 1e-6 |
 | `field_solve_test` | `field_solve_pl.hpp` | naive double field solve | 2e-6 |
+| `hpwl_grad_test` | `hpwl_gradient.hpp` | double `computeHpwlPartials_CPU` | 1e-5 (+ `test-asan`) |
+| `bb_reduce_test` | `bb_reduce.hpp` | double BB norms + bit-exact g_total | 1e-5 |
 | `sched_verify` | `param_scheduler.hpp` | recorded sw_only trace | bit-exact |
 | `synth_check.{cpp,tcl}` | control core synthesizes | — | 0 errors, II=1 |
 

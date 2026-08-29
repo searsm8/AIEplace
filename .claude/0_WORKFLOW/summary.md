@@ -90,11 +90,14 @@
   652 iters), so `sched_verify` now validates CURRENT sw_only and feeds **κ** (not the pre-#19 dff
   hack); the escalating `precond_coef` ladder is exercised. **step 2 core DONE** (schedule +
   convergence bit-exact); its divergence-conjunct / phase-relative / jolt items need a diverging or
-  mixed-size fixture. **step 3 underway** — tier-1 now **5 of 18 modules** (`hpwl_gradient`,
-  `bb_reduce` added). Next step-3 modules (`iteration_update`, `metrics`, `density_bin`,
-  `force_gather`) hit the `formats.hpp` wall (they use `hls::stream`/HLS types a pure-g++ harness
-  can't include) — needs the "decide once" fix from the report §9 (macro-guard the HLS includes, or
-  test/ stubs). → [[_NEW_REPORT_pl_algo_stage5_assessment_20260806.md]]
+  mixed-size fixture. **step 3 DONE** — the `formats.hpp` wall is broken (`b4130e6`: HLS includes +
+  `axis_t`/`beat_t` guarded behind `#ifndef PL_TIER1_STUB`, no-op for the real build; `tier1_stub.hpp`
+  supplies a `std::deque` `hls::stream`), unblocking all four modules at once. `make test` now runs
+  **11 harnesses, 10 of ~14 real modules**: added `node_footprint`, real `density_bin` (stale copy
+  deleted), `force_gather`, `metrics`, `iteration_update`+`memory_writer` (`6cdcc8d`), each vs an
+  independent double golden. **Next: step 4** (close datapath divergences — node_footprint in-die
+  shift + movable-macro weight, both flagged in `node_footprint_test`; die-clamp box; fillers), then
+  step 6 (compose the resident loop = v1, LAST). → [[_NEW_HANDOFF_20_pl_algo_stage3_20260828.md]]
 - **`hpwl_gradient` de-gathered (P1b+P2, 2026-08-28, `21adad6`/`ed25f1a`) — the main win of the #20
   step 3b optimization thread.** `NodePin` now carries the ABSOLUTE pin position (`{x,y}`, replacing
   per-node `{off_x,off_y}`); a new `refresh_pin_pos` module folds `v_k` in once per iteration

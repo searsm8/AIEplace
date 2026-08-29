@@ -9,25 +9,38 @@
 
 ## ▶ NEXT SESSION STARTS HERE
 
-**The immediate decision is the `formats.hpp` wall**, and it gates all remaining step-3 coverage.
-`iteration_update`, `metrics`, `density_bin`, `force_gather` genuinely use HLS types
-(`hls::stream`, `ap_int`, `axis_t`) that a pure-g++ tier-1 harness cannot include. Two options
-(report §9), pick one **once**:
+**Step 3 is DONE** (`b4130e6`, `6cdcc8d`) — the `formats.hpp` wall is broken (option (a)) and all
+four modules + `node_footprint` are tier-1 covered. `make test` runs 11 harnesses; coverage 10 of
+~14 real modules. So the immediate work is now **step 4: close the datapath divergences** the
+harnesses documented, cheapest/most-isolated first:
 
-- **(a) macro-guard the HLS includes in `formats.hpp`** — wrap the `ap_int.h`/`hls_stream.h`/
-  `ap_axi_sdata.h` includes (and any type aliases that need them) behind `#ifndef PL_TIER1_STUB`,
-  and have harnesses `#define PL_TIER1_STUB` + provide trivial stand-ins for the few types they
-  touch. **Recommended:** one change unblocks all four modules and the duplication in
-  `density_bin_model.cpp` (which keeps its own stale copy of `node_footprint` for exactly this
-  reason) can then be deleted.
-- **(b) minimal stub headers under `test/`** that shadow `formats.hpp`. More files, but keeps
-  `formats.hpp` untouched.
-
-Do (a), then cover the four modules using the `bb_reduce` template below.
+- **`node_footprint` in-die shift** — the PL module shifts a footprint to stay on-grid; sw_only
+  `computeNodeFootprint` (Grid.cpp:9, 35-37) does NOT (its `enforceDieBoundaries` pre-projects nodes
+  so the box is legal by construction). `node_footprint_test.cpp` tests the PL behaviour and flags
+  this in its header. Decide: adopt the sw_only invariant (project in `iteration_update`, drop the
+  shift) or keep the shift as a PL-side guarantee. Whichever, make the two agree and retarget the
+  golden to `computeNodeFootprint`.
+- **movable-macro weight override** — sw_only sets `weight = target_density` for a movable macro when
+  td < 1 (Grid.cpp:31-32, TODO #11b); the PL module has no macro/filler flag crossing the boundary in
+  v1. Needs the boundary to carry that flag before the module can match. Add a `[5]` to
+  `node_footprint_test` when it lands.
+- **die-clamp box, fillers** — the remaining two from the original step-4 list; not yet analysed.
 
 **Do NOT compose the resident loop (step 6 / the v1 milestone) yet.** DATAFLOW.md is emphatic:
-*"compose this loop LAST, not next."* The modules it wires must be tier-1 covered first, or a
-composition bug is invisible until a full sw_emu cycle.
+*"compose this loop LAST, not next."* Step 4 must reconcile the divergences first, or the composed
+loop bakes in a wrong footprint that is invisible until a full sw_emu cycle.
+
+Also still open from step 2 (need non-adaptec1 fixtures): the divergence-conjunct, phase-relative
+counters, and jolt-from-config items — see "Remaining step-2 items" below.
+
+### Done 2026-08-28 (step-3 completion, this session)
+- `b4130e6` — **wall fix (option a).** `formats.hpp` guards its HLS includes + `axis_t`/`beat_t`
+  behind `#ifndef PL_TIER1_STUB` (byte-identical preprocessed output for the real build).
+  `test/tier1_stub.hpp` sets the macro + a `std::deque` `hls::stream<T>`. `density_bin_model.cpp`
+  upgraded to call the **real** `density_bin()`/`node_footprint` (stale copies deleted; found the
+  module's `acc*inv_area` multiply, mirrored it to stay bit-exact). New `node_footprint_test.cpp`.
+- `6cdcc8d` — `force_gather_test`, `metrics_test`, `iteration_update_test` (+ `memory_writer`), each
+  vs an independent double golden. Margins 6e-9 … 7e-5, all with ≥10× headroom.
 
 ---
 
@@ -46,9 +59,10 @@ no host round-trip). Per-iteration order and resident-state contract are in DATA
 
 1. Restore `dumpScheduleTrace()` + regenerate fixture — **DONE** (`f10dc2c`).
 2. Re-verify `param_scheduler`, feed κ — **CORE DONE** (`f10dc2c`); 3 items left, see below.
-3. Tier-1 harnesses for the uncovered modules — **UNDERWAY** (`bb_reduce` done, `f6213a0`).
+3. Tier-1 harnesses for the uncovered modules — **DONE** (`b4130e6` wall + node_footprint/density_bin,
+   `6cdcc8d` force_gather/metrics/iteration_update). 10 of ~14 real modules; `make test` = 11 harnesses.
 4. Close the datapath divergences (node_footprint in-die shift, movable-macro weight, die-clamp box,
-   fillers) — not started.
+   fillers) — **NEXT** (see "NEXT SESSION STARTS HERE").
 5. (report §-level) structural gaps — not started.
 6. **Compose the resident loop = v1** — LAST.
 
@@ -78,8 +92,11 @@ no host round-trip). Per-iteration order and resident-state contract are in DATA
 5. If the module's only HLS-type dependency is an **unused** `formats.hpp` include (bb_reduce's
    was), just drop it. If it's a **real** dependency, that's the wall above — do (a) first.
 
-Run: `cd vck5000 && make test` (seconds). Coverage now **5 of 18** real modules
-(`fft_pl`, `field_solve_pl`, `param_scheduler`, `hpwl_gradient`, `bb_reduce`).
+Run: `cd vck5000 && make test` (seconds). Coverage now **10 of ~14** real modules
+(`fft_pl`, `field_solve_pl`, `param_scheduler`, `hpwl_gradient`, `bb_reduce`, `node_footprint`,
+`density_bin`, `force_gather`, `metrics`, `iteration_update`+`memory_writer`). Remaining: the
+DCT/transpose transform modules (`dct_1d`, `dct_transpose`, `spectral`, `transpose`), covered at the
+recipe level by `density_model`/`fft_pl`/`field_solve`.
 
 ## Remaining step-3 modules + their specific gotchas
 
