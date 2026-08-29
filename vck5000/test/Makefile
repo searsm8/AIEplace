@@ -26,7 +26,7 @@ BUILD     = build
 # match that run's config_used.json, or the stop check will fail against the wrong threshold.
 TRACE ?= fixtures/schedule_trace_adaptec1.csv
 
-HARNESSES = density_model density_bin_model node_footprint_test fft_pl_test field_solve_test hpwl_grad_test bb_reduce_test sched_verify
+HARNESSES = density_model density_bin_model node_footprint_test force_gather_test metrics_test iteration_update_test fft_pl_test field_solve_test hpwl_grad_test bb_reduce_test sched_verify
 BINS      = $(addprefix $(BUILD)/, $(HARNESSES))
 
 .PHONY: all test clean
@@ -56,7 +56,7 @@ $(BUILD)/hpwl_grad_test_asan: hpwl_grad_test.cpp
 
 test: $(BINS)
 	@fail=0; \
-	for h in density_model density_bin_model node_footprint_test fft_pl_test field_solve_test hpwl_grad_test bb_reduce_test; do \
+	for h in density_model density_bin_model node_footprint_test force_gather_test metrics_test iteration_update_test fft_pl_test field_solve_test hpwl_grad_test bb_reduce_test; do \
 		printf '\n=== %s ===\n' "$$h"; \
 		$(BUILD)/$$h || fail=1; \
 	done; \
