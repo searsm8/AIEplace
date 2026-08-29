@@ -379,9 +379,19 @@ Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
       before any sw_emu run of the HPWL path. Then P3 (II fixes) is the next lever —
       re-read the P1b lesson first: HLS cannot see a rotating array index, partial accumulators
       need STATIC indices via unrolling. → [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]]
-- [ ] **4. Close the datapath divergences** under that coverage: `node_footprint.hpp` still does the
-      in-die shift #11a deleted; it lacks #11b's movable-macro weight; `iteration_update.hpp` clamps to
-      `[0, die−w]` where sw_only clamps to the √2-expanded box; **pl_algo has no fillers at all**.
+- [~] **4. Close the datapath divergences** under that coverage. **Geometry pair DONE 2026-08-29
+      (`d095a9f`):** `node_footprint.hpp` no longer does the in-die shift #11a deleted (centered box,
+      matches `computeNodeFootprint`), and `iteration_update.hpp` now clamps to the √2-**expanded** box
+      `[0.5(cw−w), die−0.5(cw+w)]` matching `enforceDieBoundaries` (Step.cpp:131) — these are one
+      contract (the expanded clamp is what makes the unshifted footprint legal), so they landed
+      together. `bin_w` derives from `die/GRID`, no new top() scalar. `force_gather`/`density_bin` are
+      faithful as a consequence (edge cells now CLIP like `computeNodeOverlaps`, not shift). Verified:
+      `node_footprint_test` [3]→CENTERING, `iteration_update_test` NEW [5] on-grid coupling (0
+      off-grid), `IterVerify.cpp` host golden updated; `make test` 12 harnesses green. ⚠️ **C-synth +
+      sw_emu trajectory A/B vs sw_only still needed** to confirm the end-to-end match (tier-1 only
+      proves the module math is now faithful to sw_only's formulation).
+      **Still open:** #11b's movable-macro weight (needs a macro flag across the host/PL boundary);
+      **pl_algo has no fillers at all** (that is step 5).
 - [ ] **5. Fillers** — packer, uniform-random initial placement (not centre-clustered), the λ-init
       balance that counts them, and the movable/filler split the two density maps need. Largest single
       change; largest quality lever.

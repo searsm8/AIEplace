@@ -9,31 +9,34 @@
 
 ## ▶ NEXT SESSION STARTS HERE
 
-**Step 3 is DONE** (`b4130e6`, `6cdcc8d`) — the `formats.hpp` wall is broken (option (a)) and all
-four modules + `node_footprint` are tier-1 covered. `make test` runs 11 harnesses; coverage 10 of
-~14 real modules. So the immediate work is now **step 4: close the datapath divergences** the
-harnesses documented, cheapest/most-isolated first:
+**Step 3 DONE** (`b4130e6`, `6cdcc8d`) and **step-4 geometry pair DONE** (`d095a9f`). `make test`
+runs **12 harnesses** (spectral added, `4c0546b`); coverage 11 of ~14 real modules. Remaining work:
 
-- **`node_footprint` in-die shift** — the PL module shifts a footprint to stay on-grid; sw_only
-  `computeNodeFootprint` (Grid.cpp:9, 35-37) does NOT (its `enforceDieBoundaries` pre-projects nodes
-  so the box is legal by construction). `node_footprint_test.cpp` tests the PL behaviour and flags
-  this in its header. Decide: adopt the sw_only invariant (project in `iteration_update`, drop the
-  shift) or keep the shift as a PL-side guarantee. Whichever, make the two agree and retarget the
-  golden to `computeNodeFootprint`.
-- **movable-macro weight override** — sw_only sets `weight = target_density` for a movable macro when
-  td < 1 (Grid.cpp:31-32, TODO #11b); the PL module has no macro/filler flag crossing the boundary in
-  v1. Needs the boundary to carry that flag before the module can match. Add a `[5]` to
-  `node_footprint_test` when it lands.
-- **die-clamp box, fillers** — the remaining two from the original step-4 list; not yet analysed.
+- **⚠️ FIRST: sw_emu trajectory A/B vs sw_only for the step-4 geometry change.** The footprint/clamp
+  change (`d095a9f`) is tier-1-verified to match sw_only's *formulation*, but the end-to-end
+  trajectory match is unproven — tier-1 cannot see it. Also run C-synth on `iteration_update`/
+  `node_footprint` (the change is simple float arithmetic + a dropped branch, expected clean).
+- **step 4 remainder — movable-macro weight override.** sw_only sets `weight = target_density` for a
+  movable macro when td < 1 (Grid.cpp:31-32, TODO #11b); the PL has no macro flag crossing the
+  boundary. Needs the host→PL contract to carry an is-movable-macro flag (a NodeBox field or a split
+  index) before `node_footprint` can match. Add a `[5]` to `node_footprint_test` when it lands.
+- **step 5 — fillers** (the largest quality lever; see tasks.md #20 step 5).
 
-**Do NOT compose the resident loop (step 6 / the v1 milestone) yet.** DATAFLOW.md is emphatic:
-*"compose this loop LAST, not next."* Step 4 must reconcile the divergences first, or the composed
-loop bakes in a wrong footprint that is invisible until a full sw_emu cycle.
+**Do NOT compose the resident loop (step 6) yet** — DATAFLOW.md: *"compose this loop LAST."*
 
 Also still open from step 2 (need non-adaptec1 fixtures): the divergence-conjunct, phase-relative
 counters, and jolt-from-config items — see "Remaining step-2 items" below.
 
-### Done 2026-08-28 (step-3 completion, this session)
+### Done 2026-08-29 (step-4 geometry pair, this session)
+- `4c0546b` — `spectral_test` (Stage 4 spectral multiply vs double `compute_eField_DCT`, both axes +
+  DC drop; ~5e-8).
+- `d095a9f` — **step-4 geometry pair.** `node_footprint` drops the in-die shift (centered box =
+  `computeNodeFootprint`); `iteration_update` clamps to the √2-expanded box (= `enforceDieBoundaries`),
+  `bin_w=die/GRID` so no new top() scalar. One coupled contract. Retargeted `node_footprint_test`
+  [3]→centering, added `iteration_update_test` [5] on-grid coupling, updated host `IterVerify.cpp`.
+  `force_gather`/`density_bin` faithful as a consequence (edge cells clip, not shift).
+
+### Done 2026-08-28 (step-3 completion, prior session)
 - `b4130e6` — **wall fix (option a).** `formats.hpp` guards its HLS includes + `axis_t`/`beat_t`
   behind `#ifndef PL_TIER1_STUB` (byte-identical preprocessed output for the real build).
   `test/tier1_stub.hpp` sets the macro + a `std::deque` `hls::stream<T>`. `density_bin_model.cpp`
