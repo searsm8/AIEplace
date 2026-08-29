@@ -78,20 +78,23 @@
 ## Where pl_algo stands — THE ACTIVE THREAD as of 2026-08-28
 - All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
 - **v1 scope DECIDED (Mark, 2026-08-28):** phase-1 GP, device-resident, bit-comparable. **No phase 2,
-  no backtracking** (deferred until needed). **pl_algo pins to the frozen sw_only HEAD.** So #20 step 1
-  is now unblocked — restore `dumpScheduleTrace()` against that HEAD and `sched_verify` is meaningful
-  again. (Third §10 question — grid-1024 A/B vs per-design `-DPL_GRID` — still open.)
+  no backtracking** (deferred until needed). **pl_algo pins to the frozen sw_only HEAD.** (Third §10
+  question — grid-1024 A/B vs per-design `-DPL_GRID` — still open.)
 - Items re-filed here from the sw_only list on 2026-08-17 (marked **↪ pl_algo** in tasks.md):
   **#15** entirely (net-local frames — PL precision, expects no sw_only HPWL movement), **#23**'s
-  initial-step mirror, **#19**'s two remaining bullets (the live pre-#19 dff gate in
-  `host/src/pl_algo/`, and the fixture-trace regeneration blocked on step 1), and **#6c** operator
+  initial-step mirror, **#19**'s live pre-#19 dff gate in `host/src/pl_algo/`, and **#6c** operator
   skipping (now an *Improvements* bullet, but wanted during step 6, not after).
-- **#20 — do NOT compose Stage 5 first.** pl_algo's algorithm is frozen at the **2026-07-14**
-  sw_only, and `dumpScheduleTrace()` — the mechanism that would catch the drift — was deleted from
-  sw_only as dead code on 07-28. So `make test`'s green `sched_verify` checks a **07-18 golden and
-  always will**. Restore the trace and the tier-1 coverage (**4 of 17 modules today** — `hpwl_gradient`
-  landed 2026-08-28, `make test-asan` alongside it) first.
-  → [[_NEW_REPORT_pl_algo_stage5_assessment_20260806.md]]
+- **#20 — compose Stage 5 (the resident loop = v1) LAST, after tier-1 coverage.** Progress
+  2026-08-28: **step 1 DONE** — `dumpScheduleTrace()` restored in sw_only (config-gated, `make
+  test-regress` bit-identical = proven no-op), fixture regenerated from the frozen HEAD (adaptec1,
+  652 iters), so `sched_verify` now validates CURRENT sw_only and feeds **κ** (not the pre-#19 dff
+  hack); the escalating `precond_coef` ladder is exercised. **step 2 core DONE** (schedule +
+  convergence bit-exact); its divergence-conjunct / phase-relative / jolt items need a diverging or
+  mixed-size fixture. **step 3 underway** — tier-1 now **5 of 18 modules** (`hpwl_gradient`,
+  `bb_reduce` added). Next step-3 modules (`iteration_update`, `metrics`, `density_bin`,
+  `force_gather`) hit the `formats.hpp` wall (they use `hls::stream`/HLS types a pure-g++ harness
+  can't include) — needs the "decide once" fix from the report §9 (macro-guard the HLS includes, or
+  test/ stubs). → [[_NEW_REPORT_pl_algo_stage5_assessment_20260806.md]]
 - **`hpwl_gradient` de-gathered (P1b+P2, 2026-08-28, `21adad6`/`ed25f1a`) — the main win of the #20
   step 3b optimization thread.** `NodePin` now carries the ABSOLUTE pin position (`{x,y}`, replacing
   per-node `{off_x,off_y}`); a new `refresh_pin_pos` module folds `v_k` in once per iteration
