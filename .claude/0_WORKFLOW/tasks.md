@@ -300,8 +300,12 @@ Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
       `computeHpwlPartials_CPU`, mutation-tested — see the coverage table in its header. Memory
       safety is a separate `make test-asan` target because ASan needs `setarch -R` under this WSL2
       kernel), `node_footprint`, `density_bin` (include the
-      real header; delete `density_bin_model`'s own stale copy), `iteration_update`, `bb_reduce`,
-      `metrics`, `force_gather` — each against its named sw_only golden. **This is what makes 4–6 safe.**
+      real header; delete `density_bin_model`'s own stale copy), `iteration_update`,
+      ~~`bb_reduce`~~ (**done 2026-08-28**, `test/bb_reduce_test.cpp`: 3 assertions vs a double
+      reference of the BB norms + a bit-exact g_total check, ~50% preconditioned; dropped bb_reduce's
+      unused `formats.hpp` include so a pure-g++ harness compiles it — the residency-critical module
+      is now covered), `metrics`, `force_gather` — each against its named sw_only golden.
+      **This is what makes 4–6 safe.**
       For `density_bin`'s cap: the host is now a single `capFixedDensity` (`common/include/Grid.h`, #36)
       and both pl_algo copies already point at it — converge them onto that spec here.
 - [ ] **3b. `hpwl_gradient` optimization — proposed, not implemented.** With coverage in place,

@@ -122,10 +122,10 @@ iteration, then sw_emu-verify the trajectory vs the golden (needs the Vitis/AIE 
 > could see the coupling. So the fixture cannot be regenerated, and `sched_verify` passes against a
 > 2026-07-18 golden and always will. It is not evidence about the current algorithm.
 >
-> Also: only 4 of 18 modules are covered at tier 1 (`fft_pl`, `field_solve_pl`, `param_scheduler`,
-> and `hpwl_gradient` as of 2026-08-28 — the only ones a harness `#include`s; `density_bin_model.cpp`
-> holds its own stale copy of `node_footprint`), so most modules Stage 5 must change are still
-> unverifiable without a full sw_emu cycle.
+> Also: only 5 of 18 modules are covered at tier 1 (`fft_pl`, `field_solve_pl`, `param_scheduler`,
+> `hpwl_gradient`, and `bb_reduce` as of 2026-08-28 — the only ones a harness `#include`s;
+> `density_bin_model.cpp` holds its own stale copy of `node_footprint`), so most modules Stage 5
+> must change are still unverifiable without a full sw_emu cycle.
 >
 > Restore the trace + the tier-1 coverage first. Full assessment, including the known datapath
 > divergences and the structural gaps (second movable-only density map for the convergence overflow,

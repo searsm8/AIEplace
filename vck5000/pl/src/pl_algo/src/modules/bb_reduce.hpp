@@ -21,7 +21,9 @@
 // Sums accumulate in float (matches the golden, which sums in float); the two scalars are read by
 // param_scheduler. Movable nodes only ([0,M)).
 
-#include "../formats.hpp"
+// host_interface.hpp only (coord_t lives there); this module uses no formats.hpp/HLS types, and
+// dropping that unused include is what lets a pure-g++ tier-1 harness compile it. top.cpp pulls
+// formats.hpp itself, so the device build is unaffected. Meow.
 #include "../host_interface.hpp"
 
 namespace plalgo {
