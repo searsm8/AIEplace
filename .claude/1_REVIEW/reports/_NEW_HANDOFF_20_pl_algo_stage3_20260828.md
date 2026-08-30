@@ -16,11 +16,13 @@ runs **12 harnesses** (spectral added, `4c0546b`); coverage 11 of ~14 real modul
   change (`d095a9f`) is tier-1-verified to match sw_only's *formulation*, but the end-to-end
   trajectory match is unproven — tier-1 cannot see it. Also run C-synth on `iteration_update`/
   `node_footprint` (the change is simple float arithmetic + a dropped branch, expected clean).
-- **step 4 remainder — movable-macro weight override.** sw_only sets `weight = target_density` for a
-  movable macro when td < 1 (Grid.cpp:31-32, TODO #11b); the PL has no macro flag crossing the
-  boundary. Needs the host→PL contract to carry an is-movable-macro flag (a NodeBox field or a split
-  index) before `node_footprint` can match. Add a `[5]` to `node_footprint_test` when it lands.
-- **step 5 — fillers** (the largest quality lever; see tasks.md #20 step 5).
+- **step 5 — fillers** (the largest quality lever; see tasks.md #20 step 5). **Fold in the tabled
+  movable-macro weight override here** — decision 2026-08-29: it is latent on every std-cell design
+  pl_algo runs (num_movable_macros == 0) and needs the SAME host→PL per-node "kind" flag fillers
+  need, so building it alone would be dead code. When the flag lands, port `tagMovableMacros`
+  (Setup.cpp:106), thread `is_movable_macro` + `target_density` into `node_footprint`/`force_gather`,
+  and split `node_footprint_test` [4] by kind (it is the tripwire pinning the current no-override
+  contract). Step 4 is otherwise CLOSED (geometry pair done, `d095a9f`).
 
 **Do NOT compose the resident loop (step 6) yet** — DATAFLOW.md: *"compose this loop LAST."*
 

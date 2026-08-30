@@ -26,9 +26,17 @@
 //   * in-die shift -- RESOLVED 2026-08-29 (#20 step 4). The PL module no longer shifts; it centres
 //     the footprint exactly like computeNodeFootprint, and iteration_update's expanded-box clamp
 //     (Step.cpp:131 enforceDieBoundaries) keeps it in-die. The golden above and [3] now assert that.
-//   * movable-macro weight override -- STILL OPEN (#20 step 4, TODO #11b): sw_only overwrites weight
-//     with target_density for a movable macro when td < 1 (Grid.cpp:31-32); the PL module has no
-//     macro flag crossing the boundary in v1. When that lands, add a [5] here.
+//   * movable-macro weight override -- TABLED for v1 (#20 step 4, decision 2026-08-29). sw_only
+//     overwrites weight with target_density for a MOVABLE MACRO when td < 1 (Grid.cpp:31-32; the
+//     is_mov_macro rule is Setup.cpp:106 tagMovableMacros = is_tall && is_large && is_sized). The
+//     override is LATENT on every design pl_algo runs today: it fires only when a node is a movable
+//     macro AND td < 1, and pl_algo's benchmarks are standard-cell (num_movable_macros == 0), so it
+//     is a no-op regardless of td. It only bites MMS designs, which need phase 2 + fillers that v1
+//     does not have -- and it needs the SAME host->PL per-node "kind" flag that fillers (step 5)
+//     need. So it is deliberately bundled with fillers, not built alone as dead code. Assertion [4]
+//     below is the tripwire: it pins the current no-override contract (a macro-sized cell keeps
+//     weight 1.0). When the kind flag crosses the boundary, [4] splits -- fixed macro weight 1.0,
+//     movable macro weight td -- and node_footprint gains (is_movable_macro, target_density) params.
 
 #include "tier1_stub.hpp"                  // PL_TIER1_STUB (guards formats.hpp's HLS headers)
 #include "modules/node_footprint.hpp"      // the real module
@@ -139,7 +147,11 @@ int main() {
     const double CENTER_TOL = 1e-5;
     if (!(center_max < CENTER_TOL)) { printf("FAIL [3] centering max_rel=%.3e (tol %.0e)\n", center_max, CENTER_TOL); ok = false; }
 
-    // ---- [4] PASSTHROUGH: interior macros come back bit-exact ----
+    // ---- [4] PASSTHROUGH: interior macros come back bit-exact (also the movable-macro tripwire) ----
+    // A macro-sized cell gets weight EXACTLY 1.0 (no smoothing). This also pins the v1 no-override
+    // contract: sw_only would set weight = target_density here for a MOVABLE macro when td < 1
+    // (Grid.cpp:31), but v1 carries no macro-kind flag, so every macro passes through at 1.0. When
+    // the kind flag lands (bundled with fillers, step 5), this splits by kind -- see the header.
     int pass_bad = 0;
     for (const NodeBox& nd : cases) {
         if (nd.w <= bin_w * 1.41421356f || nd.h <= bin_h * 1.41421356f) continue;  // not a macro

@@ -97,9 +97,12 @@
   spectral). **step 4 geometry pair DONE** (`d095a9f`): `node_footprint` drops the in-die shift and
   `iteration_update` clamps to the √2-expanded box — one coupled contract matching sw_only
   `computeNodeFootprint`/`enforceDieBoundaries`, `bin_w=die/GRID` so no new ABI scalar.
-  **Next: sw_emu trajectory A/B** for that change (tier-1 proves the formulation, not the end-to-end
-  match), then step-4 remainder (movable-macro weight, needs a boundary flag) + step 5 (fillers), then
-  step 6 (compose the resident loop = v1, LAST). → [[_NEW_HANDOFF_20_pl_algo_stage3_20260828.md]]
+  **Step 4 CLOSED for v1** (2026-08-29): the movable-macro weight override (#11b) is TABLED —
+  latent on every std-cell design (num_movable_macros==0) and needs the same host→PL kind flag as
+  fillers, so it's folded into step 5; `node_footprint_test` [4] is the tripwire.
+  **Next: sw_emu trajectory A/B** for the geometry change (tier-1 proves the formulation, not the
+  end-to-end match), then step 5 (fillers + macro weight), then step 6 (compose the resident loop =
+  v1, LAST). → [[_NEW_HANDOFF_20_pl_algo_stage3_20260828.md]]
 - **`hpwl_gradient` de-gathered (P1b+P2, 2026-08-28, `21adad6`/`ed25f1a`) — the main win of the #20
   step 3b optimization thread.** `NodePin` now carries the ABSOLUTE pin position (`{x,y}`, replacing
   per-node `{off_x,off_y}`); a new `refresh_pin_pos` module folds `v_k` in once per iteration

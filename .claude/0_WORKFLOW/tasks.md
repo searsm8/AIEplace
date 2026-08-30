@@ -379,7 +379,8 @@ Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
       before any sw_emu run of the HPWL path. Then P3 (II fixes) is the next lever —
       re-read the P1b lesson first: HLS cannot see a rotating array index, partial accumulators
       need STATIC indices via unrolling. → [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]]
-- [~] **4. Close the datapath divergences** under that coverage. **Geometry pair DONE 2026-08-29
+- [x] **4. Close the datapath divergences** under that coverage — CLOSED for v1 scope 2026-08-29
+      (geometry pair done; macro-weight deferred to step 5). **Geometry pair DONE 2026-08-29
       (`d095a9f`):** `node_footprint.hpp` no longer does the in-die shift #11a deleted (centered box,
       matches `computeNodeFootprint`), and `iteration_update.hpp` now clamps to the √2-**expanded** box
       `[0.5(cw−w), die−0.5(cw+w)]` matching `enforceDieBoundaries` (Step.cpp:131) — these are one
@@ -390,11 +391,21 @@ Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
       off-grid), `IterVerify.cpp` host golden updated; `make test` 12 harnesses green. ⚠️ **C-synth +
       sw_emu trajectory A/B vs sw_only still needed** to confirm the end-to-end match (tier-1 only
       proves the module math is now faithful to sw_only's formulation).
-      **Still open:** #11b's movable-macro weight (needs a macro flag across the host/PL boundary);
-      **pl_algo has no fillers at all** (that is step 5).
+      **Movable-macro weight override (#11b) — TABLED for v1 (decision 2026-08-29, Mark).** sw_only
+      sets weight = target_density for a movable macro when td < 1 (Grid.cpp:31; is_mov_macro rule =
+      Setup.cpp:106 tagMovableMacros). It is a **no-op on every design pl_algo runs** (std-cell,
+      num_movable_macros == 0 → override never fires) and only bites MMS, which needs phase 2 +
+      fillers v1 lacks. It also needs the **same host→PL per-node "kind" flag that fillers need**, so
+      it is **bundled into step 5**, not built alone as dead code. `node_footprint_test` [4] is the
+      tripwire (pins the current no-override contract: macro weight == 1.0) — see its header for the
+      exact split when the flag lands. So **step 4 is CLOSED for v1 scope** (geometry done; macro
+      weight deferred to step 5).
 - [ ] **5. Fillers** — packer, uniform-random initial placement (not centre-clustered), the λ-init
       balance that counts them, and the movable/filler split the two density maps need. Largest single
-      change; largest quality lever.
+      change; largest quality lever. **Also carries the per-node "kind" flag across the host→PL
+      boundary** — so fold in the tabled #11b **movable-macro weight override** here (same flag; port
+      `tagMovableMacros`, thread `is_movable_macro` + `target_density` into `node_footprint` and
+      `force_gather`, split `node_footprint_test` [4] by kind). See #20 step 4.
 - [ ] **6. Compose the resident loop (Stage 5 proper)** with the second movable-only density map, the
       best-position DDR buffer, and phase-2 re-entrancy designed in from the start.
       ⚠️ **The best-position DDR buffer must hold the LOOKAHEAD `v_k`, not the committed `u`** — see
