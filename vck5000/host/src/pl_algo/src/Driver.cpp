@@ -1233,4 +1233,115 @@ int runPlacement(const PlacementConfig& cfg,
     return iters_run;
 }
 
+// Stage 5 proper (#20 step 6): the DEVICE-RESIDENT placement loop. ONE top() call in MODE_PLACE runs
+// the whole GP loop on the PL (schedule + BB norms on-chip, no per-iteration host round-trip). The
+// iteration-0 bootstrap is carried by the loop itself (resident_iteration seeds alpha = init_step on
+// k==1), so the host only seeds the buffers and runs. Uses a FIXED max_iters small enough that the
+// scheduler cannot stop early (min_iters=50), so the AIE FFT graph's fixed run count matches the
+// passes the loop streams exactly. AIE-using. Returns the number of iterations run.
+int runResidentPlacement(const PlacementConfig& cfg,
+                         int num_nodes, int num_movable, int num_nets, int num_pins, int num_npins,
+                         int first_macro, int first_filler,
+                         const coord_t* node_pos_init, const NodeBox* node_box_init,
+                         const int* net_ptr, const NodePin* pins, const NodePin* npins,
+                         const PinOffset* pin_off, const PinOffset* npin_off,
+                         const float* exp_lut, int lut_size, const float* area, int max_iters,
+                         float* out_status, coord_t* out_final_pos, const char* xclbin_path) {
+    const int    N = num_nodes, M = num_movable, G = DENSITY_GRID;
+    const float  bin_area = cfg.bin_w * cfg.bin_h;
+    float movable_area = 0.0f;
+    for (int n = 0; n < M; n++) movable_area += area[n];
+    const float kappa_coef = movable_area / ((float)num_pins + 1e-8f);  // precond OFF: c = K/total_pins
+    const float init_step  = cfg.init_step_seed * cfg.site_width;       // sw_only estimateInitialStep seed
+
+    const size_t coordN = (size_t)N * sizeof(coord_t);
+    const size_t coordM = (size_t)M * sizeof(coord_t);
+    const size_t matB   = (size_t)DENSITY_NBINS * sizeof(float);
+    const size_t npinN  = (size_t)(num_npins > 0 ? num_npins : 1);
+
+    xrt::device device(0);
+    xrt::uuid   uuid = device.load_xclbin(xclbin_path);
+    xrt::kernel top(device, uuid, "top");
+    xrt::graph  fft(device, uuid, "density_fft_graph");
+
+    // Every kernel arg must be bound. Groups 0-13 are the shared ports; 14-27 the resident buffers.
+    xrt::bo b_np    = xrt::bo(device, coordN, top.group_id(0));    // node_pos (probe v), in/out
+    xrt::bo b_ptr   = xrt::bo(device, (size_t)(num_nets+1)*sizeof(int32_t), top.group_id(1));
+    xrt::bo b_pin   = xrt::bo(device, (size_t)num_pins*sizeof(NodePin), top.group_id(2));
+    xrt::bo b_npin  = xrt::bo(device, npinN*sizeof(NodePin), top.group_id(3));
+    xrt::bo b_lut   = xrt::bo(device, (size_t)lut_size*sizeof(float), top.group_id(4));
+    xrt::bo b_bb    = xrt::bo(device, (size_t)num_nets*sizeof(NetBBox), top.group_id(5));
+    xrt::bo b_sums  = xrt::bo(device, (size_t)num_nets*sizeof(NetSums), top.group_id(6));
+    xrt::bo b_grad  = xrt::bo(device, coordM, top.group_id(7));    // g_hpwl
+    xrt::bo b_box   = xrt::bo(device, (size_t)N*sizeof(NodeBox), top.group_id(8));
+    xrt::bo b_bd    = xrt::bo(device, matB, top.group_id(9));      // rho (force map)
+    xrt::bo b_din   = xrt::bo(device, sizeof(float), top.group_id(10));   // dct_in : unused by MODE_PLACE
+    xrt::bo b_dout  = xrt::bo(device, sizeof(float), top.group_id(11));   // dct_out: unused by MODE_PLACE
+    xrt::bo b_poff  = xrt::bo(device, (size_t)num_pins*sizeof(PinOffset), top.group_id(12));
+    xrt::bo b_npoff = xrt::bo(device, npinN*sizeof(PinOffset), top.group_id(13));
+    xrt::bo b_u     = xrt::bo(device, coordM, top.group_id(14));
+    xrt::bo b_vprev = xrt::bo(device, coordM, top.group_id(15));
+    xrt::bo b_gtot  = xrt::bo(device, coordM, top.group_id(16));
+    xrt::bo b_gden  = xrt::bo(device, coordM, top.group_id(17));
+    xrt::bo b_prec  = xrt::bo(device, (size_t)M*sizeof(float), top.group_id(18));
+    xrt::bo b_stat  = xrt::bo(device, 4*sizeof(float), top.group_id(19));
+    xrt::bo b_t1    = xrt::bo(device, matB, top.group_id(20));
+    xrt::bo b_auv   = xrt::bo(device, matB, top.group_id(21));
+    xrt::bo b_exh   = xrt::bo(device, matB, top.group_id(22));
+    xrt::bo b_eyh   = xrt::bo(device, matB, top.group_id(23));
+    xrt::bo b_tE    = xrt::bo(device, matB, top.group_id(24));
+    xrt::bo b_tY    = xrt::bo(device, matB, top.group_id(25));
+    xrt::bo b_Ex    = xrt::bo(device, matB, top.group_id(26));
+    xrt::bo b_Ey    = xrt::bo(device, matB, top.group_id(27));
+
+    // ---- uploads (once) ----
+    std::memcpy(b_np.map<void*>(),   node_pos_init, coordN);
+    std::memcpy(b_box.map<void*>(),  node_box_init, (size_t)N*sizeof(NodeBox));
+    std::memcpy(b_ptr.map<void*>(),  net_ptr, (size_t)(num_nets+1)*sizeof(int32_t));
+    std::memcpy(b_pin.map<void*>(),  pins,    (size_t)num_pins*sizeof(NodePin));
+    std::memcpy(b_poff.map<void*>(), pin_off, (size_t)num_pins*sizeof(PinOffset));
+    if (num_npins > 0) {
+        std::memcpy(b_npin.map<void*>(),  npins,    (size_t)num_npins*sizeof(NodePin));
+        std::memcpy(b_npoff.map<void*>(), npin_off, (size_t)num_npins*sizeof(PinOffset));
+    }
+    std::memcpy(b_lut.map<void*>(), exp_lut, (size_t)lut_size*sizeof(float));
+    // Seed the iteration-0 state: u_0 = v_0, v_prev = v_0, g_total_prev = 0, precond = 1 (OFF).
+    { coord_t* up = b_u.map<coord_t*>();     for (int n=0;n<M;n++) up[n] = node_pos_init[n]; }
+    { coord_t* vp = b_vprev.map<coord_t*>(); for (int n=0;n<M;n++) vp[n] = node_pos_init[n]; }
+    std::memset(b_gtot.map<void*>(), 0, coordM);
+    { float* pp = b_prec.map<float*>();      for (int n=0;n<M;n++) pp[n] = 1.0f; }
+    // Zero bb: masked nets are never written and must read as a zero-extent box (host_interface NetBBox).
+    std::memset(b_bb.map<void*>(), 0, (size_t)num_nets*sizeof(NetBBox));
+
+    b_np.sync(XCL_BO_SYNC_BO_TO_DEVICE);   b_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    b_ptr.sync(XCL_BO_SYNC_BO_TO_DEVICE);  b_pin.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    b_poff.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    if (num_npins > 0) { b_npin.sync(XCL_BO_SYNC_BO_TO_DEVICE); b_npoff.sync(XCL_BO_SYNC_BO_TO_DEVICE); }
+    b_lut.sync(XCL_BO_SYNC_BO_TO_DEVICE);  b_u.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    b_vprev.sync(XCL_BO_SYNC_BO_TO_DEVICE); b_gtot.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    b_prec.sync(XCL_BO_SYNC_BO_TO_DEVICE); b_bb.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    // AIE FFT graph: 6 DCT_TRANSPOSE passes per gradient eval, each streaming G rows = G/LANES graph
+    // iterations; the loop runs exactly max_iters evals (no early stop), so the count matches.
+    const int graph_iters = 6 * (G / DENSITY_LANES) * max_iters;
+    fft.run(graph_iters);
+
+    xrt::run run = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad, b_box, b_bd,
+                       b_din, b_dout, b_poff, b_npoff,
+                       b_u, b_vprev, b_gtot, b_gden, b_prec, b_stat,
+                       b_t1, b_auv, b_exh, b_eyh, b_tE, b_tY, b_Ex, b_Ey,
+                       0.0f, 0.0f, lut_size, num_nets, M, num_npins, N,
+                       cfg.bin_w, cfg.bin_h, cfg.target_density, 0, 0,
+                       first_macro, first_filler, cfg.base_gamma, kappa_coef, cfg.overflow_threshold,
+                       bin_area, movable_area, init_step, max_iters, (int)MODE_PLACE);
+    run.wait();
+    fft.wait();
+
+    b_np.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    b_stat.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    { coord_t* np = b_np.map<coord_t*>(); for (int n=0;n<M;n++) out_final_pos[n] = np[n]; }
+    { float*   st = b_stat.map<float*>(); for (int i=0;i<4;i++) out_status[i] = st[i]; }
+    return (int)out_status[2];
+}
+
 } // namespace plalgo

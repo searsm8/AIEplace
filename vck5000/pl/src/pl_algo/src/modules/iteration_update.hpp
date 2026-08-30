@@ -45,6 +45,26 @@ static inline float clampf(float value, float lo, float hi) {
     return value < lo ? lo : (value > hi ? hi : value);
 }
 
+// Per-axis bounds of the sqrt(2)-EXPANDED die box for a cell of size (w,h) -- matches sw_only
+// enforceDieBoundaries (Step.cpp:131): the footprint uses the expanded size cw so node_footprint's
+// centered deposit is in-die by construction. Collapses to [0, die-size] when cw==w (macros / clamp
+// off). bin size derives from die + the compile-time GRID (bin_w = die/GRID), no extra ABI scalar.
+// Factored so iteration_update AND the resident-loop bootstrap trial step clamp identically. Meow.
+static inline void die_expanded_bounds(float w, float h, float die_x, float die_y,
+                                       float& min_x, float& max_x, float& min_y, float& max_y) {
+    float cw = w, ch = h;
+    if (ENABLE_DENSITY_CLAMP) {
+        const float SQRT2 = 1.41421356f;                 // == (float)M_SQRT2; matches node_footprint
+        const float min_w = (die_x / GRID) * SQRT2, min_h = (die_y / GRID) * SQRT2;
+        cw = w > min_w ? w : min_w;
+        ch = h > min_h ? h : min_h;
+    }
+    min_x = 0.5f * (cw - w); max_x = die_x - 0.5f * (cw + w);
+    min_y = 0.5f * (ch - h); max_y = die_y - 0.5f * (ch + h);
+    if (min_x > max_x) min_x = max_x = 0.5f * (die_x - w);   // footprint wider than die: center
+    if (min_y > max_y) min_y = max_y = 0.5f * (die_y - h);
+}
+
 static void iteration_update(
     const coord_t* g_hpwl,     // [M] HPWL gradient at v_k        (node_grad, gmem7)
     const coord_t* g_density,  // [M] density gradient at v_k     (dct_in,    gmem10)
@@ -78,24 +98,9 @@ node_loop:
         const float ukx = u_in[n].x, uky = u_in[n].y;
         const float vx = ux + coeff * (ux - ukx);
         const float vy = uy + coeff * (uy - uky);
-        // die clamp both, independently, to the sqrt(2)-EXPANDED box -- matches sw_only
-        // enforceDieBoundaries (Step.cpp:131). The bound uses the expanded footprint size cw so
-        // node_footprint's centered deposit is in-die by construction (that is why node_footprint
-        // does no deposit-time shift). Collapses to [0, die-size] when cw==w (macros / clamp off).
-        // bin size derives from die + the compile-time GRID (bin_w = die/GRID), same as the host
-        // (main.cpp:261) -- no extra scalar crosses the top() ABI.
-        const float w = node_box[n].w, h = node_box[n].h;
-        float cw = w, ch = h;
-        if (ENABLE_DENSITY_CLAMP) {
-            const float SQRT2 = 1.41421356f;                 // == (float)M_SQRT2; matches node_footprint
-            const float min_w = (die_xmax / GRID) * SQRT2, min_h = (die_ymax / GRID) * SQRT2;
-            cw = w > min_w ? w : min_w;
-            ch = h > min_h ? h : min_h;
-        }
-        float min_x = 0.5f * (cw - w), max_x = die_xmax - 0.5f * (cw + w);
-        float min_y = 0.5f * (ch - h), max_y = die_ymax - 0.5f * (ch + h);
-        if (min_x > max_x) min_x = max_x = 0.5f * (die_xmax - w);   // footprint wider than die: center
-        if (min_y > max_y) min_y = max_y = 0.5f * (die_ymax - h);
+        // die clamp both, independently, to the sqrt(2)-EXPANDED box (die_expanded_bounds above).
+        float min_x, max_x, min_y, max_y;
+        die_expanded_bounds(node_box[n].w, node_box[n].h, die_xmax, die_ymax, min_x, max_x, min_y, max_y);
         coord_t uo; uo.x = clampf(ux, min_x, max_x); uo.y = clampf(uy, min_y, max_y);
         coord_t vo; vo.x = clampf(vx, min_x, max_x); vo.y = clampf(vy, min_y, max_y);
         u_out[n] = uo;          // commit u_{k+1} to the owned Nesterov state

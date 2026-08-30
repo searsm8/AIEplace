@@ -133,6 +133,7 @@ int main(int argc, char** argv) {
         printf("       %s --iter-update     <xclbin>\n", argv[0]);
         printf("       %s --metrics    <benchmark_dir> <xclbin>\n", argv[0]);
         printf("       %s --place      <benchmark_dir> <xclbin> [max_iters]\n", argv[0]);
+        printf("       %s --resident-place <benchmark_dir> <xclbin> [max_iters]\n", argv[0]);
         printf("       %s --pack-check <benchmark_dir>\n", argv[0]);
         return 1;
     }
@@ -368,6 +369,68 @@ int main(int argc, char** argv) {
                ran, ok ? "finite/in-bounds" : "BAD",
                ovfl_drop ? "decreasing" : "(not strictly decreasing over this window)",
                ok ? "PASS" : "FAIL");
+        return ok ? 0 : 1;
+    }
+
+    // Stage 5 proper (#20 step 6): the DEVICE-RESIDENT loop -- ONE MODE_PLACE call runs the whole GP
+    // loop on the PL. Same setup as --place; reports the final HPWL/overflow + how far cells moved.
+    // usage: --resident-place <bench> <xclbin> [max_iters].  max_iters small (default 5) so the loop
+    // cannot stop early (the AIE FFT run count is fixed to the passes streamed).
+    if (argc >= 4 && std::strcmp(argv[1], "--resident-place") == 0) {
+        AIEplace::DataBase db(argv[2]);
+        db.printInfo();
+        float target_density = db.getMaximumUtilization() > 0.0f ? db.getMaximumUtilization() : 1.0f;
+        plalgo::tagMovableMacros(db);
+        target_density = db.addFillers(target_density);
+        plalgo::PackedDesign pk = plalgo::packDesign(db);
+        const int max_iters = (argc >= 5) ? std::atoi(argv[4]) : 5;
+
+        const int   G = plalgo::DENSITY_GRID;
+        AIEplace::Box die = db.getDieArea();
+        const float die_x = (float)die.getXsize(), die_y = (float)die.getYsize();
+        const int   N = pk.header.num_nodes, M = pk.header.num_movable;
+        const int   num_nets = pk.header.num_nets;
+        const int   num_pins = (int)pk.pins.size(), num_npins = (int)pk.npins.size();
+        const float base_gamma = 4.0f * (die_x + die_y) / 512.0f;   // gamma_bin_scaled (main --place)
+        const int   lut_size = (int)(12 / plalgo::PLACE_STEP_NORM) + 2;
+        std::vector<float> lut(lut_size);
+        for (int i = 0; i < lut_size; i++) lut[i] = std::exp(-(float)i * plalgo::PLACE_STEP_NORM);
+        std::vector<float> area(M);
+        for (int n = 0; n < M; n++) area[n] = pk.node_box[n].w * pk.node_box[n].h;
+
+        plalgo::PlacementConfig cfg{};
+        cfg.max_iters = max_iters; cfg.die_x = die_x; cfg.die_y = die_y;
+        cfg.bin_w = die_x / G; cfg.bin_h = die_y / G; cfg.target_density = target_density;
+        cfg.base_gamma = base_gamma; cfg.gamma_schedule = 1;
+        cfg.init_step_seed = 0.01f; cfg.density_weight_init_multiplier = 8e-5f;
+        cfg.site_width = db.getSiteWidth() > 0.0f ? db.getSiteWidth() : db.getRowHeight();
+        cfg.enable_momentum = 1; cfg.density_weight_min_step = 0.95f; cfg.density_weight_max_step = 1.05f;
+        cfg.overflow_threshold = 0.07f; cfg.min_iters = 50; cfg.conv_iters = 30;
+
+        printf("[resident] M=%d N=%d nets=%d die=%.1fx%.1f gamma=%.4g max_iters=%d  std=%d macro=%d filler=%d td=%.4g\n",
+               M, N, num_nets, die_x, die_y, base_gamma, max_iters, pk.header.first_macro,
+               pk.header.first_filler - pk.header.first_macro, M - pk.header.first_filler, target_density);
+
+        std::vector<float> status(4, 0.0f);
+        std::vector<plalgo::coord_t> final_pos(M);
+        const int ran = plalgo::runResidentPlacement(cfg, N, M, num_nets, num_pins, num_npins,
+            pk.header.first_macro, pk.header.first_filler,
+            pk.node_pos.data(), pk.node_box.data(), pk.net_ptr.data(), pk.pins.data(), pk.npins.data(),
+            pk.pin_off.data(), pk.npin_off.data(), lut.data(), lut_size, area.data(), max_iters,
+            status.data(), final_pos.data(), argv[3]);
+
+        double moved = 0.0; float mov_area = 0.0f;
+        for (int n = 0; n < M; n++) mov_area += area[n];
+        bool ok = ran > 0;
+        for (int n = 0; n < M; n++) {
+            if (!std::isfinite(final_pos[n].x) || !std::isfinite(final_pos[n].y)) ok = false;
+            const double dx = final_pos[n].x - pk.node_pos[n].x, dy = final_pos[n].y - pk.node_pos[n].y;
+            moved += std::sqrt(dx*dx + dy*dy);
+        }
+        const float ovf = status[1] * (cfg.bin_w * cfg.bin_h) / (mov_area + 1e-8f);
+        printf("[resident] ran=%d iters, stop=%d, final HPWL=%.6g overflow=%.4f  mean node move=%.3f\n",
+               ran, (int)status[3], status[0], ovf, moved / std::max(1, M));
+        printf("[resident] %s\n", ok ? "PASS (finite; cells moved)" : "FAIL");
         return ok ? 0 : 1;
     }
 #endif

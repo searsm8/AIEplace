@@ -199,7 +199,7 @@ run-density: $(XCLBIN) $(HOST_EXE)            # Stage 1: bin density rho
 #   make run-<target> AIE=pl_algo PL=pl_algo HOST=pl_algo TARGET=sw_emu BUILD_XRT=1 AIE_DENSITY_INSTANCES=8
 .PHONY: run-dct run-dct-rowpass run-transpose run-dct-transpose run-auv \
         run-idct-transpose run-idxst-transpose run-spectral run-field \
-        run-force-gather run-density-grad run-iter-update run-metrics run-place
+        run-force-gather run-density-grad run-iter-update run-metrics run-place run-resident-place
 run-dct: $(XCLBIN) $(HOST_EXE)                # Stage 2: 1D DCT via the AIE FFT (first AIE mode)
 	$(call EMU_RUN,--dct)
 run-dct-rowpass: $(XCLBIN) $(HOST_EXE)        # Stage 3a: 8-lane row-DCT pass
@@ -228,6 +228,8 @@ run-metrics: $(XCLBIN) $(HOST_EXE)            # Stage 5c.4: metrics reduce (HPWL
 	$(call EMU_RUN,--metrics $(BENCH))
 run-place: $(XCLBIN) $(HOST_EXE)              # Stage 5c.5/5c.6: full placement loop, PLACE_ITERS iters
 	$(call EMU_RUN,--place $(BENCH),$(PLACE_ITERS))
+run-resident-place: $(XCLBIN) $(HOST_EXE)    # Stage 5 proper (#20 step 6): device-resident loop
+	$(call EMU_RUN,--resident-place $(BENCH),$(PLACE_ITERS))
 
 
 # make dse                                  -> the 28-design suite at XPlace grids

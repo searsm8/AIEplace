@@ -149,6 +149,21 @@ int runPlacement(const PlacementConfig& cfg,
                  float* out_hpwl_hist, float* out_ovfl_hist, coord_t* out_final_pos,
                  const char* xclbin_path);
 
+// Stage 5 proper (#20 step 6): the DEVICE-RESIDENT placement loop -- ONE top() call in MODE_PLACE
+// runs the whole GP loop on the PL with no per-iteration host round-trip. The host seeds the
+// iteration-0 state (u=v0, v_prev=v0, g_total_prev=0, precond=1) and reads final coords + status
+// once. out_status[4] = {hpwl, overflow_sum, iters_run, stop_flag}; out_final_pos[num_movable].
+// max_iters must be small enough that the loop cannot stop early (the AIE FFT run count is fixed).
+// Returns iterations run. AIE-using.
+int runResidentPlacement(const PlacementConfig& cfg,
+                         int num_nodes, int num_movable, int num_nets, int num_pins, int num_npins,
+                         int first_macro, int first_filler,
+                         const coord_t* node_pos_init, const NodeBox* node_box_init,
+                         const int* net_ptr, const NodePin* pins, const NodePin* npins,
+                         const PinOffset* pin_off, const PinOffset* npin_off,
+                         const float* exp_lut, int lut_size, const float* area, int max_iters,
+                         float* out_status, coord_t* out_final_pos, const char* xclbin_path);
+
 } // namespace plalgo
 
 #endif // PL_ALGO_DRIVER_HPP

@@ -105,6 +105,7 @@ static void resident_iteration(
     int num_nets, int num_movable, int num_nodes, int num_npins, int num_pins,
     int first_macro, int first_filler, float bin_w, float bin_h, float target_density,
     float die_x, float die_y, float inv_lut_step, int lut_size, float bin_area, float movable_area,
+    float init_step,
     float& inv_gamma, float& alpha, float& coeff, float& lambda, int& stop,
     hls::stream<axis_t>& fa0, hls::stream<axis_t>& fa1, hls::stream<axis_t>& fa2, hls::stream<axis_t>& fa3,
     hls::stream<axis_t>& fa4, hls::stream<axis_t>& fa5, hls::stream<axis_t>& fa6, hls::stream<axis_t>& fa7,
@@ -149,6 +150,13 @@ static void resident_iteration(
     const float kappa = sched_kappa(lambda, sp.kappa_coef);          // XPlace weighted_weight (precond OFF)
     param_scheduler(st, sp, hpwl, overflow, pos_norm_sq, grad_norm_sq, kappa,
                     gwl_L1, gden_L1, inv_gamma, alpha, coeff, lambda, stop);
+    // Iteration-1 step seed (replaces the in-kernel estimateInitialStep bootstrap, which called the
+    // dataflow density_gradient from a second site and segfaulted the HLS elaborator). At k==1 the
+    // probe has not moved yet (host seeds v_prev == v0, g_total_prev == 0), so param_scheduler's BB
+    // alpha is 0; seed it with init_step (= init_step_seed * site_width, sw_only estimateInitialStep's
+    // seed) so v0 actually moves. From k==2 the BB reduction over (v1-v0, g1-g0) takes over. The only
+    // divergence from sw_only: iteration 1 takes a fixed seed step instead of the BB-trial alpha.
+    if (st.iteration == 1) alpha = init_step;
     // [best-position snapshot hook: when param_scheduler records a new best (st.bp_valid rises),
     //  copy v_k (node_pos) -> best_pos here. Deferred with the 2nd density map -- see the header.]
 
@@ -185,9 +193,9 @@ static void resident_place(
     float* Ex, float* Ey, float* status,
     int num_nets, int num_movable, int num_nodes, int num_npins,
     int first_macro, int first_filler, float bin_w, float bin_h, float target_density,
-    float die_x, float die_y, float inv_lut_step, int lut_size,
+    float die_x, float die_y, int lut_size,
     float base_gamma, float kappa_coef, float overflow_threshold, float bin_area, float movable_area,
-    int max_iters,
+    float init_step, int max_iters,
     hls::stream<axis_t>& fa0, hls::stream<axis_t>& fa1, hls::stream<axis_t>& fa2, hls::stream<axis_t>& fa3,
     hls::stream<axis_t>& fa4, hls::stream<axis_t>& fa5, hls::stream<axis_t>& fa6, hls::stream<axis_t>& fa7,
     hls::stream<axis_t>& fb0, hls::stream<axis_t>& fb1, hls::stream<axis_t>& fb2, hls::stream<axis_t>& fb3,
@@ -204,14 +212,24 @@ static void resident_place(
 
     float inv_gamma = st.inv_gamma, alpha = 0.0f, coeff = 0.0f, lambda = st.lambda;
     int stop = 0, k = 0;
+
+    // The iteration-0 bootstrap (sw_only initializeDensityWeight + estimateInitialStep) is done on
+    // the HOST (runResidentPlacement) using the bring-up gradient modes, then seeded across the
+    // boundary: node_pos/node_box = v0, u = v0, v_prev = v0, g_total_prev = 0, precond = 1. A
+    // KERNEL bootstrap (a second density_gradient call site) segfaulted the HLS elaborator, so the
+    // per-iteration loop below carries the seed instead: iteration 1 uses alpha = init_step
+    // (resident_iteration), from iteration 2 the BB reduction takes over.
 place_loop:
     for (k = 1; k <= max_iters; k++) {
+        // inv_lut_step tracks the current gamma: inv_gamma / STEP_NORM, STEP_NORM = 0.05 =
+        // PLACE_STEP_NORM (the constant the host builds the exp LUT with: lut[i] = exp(-i*0.05)).
+        const float inv_lut_step = inv_gamma * 20.0f;
         resident_iteration(node_pos, node_box, u, v_prev, g_total_prev, g_hpwl, g_density, precond,
                            net_ptr, pins, npins, pin_off, npin_off, exp_lut, bb, sums,
                            rho, t1, a_uv, Ex_hat, Ey_hat, tE, tY, Ex, Ey, status,
                            st, sp, num_nets, num_movable, num_nodes, num_npins, net_ptr[num_nets],
                            first_macro, first_filler, bin_w, bin_h, target_density,
-                           die_x, die_y, inv_lut_step, lut_size, bin_area, movable_area,
+                           die_x, die_y, inv_lut_step, lut_size, bin_area, movable_area, init_step,
                            inv_gamma, alpha, coeff, lambda, stop,
                            fa0,fa1,fa2,fa3,fa4,fa5,fa6,fa7, fb0,fb1,fb2,fb3,fb4,fb5,fb6,fb7);
         if (stop) break;
@@ -298,6 +316,7 @@ void top(
     float          overflow_threshold,
     float          bin_area,
     float          movable_area,
+    float          init_step,           // init_step_seed * site_width (iteration-0 BB seed, TODO #23)
     int            max_iters,
     // ---- mode selector ----
     int            mode
@@ -436,6 +455,7 @@ void top(
 #pragma HLS INTERFACE s_axilite port=overflow_threshold bundle=control
 #pragma HLS INTERFACE s_axilite port=bin_area           bundle=control
 #pragma HLS INTERFACE s_axilite port=movable_area       bundle=control
+#pragma HLS INTERFACE s_axilite port=init_step          bundle=control
 #pragma HLS INTERFACE s_axilite port=max_iters          bundle=control
 #pragma HLS INTERFACE s_axilite port=mode           bundle=control
 
@@ -478,8 +498,8 @@ void top(
                        bin_density /*rho*/, fft_t1, fft_a_uv, fft_ex_hat, fft_ey_hat, fft_tE, fft_tY,
                        fft_Ex, fft_Ey, status,
                        num_nets, num_movable, num_nodes, num_npins, first_macro, first_filler,
-                       bin_w, bin_h, target_density, bin_w * GRID, bin_h * GRID, inv_lut_step, lut_size,
-                       base_gamma, kappa_coef, overflow_threshold, bin_area, movable_area, max_iters,
+                       bin_w, bin_h, target_density, bin_w * GRID, bin_h * GRID, lut_size,
+                       base_gamma, kappa_coef, overflow_threshold, bin_area, movable_area, init_step, max_iters,
                        fft_to_aie_0, fft_to_aie_1, fft_to_aie_2, fft_to_aie_3,
                        fft_to_aie_4, fft_to_aie_5, fft_to_aie_6, fft_to_aie_7,
                        fft_from_aie_0, fft_from_aie_1, fft_from_aie_2, fft_from_aie_3,
