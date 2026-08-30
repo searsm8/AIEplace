@@ -131,10 +131,18 @@ uses the closed form `sched_kappa`. `kappa` is XPlace's `weighted_weight`
 (param_scheduler.py:386) = sw_only's `precond_kappa`; it was called `dff` here until 2026-08-09,
 which is what hid TODO #19b.
 
-**Status:** control modules (param_scheduler, bb_reduce, metrics, iteration_update) built; the
-bb_reduce + param_scheduler core C-synthesizes (`vck5000/test/synth_check.{cpp,tcl}`). Remaining = compose
-the datapath (stages 1-3) + control into one resident `top` loop with the AIE FFT streaming per
-iteration, then sw_emu-verify the trajectory vs the golden (needs the Vitis/AIE env).
+**Status (2026-08-29): the resident loop IS COMPOSED in `top.cpp` (#20 step 6, STRUCTURAL DRAFT).**
+`top.cpp` now holds three diagram-level functions -- `density_gradient` (bin_scatter -> AIE-FFT
+field solve -> force_gather, mirroring Driver.cpp:547-556), `resident_iteration` (the DATAFLOW
+per-iteration order below), and `resident_place` (the loop + on-chip `SchedState`) -- driven by
+`MODE_PLACE` with a dedicated resident ABI (gmem14-27 + 8 scalars). It **syntax-checks clean against
+the Vitis HLS headers** (`g++ -fsyntax-only -I$XILINX_HLS/include`, both `!PL_ONLY` and `PL_ONLY`)
+and tier-1 stays green. **NOT yet C-synthesized (tier-2) or sw_emu-verified (tier-3)** -- that is the
+next gate. Two pieces deferred (Mark, "structure first"): the **movable-only overflow map**
+`[0,first_filler)` (`metrics` still reduces the filler-inclusive force map) and the **best-position
+snapshot** (hook marked). **Host co-design pending:** the resident args (gmem14-27) mean `Driver.cpp`
+needs a `runResidentPlacement()` for `MODE_PLACE` AND dummy bindings for the bring-up modes (XRT
+requires every kernel arg set) -- the bring-up sw_emu modes will error until that lands.
 
 > ### ⚠️ 2026-08-06 — compose this loop LAST, not next. See TODO #20.
 > The algorithm in these modules is pinned to the **2026-07-14** sw_only. `param_scheduler.hpp` has
@@ -158,14 +166,15 @@ iteration, then sw_emu-verify the trajectory vs the golden (needs the Vitis/AIE 
 > backtracking, best-position buffer, fillers, phase-2 re-entrancy):
 > `vck5000/1_REVIEW/reports/_NEW_REPORT_pl_algo_stage5_assessment_20260806.md`.
 
-> **`bb_reduce.hpp` and `param_scheduler.hpp` are BUILT AND VERIFIED BUT NOT WIRED INTO `top.cpp`.**
-> This is the correct in-progress state, not an oversight -- they are the *device-resident* control
-> path, and nothing consumes them until the resident loop above is composed. They are exercised
-> today only through `vck5000/test/synth_check.tcl` (HLS C-synthesis: 0 errors, Fmax 411 MHz, bb_loop II=1)
-> and `vck5000/test/sched_verify.cpp` (offline bit-for-bit replay vs the sw_only golden trace -- runs in
-> `make test` against the committed `vck5000/test/fixtures/schedule_trace_adaptec1.csv`). Meanwhile
-> `top.cpp` still runs the host-owned loop above, with the equivalent policy math on the host in
-> `host/src/pl_algo/src/Placement.hpp`. Do not re-derive these modules -- they exist and they match.
+> **`bb_reduce.hpp` and `param_scheduler.hpp` are NOW WIRED into `top.cpp`** (2026-08-29, #20 step 6):
+> `resident_iteration` calls `bb_reduce` then `param_scheduler` on-chip, no host round-trip. They are
+> still ALSO covered standalone by `vck5000/test/synth_check.tcl` (C-synth: 0 errors, Fmax 411 MHz,
+> bb_loop II=1) and `vck5000/test/sched_verify.cpp` (bit-for-bit golden replay in `make test`). The
+> composed `top()` is syntax-clean vs the HLS headers but not yet C-synthesized/sw_emu-verified.
+> ⚠️ The HOST side has NOT caught up: `Driver.cpp::runPlacement` + `Placement.hpp` still run the
+> equivalent policy math on the host per-iteration (the pre-step-6 loop), and nothing drives
+> `MODE_PLACE` yet. Composing the resident kernel and wiring the host driver are two steps; the second
+> is pending. Do not re-derive these modules -- they exist and they match.
 
 ## Open format decisions (to finalize as modules are implemented)
 - AoS vs SoA and 1-vs-2 nodes per beat for the coord/gradient buffers.

@@ -423,11 +423,23 @@ Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
       for MMS+phase-2. Device `--place` run with fillers is tier-3 (Vitis/Geert's card). Initial
       placement parity (sw_only centre-clusters movable; pl_algo uses parsed positions) is a separate
       step-6 A/B concern. → [[_NEW_HANDOFF_20_pl_algo_stage3_20260828.md]] (step-5 section to append).
-- [ ] **6. Compose the resident loop (Stage 5 proper)** with the second movable-only density map, the
-      best-position DDR buffer, and phase-2 re-entrancy designed in from the start.
-      ⚠️ **The best-position DDR buffer must hold the LOOKAHEAD `v_k`, not the committed `u`** — see
-      the sw_only-parity note below. Getting this wrong is invisible: both are float32 positions of
-      the right shape, and a wrong choice costs a fraction of a percent of HPWL, not a crash.
+- [~] **6. Compose the resident loop — STRUCTURAL DRAFT DONE 2026-08-29 ("structure first", Mark).**
+      `top.cpp` now reads like the DATAFLOW diagram: three functions — `density_gradient` (bin_scatter
+      → AIE-FFT field solve → force_gather, mirroring the proven Driver.cpp:547-556 sequence),
+      `resident_iteration` (refresh → hpwl_grad + density → bb_reduce → metrics → param_scheduler →
+      iteration_update, on-chip `SchedState`, no host round-trip), and `resident_place` (the loop),
+      driven by a new `MODE_PLACE` with a dedicated resident ABI (gmem14-27 + 8 scalars). **Verified
+      to the extent possible here:** `g++ -fsyntax-only -I$XILINX_HLS/include` clean (both `!PL_ONLY`
+      and `PL_ONLY`) — a real check that every module signature + the wiring is consistent — and tier-1
+      stays 12/12. **NOT done (the next gates):** (a) **tier-2 C-synth** (`vitis_hls`) — syntax ≠
+      C-synth; (b) **tier-3 sw_emu** trajectory A/B vs sw_only; (c) **host co-design** — `Driver.cpp`
+      needs a `runResidentPlacement()` to bind the 14 resident buffers + 8 scalars for `MODE_PLACE`,
+      AND dummy bindings for those args in the bring-up modes (XRT requires every kernel arg set, so
+      the bring-up sw_emu modes error until then — the Driver still *compiles*, `xrt::kernel` is
+      variadic); (d) the **movable-only overflow map** `[0,first_filler)` (deferred: `metrics` reduces
+      the filler-inclusive force map — "2nd map next"); (e) the **best-position snapshot** (hook marked
+      in `resident_iteration`) — ⚠️ **it must snapshot the LOOKAHEAD `v_k`, not committed `u`** (parity
+      note below). Phase-2 re-entrancy left out per the v1 decision (leave room, don't build).
 
 ⚠️ **sw_only parity note — u vs v (added 2026-08-17, from #32/7a).** sw_only now does what XPlace
 does: **best-solution tracking snapshots the lookahead `v_k` (`probe_pos`) and measures HPWL there

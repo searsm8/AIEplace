@@ -298,11 +298,16 @@ enum top_mode { MODE_HPWL_GRAD = 0, MODE_DENSITY_BIN = 1, MODE_DCT_1D = 2,
                                          // IN: node_pos(0), pin_off(12), npin_off(13);
                                          // IN/OUT: pins(2), npins(3). scalars: num_nets (for
                                          // num_pins via net_ptr), num_npins.
-                MODE_FIELD_SOLVE_PL = 10 }; // PL-only field solve: forward 2D DCT -> spectral ->
+                MODE_FIELD_SOLVE_PL = 10, // PL-only field solve: forward 2D DCT -> spectral ->
                                          // inverse (IDCT/IDXST), the whole density solve on the PL
                                          // via fft_pl (NO AIE). rho = dct_in (gmem10) -> Ex =
                                          // dct_out (gmem11), Ey = bin_density (gmem9). On-chip
                                          // scratch. Small-grid (PL_GRID) build only (fits on-chip).
+                MODE_PLACE = 12 };       // Stage 5 proper: the whole device-resident GP loop
+                                         // (resident_place in top.cpp). Host uploads design+config
+                                         // once, runs top() in this mode, reads final coords+status
+                                         // once -- no per-iteration round-trip. Uses the dedicated
+                                         // resident buffers (gmem14-27) + scalars; see top.cpp.
 
 // ---- 1D DCT via the AIE FFT  (Stage 2 -- first AIE bring-up) ----------------
 // MODE_DCT_1D streams num_frames real rows of FFT_PTS points each through:
