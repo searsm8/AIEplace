@@ -16,27 +16,22 @@
 //                     likewise y. This is the property the no-shift geometry guarantees (a
 //                     reintroduced in-die shift would break it for edge cells); it holds regardless
 //                     of position, so it is driven at the die edges too.
-//   [4] PASSTHROUGH-- an interior macro (already bigger than sqrt(2) bins) gets NO smoothing:
-//                     weight == 1.0f BIT-EXACT (cw==w, ch==h, so weight = w*h/(w*h), an exact
-//                     x/x == 1.0 in float). A stray inflation or weight!=1 is caught exactly. The
-//                     coords are NOT bit-exact (xl = x + 0.5w - 0.5w != x in float); [1] covers
-//                     them against the double golden.
+//   [4] KIND SPLIT -- an interior macro (already bigger than sqrt(2) bins) gets NO area smoothing,
+//                     so its weight is decided purely by the #11b override: NOT a movable macro ->
+//                     1.0 BIT-EXACT (x/x == 1.0 in float); movable macro with td < 1 -> td exactly;
+//                     movable macro with td == 1 -> 1.0 (override gated off). All bit-exact. The
+//                     coords are NOT bit-exact (xl = x + 0.5w - 0.5w != x in float); [1] covers them.
 //
 // DIVERGENCES from the sw_only golden computeNodeFootprint (Grid.cpp:9):
 //   * in-die shift -- RESOLVED 2026-08-29 (#20 step 4). The PL module no longer shifts; it centres
 //     the footprint exactly like computeNodeFootprint, and iteration_update's expanded-box clamp
 //     (Step.cpp:131 enforceDieBoundaries) keeps it in-die. The golden above and [3] now assert that.
-//   * movable-macro weight override -- TABLED for v1 (#20 step 4, decision 2026-08-29). sw_only
+//   * movable-macro weight override -- IMPLEMENTED 2026-08-29 (#20 step 5, with fillers). sw_only
 //     overwrites weight with target_density for a MOVABLE MACRO when td < 1 (Grid.cpp:31-32; the
-//     is_mov_macro rule is Setup.cpp:106 tagMovableMacros = is_tall && is_large && is_sized). The
-//     override is LATENT on every design pl_algo runs today: it fires only when a node is a movable
-//     macro AND td < 1, and pl_algo's benchmarks are standard-cell (num_movable_macros == 0), so it
-//     is a no-op regardless of td. It only bites MMS designs, which need phase 2 + fillers that v1
-//     does not have -- and it needs the SAME host->PL per-node "kind" flag that fillers (step 5)
-//     need. So it is deliberately bundled with fillers, not built alone as dead code. Assertion [4]
-//     below is the tripwire: it pins the current no-override contract (a macro-sized cell keeps
-//     weight 1.0). When the kind flag crosses the boundary, [4] splits -- fixed macro weight 1.0,
-//     movable macro weight td -- and node_footprint gains (is_movable_macro, target_density) params.
+//     is_mov_macro rule is Setup.cpp:106 tagMovableMacros = is_tall && is_large && is_sized). It is
+//     driven through node_footprint's (is_movable_macro, target_density) params, which a caller
+//     derives from the node's index range (host_interface.hpp classifyNode). [4] exercises the
+//     branch directly; the override stays LATENT on std-cell designs (num_movable_macros == 0).
 
 #include "tier1_stub.hpp"                  // PL_TIER1_STUB (guards formats.hpp's HLS headers)
 #include "modules/node_footprint.hpp"      // the real module
@@ -53,7 +48,8 @@ struct FP { double xl, yl, xh, yh, weight; };
 // Independent double re-derivation of node_footprint's documented spec. Uses the true sqrt(2),
 // not the module's float literal 1.41421356f, so it is a genuine reference and not a copy -- the
 // resulting ~1e-7 difference in the clamp threshold is well inside [1]'s tolerance.
-static FP golden(const NodeBox& nd, double bin_w, double bin_h) {
+static FP golden(const NodeBox& nd, double bin_w, double bin_h,
+                 bool is_movable_macro = false, double target_density = 1.0) {
     const double w = nd.w, h = nd.h;
     double cw = w, ch = h, weight = 1.0;
     if (ENABLE_DENSITY_CLAMP) {
@@ -61,15 +57,17 @@ static FP golden(const NodeBox& nd, double bin_w, double bin_h) {
         cw = w > min_w ? w : min_w;
         ch = h > min_h ? h : min_h;
         weight = (cw > 0.0 && ch > 0.0) ? (w * h) / (cw * ch) : 0.0;
+        if (target_density < 1.0 && is_movable_macro) weight = target_density;   // #11b override
     }
     const double xl = nd.x + 0.5 * w - 0.5 * cw;   // centered, NO in-die shift (computeNodeFootprint)
     const double yl = nd.y + 0.5 * h - 0.5 * ch;
     return FP{ xl, yl, xl + cw, yl + ch, weight };
 }
 
-static FP run(const NodeBox& nd, float bin_w, float bin_h) {
+static FP run(const NodeBox& nd, float bin_w, float bin_h,
+              bool is_movable_macro = false, float target_density = 1.0f) {
     float xl, yl, xh, yh, weight;
-    node_footprint(nd, bin_w, bin_h, xl, yl, xh, yh, weight);
+    node_footprint(nd, bin_w, bin_h, is_movable_macro, target_density, xl, yl, xh, yh, weight);
     return FP{ xl, yl, xh, yh, weight };
 }
 
@@ -147,24 +145,31 @@ int main() {
     const double CENTER_TOL = 1e-5;
     if (!(center_max < CENTER_TOL)) { printf("FAIL [3] centering max_rel=%.3e (tol %.0e)\n", center_max, CENTER_TOL); ok = false; }
 
-    // ---- [4] PASSTHROUGH: interior macros come back bit-exact (also the movable-macro tripwire) ----
-    // A macro-sized cell gets weight EXACTLY 1.0 (no smoothing). This also pins the v1 no-override
-    // contract: sw_only would set weight = target_density here for a MOVABLE macro when td < 1
-    // (Grid.cpp:31), but v1 carries no macro-kind flag, so every macro passes through at 1.0. When
-    // the kind flag lands (bundled with fillers, step 5), this splits by kind -- see the header.
-    int pass_bad = 0;
+    // ---- [4] KIND SPLIT: macro passthrough vs the #11b movable-macro deposit-weight override ----
+    // A macro-sized cell gets NO area smoothing (cw==w, ch==h). What its weight ends up being now
+    // depends on kind (host_interface.hpp classifyNode), driven through the two new params:
+    //   * NOT a movable macro (std-cell/filler/fixed), any td      -> weight EXACTLY 1.0 (passthrough)
+    //   * movable macro, td < 1 (here 0.7)                         -> weight EXACTLY td (override)
+    //   * movable macro, td == 1 (override gated off)              -> weight EXACTLY 1.0
+    // All three are bit-exact: the override is a direct assignment and passthrough is x/x==1.0.
+    const float TD = 0.7f;
+    int pass_bad = 0, override_bad = 0, td1_bad = 0;
     for (const NodeBox& nd : cases) {
         if (nd.w <= bin_w * 1.41421356f || nd.h <= bin_h * 1.41421356f) continue;  // not a macro
-        FP m = run(nd, bin_w, bin_h);
-        if (m.weight != 1.0f) pass_bad++;              // no smoothing for a macro: weight exactly 1
+        if (run(nd, bin_w, bin_h, /*is_macro*/false, /*td*/TD).weight != 1.0f) pass_bad++;
+        if (run(nd, bin_w, bin_h, /*is_macro*/true,  /*td*/TD).weight != TD)   override_bad++;
+        if (run(nd, bin_w, bin_h, /*is_macro*/true,  /*td*/1.0f).weight != 1.0f) td1_bad++;
     }
     if (passthrough_seen < 100) { printf("FAIL [4] only %d macros -- lost passthrough coverage\n", passthrough_seen); ok = false; }
-    if (pass_bad) { printf("FAIL [4] %d interior macros not bit-exact passthrough\n", pass_bad); ok = false; }
+    if (pass_bad)     { printf("FAIL [4] %d non-macro cells not weight 1.0 passthrough\n", pass_bad); ok = false; }
+    if (override_bad) { printf("FAIL [4] %d movable macros did not deposit at td=%.2f\n", override_bad, TD); ok = false; }
+    if (td1_bad)      { printf("FAIL [4] %d movable macros at td=1.0 not weight 1.0 (override should gate off)\n", td1_bad); ok = false; }
 
     printf("[1] spec       max_rel=%.3e (tol %.0e)   [%d clamp-firing cells]\n", spec_max_rel, SPEC_TOL, clamp_fired);
     printf("[2] area       max_rel=%.3e (tol %.0e)\n", area_max_rel, AREA_TOL);
     printf("[3] centering  max_rel=%.3e (tol %.0e)  (footprint centre == cell centre, edges incl.)\n", center_max, CENTER_TOL);
-    printf("[4] passthru   %d interior macros, %d with weight != 1.0f\n", passthrough_seen, pass_bad);
+    printf("[4] kind       %d macros: passthru bad=%d, override(td=%.2f) bad=%d, td1 bad=%d\n",
+           passthrough_seen, pass_bad, TD, override_bad, td1_bad);
     printf("%s\n", ok ? "PASS" : "FAIL");
     return ok ? 0 : 1;
 }

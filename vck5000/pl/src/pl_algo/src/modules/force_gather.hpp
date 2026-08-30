@@ -33,12 +33,15 @@ namespace plalgo {
 
 // Gather one node's force: field summed over its (clamped, area-conserving) footprint bins,
 // weighted by the deposited overlap. This is the exact adjoint of bin_scatter, so it uses the
-// SAME node_footprint geometry -- the same clamped footprint and area-conserving weight.
+// SAME node_footprint geometry -- the same clamped footprint and area-conserving weight, and the
+// SAME #11b movable-macro deposit-weight override (is_macro/target_density), or the gather would
+// stop being the adjoint of the scatter for macros.
 // eField_x / eField_y are GRID x GRID, x-major (idx = col*GRID + row), matching bin_density.
 static void node_gather(const NodeBox& nd, const float* eField_x, const float* eField_y,
-                        float bin_w, float bin_h, float& grad_x, float& grad_y) {
+                        float bin_w, float bin_h, bool is_macro, float target_density,
+                        float& grad_x, float& grad_y) {
     float xl, yl, xh, yh, weight;
-    node_footprint(nd, bin_w, bin_h, xl, yl, xh, yh, weight);
+    node_footprint(nd, bin_w, bin_h, is_macro, target_density, xl, yl, xh, yh, weight);
     int col_lo = (int)(xl / bin_w);  if (col_lo < 0)        col_lo = 0;   // first x-bin touched
     int col_hi = (int)(xh / bin_w);  if (col_hi > GRID - 1) col_hi = GRID - 1; // last x-bin touched
     int row_lo = (int)(yl / bin_h);  if (row_lo < 0)        row_lo = 0;   // first y-bin touched
@@ -68,13 +71,17 @@ static void force_gather(const NodeBox* node_box,    // [num_nodes]  movable [0,
                          const float*   eField_x,    // [GRID*GRID]  x-major eField.x
                          const float*   eField_y,    // [GRID*GRID]  x-major eField.y
                          coord_t*       node_grad,    // [num_movable] density gradient out
-                         int            num_movable,
+                         int            num_movable,  // M: gather over the whole movable prefix (incl. fillers)
+                         int            first_macro,  // M_std: movable macros are [first_macro,first_filler)
+                         int            first_filler, // M_mac: fillers are [first_filler,num_movable)
                          float          bin_w,
-                         float          bin_h) {
+                         float          bin_h,
+                         float          target_density) {
 node_loop:
     for (int n = 0; n < num_movable; n++) {
+        const bool is_macro = (n >= first_macro) && (n < first_filler);   // adjoint of density_bin's scatter
         float grad_x, grad_y;
-        node_gather(node_box[n], eField_x, eField_y, bin_w, bin_h, grad_x, grad_y);
+        node_gather(node_box[n], eField_x, eField_y, bin_w, bin_h, is_macro, target_density, grad_x, grad_y);
         node_grad[n].x = grad_x;
         node_grad[n].y = grad_y;
     }

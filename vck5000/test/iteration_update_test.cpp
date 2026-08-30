@@ -139,7 +139,7 @@ int main() {
         for (const coord_t& p : { u_out[n], v_out[n] }) {
             NodeBox nb{ p.x, p.y, w, h };
             float xl, yl, xh, yh, wt;
-            node_footprint(nb, die_xmax / GRID, die_ymax / GRID, xl, yl, xh, yh, wt);
+            node_footprint(nb, die_xmax / GRID, die_ymax / GRID, false, 1.0f, xl, yl, xh, yh, wt); // legality check: no override
             if (xl < -1e-3f || yl < -1e-3f || xh > die_xmax + 1e-3f || yh > die_ymax + 1e-3f) off_grid++;
         }
         if (coords[n].x != v_out[n].x || coords[n].y != v_out[n].y) writer_bad++;

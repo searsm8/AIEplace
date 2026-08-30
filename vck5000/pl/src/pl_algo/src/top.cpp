@@ -212,7 +212,10 @@ void top(
 #pragma HLS INTERFACE s_axilite port=return         bundle=control
 
     if (mode == MODE_DENSITY_BIN) {
-        density_bin(node_box, bin_density, num_movable, num_nodes,
+        // Bring-up verify pack is std-cell-only (no tagged macros, no fillers), so the movable
+        // macro sub-range is empty: first_macro == first_filler == num_movable -> the #11b override
+        // never fires. The resident loop (#20 step 6) passes the real boundaries. Meow.
+        density_bin(node_box, bin_density, num_movable, num_nodes, num_movable, num_movable,
                     bin_w, bin_h, target_density);
     }
 #ifndef PL_ONLY
@@ -252,7 +255,10 @@ void top(
     } else if (mode == MODE_FORCE_GATHER) {
         // Stage 5: per-node density gradient. eField_x = bin_density (gmem9), eField_y =
         // dct_in (gmem10), node geometry = node_box (gmem8) -> node_grad (gmem7).
-        force_gather(node_box, bin_density, dct_in, node_grad, num_movable, bin_w, bin_h);
+        // Bring-up pack has no movable macros (see MODE_DENSITY_BIN), so the macro sub-range is
+        // empty and the override is inert; the resident loop passes the real boundaries.
+        force_gather(node_box, bin_density, dct_in, node_grad, num_movable, num_movable, num_movable,
+                     bin_w, bin_h, target_density);
     } else if (mode == MODE_ITERATION_UPDATE) {
         // Stage 5c: one Nesterov step, streamed to the Memory Writer (single coords writer).
         // Port aliasing (see host_interface.hpp MODE_ITERATION_UPDATE): u_k=node_pos(0),

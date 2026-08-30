@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 #include <algorithm>
 
@@ -59,6 +60,60 @@ static plalgo::PackedDesign makeSyntheticDesign() {
 #include <cstring>
 #endif
 
+// --pack-check <bench>: exercise the filler + movable-macro packer on a real design and assert the
+// nested-range invariants (host-only, no XRT/device -- runs in the CPU-only build). This is the
+// tier-1-style verification of tagMovableMacros + DataBase::addFillers + packDesign's bucketing.
+static int runPackCheck(const char* bench) {
+    AIEplace::DataBase db(bench);
+    db.printInfo();
+    float target = db.getMaximumUtilization() > 0.0f ? db.getMaximumUtilization() : 1.0f;
+
+    plalgo::tagMovableMacros(db);
+    const float eff_td = db.addFillers(target);          // may raise target; populates getFillers()
+    plalgo::PackedDesign pk = plalgo::packDesign(db);
+
+    const int M = pk.header.num_movable, N = pk.header.num_nodes;
+    const int fm = pk.header.first_macro, ff = pk.header.first_filler;
+    const int n_std = fm, n_macro = ff - fm, n_filler = M - ff;
+    bool ok = true;
+
+    // [1] nested ranges are ordered and partition the movable prefix; filler count matches getFillers.
+    if (!(0 <= fm && fm <= ff && ff <= M && M <= N)) {
+        printf("FAIL [1] range order  0<=%d<=%d<=%d<=%d violated\n", fm, ff, M, N); ok = false;
+    }
+    if (n_filler != (int)db.getFillers().size()) {
+        printf("FAIL [1] packed filler count %d != db.getFillers() %d\n", n_filler, (int)db.getFillers().size());
+        ok = false;
+    }
+
+    // [2] every filler sits inside the die bounding box (uniform-random placement stayed in-die).
+    AIEplace::Box die = db.getDieArea();
+    const float llx = die.getPosBottomLeft().x, lly = die.getPosBottomLeft().y;
+    const float hix = llx + die.getXsize(),     hiy = lly + die.getYsize();
+    int oob = 0;
+    for (int n = ff; n < M; n++) {
+        const plalgo::coord_t& p = pk.node_pos[n];
+        if (p.x < llx || p.x > hix || p.y < lly || p.y > hiy) oob++;
+    }
+    if (oob) { printf("FAIL [2] %d filler positions outside the die box\n", oob); ok = false; }
+
+    // [3] fillers are on no nets, so the HPWL over real nodes must still match the DataBase golden.
+    double golden = 0.0;
+    for (AIEplace::Net* net : db.getNetsVector()) {
+        const int deg = net->getDegree();
+        if (deg <= 1 || deg > plalgo::IGNORE_NET_DEGREE) continue;
+        golden += (double)net->computeWirelength_HPWL();
+    }
+    const double packed = plalgo::hpwlFromPacked(pk);
+    const double rel = std::fabs(packed - golden) / std::fabs(golden);
+    if (!(rel < 1e-6)) { printf("FAIL [3] HPWL rel_err=%.3e (fillers must not perturb net HPWL)\n", rel); ok = false; }
+
+    printf("[pack-check] N=%d M=%d  std=%d macro=%d filler=%d  eff_td=%.4g\n", N, M, n_std, n_macro, n_filler, eff_td);
+    printf("[pack-check] HPWL golden=%.6g packed=%.6g rel=%.3e  (fillers in-die: %d oob)\n", golden, packed, rel, oob);
+    printf("%s\n", ok ? "PASS" : "FAIL");
+    return ok ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         printf("usage: %s <benchmark_dir> [xclbin]\n", argv[0]);
@@ -78,8 +133,13 @@ int main(int argc, char** argv) {
         printf("       %s --iter-update     <xclbin>\n", argv[0]);
         printf("       %s --metrics    <benchmark_dir> <xclbin>\n", argv[0]);
         printf("       %s --place      <benchmark_dir> <xclbin> [max_iters]\n", argv[0]);
+        printf("       %s --pack-check <benchmark_dir>\n", argv[0]);
         return 1;
     }
+
+    // Host-only packer check (fillers + macro tags + nested ranges); no device, CPU-only build OK.
+    if (argc >= 3 && std::strcmp(argv[1], "--pack-check") == 0)
+        return runPackCheck(argv[2]);
 
 #ifdef USE_XILINX_XRT
     // Verify the first AIE-using mode (1D DCT via the AIE FFT) on synthetic vectors.
@@ -224,6 +284,15 @@ int main(int argc, char** argv) {
     if (argc >= 4 && std::strcmp(argv[1], "--place") == 0) {
         AIEplace::DataBase db(argv[2]);
         db.printInfo();
+        // target_density from the benchmark's placement.constraints (maximum_utilization); ISPD2005
+        // has no constraints file -> default 1.0 (matches sw_only and XPlace ispd2005).
+        float target_density = db.getMaximumUtilization() > 0.0f
+                             ? db.getMaximumUtilization() : 1.0f;
+        // Fillers + macro tags before packing, mirroring sw_only setupDesign: tag movable macros,
+        // then add fillers (addFillers may RAISE target_density when the std-cell utilization exceeds
+        // the request -- adopt the returned effective value). packDesign then buckets std|macro|filler.
+        plalgo::tagMovableMacros(db);
+        target_density = db.addFillers(target_density);
         plalgo::PackedDesign pk = plalgo::packDesign(db);
         const int max_iters = (argc >= 5) ? std::atoi(argv[4]) : 2;
 
@@ -252,10 +321,8 @@ int main(int argc, char** argv) {
         std::vector<float> area(M);
         for (int n = 0; n < M; n++) area[n] = pk.node_box[n].w * pk.node_box[n].h;
 
-        // target_density from the benchmark's placement.constraints (maximum_utilization); ISPD2005
-        // has no constraints file -> default 1.0 (matches sw_only and XPlace ispd2005).
-        const float target_density = db.getMaximumUtilization() > 0.0f
-                                   ? db.getMaximumUtilization() : 1.0f;
+        // target_density was resolved above (benchmark maximum_utilization, then addFillers may
+        // have raised it to the std-cell utilization). Adopt that effective value here.
         plalgo::PlacementConfig cfg{};
         cfg.max_iters = max_iters; cfg.die_x = die_x; cfg.die_y = die_y;
         cfg.bin_w = die_x / G; cfg.bin_h = die_y / G; cfg.target_density = target_density;
@@ -273,6 +340,9 @@ int main(int argc, char** argv) {
 
         printf("[place] bench M=%d N=%d nets=%d die=%.1fx%.1f bin=%.4gx%.4g gamma=%.4g max_iters=%d\n",
                M, N, num_nets, die_x, die_y, cfg.bin_w, cfg.bin_h, base_gamma, max_iters);
+        printf("[place] movable split: std=%d macro=%d filler=%d  td=%.4g\n",
+               pk.header.first_macro, pk.header.first_filler - pk.header.first_macro,
+               M - pk.header.first_filler, target_density);
 
         std::vector<float> hpwl_hist(max_iters, 0.0f), ovfl_hist(max_iters, 0.0f);
         std::vector<plalgo::coord_t> final_pos(M);

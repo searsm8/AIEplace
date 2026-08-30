@@ -9,8 +9,9 @@
 // Density.cpp::computeOverlaps: fixed nodes first, clamp each bin to
 // min(rho,1)*target_density, then movable nodes on top. Per-node scatter mirrors
 // Grid::computeBinOverlaps (fast path for sub-bin cells, else exact rect
-// intersection). Fillers EXCLUDED in v1. rho = clamped_overlap / bin_area, written
-// x-major (bin_density[x*GRID+y]) per host_interface.hpp.
+// intersection). This is the FORCE/field-solve map: ALL movable nodes incl. fillers
+// [0,num_movable) deposit, movable macros at the #11b override weight (step 5). rho =
+// clamped_overlap / bin_area, written x-major (bin_density[x*GRID+y]) per host_interface.hpp.
 //
 // Algorithm verified bit-exact vs a naive full-grid scatter in
 // model/density_bin_model.cpp; verified vs the Grid golden (real benchmark) in sw_emu.
@@ -31,12 +32,13 @@ constexpr int STRIP = 64;                  // x-values per strip; GRID/STRIP = 1
 // Scatter one node's (area-conserving, clamped) density into the strip accumulator
 // acc_URAM[STRIP][GRID], for the x-bins (columns) in [c0, c0+STRIP). The footprint geometry
 // comes from node_footprint (shared with force_gather); a sub-bin cell is smeared to ~grid
-// resolution with weight = real_area/clamped_area, so no bin spikes. Mirrors the software
-// golden Grid::computeBinOverlaps with clamping enabled.
-static void bin_scatter(const NodeBox& nd, float bin_w, float bin_h, int c0,
-                        float acc_URAM[STRIP][GRID]) {
+// resolution with weight = real_area/clamped_area, so no bin spikes. is_macro drives the #11b
+// movable-macro deposit-weight override inside node_footprint. Mirrors the software golden
+// Grid::computeBinOverlaps with clamping enabled.
+static void bin_scatter(const NodeBox& nd, float bin_w, float bin_h, bool is_macro,
+                        float target_density, int c0, float acc_URAM[STRIP][GRID]) {
     float xl, yl, xh, yh, weight;
-    node_footprint(nd, bin_w, bin_h, xl, yl, xh, yh, weight);
+    node_footprint(nd, bin_w, bin_h, is_macro, target_density, xl, yl, xh, yh, weight);
     // Bin-index range the footprint spans, clamped to the grid (col = x-bin, row = y-bin).
     int col_lo = (int)(xl / bin_w);  if (col_lo < 0)        col_lo = 0;   // first x-bin touched
     int col_hi = (int)(xh / bin_w);  if (col_hi > GRID - 1) col_hi = GRID - 1; // last x-bin touched
@@ -64,8 +66,10 @@ static void bin_scatter(const NodeBox& nd, float bin_w, float bin_h, int c0,
 
 static void density_bin(const NodeBox* node_box,    // [num_nodes]  movable [0,M), fixed [M,N)
                         float*         bin_density,  // [GRID*GRID]  rho, x-major rho[x*GRID+y]
-                        int            num_movable,
-                        int            num_nodes,
+                        int            num_movable,  // M: end of the movable prefix (incl. fillers)
+                        int            num_nodes,    // N
+                        int            first_macro,  // M_std: movable macros are [first_macro,first_filler)
+                        int            first_filler, // M_mac: fillers are [first_filler,num_movable)
                         float          bin_w,
                         float          bin_h,
                         float          target_density) {
@@ -92,7 +96,7 @@ strip_loop:
 
     pass1_fixed:
         for (int n = num_movable; n < num_nodes; n++)
-            bin_scatter(node_box[n], bin_w, bin_h, c0, acc_URAM);
+            bin_scatter(node_box[n], bin_w, bin_h, false, target_density, c0, acc_URAM); // fixed: never a movable macro
 
     // Cap the fixed nodes (large macros) per bin at bin_area*target_density, before movable
     // nodes are added, so a fully-blocked bin contributes no overflow. Deliberate divergence
@@ -107,9 +111,14 @@ strip_loop:
                 acc_URAM[i][y]  = (acc_URAM[i][y] > cap) ? cap : acc_URAM[i][y];
             }
 
+    // This is the FORCE / field-solve map: ALL movable nodes incl. fillers ([0,num_movable)).
+    // The movable-only (no-filler) map the convergence overflow needs is a separate scatter over
+    // [0,first_filler) -- deferred to the resident loop (#20 step 6). Meow.
     pass2_movable:
-        for (int n = 0; n < num_movable; n++)
-            bin_scatter(node_box[n], bin_w, bin_h, c0, acc_URAM);
+        for (int n = 0; n < num_movable; n++) {
+            const bool is_macro = (n >= first_macro) && (n < first_filler);
+            bin_scatter(node_box[n], bin_w, bin_h, is_macro, target_density, c0, acc_URAM);
+        }
 
     write_i:
         for (int i = 0; i < STRIP; i++)

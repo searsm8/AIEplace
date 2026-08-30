@@ -12,10 +12,19 @@
 
 namespace plalgo {
 
-// Build the v0 buffers from a parsed DataBase.
-//   - movable components  -> indices [0, M)
-//   - FIXED components + IOPads -> indices [M, N)
-//   - fillers are excluded (v0 is HPWL-only)
+// Tag movable macros on the DataBase (XPlace is_mov_macro rule). Call BEFORE db.addFillers() and
+// packDesign() so both see the macro tags. Port of sw_only Placer::tagMovableMacros (Setup.cpp:106).
+void tagMovableMacros(AIEplace::DataBase& db);
+
+// Build the host->PL buffers from a parsed DataBase. The movable prefix is NESTED by kind
+// (host_interface.hpp DesignHeader): std-cells [0,first_macro), movable macros
+// [first_macro,first_filler), fillers [first_filler,M); then FIXED components + IOPads [M,N).
+// Reads Node::isMovableMacro() (set by tagMovableMacros) to bucket macros, and db.getFillers()
+// (populated by db.addFillers()) for fillers -- so a caller that skips both gets the old
+// all-std-cell, filler-free pack (first_macro == first_filler == M), byte-identical to before.
+// Filler initial positions are uniform-random across the die, seeded DETERMINISTICALLY (a fixed
+// stream): exact parity with sw_only's interleaved std::rand() filler order is not attempted, since
+// fillers are auxiliary and the A/B compares converged HPWL, not filler trajectories.
 // Nets reference nodes by these indices; pin offsets come from NetPin.offset.
 PackedDesign packDesign(AIEplace::DataBase& db);
 

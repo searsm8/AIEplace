@@ -4,15 +4,19 @@
 // node_footprint_test); the overlap-area weighting is required, not optional (vs DREAMPlace /
 // Xplace, sw_only computeElectrostaticForce fixed 2026-07-03).
 //
-// TWO ASSERTIONS:
+// THREE ASSERTIONS (all with the #11b movable-macro override ACTIVE: macros [0,FIRST_FILLER), td<1):
 //   [1] GATHER   -- module (float acc) vs a double reference that shares the module's node_footprint
-//                   and its integer bin ranges, but forms every rectangle overlap and the
-//                   field-weighted sum in DOUBLE. Isolates the intersection + accumulation; only
-//                   float rounding of the module's running sum remains, so this is the tight check.
-//   [2] ADJOINT  -- with eField == 1 everywhere, each node's gathered gx (== gy) must equal the
-//                   TOTAL area that node scatters (sum of overlap_area), i.e. its clamped,
-//                   area-conserving deposit == real cell area w*h (area conservation), to float
-//                   tolerance. This ties the gather to density_bin's scatter without a second model.
+//                   (override included) and its integer bin ranges, but forms every rectangle overlap
+//                   and the field-weighted sum in DOUBLE. Isolates the intersection + accumulation;
+//                   only float rounding of the module's running sum remains -> the tight check, and
+//                   it now covers the macro override end to end (both sides deposit at td).
+//   [2] ADJOINT  -- with eField == 1, a STD cell's gathered value == its clamped area-conserving
+//                   deposit == real cell area w*h (area conservation), to float tolerance. Ties the
+//                   gather to density_bin's scatter without a second model. Std cells only: an
+//                   overridden macro is deliberately NOT area-conserving (that is [3]).
+//   [3] OVERRIDE -- with eField == 1, a MACRO's gathered value == td * footprint area (== td*w*h, a
+//                   macro is not clamp-inflated). Confirms the override changed the deposit AND that
+//                   the gather stayed the adjoint of the scatter through it.
 //
 // Only movable nodes ([0,M)) carry a gradient. The eField sign/scale (lambda, local_density_weight)
 // is applied downstream in iteration_update; this module emits the pure area-weighted field sum.
@@ -31,9 +35,9 @@ using namespace plalgo;                    // NodeBox, coord_t, GRID, node_footp
 // bin ranges as the module, then forms the overlaps and the field-weighted sum in double.
 static void golden_gather(const NodeBox& nd, const std::vector<float>& ef_x,
                           const std::vector<float>& ef_y, float bin_w, float bin_h,
-                          double& gx, double& gy) {
+                          bool is_macro, float target_density, double& gx, double& gy) {
     float xl, yl, xh, yh, weight;
-    node_footprint(nd, bin_w, bin_h, xl, yl, xh, yh, weight);
+    node_footprint(nd, bin_w, bin_h, is_macro, target_density, xl, yl, xh, yh, weight);
     int col_lo = (int)(xl / bin_w); if (col_lo < 0)        col_lo = 0;
     int col_hi = (int)(xh / bin_w); if (col_hi > GRID - 1) col_hi = GRID - 1;
     int row_lo = (int)(yl / bin_h); if (row_lo < 0)        row_lo = 0;
@@ -76,40 +80,48 @@ int main() {
         float w = wsmall(rng), h = wsmall(rng);
         nodes[i] = { mgn + pos(rng) * (die - w - 2 * mgn), mgn + pos(rng) * (die - h - 2 * mgn), w, h };
     }
-    for (int i = 0; i < 50 && i < M; i++) {                       // ...plus some movable macros
+    // Movable macros are the front sub-range [0,FIRST_FILLER); std cells fill the rest. This lets the
+    // module's per-node is_macro = (n in [FIRST_MACRO,FIRST_FILLER)) fire on exactly these nodes.
+    const int   FIRST_MACRO = 0, FIRST_FILLER = 50;   // no fillers in this fixture; macros [0,50)
+    const float TD = 0.7f;                            // < 1 so the #11b override engages on the macros
+    for (int i = 0; i < FIRST_FILLER && i < M; i++) {             // ...plus some movable macros
         float w = wbig(rng), h = wbig(rng);
         nodes[i] = { mgn + pos(rng) * (die - w - 2 * mgn), mgn + pos(rng) * (die - h - 2 * mgn), w, h };
     }
     for (int i = M; i < N; i++) nodes[i] = { 1000.0f, 1000.0f, 200.0f, 200.0f };  // fixed: no grad
+    auto is_macro = [&](int n) { return n >= FIRST_MACRO && n < FIRST_FILLER; };
 
     std::vector<float> ef_x(GRID * GRID), ef_y(GRID * GRID);
     for (int i = 0; i < GRID * GRID; i++) { ef_x[i] = fld(rng); ef_y[i] = fld(rng); }
 
-    // ---- run the real module ----
+    // ---- run the real module (override active: TD<1 on the macro sub-range) ----
     std::vector<coord_t> grad(M, coord_t{ -7.7e30f, -7.7e30f });   // poison; module writes all M
-    force_gather(nodes.data(), ef_x.data(), ef_y.data(), grad.data(), M, bin_w, bin_h);
+    force_gather(nodes.data(), ef_x.data(), ef_y.data(), grad.data(), M, FIRST_MACRO, FIRST_FILLER, bin_w, bin_h, TD);
 
-    // ---- [1] GATHER vs double reference ----
+    // ---- [1] GATHER vs double reference (both deposit macros at td) ----
     double se = 0, sr = 0;
     for (int n = 0; n < M; n++) {
         double gx, gy;
-        golden_gather(nodes[n], ef_x, ef_y, bin_w, bin_h, gx, gy);
+        golden_gather(nodes[n], ef_x, ef_y, bin_w, bin_h, is_macro(n), TD, gx, gy);
         const double ex = (double)grad[n].x - gx, ey = (double)grad[n].y - gy;
         se += ex * ex + ey * ey;
         sr += gx * gx + gy * gy;
     }
     const double rel_rms = std::sqrt(se / sr);
 
-    // ---- [2] ADJOINT: field == 1 -> gathered value == total scattered area == cell area ----
+    // ---- [2] ADJOINT (std cells) + [3] OVERRIDE (macros): field == 1 ----
     std::vector<float> ones(GRID * GRID, 1.0f);
     std::vector<coord_t> gsum(M, coord_t{ 0, 0 });
-    force_gather(nodes.data(), ones.data(), ones.data(), gsum.data(), M, bin_w, bin_h);
-    double area_max_rel = 0.0;
+    force_gather(nodes.data(), ones.data(), ones.data(), gsum.data(), M, FIRST_MACRO, FIRST_FILLER, bin_w, bin_h, TD);
+    double std_area_max_rel = 0.0, macro_ovr_max_rel = 0.0;
     for (int n = 0; n < M; n++) {
         const double real_area = (double)nodes[n].w * (double)nodes[n].h;
         if (real_area <= 0.0) continue;
-        // gx and gy both equal the summed overlap area (field is 1 on both axes).
-        area_max_rel = std::max(area_max_rel, std::fabs((double)gsum[n].x - real_area) / real_area);
+        // A macro (not clamp-inflated) deposits td*w*h; a std cell area-conserves to w*h.
+        const double expected = is_macro(n) ? TD * real_area : real_area;
+        const double rel = std::fabs((double)gsum[n].x - expected) / expected;
+        if (is_macro(n)) macro_ovr_max_rel = std::max(macro_ovr_max_rel, rel);
+        else             std_area_max_rel  = std::max(std_area_max_rel, rel);
     }
 
     bool ok = true;
@@ -117,10 +129,12 @@ int main() {
     if (!(rel_rms < G_TOL)) { printf("FAIL [1] gather rel_rms=%.3e (tol %.0e)\n", rel_rms, G_TOL); ok = false; }
     // Area conservation limited by (xh-xl) cancellation at absolute coords ~1e4 (see node_footprint_test).
     const double A_TOL = 5e-4;
-    if (!(area_max_rel < A_TOL)) { printf("FAIL [2] adjoint/area rel=%.3e (tol %.0e)\n", area_max_rel, A_TOL); ok = false; }
+    if (!(std_area_max_rel < A_TOL)) { printf("FAIL [2] adjoint/area rel=%.3e (tol %.0e)\n", std_area_max_rel, A_TOL); ok = false; }
+    if (!(macro_ovr_max_rel < A_TOL)) { printf("FAIL [3] override rel=%.3e (tol %.0e)\n", macro_ovr_max_rel, A_TOL); ok = false; }
 
-    printf("[1] gather     rel_rms=%.3e (tol %.0e)   [%d movable]\n", rel_rms, G_TOL, M);
-    printf("[2] adjoint    area max_rel=%.3e (tol %.0e)  (field==1 -> gathered == cell area)\n", area_max_rel, A_TOL);
+    printf("[1] gather     rel_rms=%.3e (tol %.0e)   [%d movable, %d macros @ td=%.2f]\n", rel_rms, G_TOL, M, FIRST_FILLER, TD);
+    printf("[2] adjoint    std area max_rel=%.3e (tol %.0e)  (field==1 -> gathered == cell area)\n", std_area_max_rel, A_TOL);
+    printf("[3] override   macro   max_rel=%.3e (tol %.0e)  (field==1 -> gathered == td * cell area)\n", macro_ovr_max_rel, A_TOL);
     printf("%s\n", ok ? "PASS" : "FAIL");
     return ok ? 0 : 1;
 }

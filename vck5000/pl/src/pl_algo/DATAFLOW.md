@@ -52,6 +52,32 @@ it is the only place that knows a node moved. That is why the offsets must be de
 requires `bb_DDR` to be **zeroed before first use** (masked nets are never written; zeroed, they
 contribute a zero-extent box). Both `Driver.cpp` allocation sites memset it.
 
+## Node index space & kinds (fillers, #20 step 5, 2026-08-29)
+
+The flat node index is nested by kind, so a per-node consumer classifies by index alone -- no
+per-node kind field is stored (Mark's call: nested ranges over a struct field):
+
+```
+0 ----- first_macro ----- first_filler ----- num_movable(M) ----- num_nodes(N)
+|  std   |    macro        |    filler        |      fixed          |
+| [0,fm) |   [fm,ff)       |   [ff,M)         |     [M,N)           |
+```
+
+`DesignHeader.first_macro`/`first_filler` carry the two boundaries; `classifyNode(n, ...)`
+(`host_interface.hpp`) returns `{is_std_cell, is_movable_macro, is_filler, is_fixed}`, exactly one
+true. Two consumers use it: the **movable-macro deposit-weight override** (#11b -- `node_footprint`
+sets `weight = target_density` for a movable macro when `td<1`; `density_bin`/`force_gather` derive
+`is_macro` per node and stay adjoints because they share `node_footprint`), and **fillers** -- on no
+nets (density force only), placed uniform-random across the die by the packer (`tagMovableMacros` +
+`db.addFillers` run host-side before `packDesign`).
+
+Two density maps follow from this split. The **force / field-solve map** scatters ALL movable
+`[0,M)` (fillers included) -- that is what `density_bin` emits today. The **convergence-overflow
+map** must scatter movable-EXCLUDING-fillers `[0,first_filler)` -- **not yet built**; the resident
+loop (step 6) adds it (`metrics` currently reduces the force map, so `--place` overflow is
+filler-inclusive until then). A bring-up verify pack has no macros/fillers, so
+`first_macro==first_filler==M` and both reduce to the old all-std behaviour.
+
 ## Stage-by-stage
 
 | # | Stage | Producer -> Consumer | Format |

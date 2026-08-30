@@ -400,12 +400,29 @@ Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
       tripwire (pins the current no-override contract: macro weight == 1.0) — see its header for the
       exact split when the flag lands. So **step 4 is CLOSED for v1 scope** (geometry done; macro
       weight deferred to step 5).
-- [ ] **5. Fillers** — packer, uniform-random initial placement (not centre-clustered), the λ-init
-      balance that counts them, and the movable/filler split the two density maps need. Largest single
-      change; largest quality lever. **Also carries the per-node "kind" flag across the host→PL
-      boundary** — so fold in the tabled #11b **movable-macro weight override** here (same flag; port
-      `tagMovableMacros`, thread `is_movable_macro` + `target_density` into `node_footprint` and
-      `force_gather`, split `node_footprint_test` [4] by kind). See #20 step 4.
+- [~] **5. Fillers — MODEL + PACKER DONE 2026-08-29 (tier-1 + host pack-check); device run pending.**
+      **Kind flag = NESTED INDEX RANGES (Mark's call), not a per-node field.** The movable prefix is
+      `std [0,first_macro) | macro [first_macro,first_filler) | filler [first_filler,M)`; a per-node
+      consumer classifies by index (`host_interface.hpp` `classifyNode` → `{is_std_cell,
+      is_movable_macro, is_filler, is_fixed}`, exactly one true). "Real movable" (overflow map) is the
+      prefix `[0,first_filler)`; "all movable" (force map) is `[0,M)` — the ideal nesting.
+      Landed: `DesignHeader` gains `first_macro`/`first_filler`; `node_footprint` takes
+      `(is_movable_macro, target_density)` and applies the **#11b override** (`weight=td`, Grid.cpp:31);
+      `density_bin`/`force_gather` derive `is_macro` per node and stay adjoints (shared helper);
+      **`tagMovableMacros` ported** into the pl_algo host (`Packer.cpp`), `db.addFillers()` called in
+      `--place` (adopts effective td), packer buckets the four ranges + seeds filler positions
+      uniform-random (deterministic seed, **not** matched to sw_only's `rand()` stream — documented).
+      Verified: `make test` 12/12 (node_footprint [4] override split, force_gather [3] override,
+      density_bin bit-exact w/ 100 movable macros); new host `--pack-check` mode PASS on
+      **adaptec1 (filler=160067 = XPlace-exact), mms/adaptec5 (76 macros, 1.51M fillers, all in-die,
+      HPWL rel=0)**. ⚠️ **Two things NOT done (deferred to step 6 / MMS):** (a) the movable-only
+      overflow map — `density_bin` currently emits ONE filler-inclusive force map, so `--place`
+      overflow reads filler-inclusive until step 6 adds the `[0,first_filler)` scatter; (b) the macro
+      override is **latent on every design pl_algo runs today** (ISPD std-cell → no macros; bookshelf
+      MMS → td defaults to 1.0 in `--place`, so `td<1` never fires) — implemented+tier-1-tested, ready
+      for MMS+phase-2. Device `--place` run with fillers is tier-3 (Vitis/Geert's card). Initial
+      placement parity (sw_only centre-clusters movable; pl_algo uses parsed positions) is a separate
+      step-6 A/B concern. → [[_NEW_HANDOFF_20_pl_algo_stage3_20260828.md]] (step-5 section to append).
 - [ ] **6. Compose the resident loop (Stage 5 proper)** with the second movable-only density map, the
       best-position DDR buffer, and phase-2 re-entrancy designed in from the start.
       ⚠️ **The best-position DDR buffer must hold the LOOKAHEAD `v_k`, not the committed `u`** — see

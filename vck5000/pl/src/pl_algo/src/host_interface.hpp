@@ -28,19 +28,44 @@ struct coord_t { float x; float y; };
 // ===========================================================================
 //  Buffer 1: design header  (host -> PL, uploaded once)
 // ===========================================================================
-// Counts known after parsing. The node index space is a single flat
-// enumeration with movable nodes FIRST:
-//     node_pos[0 .. num_movable-1]            movable cells (fillers excluded in v0)
-//     node_pos[num_movable .. num_nodes-1]    fixed nodes (FIXED components + IOPads)
-// => a node is fixed iff its index >= num_movable; no per-node flag needed, and
-//    the per-iteration position update (later) touches only the [0,num_movable)
-//    prefix.
+// Counts known after parsing. The node index space is a single flat enumeration
+// with movable nodes FIRST, and the movable prefix is NESTED by kind so a node's
+// kind is implicit in its index (positional -- no per-node kind field stored):
+//     node_pos[0          .. first_macro-1 ]  movable std-cells   (M_std cells)
+//     node_pos[first_macro .. first_filler-1]  movable macros      (#11b deposit weight)
+//     node_pos[first_filler .. num_movable-1]  fillers             (density force, no wirelength)
+//     node_pos[num_movable .. num_nodes-1  ]  fixed nodes         (FIXED components + IOPads)
+// => a node is fixed iff its index >= num_movable; the per-iteration position update
+//    touches only the [0,num_movable) prefix. Two boundaries carry the movable split:
+//    first_macro == M_std (# std-cells), first_filler == M_mac (# std-cells + # macros).
+//    "Real movable" (what the convergence-overflow density map counts) is the contiguous
+//    prefix [0, first_filler); "all movable" (what the force map deposits) is [0, num_movable).
+//    When a design has no macros, first_macro == first_filler; no fillers, first_filler ==
+//    num_movable. classifyNode() below turns an index into the kind flags.
 struct DesignHeader {
     int32_t num_movable;   // M
     int32_t num_nodes;     // N = movable + fixed
     int32_t num_nets;
     int32_t num_pins;      // total pin records == net_ptr[num_nets]
+    int32_t first_macro;   // M_std: first movable-macro index (== number of movable std-cells)
+    int32_t first_filler;  // M_mac: first filler index (== first_macro + number of movable macros)
 };
+
+// Per-node kind, derived from the packed index ranges above -- exactly one flag is true for a
+// valid index (a movable node is one of the three movable kinds; a fixed node is is_fixed only).
+// Positional classification: no per-node storage, a consumer that streams the flat index derives
+// its kind from the boundaries. This is the "within-range signal per cell type" the density path
+// branches on (macro deposit-weight override; filler exclusion from the movable-only map). Meow.
+struct NodeKind { bool is_std_cell; bool is_movable_macro; bool is_filler; bool is_fixed; };
+
+static inline NodeKind classifyNode(int n, int first_macro, int first_filler, int num_movable) {
+    NodeKind k;
+    k.is_std_cell      = (n < first_macro);
+    k.is_movable_macro = (n >= first_macro)  && (n < first_filler);
+    k.is_filler        = (n >= first_filler) && (n < num_movable);
+    k.is_fixed         = (n >= num_movable);
+    return k;
+}
 
 // ===========================================================================
 //  Buffer 2: node positions  (host -> PL)   coord_t node_pos[num_nodes]

@@ -31,16 +31,17 @@ using namespace plalgo;                   // NodeBox, GRID, STRIP, node_footprin
 // Naive reference: full GRID x GRID overlap accumulator, two-pass + per-bin cap, using the SAME
 // node_footprint geometry as the module (so this checks the strip decomposition, not the footprint).
 static std::vector<float> bin_reference(const std::vector<NodeBox>& nodes, int M,
+                                        int first_macro, int first_filler,
                                         float bin_w, float bin_h, float target_density,
                                         int& clamped_bins) {
     const float bin_area = bin_w * bin_h;
     std::vector<float> ov(GRID * GRID, 0.0f);
 
     // One node's exact-rectangle scatter over the full grid (mirrors bin_scatter with c0=0,
-    // strip=GRID -- i.e. no column clipping).
-    auto scatter = [&](const NodeBox& nd) {
+    // strip=GRID -- i.e. no column clipping). is_macro drives the #11b override in node_footprint.
+    auto scatter = [&](const NodeBox& nd, bool is_macro) {
         float xl, yl, xh, yh, weight;
-        node_footprint(nd, bin_w, bin_h, xl, yl, xh, yh, weight);
+        node_footprint(nd, bin_w, bin_h, is_macro, target_density, xl, yl, xh, yh, weight);
         int col_lo = (int)(xl / bin_w); if (col_lo < 0)        col_lo = 0;
         int col_hi = (int)(xh / bin_w); if (col_hi > GRID - 1) col_hi = GRID - 1;
         int row_lo = (int)(yl / bin_h); if (row_lo < 0)        row_lo = 0;
@@ -58,11 +59,12 @@ static std::vector<float> bin_reference(const std::vector<NodeBox>& nodes, int M
         }
     };
 
-    for (int n = M; n < (int)nodes.size(); n++) scatter(nodes[n]);   // PASS 1: fixed [M,N)
+    for (int n = M; n < (int)nodes.size(); n++) scatter(nodes[n], false); // PASS 1: fixed [M,N)
     const float cap = bin_area * target_density;                     // min(rho,td) cap (TODO #35)
     clamped_bins = 0;
     for (float& v : ov) if (v > cap) { v = cap; clamped_bins++; }
-    for (int n = 0; n < M; n++) scatter(nodes[n]);                   // PASS 2: movable [0,M)
+    for (int n = 0; n < M; n++)                                       // PASS 2: movable [0,M)
+        scatter(nodes[n], n >= first_macro && n < first_filler);     // macros deposit at td
     const float inv_area = 1.0f / bin_area;                          // multiply, matching the
     for (float& v : ov) v *= inv_area;                               // module (rho); x*(1/a) != x/a
     return ov;
@@ -77,14 +79,21 @@ int main() {
     const float target_density = 0.9f;
 
     std::vector<NodeBox> nodes;
-    const int M = 8000;                                   // movable [0,M): mostly sub-bin std cells
     std::uniform_real_distribution<float> wsmall(2.0f, 30.0f);
-    for (int i = 0; i < M; i++) {
+    std::uniform_real_distribution<float> wbig(100.0f, 1500.0f);
+    // Movable prefix is nested: std cells [0,first_macro), movable macros [first_macro,first_filler),
+    // no fillers here (first_filler == M). td<1, so the macros exercise the #11b deposit override.
+    const int first_macro = 7900, num_macro = 100;
+    const int first_filler = first_macro + num_macro, M = first_filler;   // 8000, no fillers
+    for (int i = 0; i < first_macro; i++) {               // std cells: mostly sub-bin
         float w = wsmall(rng), h = wsmall(rng);
         nodes.push_back({ upos(rng) * (die - w), upos(rng) * (die - h), w, h });
     }
+    for (int i = 0; i < num_macro; i++) {                 // movable macros: large, get weight = td
+        float w = wbig(rng), h = wbig(rng);
+        nodes.push_back({ upos(rng) * (die - w), upos(rng) * (die - h), w, h });
+    }
     const int Nfixed = 40;                                // fixed [M,N): macros -> exercise the cap
-    std::uniform_real_distribution<float> wbig(100.0f, 1500.0f);
     for (int i = 0; i < Nfixed; i++) {
         float w = wbig(rng), h = wbig(rng);
         nodes.push_back({ upos(rng) * (die - w), upos(rng) * (die - h), w, h });
@@ -92,10 +101,10 @@ int main() {
     const int N = M + Nfixed;
 
     int clamped = 0;
-    std::vector<float> ref = bin_reference(nodes, M, bin_w, bin_h, target_density, clamped);
+    std::vector<float> ref = bin_reference(nodes, M, first_macro, first_filler, bin_w, bin_h, target_density, clamped);
 
     std::vector<float> rho(GRID * GRID, -1.0f);           // poison; density_bin must write every bin
-    density_bin(nodes.data(), rho.data(), M, N, bin_w, bin_h, target_density);
+    density_bin(nodes.data(), rho.data(), M, N, first_macro, first_filler, bin_w, bin_h, target_density);
 
     double max_abs = 0, sum_ref = 0;
     for (int i = 0; i < GRID * GRID; i++) {
