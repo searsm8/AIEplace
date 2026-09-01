@@ -185,17 +185,17 @@ void Placer::createFillers()
 }
 
 /**
- * @brief Parse the TOML config file named by m_config_filepath into cfg (toml++), then read
+ * @brief Parse the TOML config file named by config_filepath into cfg (toml++), then read
  *        every hyperparameter, compute-method, and convergence setting.
  *        gamma/base_gamma are only seeded here; they are finalized once the grid exists.
  */
 void Placer::loadConfiguration()
 {
     // Read configuration file
-    std::ifstream config_file(m_config_filepath);
+    std::ifstream config_file(config_filepath);
     // check if config file was found
     if (!config_file.is_open()) {
-        Logger::log_error("Unable to open configuration file: " + m_config_filepath);
+        Logger::log_error("Unable to open configuration file: " + config_filepath);
         exit(1);
     }
 
@@ -207,9 +207,9 @@ void Placer::loadConfiguration()
 
     // Parse TOML
     try {
-        cfg = toml::parse(buffer.str(), m_config_filepath);
+        cfg = toml::parse(buffer.str(), config_filepath);
     } catch (const toml::parse_error& err) {
-        Logger::log_error("Failed to parse configuration file: " + m_config_filepath
+        Logger::log_error("Failed to parse configuration file: " + config_filepath
             + "\n" + std::string(err.description()));
         exit(1);
     }
@@ -223,7 +223,7 @@ void Placer::loadConfiguration()
                           : interactive ? LogLevel::ITER  // + per-iteration live status
                                         : LogLevel::INFO);
     printWelcomeBanner();
-    Logger::log_info("Reading runtime configuration from: " + m_config_filepath);
+    Logger::log_info("Reading runtime configuration from: " + config_filepath);
 
     // Read hyperparameters. gamma/base_gamma are finalized after the grid is built
     // (gamma_bin_scaled ties base_gamma to the bin geometry — see after grid creation).

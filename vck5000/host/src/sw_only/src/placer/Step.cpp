@@ -27,7 +27,7 @@ float Placer::computeLipschitzEstimate()
     float grad_norm_sq = 0.0f;
     const auto& nodes = db.getMovableNodes();
 
-    m_ordered_reduce.sum2((int)nodes.size(),
+    ordered_reduce.sum2((int)nodes.size(),
         [&](int i, float& pos_term, float& grad_term) {
             Node* node_p = nodes[i];
             // ||v̂_{k+1} - v_k||²
@@ -84,11 +84,11 @@ void Placer::combineGradients()
     // Pure stores into a buffer sized by beginPositionDumpGeneration(); no arithmetic is added or
     // reordered, so the trajectory is bit-identical whether the dump is on or off. The size test
     // is the guard: it is false for the frames between a node-set change and the resize.
-    const bool capture_forces = m_pos_dump.enabled && m_pos_dump.forces_enabled &&
-                                m_pos_dump.force_capture.size() ==
+    const bool capture_forces = pos_dump.enabled && pos_dump.forces_enabled &&
+                                pos_dump.force_capture.size() ==
                                     (size_t)nodes.size() * FORCE_FLOATS_PER_NODE;
 
-    m_ordered_reduce.sum2((int)nodes.size(),
+    ordered_reduce.sum2((int)nodes.size(),
         [&](int i, float& gwl_term, float& gden_term) {
             Gradient& g = nodes[i]->next.probe_grad;
             // fillers are on no nets, so they contribute no wirelength gradient
@@ -102,7 +102,7 @@ void Placer::combineGradients()
                 // the electrostatic force points the way the cell moves, the gradient term
                 // opposes it.) Fillers are on no nets and Partials.cpp clears probe_grad every
                 // iteration, so their wl entry is structurally zero, not merely masked.
-                float* record = &m_pos_dump.force_capture[(size_t)i * FORCE_FLOATS_PER_NODE];
+                float* record = &pos_dump.force_capture[(size_t)i * FORCE_FLOATS_PER_NODE];
                 record[0] =  g.x;
                 record[1] =  g.y;
                 record[2] = -electro.x;
@@ -112,7 +112,7 @@ void Placer::combineGradients()
             g -= electro;
         }, last_gwl_L1, last_gden_L1);
 
-    if (capture_forces) m_pos_dump.forces_fresh = true;
+    if (capture_forces) pos_dump.forces_fresh = true;
 }
 
 
@@ -260,7 +260,7 @@ void Placer::estimateInitialStep()
     // plausible-looking number. The guard is written as !(α > 0) so a NaN α trips it too.
     if (!(step_length > 0.0f)) {
         Logger::log_error("Initial BB step estimate is " + PREC_P(step_length, 6) + " at iteration "
-                          + std::to_string(iteration) + " (" + phaseName(m_phase) + "): a trial step of "
+                          + std::to_string(iteration) + " (" + phaseName(phase) + "): a trial step of "
                           "init_step_seed = " + PREC_P(init_step_seed, 6) + " site widths (" +
                           PREC_P(init_step_seed * site_width, 6) + " DBU) displaced no movable node, "
                           "so no later step can either. Raise init_step_seed (see TODO #23).");

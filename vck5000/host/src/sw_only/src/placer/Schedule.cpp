@@ -319,7 +319,7 @@ void Placer::updatePrecondWeights()
     const auto& nodes = db.getMovableNodes();
     const int filler_start = db.getFillerStartIndex();
 
-    m_ordered_reduce.sum2((int)nodes.size(),
+    ordered_reduce.sum2((int)nodes.size(),
         [&](int i, float& a1_term, float& a2_term) {
             Node* node_p = nodes[i];
             float num_pins = (i < filler_start) ? (float)node_p->getNets().size() : 0.0f;
@@ -376,7 +376,7 @@ bool Placer::checkConvergence()
 bool Placer::reachedMaxIterations()
 {
     if (iteration < max_iterations) return false;
-    m_stop_reason = StopReason::MAX_ITERATIONS;
+    stop_reason = StopReason::MAX_ITERATIONS;
     Logger::log_info("Stopping: reached maximum iterations (" +
                     std::to_string(max_iterations) + ")");
     return true;
@@ -386,7 +386,7 @@ bool Placer::reachedMaxIterations()
 bool Placer::hasNaNMetrics()
 {
     if (!std::isnan(ovfw_history.back()) && !std::isnan(hpwl_history.back())) return false;
-    m_stop_reason = StopReason::NAN_METRICS;
+    stop_reason = StopReason::NAN_METRICS;
     Logger::log_info("Stopping: NaN detected at iteration " + std::to_string(iteration));
     return true;
 }
@@ -440,7 +440,7 @@ bool Placer::hasCoarseDivergence()
     float overflow = ovfw_history.back(), prev_overflow = ovfw_history[ovfw_history.size() - 2];
     if (overflow <= prev_overflow) return false;   // still spreading, not diverging
 
-    m_stop_reason = StopReason::DIVERGED_HPWL;
+    stop_reason = StopReason::DIVERGED_HPWL;
     Logger::log_info("Stopping: divergence detected at iteration " +
                     std::to_string(iteration) +
                     " (HPWL " + std::to_string(current_hpwl) +
@@ -488,7 +488,7 @@ bool Placer::checkFineDivergenceGuard()
 
     if (life > 0) return false;
 
-    m_stop_reason = StopReason::DIVERGENCE_GUARD;
+    stop_reason = StopReason::DIVERGENCE_GUARD;
     Logger::log_info("Stopping: divergence guard exhausted at iteration " +
                     std::to_string(iteration) + " (best HPWL " +
                     std::to_string(best_ref.hpwl) + " from iter " +
@@ -527,7 +527,7 @@ bool Placer::checkOverflowCountdown()
     convergence_iterations_remaining--;
 
     if (convergence_iterations_remaining <= 0) {
-        m_stop_reason = StopReason::CONVERGED;
+        stop_reason = StopReason::CONVERGED;
         Logger::log_info("Convergence achieved at iteration " +
                         std::to_string(iteration) +
                         " (overflow countdown complete)");

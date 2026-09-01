@@ -25,8 +25,8 @@ void Placer::run()
                 continue;
             break;
         }
-        if (m_nan_detected) {
-            m_stop_reason = StopReason::NAN_PARTIALS;
+        if (nan_detected) {
+            stop_reason = StopReason::NAN_PARTIALS;
             break;
         }
     }
@@ -63,7 +63,7 @@ void Placer::performIteration()
     if (cfg["output"]["dump_schedule_trace"].value_or(false))
         dumpScheduleTrace();
 
-    if (m_nan_detected)
+    if (nan_detected)
         Logger::log_error("Stopping: NaN in HPWL partials at iteration " +
                           std::to_string(iteration) + " (hard divergence)");
 }
@@ -83,9 +83,9 @@ void Placer::performIterationZero()
     initializeDensityWeight();
 }
 
-Placer::Placer(std::string config_filepath)
+Placer::Placer(std::string config_filepath_arg)
 {
-    m_config_filepath = config_filepath;
+    config_filepath = config_filepath_arg;
 
     setupDesign();
     Logger::log_detail("Database setup time: " + 
@@ -152,8 +152,8 @@ void Placer::restoreBestPlacement(BestSlot slot)
     // gradient evaluation never saw, so both auxiliary dump channels stop describing them. The
     // final "best_solution" frame is exactly this case: without clearing here it would carry the
     // last ITERATED placement's heatmap under the RESTORED placement's cells.
-    m_pos_dump.density_fresh = false;
-    m_pos_dump.forces_fresh  = false;
+    pos_dump.density_fresh = false;
+    pos_dump.forces_fresh  = false;
 
     const auto& nodes = db.getMovableNodes();
     #pragma omp parallel for schedule(static)

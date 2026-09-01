@@ -17,7 +17,7 @@ void Placer::computeElectricFields()
     // CLAUDE CODE: the grid now holds rho and E at the CURRENT probe positions, which is what
     // makes the dump's density/field channel meaningful for a frame taken from here on. Cleared
     // again by anything that moves nodes without re-solving (see PositionDump.cpp).
-    m_pos_dump.density_fresh = true;
+    pos_dump.density_fresh = true;
 
     if(density_method == "cpu") {
         computeElectricFields_DCT();   // Compute E-fields on CPU using DCT

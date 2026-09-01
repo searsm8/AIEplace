@@ -33,7 +33,7 @@ namespace ConfigUtils {
 class Placer
 {
 private:
-    std::string m_config_filepath;
+    std::string config_filepath;
 
     // Constructor phases (see Placer::Placer)
     void setupDesign();                    // timed: config parse + grid decision + DB read + fillers + area analysis
@@ -140,12 +140,12 @@ public:
 
     // Scratch for the per-iteration reductions that must add in index order (see Common.h).
     // Members, not locals, so the buffers are allocated once for the whole run.
-    OrderedReduce m_ordered_reduce;
+    OrderedReduce ordered_reduce;
     // Threaded gradient scatter under g_deterministic: the per-net partials are computed in
-    // parallel into m_pin_partials, indexed by m_net_pin_offset[net] + pin, then replayed onto
+    // parallel into pin_partials, indexed by net_pin_offset[net] + pin, then replayed onto
     // the shared nodes serially in net order. Built once by buildPinPartialIndex().
-    std::vector<int> m_net_pin_offset;
-    std::vector<Gradient> m_pin_partials;
+    std::vector<int> net_pin_offset;
+    std::vector<Gradient> pin_partials;
     void buildPinPartialIndex();
 
     // Methods of computation, loaded from config file
@@ -192,14 +192,14 @@ public:
     //   * max_iterations stays ABSOLUTE — XPlace's inner_iter spans both phases (TODO #4), so
     //     it is a whole-run runaway backstop, not a per-phase budget.
     // While there is only one phase this is 0, so phaseIteration() == iteration exactly.
-    int m_phase_start_iter = 0;
-    int phaseIteration() const { return iteration - m_phase_start_iter; }
+    int phase_start_iter = 0;
+    int phaseIteration() const { return iteration - phase_start_iter; }
     // Console verbosity, resolved in loadConfiguration(). quiet wins: errors only. Otherwise
     // interactive defaults to isatty(stdout) — a terminal gets the banner and the per-iteration
     // live-status table, a pipe gets the bare minimum. The run report is written either way.
     bool quiet = false;
     bool interactive = true;
-    bool m_nan_detected = false; // set when a NaN appears in the HPWL partials (hard divergence);
+    bool nan_detected = false; // set when a NaN appears in the HPWL partials (hard divergence);
                              // run() breaks the loop so printFinalResults() still emits a
                              // best-so-far results row instead of the process aborting.
 
@@ -208,7 +208,7 @@ public:
     // overflow countdown completed; every other value marks a run that was cut short.
     enum class StopReason { RUNNING, CONVERGED, MAX_ITERATIONS, NAN_METRICS,
                             NAN_PARTIALS, DIVERGED_HPWL, DIVERGENCE_GUARD };
-    StopReason m_stop_reason = StopReason::RUNNING;
+    StopReason stop_reason = StopReason::RUNNING;
     static const char* stopReasonName(StopReason reason);
 
     // --- Mixed-size two-phase flow (TODO #13, XPlace run_placement_nesterov.py:167-230) -------
@@ -217,7 +217,7 @@ public:
     // the standard cells against the macros as fixed obstacles. XPlace's own newblue5 goes
     // 0.1697 -> 0.0452 overflow across this boundary.
     enum class Phase { MIXED_SIZE, STDCELL_FIXED_MACRO };
-    Phase m_phase = Phase::MIXED_SIZE;
+    Phase phase = Phase::MIXED_SIZE;
     static const char* phaseName(Phase phase);
 
     /// @brief Take the phase-1 -> phase-2 transition if this run warrants one.
@@ -255,7 +255,7 @@ public:
         float overflow_macro_excluded = 0.0f;
         StopReason stop_reason = StopReason::RUNNING;
     };
-    PhaseSummary m_phase1_summary;
+    PhaseSummary phase1_summary;
 
     // Three best-solution trackers, mirroring XPlace's (param_scheduler.py:94-101).
     // Each has its OWN geometry buffer in Node (TODO #24): they shared one until 2026-08-10, so
@@ -382,7 +382,7 @@ public:
         bool density_fresh = false;
         bool forces_fresh  = false;
     };
-    PositionDump m_pos_dump;
+    PositionDump pos_dump;
     static constexpr int FORCE_FLOATS_PER_NODE = 5;  // wl.x, wl.y, den.x, den.y, precond_weight
 
     void beginPositionDumpGeneration();   ///< close the open generation, open the next one

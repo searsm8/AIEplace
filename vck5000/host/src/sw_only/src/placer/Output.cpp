@@ -180,8 +180,8 @@ void Placer::dumpScheduleTrace() {
       << momentum_coeff         << ',' << density_weight        << ','
       << precond_coef           << ',' << precond_a1_norm       << ','
       << precond_a2_norm        << ','
-      << precond_kappa          << ',' << ((int)m_phase + 1)    << ','
-      << phaseIteration()       << ',' << (int)m_stop_reason    << ','
+      << precond_kappa          << ',' << ((int)phase + 1)    << ','
+      << phaseIteration()       << ',' << (int)stop_reason    << ','
       << backtrack_steps        << '\n';
     f.close();
 }
@@ -346,7 +346,7 @@ void Placer::printFinalResults()
     Logger::log_info("AIEplace algorithm complete.");
     // One canonical, machine-readable line per run. Every stop path already logs its own
     // prose; this is the one a sweep runner greps.
-    Logger::log_info("[STOP] reason=" + std::string(stopReasonName(m_stop_reason))
+    Logger::log_info("[STOP] reason=" + std::string(stopReasonName(stop_reason))
                    + " iteration=" + std::to_string(iteration));
 
     BestChoice chosen = restoreBestSolution();
@@ -420,7 +420,7 @@ Placer::FinalMetrics Placer::computeFinalMetrics()
     // Macro-excluded, sharp, no filler. Meaningful ONLY on a single-phase mixed-size run: after
     // phase 2 the macros are FIXED, so exclude_macros (which only skips inside the movable pass)
     // matches nothing and this collapses onto final_overflow. The XPlace Mixed-GP comparison lives
-    // in m_phase1_summary.overflow_macro_excluded instead. Zero-cost with no movable macros, so
+    // in phase1_summary.overflow_macro_excluded instead. Zero-cost with no movable macros, so
     // always computed rather than gated; exportSummaryReports decides whether to print it.
     m.final_overflow_macro_excluded = computeOverflow(false, nullptr, false, true);
 
@@ -479,20 +479,20 @@ void Placer::exportSummaryReports(const BestChoice& chosen, const FinalMetrics& 
     Table results;
     results.add_row({"Benchmark name", db.getBenchmarkName()});
     results.add_row(RowStream{} << "Iterations" << iteration);
-    if (m_phase1_summary.valid) {
+    if (phase1_summary.valid) {
         // TODO #13 two-phase run: without this, only the phase-2 endpoint shows and the
         // macro-placement quality phase 1 is responsible for is invisible.
         // All measured on the RESTORED phase-1 best with the macros still movable, which is
         // XPlace's Mixed-GP checkpoint (see reportPhaseSummary's call site).
-        results.add_row(RowStream{} << "Phase 1 Iterations" << m_phase1_summary.iterations);
-        results.add_row(RowStream{} << "Phase 1 HPWL" << std::scientific << std::setprecision(3) << m_phase1_summary.hpwl);
-        results.add_row(RowStream{} << "Phase 1 HPWL (exact, all nets)" << std::scientific << std::setprecision(3) << m_phase1_summary.hpwl_exact);
-        results.add_row(RowStream{} << "Phase 1 Overflow (smoothed)" << std::scientific << std::setprecision(3) << m_phase1_summary.overflow_smoothed);
-        results.add_row(RowStream{} << "Phase 1 Overflow (exact, no fillers)" << std::scientific << std::setprecision(3) << m_phase1_summary.overflow_exact);
+        results.add_row(RowStream{} << "Phase 1 Iterations" << phase1_summary.iterations);
+        results.add_row(RowStream{} << "Phase 1 HPWL" << std::scientific << std::setprecision(3) << phase1_summary.hpwl);
+        results.add_row(RowStream{} << "Phase 1 HPWL (exact, all nets)" << std::scientific << std::setprecision(3) << phase1_summary.hpwl_exact);
+        results.add_row(RowStream{} << "Phase 1 Overflow (smoothed)" << std::scientific << std::setprecision(3) << phase1_summary.overflow_smoothed);
+        results.add_row(RowStream{} << "Phase 1 Overflow (exact, no fillers)" << std::scientific << std::setprecision(3) << phase1_summary.overflow_exact);
         // The XPlace-comparable pair is this row + "Phase 1 HPWL (exact, all nets)" above; see
         // tools/benchmarks.py::_XPLACE_MMS_MIXED_GP.
-        results.add_row(RowStream{} << "Phase 1 Overflow (macro-excluded, exact, no fillers)" << std::scientific << std::setprecision(3) << m_phase1_summary.overflow_macro_excluded);
-        results.add_row({"Phase 1 Stop reason", stopReasonName(m_phase1_summary.stop_reason)});
+        results.add_row(RowStream{} << "Phase 1 Overflow (macro-excluded, exact, no fillers)" << std::scientific << std::setprecision(3) << phase1_summary.overflow_macro_excluded);
+        results.add_row({"Phase 1 Stop reason", stopReasonName(phase1_summary.stop_reason)});
     }
     results.add_row(RowStream{} << "Total runtime (s)" << std::fixed << std::setprecision(3) << metrics.total_runtime);
     results.add_row(RowStream{} << "Database I/O time (s)" << std::fixed << std::setprecision(3) << Logger::getFunctionTime("setupDesign") / 1.0e6);
@@ -503,7 +503,7 @@ void Placer::exportSummaryReports(const BestChoice& chosen, const FinalMetrics& 
     results.add_row(RowStream{} << "Final Overflow (smoothed, no fillers)"
                                 << std::scientific << std::setprecision(3) << metrics.final_smoothed_overflow);
     results.add_row(RowStream{} << "Final Overflow (exact, no fillers)" << std::scientific << std::setprecision(3) << metrics.final_overflow);
-    if (num_movable_macros > 0 && !m_phase1_summary.valid) {
+    if (num_movable_macros > 0 && !phase1_summary.valid) {
         // Only when phase 2 did NOT run. Once freezeMovableMacros() has fired the macros are
         // FIXED, exclude_macros matches nothing, and this row is bit-identical to "Final Overflow
         // (exact, no fillers)" above while claiming to be the XPlace-comparable number -- it was
@@ -515,7 +515,7 @@ void Placer::exportSummaryReports(const BestChoice& chosen, const FinalMetrics& 
         results.add_row(RowStream{} << "Macro-Excluded Overflow (exact, no fillers)" << std::scientific
                                     << std::setprecision(3) << metrics.final_overflow_macro_excluded);
     }
-    results.add_row({"Stop reason", stopReasonName(m_stop_reason)});
+    results.add_row({"Stop reason", stopReasonName(stop_reason)});
     if (chosen.sol) {
         std::ostringstream best_str;
         best_str << "iter " << chosen.sol->iteration
@@ -555,7 +555,7 @@ void Placer::writeFinalDesignArtifacts(const std::string& run_output_dir)
 {
     db.writeDEF(run_output_dir);
 
-    std::ifstream src(m_config_filepath);
+    std::ifstream src(config_filepath);
     std::ofstream dst(run_output_dir + "/config_used.toml");
     dst << src.rdbuf();
 }

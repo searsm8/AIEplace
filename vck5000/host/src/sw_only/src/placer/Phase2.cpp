@@ -41,7 +41,7 @@ const char* Placer::phaseName(Phase phase)
 bool Placer::beginFixedMacroPhase()
 {
     if (!enable_phase2)               return false;   // config opt-out
-    if (m_phase != Phase::MIXED_SIZE) return false;   // already done it
+    if (phase != Phase::MIXED_SIZE) return false;   // already done it
     if (!mixed_size_mode)             return false;   // no movable macros: nothing to freeze
 
     // Which phase-1 endings earn a phase 2 (Mark's call, 2026-08-01):
@@ -53,11 +53,11 @@ bool Placer::beginFixedMacroPhase()
     //     respectable-looking phase-2 number.
     //   max_iterations               -> NO. Phase 1 never finished; its macros are not settled,
     //     and the absolute iteration budget is already spent.
-    const bool eligible = (m_stop_reason == StopReason::CONVERGED ||
-                           m_stop_reason == StopReason::DIVERGENCE_GUARD);
+    const bool eligible = (stop_reason == StopReason::CONVERGED ||
+                           stop_reason == StopReason::DIVERGENCE_GUARD);
     if (!eligible) {
         Logger::log_info("Phase 2 skipped: phase 1 ended with reason=" +
-                         std::string(stopReasonName(m_stop_reason)) +
+                         std::string(stopReasonName(stop_reason)) +
                          " (macro positions are not trustworthy)");
         return false;
     }
@@ -104,8 +104,8 @@ bool Placer::beginFixedMacroPhase()
     reinitializeStdCells();
     resetSolverState();
 
-    m_phase            = Phase::STDCELL_FIXED_MACRO;
-    m_phase_start_iter = iteration;   // schedule warmups restart here; `iteration` keeps counting
+    phase            = Phase::STDCELL_FIXED_MACRO;
+    phase_start_iter = iteration;   // schedule warmups restart here; `iteration` keeps counting
     mixed_size_mode    = false;       // XPlace include_macros = False for the rest of the run
 
     // TODO #16: rebuildFillers() replaced the filler set, the second node-set change of this
@@ -118,7 +118,7 @@ bool Placer::beginFixedMacroPhase()
     // must see the plain configured value however phase 1 modified it.
     overflow_threshold = ConfigUtils::require<float>(cfg, "params", "convergence_overflow_threshold");
 
-    Logger::log_info("Phase 2 (" + std::string(phaseName(m_phase)) + "): froze " +
+    Logger::log_info("Phase 2 (" + std::string(phaseName(phase)) + "): froze " +
                      std::to_string(frozen) + " macros, re-seeded " +
                      std::to_string(db.getFillerStartIndex()) + " movable cells, stop overflow " +
                      PREC(overflow_threshold));
@@ -206,7 +206,7 @@ void Placer::resetSolverState()
     best_aux                         = BestSolution{};
     best_rollback                    = BestSolution{};
     ever_converged                   = false;
-    m_stop_reason                    = StopReason::RUNNING;
+    stop_reason                    = StopReason::RUNNING;
 
     // gamma restarts high (overflow is ~1 again after the re-seed) so the WA surrogate is smooth
     // while the cells spread, exactly as at setup.
@@ -238,18 +238,18 @@ void Placer::reportPhaseSummary()
     float hpwl_exact = db.computeTotalWirelength(
         ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), 1000000000);
 
-    m_phase1_summary = { .valid              = true,
+    phase1_summary = { .valid              = true,
                          .iterations         = iteration,
                          .hpwl               = hpwl,
                          .hpwl_exact         = hpwl_exact,
                          .overflow_smoothed  = overflow_smoothed,
                          .overflow_exact     = overflow_exact,
                          .overflow_macro_excluded = overflow_macro_ex,
-                         .stop_reason        = m_stop_reason };
+                         .stop_reason        = stop_reason };
 
-    Logger::log_info("[PHASE] name=" + std::string(phaseName(m_phase)) +
+    Logger::log_info("[PHASE] name=" + std::string(phaseName(phase)) +
                      " end_iteration=" + std::to_string(iteration) +
-                     " reason=" + std::string(stopReasonName(m_stop_reason)) +
+                     " reason=" + std::string(stopReasonName(stop_reason)) +
                      " hpwl=" + SCI(hpwl) +
                      " hpwl_exact=" + SCI(hpwl_exact) +
                      " ovfw_smoothed=" + PREC(overflow_smoothed) +
