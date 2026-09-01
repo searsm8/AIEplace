@@ -220,11 +220,14 @@ public:
     Phase phase = Phase::MIXED_SIZE;
     static const char* phaseName(Phase phase);
 
-    /// @brief Take the phase-1 -> phase-2 transition if this run warrants one.
-    /// @return true if phase 2 has begun and run() should keep iterating; false to end the run
-    ///         (not mixed-size, already in phase 2, or phase 1 ended in a way we must not
-    ///         restart from — see the body).
-    bool beginFixedMacroPhase();
+    /// @brief Is this run eligible for the phase-1 -> phase-2 handoff? Holds the eligibility policy
+    ///        (config opt-out, movable macros present, a phase-1 ending worth restarting from).
+    ///        run() gates on phase == MIXED_SIZE before asking; beginPhase2() performs
+    ///        the transition once this returns true.
+    bool readyForPhase2();
+    /// @brief Perform the phase-1 -> phase-2 transition: freeze the macros, re-seed the standard
+    ///        cells, restart the schedule. Precondition: readyForPhase2() has returned true.
+    void beginPhase2();
     void legalizeMacros();          ///< stage 2 entry point (honours macro_legalization_enabled)
     void runMacroLegalization();    ///< stage 2 proper; see MacroLegalize.cpp
     void reinitializeStdCells();    ///< XPlace randn_center: re-seed std cells, keep frozen macros
@@ -436,13 +439,13 @@ public:
 
     // Main algorithm iteration functions
     void performIterationZero();        // bootstrap gradients + solver state, before iteration 1
-    void combineGradients();            // subtract electro from probe_grad in-place
-    float computeLipschitzEstimate();    // BB step estimate: ||Δv|| / ||Δ∇f||
-    void estimateInitialStep();         // XPlace-style iteration-1 BB learning-rate estimate
     void performNextStep(bool backtracking_enabled = true); // Algorithm 2: BkTrk
-    void advanceIterationState();       // promote next → current for all nodes
+    void estimateInitialStep();         // XPlace-style iteration-1 BB learning-rate estimate
+    float computeLipschitzEstimate();    // BB step estimate: ||Δv|| / ||Δ∇f||
+    void combineGradients();            // subtract electro from probe_grad in-place
     void stepAllNodes();                // Algorithm 1, lines 2–4
     void enforceDieBoundaries(Node* node_p);           // clamp next.node_pos to die area
+    void advanceIterationState();       // promote next → current for all nodes
     void updateSchedule();              // throttled γ/λ update (skip_update gate)
     void updateDensityWeight();
     void updateGamma(float overflow);

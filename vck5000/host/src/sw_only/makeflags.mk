@@ -7,7 +7,7 @@ THIRD_PARTY = $(PROJECT_ROOT)/../third_party
 
 HOST_MAIN = main.cpp
 HOST_SRCS = placer/AIEplace.cpp placer/Setup.cpp placer/Schedule.cpp placer/Step.cpp \
-	    placer/Partials.cpp placer/Density.cpp placer/Output.cpp \
+	    placer/Partials.cpp placer/Density.cpp placer/Output.cpp placer/BestSolution.cpp \
 	    placer/Phase2.cpp placer/MacroLegalize.cpp placer/PositionDump.cpp DCT.cpp
 # Parser + data model, shared with pl_algo -- see host/src/common (TODO #9).
 COMMON_SRCS = DataBase.cpp Grid.cpp Net.cpp Logger.cpp Common.cpp

@@ -1,8 +1,8 @@
 /**
  * @file PositionDump.cpp
- * @brief Node-position export for the offline visualizer (TODO #16).
+ * @brief Node-position export for the offline visualizer.
  *
- * Everything the renderer needs is a pure function of node positions at iteration k plus static
+ * Everything the visualizer needs is a pure function of node positions at iteration k plus static
  * design data. So dump the positions once and render offline -- as many times, and as many ways,
  * as anyone wants -- instead of paying for a render inside the optimizer's loop and re-running an
  * hour-long placement every time the view changes.

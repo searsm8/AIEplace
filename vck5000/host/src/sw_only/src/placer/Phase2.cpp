@@ -32,17 +32,14 @@ const char* Placer::phaseName(Phase phase)
 }
 
 /**
- * @brief Take the phase-1 -> phase-2 transition, if this run warrants one.
+ * @brief Answers the question: Is this run eligible for the phase-1 -> phase-2 handoff?
  *
- * Called from run() when checkConvergence() says phase 1 is over. Returns false to let the run
- * end exactly as it did before phase 2 existed, which is what keeps every non-mixed-size design
- * bit-identical.
+ * Called when checkConvergence() says phase 1 is over. 
  */
-bool Placer::beginFixedMacroPhase()
+bool Placer::readyForPhase2()
 {
-    if (!enable_phase2)               return false;   // config opt-out
-    if (phase != Phase::MIXED_SIZE) return false;   // already done it
-    if (!mixed_size_mode)             return false;   // no movable macros: nothing to freeze
+    if (!enable_phase2)   return false;   // config opt-out
+    if (!mixed_size_mode) return false;   // no movable macros: nothing to freeze
 
     // Which phase-1 endings earn a phase 2 (Mark's call, 2026-08-01):
     //   converged / divergence_guard -> YES. In XPlace the early-stop signal IS the handoff
@@ -61,7 +58,16 @@ bool Placer::beginFixedMacroPhase()
                          " (macro positions are not trustworthy)");
         return false;
     }
+    return true;
+}
 
+/**
+ * @brief Perform the phase-1 -> phase-2 transition: freeze the macros, legalize them, re-seed the
+ *        standard cells, and restart the schedule. Precondition (enforced by run() and
+ *        readyForPhase2()): this is a mixed-size phase-1 run that ended eligibly.
+ */
+void Placer::beginPhase2()
+{
     // Phase 1's deliverable is where the macros ended up, and best-solution tracking usually holds
     // a better placement than the last iteration's. Same selection rule as the final restore, so
     // the macros get frozen at the placement the run would have shipped. Guard it: the snapshot
@@ -132,7 +138,6 @@ bool Placer::beginFixedMacroPhase()
 
     // ...and the re-seeded starting state, so the GIF shows what phase 2 actually begins from.
     dumpIterationPositions("reseeded");
-    return true;
 }
 
 /**

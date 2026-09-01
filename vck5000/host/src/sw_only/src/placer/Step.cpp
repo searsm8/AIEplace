@@ -1,7 +1,8 @@
 /**
  * @file Step.cpp
- * @brief Nesterov/Barzilai-Borwein step machinery: gradient combination, boundary
- *        enforcement, the BB step-length estimate, and the backtracked step itself.
+ * @brief Nesterov/Barzilai-Borwein step machinery: the backtracked step (Algorithm 2) and the
+ *        iteration-1 step-length bootstrap up top, then the shared primitives both call --
+ *        gradient combination, the BB step estimate, per-node stepping, and boundary enforcement.
  *        Split out of AIEplace.cpp.
  */
 
@@ -10,6 +11,139 @@
 #include <algorithm>
 
 AIEPLACE_NAMESPACE_BEGIN
+
+/**
+ * @brief Algorithm 2 (BkTrk): Backtracking line search for step length.
+ *
+ * Uses the Barzilai-Borwein (Lipschitz) estimate to validate the step length.
+ * The do-while loop takes trial steps with the current step_length, recomputes
+ * gradients at the trial position, and checks if α̂ ≤ ε · fresh_bb.
+ * If rejected, positions are restored and step_length is updated to the fresh estimate.
+ *
+ * After the loop, the accepted trial step is committed (positions already at u_{k+1}, v_{k+1})
+ * and the Nesterov coefficient is advanced.
+ */
+void Placer::performNextStep(bool backtracking_enabled)
+{
+    // Algorithm 1, Line 3: compute momentum coefficient for this iteration
+    float a_next = (1.0f + sqrtf(4.0f * nesterov_ak * nesterov_ak + 1.0f)) / 2.0f;
+    momentum_coeff = enable_momentum ? (nesterov_ak - 1.0f) / a_next : 0.0f;
+    nesterov_ak = a_next;
+
+    // step_length (α̂) carries over from previous iteration (or warmup default)
+    advanceIterationState();  // copy next state into current state
+
+    // Algorithm 2: Backtracking
+    int tries = 0;
+    float prev_step_length;
+    do {
+        // Lines 2 & 3: trial step using existing step_length from previous iteration
+        stepAllNodes();
+
+        iterationReset();
+        // Recompute gradients at trial v̂ (the expensive part, accelerated on AIEs)
+        computeHpwlPartials();      // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
+        computeElectricFields();    // ∇D from ρ → bin eFields
+        combineGradients();         // add electro in-place: next.probe_grad becomes total ∇f
+
+        prev_step_length = step_length;
+
+        // new steplength estimate at probe position:
+        // α = 1 / L = ||v̂ - v_k|| / ||∇f(v̂) - ∇f(v_k)||
+        step_length = computeLipschitzEstimate();
+
+        // Accept if α̂ ≤ ε · fresh_bb (step is not too aggressive)
+    } while(backtracking_enabled &&
+            prev_step_length > backtrack_epsilon * step_length && // epsilon condition
+            ++tries < max_backtracking_attempts);
+
+    backtrack_steps = tries; // for logging
+
+    if (Logger::isLevelActive(LogLevel::DEBUG)) logStepDiagnostics();
+}
+
+
+/**
+ * @brief XPlace-style initial learning-rate (step-length) estimate, run once at iteration 1.
+ *
+ * Mirrors Xplace estimate_initial_learning_rate (initializer.py:171): from the current movable
+ * positions x0 with total gradient g0, take ONE trial step x' = x0 − (seed·site_width)·P·g0,
+ * recompute the total gradient g' there, and set
+ *     step_length = ‖x' − x0‖₂ / ‖P·(g' − g0)‖₂        (Barzilai-Borwein inverse-Lipschitz)
+ * which is exactly the ratio computeLipschitzEstimate() forms. The step (Node::step) and the
+ * estimate both divide by precond_weight, so the whole ratio is in the preconditioned gradient
+ * — matching XPlace, whose calc_obj_and_grad returns the preconditioned gradient.
+ *
+ * WHY site_width: XPlace divides every coordinate by it before placing
+ * (prescale_by_site_width, database.py:854), so its args.lr = 0.01 is a displacement of 0.01 SITE
+ * WIDTHS. Ours is in raw DBU, where the same 0.01 means a different physical distance on every
+ * design -- 0.01 DBU on an ISPD2015 die whose site is 200-400 DBU wide. Below one float32 ULP of
+ * the coordinates it rounds to zero and alpha comes out 0 (TODO #23, 5 ISPD2015 designs).
+ * Multiplying the seed by site_width restores XPlace's unit without normalizing the whole
+ * coordinate system. NOTE this is a change of UNITS, not of precision: scaling all coordinates
+ * would not help, since float32's relative epsilon is scale-invariant.
+ * Bookshelf .scl carries Sitewidth = 1, so ISPD2005/MMS trajectories are bit-unchanged by this.
+ *
+ * Positions are restored to x0 afterwards and next.probe_grad left = g0 (the total gradient), so
+ * the real first step in performNextStep starts from x0 exactly as every later iteration does —
+ * the only lasting effect is the calibrated step_length. Costs one extra gradient evaluation, once.
+ *
+ * Preconditions: density_weight (initializeDensityWeight) and precond_weight (updatePrecondWeights)
+ * are set; next holds x0 with the HPWL-only gradient in probe_grad.
+ */
+void Placer::estimateInitialStep()
+{
+    // g0 = total gradient at x0 (subtract λ·density force from the HPWL-only next.probe_grad).
+    combineGradients();
+
+    // Snapshot the anchor (x0, g0) into current so computeLipschitzEstimate can diff against it.
+    advanceIterationState();
+
+    // One trial step x' = x0 − (seed·site_width)·P·g0, momentum off (XPlace's x_k − lr·g_k, whose
+    // lr is in site widths because its coordinates are). Fall back to the row height if the input
+    // named no site: both are the design's own length scale, and it beats a raw-DBU seed.
+    const float site_width = db.getSiteWidth() > 0.0f ? db.getSiteWidth() : db.getRowHeight();
+    if (site_width <= 0.0f) {
+        Logger::log_error("Design supplies neither a site width nor a row height, so init_step_seed "
+                          "has no length unit to scale by (see TODO #23).");
+        exit(1);
+    }
+    step_length    = init_step_seed * site_width;
+    momentum_coeff = 0.0f;
+    stepAllNodes();
+
+    // g' = total gradient at the trial point x'.
+    iterationReset();
+    computeHpwlPartials();
+    computeElectricFields();
+    combineGradients();
+
+    // Barzilai-Borwein estimate α = ‖Δv‖₂ / ‖P·Δg‖₂ (no magnitude clamp — as in XPlace).
+    step_length = computeLipschitzEstimate();
+    Logger::log_detail("Estimated initial step_length (BB): " + PREC_P(step_length, 6) +
+                     "  (seed " + PREC_P(init_step_seed, 4) + " x site_width " +
+                     PREC_P(site_width, 4) + ")");
+
+    // A zero α is self-sustaining: Node::step then moves nothing, so the next BB estimate is
+    // also ‖0‖/‖0‖ and the run no-ops to max_iterations while reporting the UNTOUCHED initial
+    // placement as its HPWL. Seen on 5 ISPD2015 designs, where seed·P·g0 falls below one float32
+    // ULP of their coordinates so Δv is exactly 0 (TODO #23). Fail loudly instead of emitting a
+    // plausible-looking number. The guard is written as !(α > 0) so a NaN α trips it too.
+    if (!(step_length > 0.0f)) {
+        Logger::log_error("Initial BB step estimate is " + PREC_P(step_length, 6) + " at iteration "
+                          + std::to_string(iteration) + " (" + phaseName(phase) + "): a trial step of "
+                          "init_step_seed = " + PREC_P(init_step_seed, 6) + " site widths (" +
+                          PREC_P(init_step_seed * site_width, 6) + " DBU) displaced no movable node, "
+                          "so no later step can either. Raise init_step_seed (see TODO #23).");
+        exit(1);
+    }
+
+    // Undo the probe step: restore x0 / g0 into next so the real first step starts from x0.
+    const auto& nodes = db.getMovableNodes();
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)nodes.size(); i++) nodes[i]->restoreState();
+}
+
 
 /**
  * @brief Estimate ᾱ_k from current positions vs stored prev-iteration data.
@@ -117,6 +251,28 @@ void Placer::combineGradients()
 
 
 /**
+ * @brief Perform Nesterov gradient step for all nodes (Algorithm 1, Lines 2 & 4).
+ *
+ * Delegates to Node::step() which reads from current state and writes to next.
+ * The momentum coefficient is computed by the caller (computeNextStep owns Nesterov state).
+ *
+ * @param mom_coeff Momentum coefficient: (a_k - 1) / a_{k+1}, or 0 if momentum disabled.
+ */
+void Placer::stepAllNodes()
+{
+    TIME_FUNCTION();
+    const auto& nodes = db.getMovableNodes();
+
+    // Each node's step reads and writes only its own state, so this is bit-exact threaded.
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < (int)nodes.size(); i++) {
+        nodes[i]->step(step_length, momentum_coeff);
+        enforceDieBoundaries(nodes[i]);
+    }
+}
+
+
+/**
  * @brief Clamp node positions so the cell stays within the die area.
  *
  * The node position is the lower-left corner of the cell, so the upper bound must account for the
@@ -171,158 +327,6 @@ void Placer::advanceIterationState()
     for (int i = 0; i < (int)nodes.size(); i++) nodes[i]->cacheState();
 }
 
-/**
- * @brief Perform Nesterov gradient step for all nodes (Algorithm 1, Lines 2 & 4).
- *
- * Delegates to Node::step() which reads from current state and writes to next.
- * The momentum coefficient is computed by the caller (computeNextStep owns Nesterov state).
- *
- * @param mom_coeff Momentum coefficient: (a_k - 1) / a_{k+1}, or 0 if momentum disabled.
- */
-void Placer::stepAllNodes()
-{
-    TIME_FUNCTION();
-    const auto& nodes = db.getMovableNodes();
-
-    // Each node's step reads and writes only its own state, so this is bit-exact threaded.
-    #pragma omp parallel for schedule(static)
-    for (int i = 0; i < (int)nodes.size(); i++) {
-        nodes[i]->step(step_length, momentum_coeff);
-        enforceDieBoundaries(nodes[i]);
-    }
-}
-
-/**
- * @brief XPlace-style initial learning-rate (step-length) estimate, run once at iteration 1.
- *
- * Mirrors Xplace estimate_initial_learning_rate (initializer.py:171): from the current movable
- * positions x0 with total gradient g0, take ONE trial step x' = x0 − (seed·site_width)·P·g0,
- * recompute the total gradient g' there, and set
- *     step_length = ‖x' − x0‖₂ / ‖P·(g' − g0)‖₂        (Barzilai-Borwein inverse-Lipschitz)
- * which is exactly the ratio computeLipschitzEstimate() forms. The step (Node::step) and the
- * estimate both divide by precond_weight, so the whole ratio is in the preconditioned gradient
- * — matching XPlace, whose calc_obj_and_grad returns the preconditioned gradient.
- *
- * WHY site_width: XPlace divides every coordinate by it before placing
- * (prescale_by_site_width, database.py:854), so its args.lr = 0.01 is a displacement of 0.01 SITE
- * WIDTHS. Ours is in raw DBU, where the same 0.01 means a different physical distance on every
- * design -- 0.01 DBU on an ISPD2015 die whose site is 200-400 DBU wide. Below one float32 ULP of
- * the coordinates it rounds to zero and alpha comes out 0 (TODO #23, 5 ISPD2015 designs).
- * Multiplying the seed by site_width restores XPlace's unit without normalizing the whole
- * coordinate system. NOTE this is a change of UNITS, not of precision: scaling all coordinates
- * would not help, since float32's relative epsilon is scale-invariant.
- * Bookshelf .scl carries Sitewidth = 1, so ISPD2005/MMS trajectories are bit-unchanged by this.
- *
- * Positions are restored to x0 afterwards and next.probe_grad left = g0 (the total gradient), so
- * the real first step in performNextStep starts from x0 exactly as every later iteration does —
- * the only lasting effect is the calibrated step_length. Costs one extra gradient evaluation, once.
- *
- * Preconditions: density_weight (initializeDensityWeight) and precond_weight (updatePrecondWeights)
- * are set; next holds x0 with the HPWL-only gradient in probe_grad.
- */
-void Placer::estimateInitialStep()
-{
-    // g0 = total gradient at x0 (subtract λ·density force from the HPWL-only next.probe_grad).
-    combineGradients();
-
-    // Snapshot the anchor (x0, g0) into current so computeLipschitzEstimate can diff against it.
-    advanceIterationState();
-
-    // One trial step x' = x0 − (seed·site_width)·P·g0, momentum off (XPlace's x_k − lr·g_k, whose
-    // lr is in site widths because its coordinates are). Fall back to the row height if the input
-    // named no site: both are the design's own length scale, and it beats a raw-DBU seed.
-    const float site_width = db.getSiteWidth() > 0.0f ? db.getSiteWidth() : db.getRowHeight();
-    if (site_width <= 0.0f) {
-        Logger::log_error("Design supplies neither a site width nor a row height, so init_step_seed "
-                          "has no length unit to scale by (see TODO #23).");
-        exit(1);
-    }
-    step_length    = init_step_seed * site_width;
-    momentum_coeff = 0.0f;
-    stepAllNodes();
-
-    // g' = total gradient at the trial point x'.
-    iterationReset();
-    computeHpwlPartials();
-    computeElectricFields();
-    combineGradients();
-
-    // Barzilai-Borwein estimate α = ‖Δv‖₂ / ‖P·Δg‖₂ (no magnitude clamp — as in XPlace).
-    step_length = computeLipschitzEstimate();
-    Logger::log_detail("Estimated initial step_length (BB): " + PREC_P(step_length, 6) +
-                     "  (seed " + PREC_P(init_step_seed, 4) + " x site_width " +
-                     PREC_P(site_width, 4) + ")");
-
-    // A zero α is self-sustaining: Node::step then moves nothing, so the next BB estimate is
-    // also ‖0‖/‖0‖ and the run no-ops to max_iterations while reporting the UNTOUCHED initial
-    // placement as its HPWL. Seen on 5 ISPD2015 designs, where seed·P·g0 falls below one float32
-    // ULP of their coordinates so Δv is exactly 0 (TODO #23). Fail loudly instead of emitting a
-    // plausible-looking number. The guard is written as !(α > 0) so a NaN α trips it too.
-    if (!(step_length > 0.0f)) {
-        Logger::log_error("Initial BB step estimate is " + PREC_P(step_length, 6) + " at iteration "
-                          + std::to_string(iteration) + " (" + phaseName(phase) + "): a trial step of "
-                          "init_step_seed = " + PREC_P(init_step_seed, 6) + " site widths (" +
-                          PREC_P(init_step_seed * site_width, 6) + " DBU) displaced no movable node, "
-                          "so no later step can either. Raise init_step_seed (see TODO #23).");
-        exit(1);
-    }
-
-    // Undo the probe step: restore x0 / g0 into next so the real first step starts from x0.
-    const auto& nodes = db.getMovableNodes();
-    #pragma omp parallel for schedule(static)
-    for (int i = 0; i < (int)nodes.size(); i++) nodes[i]->restoreState();
-}
-
-
-/**
- * @brief Algorithm 2 (BkTrk): Backtracking line search for step length.
- *
- * Uses the Barzilai-Borwein (Lipschitz) estimate to validate the step length.
- * The do-while loop takes trial steps with the current step_length, recomputes
- * gradients at the trial position, and checks if α̂ ≤ ε · fresh_bb.
- * If rejected, positions are restored and step_length is updated to the fresh estimate.
- *
- * After the loop, the accepted trial step is committed (positions already at u_{k+1}, v_{k+1})
- * and the Nesterov coefficient is advanced.
- */
-void Placer::performNextStep(bool backtracking_enabled)
-{
-    // Algorithm 1, Line 3: compute momentum coefficient for this iteration
-    float a_next = (1.0f + sqrtf(4.0f * nesterov_ak * nesterov_ak + 1.0f)) / 2.0f;
-    momentum_coeff = enable_momentum ? (nesterov_ak - 1.0f) / a_next : 0.0f;
-    nesterov_ak = a_next;
-
-    // step_length (α̂) carries over from previous iteration (or warmup default)
-    advanceIterationState();  // copy next state into current state
-
-    // Algorithm 2: Backtracking
-    int tries = 0;
-    float prev_step_length;
-    do {
-        // Lines 2 & 3: trial step using existing step_length from previous iteration
-        stepAllNodes();
-
-        iterationReset();
-        // Recompute gradients at trial v̂ (the expensive part, accelerated on AIEs)
-        computeHpwlPartials();      // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
-        computeElectricFields();    // ∇D from ρ → bin eFields
-        combineGradients();         // add electro in-place: next.probe_grad becomes total ∇f
-
-        prev_step_length = step_length;
-
-        // new steplength estimate at probe position:
-        // α = 1 / L = ||v̂ - v_k|| / ||∇f(v̂) - ∇f(v_k)||
-        step_length = computeLipschitzEstimate();
-
-        // Accept if α̂ ≤ ε · fresh_bb (step is not too aggressive)
-    } while(backtracking_enabled &&
-            prev_step_length > backtrack_epsilon * step_length && // epsilon condition
-            ++tries < max_backtracking_attempts);
-
-    backtrack_steps = tries; // for logging
-
-    if (Logger::isLevelActive(LogLevel::DEBUG)) logStepDiagnostics();
-}
 
 /// @brief Log per-iteration step diagnostics (gradient norms, step length, overflow) — DEBUG only.
 void Placer::logStepDiagnostics()

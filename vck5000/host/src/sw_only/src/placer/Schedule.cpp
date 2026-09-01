@@ -1,7 +1,11 @@
 /**
  * @file Schedule.cpp
  * @brief gamma/lambda schedule policy and convergence/divergence checks. Split out of
- *        AIEplace.cpp.
+ *        AIEplace.cpp. Two top-level entry points, in the order performIteration()/run() call
+ *        them: updateSchedule() then checkConvergence(); each is followed immediately by the
+ *        callees it dispatches to, in call order. The two shared low-level predicates
+ *        (checkOverflowPlateau, checkDivergence) are used by callees under BOTH entry points, so
+ *        they sit at the end as reusable primitives rather than under either one.
  */
 
 #include "AIEplace.h"
@@ -89,6 +93,23 @@ void Placer::configureGammaSchedule()
     Logger::log_detail("WA gamma: base_gamma=" + std::to_string(base_gamma) +
                      " (bin_scaled=" + std::string(gamma_bin_scaled ? "true" : "false") +
                      "), initial gamma=" + std::to_string(gamma));
+}
+
+/**
+ * @brief Update the WA smoothing length gamma on the XPlace overflow-driven schedule and
+ *        refresh the LUT scalars. gamma = 10^((overflow - 0.1) * 20/9 - 1) * base_gamma
+ *        (overflow 1.0 -> ~10x base; 0.55 -> 1x; 0.07 -> ~0.09x). Moved here from Partials.cpp
+ *        with the rest of the gamma schedule (2026-08-31); the LUT scalars it refreshes are the
+ *        only coupling back to the simple HPWL backend.
+ */
+void Placer::updateGamma(float overflow)
+{
+    if (!gamma_schedule) return;
+    float coef = std::pow(10.0f, (overflow - 0.1f) * (20.0f / 9.0f) - 1.0f);
+    gamma     = coef * base_gamma;
+    inv_gamma = 1.0f / gamma;
+    hpwl_lut_range = LUT_GAMMA_MULTIPLIER * gamma;
+    inv_lut_step   = 1.0f / (LUT_STEP_NORM * gamma);
 }
 
 /**
@@ -223,71 +244,6 @@ void Placer::updatePrecondCoef()
 
 
 /**
- * @brief Check if overflow has plateaued over a recent window.
- *
- * Returns true if the relative range (max - min) / mean of the last
- * `window` overflow values is below `threshold`. Matches XPlace's
- * check_plateau() in param_scheduler.py.
- */
-bool Placer::checkOverflowPlateau(int window, float threshold)
-{
-    if ((int)ovfw_history.size() < window) return false;
-    auto begin = ovfw_history.end() - window;
-    auto end = ovfw_history.end();
-    float min_val = *std::min_element(begin, end);
-    float max_val = *std::max_element(begin, end);
-    float mean_val = std::accumulate(begin, end, 0.0f) / window;
-    return (max_val - min_val) / (mean_val + 1e-8f) < threshold;
-}
-
-
-/**
- * @brief Detect divergence, mirroring XPlace check_divergence (param_scheduler.py).
- *
- * Fires only once the recent HPWL mean has climbed meaningfully above the best known
- * HPWL (so the healthy early phase, where HPWL rises as cells spread, is not flagged)
- * AND overflow is no longer making progress — it has grown past its best, plateaued
- * high, or is fluctuating upward. Reference is the primary best (converged) if we have
- * one, else the lowest-overflow fallback so the guard is useful even before convergence.
- */
-bool Placer::checkDivergence(int window, float threshold)
-{
-    // Reference the CONVERGED best only (XPlace check_divergence returns False while
-    // best_metric["hpwl"] is inf). best_aux tracks the newest lowest-overflow point,
-    // so on a healthy monotonic descent a trailing-mean-vs-newest comparison always reads
-    // "worse than best" on both HPWL and overflow and false-fires the guard — that killed
-    // adaptec2 at iter 332 with overflow still dropping ~2%/iter toward the 0.07 threshold.
-    if (!best_primary.valid) return false;
-    const BestSolution& best = best_primary;
-    if ((int)hpwl_history.size() <= window) return false;
-
-    auto hpwl_begin = hpwl_history.end() - window;
-    float wl_mean = std::accumulate(hpwl_begin, hpwl_history.end(), 0.0f) / window;
-    float wl_ratio = (wl_mean - best.hpwl) / (best.hpwl + 1e-8f);
-    if (wl_ratio <= threshold * 1.2f)
-        return false;  // HPWL still near its best → not diverging
-
-    // HPWL is rising above best; classify by how overflow behaves over the window.
-    auto ovfw_begin = ovfw_history.end() - window;
-    float ovfw_mean = std::accumulate(ovfw_begin, ovfw_history.end(), 0.0f) / window;
-    float ovfw_min  = *std::min_element(ovfw_begin, ovfw_history.end());
-    float ovfw_max  = *std::max_element(ovfw_begin, ovfw_history.end());
-    int rises = 0;
-    for (auto it = ovfw_begin + 1; it != ovfw_history.end(); ++it)
-        if (*it > *(it - 1)) rises++;
-    float ovfw_up_frac = (float)rises / (window - 1);
-
-    float ovfw_ratio = (ovfw_mean - std::max(overflow_threshold, best.overflow)) /
-                       (best.overflow + 1e-8f);
-
-    if (ovfw_ratio > threshold)                                  return true; // overflow grew past best
-    if ((ovfw_max - ovfw_min) / (ovfw_mean + 1e-8f) < threshold) return true; // plateaued high
-    if (ovfw_up_frac > 0.6f)                                     return true; // fluctuating upward
-    return false;
-}
-
-
-/**
  * @brief Update per-node preconditioner weights (diagonal preconditioner).
  *
  * Each node's gradient is divided by its precond_weight before the Nesterov step.
@@ -389,38 +345,6 @@ bool Placer::hasNaNMetrics()
     stop_reason = StopReason::NAN_METRICS;
     Logger::log_info("Stopping: NaN detected at iteration " + std::to_string(iteration));
     return true;
-}
-
-/// @brief The divergence guards' reference metric — deliberately NOT the shipping rule. This one
-///        feeds stopping criteria, so its population must stay as wide as it was before TODO #24
-///        (any tracker, converged or not); selectBestSolution() answers the different question of
-///        which placement to hand over at the end.
-const Placer::BestSolution& Placer::bestReference() const
-{
-    return best_primary.valid  ? best_primary
-         : best_aux.valid      ? best_aux
-         : best_rollback.valid ? best_rollback
-         : best_primary;
-}
-
-/**
- * @brief Which solution to ship. Ported from XPlace get_best_solution (param_scheduler.py:540-577):
- *        a surviving rollback wins outright (it only survives when the run never converged, so
- *        nothing else exists); otherwise PREFER the lower-overflow aux, but only when it costs
- *        <= 0.5% HPWL and buys >= 10% overflow. The default lean is toward the spread-out solution.
- */
-Placer::BestChoice Placer::selectBestSolution() const
-{
-    if (best_rollback.valid)
-        return {&best_rollback, BestSlot::ROLLBACK, "rollback (never converged)"};
-    if (!best_primary.valid && !best_aux.valid) return {};
-    if (!best_aux.valid)     return {&best_primary, BestSlot::PRIMARY, "primary (HPWL driven)"};
-    if (!best_primary.valid) return {&best_aux,     BestSlot::AUX,     "aux (overflow driven)"};
-
-    const bool aux_worth_its_hpwl = (best_aux.hpwl < best_primary.hpwl * aux_select_hpwl_ratio &&
-                                     best_aux.overflow * AUX_SELECT_OVFW_RATIO < best_primary.overflow);
-    return aux_worth_its_hpwl ? BestChoice{&best_aux,     BestSlot::AUX,     "aux (overflow driven)"}
-                              : BestChoice{&best_primary, BestSlot::PRIMARY, "primary (HPWL driven)"};
 }
 
 /**
@@ -536,6 +460,78 @@ bool Placer::checkOverflowCountdown()
 
     Logger::log_detail("Convergence countdown: " +
                       std::to_string(convergence_iterations_remaining) + " remaining");
+    return false;
+}
+
+
+/**
+ * @brief Check if overflow has plateaued over a recent window.
+ *
+ * Returns true if the relative range (max - min) / mean of the last
+ * `window` overflow values is below `threshold`. Matches XPlace's
+ * check_plateau() in param_scheduler.py.
+ *
+ * Shared primitive: called by updateDensityWeight() (the emergency jolt) above and by
+ * checkFineDivergenceGuard() (the plateau kill) above -- kept at the end of the file rather
+ * than under either caller since it belongs to neither exclusively.
+ */
+bool Placer::checkOverflowPlateau(int window, float threshold)
+{
+    if ((int)ovfw_history.size() < window) return false;
+    auto begin = ovfw_history.end() - window;
+    auto end = ovfw_history.end();
+    float min_val = *std::min_element(begin, end);
+    float max_val = *std::max_element(begin, end);
+    float mean_val = std::accumulate(begin, end, 0.0f) / window;
+    return (max_val - min_val) / (mean_val + 1e-8f) < threshold;
+}
+
+
+/**
+ * @brief Detect divergence, mirroring XPlace check_divergence (param_scheduler.py).
+ *
+ * Fires only once the recent HPWL mean has climbed meaningfully above the best known
+ * HPWL (so the healthy early phase, where HPWL rises as cells spread, is not flagged)
+ * AND overflow is no longer making progress — it has grown past its best, plateaued
+ * high, or is fluctuating upward. Reference is the primary best (converged) if we have
+ * one, else the lowest-overflow fallback so the guard is useful even before convergence.
+ *
+ * Shared primitive: the only caller today is checkFineDivergenceGuard() above; kept beside
+ * checkOverflowPlateau() as the file's other reusable low-level predicate.
+ */
+bool Placer::checkDivergence(int window, float threshold)
+{
+    // Reference the CONVERGED best only (XPlace check_divergence returns False while
+    // best_metric["hpwl"] is inf). best_aux tracks the newest lowest-overflow point,
+    // so on a healthy monotonic descent a trailing-mean-vs-newest comparison always reads
+    // "worse than best" on both HPWL and overflow and false-fires the guard — that killed
+    // adaptec2 at iter 332 with overflow still dropping ~2%/iter toward the 0.07 threshold.
+    if (!best_primary.valid) return false;
+    const BestSolution& best = best_primary;
+    if ((int)hpwl_history.size() <= window) return false;
+
+    auto hpwl_begin = hpwl_history.end() - window;
+    float wl_mean = std::accumulate(hpwl_begin, hpwl_history.end(), 0.0f) / window;
+    float wl_ratio = (wl_mean - best.hpwl) / (best.hpwl + 1e-8f);
+    if (wl_ratio <= threshold * 1.2f)
+        return false;  // HPWL still near its best → not diverging
+
+    // HPWL is rising above best; classify by how overflow behaves over the window.
+    auto ovfw_begin = ovfw_history.end() - window;
+    float ovfw_mean = std::accumulate(ovfw_begin, ovfw_history.end(), 0.0f) / window;
+    float ovfw_min  = *std::min_element(ovfw_begin, ovfw_history.end());
+    float ovfw_max  = *std::max_element(ovfw_begin, ovfw_history.end());
+    int rises = 0;
+    for (auto it = ovfw_begin + 1; it != ovfw_history.end(); ++it)
+        if (*it > *(it - 1)) rises++;
+    float ovfw_up_frac = (float)rises / (window - 1);
+
+    float ovfw_ratio = (ovfw_mean - std::max(overflow_threshold, best.overflow)) /
+                       (best.overflow + 1e-8f);
+
+    if (ovfw_ratio > threshold)                                  return true; // overflow grew past best
+    if ((ovfw_max - ovfw_min) / (ovfw_mean + 1e-8f) < threshold) return true; // plateaued high
+    if (ovfw_up_frac > 0.6f)                                     return true; // fluctuating upward
     return false;
 }
 

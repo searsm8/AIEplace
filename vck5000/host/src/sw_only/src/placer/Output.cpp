@@ -376,23 +376,7 @@ void Placer::printFinalResults()
     Logger::log_info("All outputs saved to: " + run_output_dir);
 }
 
-/// @brief Apply selectBestSolution() and restore THAT tracker's geometry. The slot comes from the
-///        same struct as the metadata being logged, so the two cannot disagree (TODO #24).
-Placer::BestChoice Placer::restoreBestSolution()
-{
-    BestChoice chosen = selectBestSolution();
-
-    if (chosen.sol) {
-        restoreBestPlacement(chosen.slot);   // restores both halves; everything below reports on it
-        Logger::log_info("Restored " + std::string(chosen.type) + " best placement from iteration " +
-            std::to_string(chosen.sol->iteration) +
-            " (HPWL: " + std::to_string(chosen.sol->hpwl) +
-            ", overflow: " + std::to_string(chosen.sol->overflow) + ")");
-    } else {
-        Logger::log_info("No best placement saved (solver may not have stabilized). Using last solution.");
-    }
-    return chosen;
-}
+// restoreBestSolution() moved to BestSolution.cpp (2026-08-31).
 
 /// @brief Compute the run's headline HPWL/overflow/timing metrics on the restored placement.
 Placer::FinalMetrics Placer::computeFinalMetrics()

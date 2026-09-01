@@ -424,7 +424,7 @@ int DataBase::freezeMovableMacros()
         //
         // The caller normally arrives here straight from restoreBestPlacement(), which since
         // 2026-08-26 writes node_pos AND probe_pos to the same snapshot, making this a no-op. It
-        // is NOT redundant: beginFixedMacroPhase() skips that restore entirely when phase 1
+        // is NOT redundant: beginPhase2() skips that restore entirely when phase 1
         // recorded no best solution, and then node_pos is u_k while probe_pos is v_k. Keep it.
         comp_p->initializeState(comp_p->next.node_pos);
         frozen++;

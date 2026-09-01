@@ -58,20 +58,7 @@ void Placer::initHpwlLut()
         + " entries (normalized), init_gamma=" + std::to_string(gamma));
 }
 
-/**
- * @brief Update the WA smoothing length gamma on the XPlace overflow-driven schedule and
- *        refresh the LUT scalars. gamma = 10^((overflow - 0.1) * 20/9 - 1) * base_gamma
- *        (overflow 1.0 -> ~10x base; 0.55 -> 1x; 0.07 -> ~0.09x).
- */
-void Placer::updateGamma(float overflow)
-{
-    if (!gamma_schedule) return;
-    float coef = std::pow(10.0f, (overflow - 0.1f) * (20.0f / 9.0f) - 1.0f);
-    gamma     = coef * base_gamma;
-    inv_gamma = 1.0f / gamma;
-    hpwl_lut_range = LUT_GAMMA_MULTIPLIER * gamma;
-    inv_lut_step   = 1.0f / (LUT_STEP_NORM * gamma);
-}
+// updateGamma() moved to Schedule.cpp with the rest of the gamma schedule (2026-08-31).
 
 /// @brief Linearly interpolate into the precomputed exp(-d/gamma) LUT.
 inline float Placer::lutLookup(float d) const
