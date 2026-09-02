@@ -73,6 +73,19 @@ If something does need amending, an annotation is better than hard edits.
 4. Place new reports in `.claude/1_REVIEW/reports`. These files should be text only, since it is git tracked.
 Large artifacts such as images or gifs should be placed in `.claude/2_ARTIFACTS` which is not git tracked (create if needed).
 
+## A handoff IS a report-in-progress (policy, 2026-08-31)
+There is no separate, persistent class of handoff document. A handoff exists only **between
+sessions** — it is the running draft of a report while the work is still open. When the work
+finishes, that same file **becomes the report**: rename `HANDOFF_...` → `REPORT_...` in place, in
+`.claude/1_REVIEW/reports/`. Do not accumulate a graveyard of stale handoffs — the old pile in
+`.claude/1_REVIEW/handoffs/` was deleted on 2026-08-31 (git history holds it) and the directory is
+gone. Consequences:
+- **Write a handoff only when a session ends mid-task** and the next session needs the draft.
+  Name it `[_NEW_]HANDOFF_<#n>_<desc>_<YYYYMMDD>.md`, in `reports/` (not a separate `handoffs/`).
+- **When the task closes, convert it:** `git mv` the file to `REPORT_...` and finish the writeup.
+  One document, two lifecycle stages — never two files for the same work.
+- `HANDOFF` stays in the `<TYPE>` list below only as this transient draft stage.
+
 ## 📄 Naming what you hand Mark — the filename carries the metadata
 Work here is asynchronous and multi-session, so filenames are an efficient channel to communicate across different coding sessions, and to me when I am reviewing files.
 
@@ -82,7 +95,8 @@ When naming new files:
   The leading underscore is load-bearing: it sorts the unread set to the top of a listing in File Explorer, VS Code and PowerShell.
 
 2)  `<TYPE>` — one of `REPORT`, `HANDOFF`, `PLAN`, `EXPLAINER`. Deliberately small; if none fits,
-  default to `REPORT`.
+  default to `REPORT`. `HANDOFF` is the transient draft stage of a `REPORT` (see the policy above),
+  not a permanent kind.
 
 3) If the file is attached to an open TODO, add it's number to the filename.
 

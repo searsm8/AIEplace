@@ -18,7 +18,8 @@ description: >
 
 The placer dumps node positions to `<run_dir>/coord_dump/` (binary frames + `manifest.json`); this tool
 reads that dump and renders PNGs/GIFs entirely offline, in seconds, however many times you want.
-Full spec and history: `1_REVIEW/handoffs/NEW_HANDOFF_viz_offline_tool_20260805.md`.
+(The original design handoff was folded into this skill and deleted in the 2026-08-31 handoff
+cleanup; see git history if the original spec is needed.)
 
 ## 0. Check the run has a dump
 

@@ -48,10 +48,42 @@ Fast iteration left breadcrumbs and we started tripping over them. Workflow dirs
 tree committed, **67 GB freed** from `results/` (helper: `tools/prune_run_artifacts.sh`),
 `vck5000/` top level tidied, harnesses moved to `vck5000/test/`. What is left is notes hygiene.
 
-- [ ] Consolidate `.claude/1_REVIEW/` handoffs and reports; apply the `_NEW_` convention consistently —
-      un-prefix the ones Mark has read, keep it on the rest.
+- [x] **Handoffs are now reports-in-progress (2026-08-31, Mark).** New policy in `CLAUDE.md`
+      ("A handoff IS a report-in-progress"): a handoff exists only *between* sessions and, when the
+      task closes, is `git mv`'d in place to `REPORT_...`. No standing `handoffs/` class anymore —
+      all 16 accumulated handoffs deleted and the `handoffs/` dir removed (git history holds them).
+      `_NEW_` un-prefixing stays Mark's alone; not part of this item.
 - [ ] Fold the still-relevant findings out of old reports into tasks.md / memory so those reports
       can be archived.
+- [x] **Placer class map + three structural refactors (2026-08-31, bit-identical).** Built a
+      hierarchical map of the `Placer` class (all ~85 methods by responsibility along the dataflow,
+      each tagged with its file, misplacements flagged) — artifact "Placer Class Map". Acting on it,
+      with Mark, three readability moves (freeze is functionality-only), each verified
+      `make test-regress` + `test-regress-slow` bit-identical (mms_adaptec1 exercises phase 2):
+      (1) **new `placer/BestSolution.cpp`** gathers the 6 best-solution methods that had been split
+      across AIEplace/Schedule/Output — this is why `BestPlacement` felt wrong at the top level;
+      (2) **all γ code into `Schedule.cpp`** — `updateGamma` moved out of `Partials.cpp` beside
+      `configureGammaSchedule`; (3) **`run()` reads plainly** — `beginFixedMacroPhase()` split into
+      `readyForFixedMacroPhase()` (eligibility) + `void beginFixedMacroPhase()` (transition), gated
+      in `run()` by `m_phase == Phase::MIXED_SIZE`, retiring the long explanatory comment. New file
+      registered in `makeflags.mk`. Remaining flagged-but-open: `recordIterationResults` placement.
+- [x] **sw_only readability refactor is real and ongoing — tracked in #39, not here.** The comment
+      sweep below found the *comments* clean; it did not anticipate the *structural* readability
+      pass (function order, naming, file placement) Mark opened right after, driven by thesis
+      presentation needs. Do not read "found clean, no refactor taken" below as the current state.
+      <details><summary>Original 2026-08-31 entry: "sw_only comment + readability audit — found
+      clean, no refactor taken"</summary>
+
+      > Freeze is functionality-only, so readability refactoring is admitted; but the audit found
+      > little to pay. Comments: the masked→smoothed rename has zero stale survivors, the removed BB
+      > step-clamp is correctly annotated as gone, deleted toggles are documented *as* deleted with
+      > dates/TODOs. Structure: Output/Schedule/Setup are already 13–20 small single-purpose
+      > functions; the one long function (`updateDensityWeight`, 107 lines) is ~80% load-bearing
+      > history comments over ~30 lines of code. Refactoring clean code would only risk the
+      > bit-identical contract — not done, per surgical-changes. Real refactor debt lives in
+      > **pl_algo** (`Driver.cpp`, #10), which is device-gated. `make test-regress` baseline
+      > confirmed green this session.
+      </details>
 - [ ] **Per-run `viz/` dumps are reproducible output** (~96 MB per adaptec1 run, ~480 MB per
       bigblue4). Already swept by the default slim. Given the size, consider making viz output
       **opt-in for sweeps** rather than default.
@@ -73,8 +105,10 @@ tree committed, **67 GB freed** from `results/` (helper: `tools/prune_run_artifa
       2026-08-12 `5b52f50` scoring-pipeline move), and the question is now answered — it stays,
       marked dormant, because it evaluates overflow *without* invoking the fragile legalizer.
       </details>
-- [~] The stale `run_config.json` re-baseline comment is fixed but **uncommitted** — bundled with
-      #2's comment pruning.
+- [x] **Moot 2026-08-31.** The "stale `run_config.json` re-baseline comment" item is dead: there is
+      no `run_config.json` (the sw_only config is `default_config.toml`), the working tree has no
+      uncommitted config change, and a 2026-08-31 sweep found the toml's comments already clean. #2
+      (which it was "bundled with") is closed and in history.md.
 - [x] **DONE 2026-08-17 — `~/phd/Xplace`'s 3 local edits are committed**, on a new branch
       `local-fixes` (the clone was sitting on `main`). Split into three commits so the two genuine
       fixes are cherry-pickable and the instrumentation is not: `5ecf97e` apply_precond returns
@@ -741,6 +775,82 @@ GP left them (overlapping; phase-2 overflow is still meaningful, the placement i
       because every `terminal` in `data/raw/mms/*.nodes` is zero-area; it would bite on any
       LEF/DEF mixed-size input with a sized fixed macro. **Don't fix this before the A/B** — if the
       file goes, the gap goes with it.
+
+---
+
+## #39 — sw_only readability refactor, for thesis presentation (opened 2026-08-31, Mark)
+
+Mark is presenting this codebase for his thesis and needs to know what's in it and be able to
+explain it — going through the high-level `Placer` files with a fine-tooth comb, comparing code
+snippets against a hierarchical class map to check each is in the right file, right order, right
+name. **Functionality is frozen; readability is explicitly in scope** (CLAUDE.md's freeze section).
+Every code move is verified bit-identical (`make test-regress[-slow]`) before landing — skip that
+per-change during an active session only when Mark says so; confirm it before calling a stretch of
+readability work done. Session started from — and is guided by — the "Placer Class Map" artifact
+built 2026-08-31 (all ~85 `Placer` methods grouped by responsibility along the dataflow, each
+tagged with its file; misplacements flagged).
+
+**Session 2026-08-31 → 2026-09-01 landed and is now committed** (3 commits, `1ed9ea7`/`652ba25`/
+`5867600` on `pl_algo` — see [[_NEW_HANDOFF_39_readability_refactor_session_20260901.md]] for the
+full narrative, including a real bit-identical regression hit and resolved mid-session):
+
+- **New `placer/BestSolution.cpp`** — gathers 6 best-solution methods that were split across
+  AIEplace/Schedule/Output (this is why `BestPlacement` felt wrong in the top-level file).
+- **All γ code consolidated into `Schedule.cpp`** — `updateGamma` out of `Partials.cpp`.
+- **`run()` reads plainly via `phase`** — `beginFixedMacroPhase()` split into `readyForPhase2()`
+  (eligibility) + `beginPhase2()` (transition), gated in `run()` by `phase == Phase::MIXED_SIZE`.
+- **`FixedMacroPhase` → `Phase2`** renamed throughout; `Phase2.cpp` now states explicitly how
+  XPlace's 3 stages map onto our 2-state `Phase` enum.
+- **`Step.cpp` reordered** — `performNextStep()` (Algorithm 2, the heart) and `estimateInitialStep()`
+  lead; shared primitives follow in call order; `logStepDiagnostics()` last.
+- **`Schedule.cpp` reordered** — `updateSchedule()` and `checkConvergence()` (both called directly
+  from `run()`) lead, each followed by its dispatched callees in call order; the two cross-cutting
+  predicates (`checkOverflowPlateau`, `checkDivergence`) moved to the end as shared primitives.
+- **`checkForNaN()`** — the two scattered `nan_detected` checks consolidated into one Schedule.cpp
+  function, called once from `run()`.
+- **`dumpScheduleTrace()` self-gates** — the config check moved inside the function; the call site
+  is now unconditional.
+- **`iterationReset()` moved** from `AIEplace.cpp` to `Step.cpp`, beside `advanceIterationState()`.
+- **`beginPhase2()` now calls `performIterationZero()`** instead of hand-duplicating its body —
+  closes a silent-drift risk.
+- **`m_` prefix dropped** from every `Placer` data member (landed in a parallel session, rolled into
+  commit 1 here as a from-`HEAD` mechanical rename, independently re-verified bit-identical).
+
+**A real bit-identical regression was hit and resolved.** `make test-regress-slow` failed
+mid-session (`density_weight` off by ~0.3% from iteration 3 onward, on every design including ones
+with no macros). Root cause, found by direct A/B bisection of the diff (not none of the readability
+moves above — all individually re-verified clean): a **statement-order swap** in `performIteration()`
+— `printIterationResults()` moved to run *after* `updateSchedule()` instead of *before*, part of an
+unrelated "group by function type" edit. Confirmed by flipping the order alone, reproducibly, across
+clean rebuilds. **The mechanism is still unknown** — none of `printIterationResults()`'s callees
+write any state `updateSchedule()` reads, so this reads like a compiler/FPU-state side effect of the
+iostream formatting in the print path, not a logic bug. Effect was negligible on the one benchmark
+measured (final HPWL/overflow identical to 4 sig figs; only the internal `density_weight` scheduling
+value drifted). **The original order is kept** (Mark's call) to leave the committed baselines
+unchanged — see next section.
+
+Open / queued for a future session:
+- [ ] **Understand the print/updateSchedule order-sensitivity mechanism.** Not urgent (order is
+      correct in committed code, `test-regress-slow` is green), but it's an undocumented,
+      load-bearing statement-order dependency that looks like harmless reordering — exactly the
+      kind of thing that bites again. Suspect: iostream formatting (`SCI`/`PREC`/`std::to_string`)
+      perturbing FPU rounding-mode state ahead of `updateDensityWeight()`'s `std::pow()` call. If
+      confirmed, the fix is probably a comment at the call site, not a code change.
+- [ ] **`Setup.cpp`** — `setupDesign()` is the orchestrator but calls `loadConfiguration()` *first*,
+      yet that function is declared *last* among its siblings — same declared-order-vs-call-order
+      mismatch `performNextStep` had. Reorder callees to match `setupDesign()`'s actual call
+      sequence.
+- [ ] **`Output.cpp`** — `recordIterationResults()` runs every iteration but sits at the very
+      bottom of the file, below the once-per-run final-report functions. The class-map session
+      flagged it as arguably closer kin to `BestSolution.cpp` (it does real best-solution snapshot
+      bookkeeping, not just printing) — worth revisiting that placement, not just its position
+      within Output.cpp.
+- [ ] Sweep the remaining `placer/*.cpp` files (`Density.cpp`, `Partials.cpp`, `Phase2.cpp`,
+      `PositionDump.cpp`) for the same pattern — reorder only where a real orchestrator/callee
+      mismatch exists, not for its own sake (Density.cpp and Partials.cpp's dispatchers already
+      lead their files; verify before touching).
+- [ ] Fold this task into `#1`'s two 2026-08-31 sub-items once concluded — see the superseded note
+      there; that "found clean, no refactor taken" verdict was true at the time but is now stale.
 
 ---
 
