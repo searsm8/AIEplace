@@ -842,11 +842,20 @@ Open / queued for a future session:
       Step.cpp/Schedule.cpp; `setupGrid()` moved next to it (the constructor's next call after
       `setupDesign()`). Pure reordering of out-of-line member definitions — no logic touched.
       Verified: `make host` clean, `make test-regress` bit-identical on both designs.
-- [ ] **`Output.cpp`** — `recordIterationResults()` runs every iteration but sits at the very
-      bottom of the file, below the once-per-run final-report functions. The class-map session
-      flagged it as arguably closer kin to `BestSolution.cpp` (it does real best-solution snapshot
-      bookkeeping, not just printing) — worth revisiting that placement, not just its position
-      within Output.cpp.
+- [x] **DONE 2026-09-02 — `configureThreadPool()` relocated + `setupGrid()` folded into
+      `setupDesign()` (`df6a2c2`).** `configureThreadPool()` (a static helper with only one
+      caller) moved down to its call-order position right after `loadConfiguration()`, behind a
+      forward declaration, so `setupDesign()` is the first function in the file as Mark asked.
+      `setupGrid()`'s call moved from the constructor into `setupDesign()` (as its last step) —
+      safe because nothing ran between the two calls in the constructor, so no execution order
+      changed; `setupGrid()` itself stays put, already at its call-order position. Verified:
+      `make host` clean, `make test-regress-slow` bit-identical on all three baselines
+      (mms_adaptec1 exercises phase 2).
+- [x] **DONE 2026-09-02 — `recordIterationResults()` moved to `BestSolution.cpp` (`df6a2c2`).**
+      It drives the same three trackers (primary/aux/rollback) the rest of that file manages, not
+      output/reporting — placed right before its callee `snapshotBestPlacement()`. A one-line
+      breadcrumb left in `Output.cpp`, matching the existing `restoreBestSolution()` breadcrumb.
+      Verified: `make host` clean, `make test-regress-slow` bit-identical on all three baselines.
 - [ ] Sweep the remaining `placer/*.cpp` files (`Density.cpp`, `Partials.cpp`, `Phase2.cpp`,
       `PositionDump.cpp`) for the same pattern — reorder only where a real orchestrator/callee
       mismatch exists, not for its own sake (Density.cpp and Partials.cpp's dispatchers already
