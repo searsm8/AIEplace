@@ -836,10 +836,12 @@ Open / queued for a future session:
       kind of thing that bites again. Suspect: iostream formatting (`SCI`/`PREC`/`std::to_string`)
       perturbing FPU rounding-mode state ahead of `updateDensityWeight()`'s `std::pow()` call. If
       confirmed, the fix is probably a comment at the call site, not a code change.
-- [ ] **`Setup.cpp`** — `setupDesign()` is the orchestrator but calls `loadConfiguration()` *first*,
-      yet that function is declared *last* among its siblings — same declared-order-vs-call-order
-      mismatch `performNextStep` had. Reorder callees to match `setupDesign()`'s actual call
-      sequence.
+- [x] **DONE 2026-09-02 — `Setup.cpp` reordered to match call order (`a2a2c1b`).**
+      `setupDesign()`'s callees (`loadConfiguration`/`resolveGridResolution`/`loadDesignDatabase`/
+      `tagMovableMacros`/`createFillers`) now follow it in call order, same convention as
+      Step.cpp/Schedule.cpp; `setupGrid()` moved next to it (the constructor's next call after
+      `setupDesign()`). Pure reordering of out-of-line member definitions — no logic touched.
+      Verified: `make host` clean, `make test-regress` bit-identical on both designs.
 - [ ] **`Output.cpp`** — `recordIterationResults()` runs every iteration but sits at the very
       bottom of the file, below the once-per-run final-report functions. The class-map session
       flagged it as arguably closer kin to `BestSolution.cpp` (it does real best-solution snapshot
