@@ -1,11 +1,13 @@
 /**
  * @file Schedule.cpp
  * @brief gamma/lambda schedule policy and convergence/divergence checks. Split out of
- *        AIEplace.cpp. Two top-level entry points, in the order performIteration()/run() call
- *        them: updateSchedule() then checkConvergence(); each is followed immediately by the
- *        callees it dispatches to, in call order. The two shared low-level predicates
- *        (checkOverflowPlateau, checkDivergence) are used by callees under BOTH entry points, so
- *        they sit at the end as reusable primitives rather than under either one.
+ *        AIEplace.cpp. Three top-level entry points, in the order run()/performIteration() call
+ *        them: updateSchedule() and checkConvergence() are each followed immediately by the
+ *        callees they dispatch to, in call order; checkForNaN() is a standalone third check —
+ *        run() calls it directly, bypassing checkConvergence() entirely, so it is not filed under
+ *        it. The two shared low-level predicates (checkOverflowPlateau, checkDivergence) are used
+ *        by callees under BOTH updateSchedule() and checkConvergence(), so they sit at the end as
+ *        reusable primitives rather than under either one.
  */
 
 #include "AIEplace.h"
@@ -461,6 +463,24 @@ bool Placer::checkOverflowCountdown()
     Logger::log_detail("Convergence countdown: " +
                       std::to_string(convergence_iterations_remaining) + " remaining");
     return false;
+}
+
+
+/**
+ * @brief Hard divergence: nan_detected (Partials.cpp) is set once a NaN appears in the HPWL
+ *        partials, inside an OpenMP loop where `return` is illegal -- sticky, never cleared, so
+ *        this fires on the very next check. A standalone check rather than a checkConvergence()
+ *        dispatch branch: this is a numerically catastrophic case, not the gradual metrics NaN
+ *        hasNaNMetrics() guards against, and run() calls it directly, bypassing checkConvergence()
+ *        entirely (see this file's header comment).
+ */
+bool Placer::checkForNaN()
+{
+    if (!nan_detected) return false;
+    stop_reason = StopReason::NAN_PARTIALS;
+    Logger::log_error("Stopping: NaN in HPWL partials at iteration " +
+                      std::to_string(iteration) + " (hard divergence)");
+    return true;
 }
 
 

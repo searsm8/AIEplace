@@ -16,20 +16,16 @@ void Placer::run()
     while( true )
     {
         performIteration();
+
         if (checkConvergence()) {
             // MMS benchmarks run with Phase::MIXED_SIZE.
             // Upon converging, lock macros and begin phase 2 (Phase::STDCELL_FIXED_MACRO).
             if (phase == Phase::MIXED_SIZE && readyForPhase2()) {
                 beginPhase2();
-                continue;
-            }
-            break;
+            } else break;
         }
 
-        if (nan_detected) {
-            stop_reason = StopReason::NAN_PARTIALS;
-            break;
-        }
+        if (checkForNaN()) break; // NaN detected, very bad, stop immediately
     }
 }
 
@@ -54,18 +50,15 @@ void Placer::performIteration()
 
     updateSchedule();
 
-    if (cfg["output"]["dump_schedule_trace"].value_or(false))
-        dumpScheduleTrace();
-
-    if (nan_detected)
-        Logger::log_error("Stopping: NaN in HPWL partials at iteration " +
-                          std::to_string(iteration) + " (hard divergence)");
+    dumpScheduleTrace();
 }
 
 /**
- * @brief Iteration-zero bootstrap: compute the first gradients and initialize solver state,
- *        before the first numbered iteration runs. Probe positions (v_1 = u_1) are already
- *        set by initializePlacement().
+ * @brief Iteration-zero bootstrap: compute the first gradients and initialize solver state from
+ *        whatever the current probe positions (v_k = u_k) are. Two callers, two different
+ *        position-setters: run() calls it right after initializePlacement() seeds the whole
+ *        design; beginPhase2() calls it again after freezing the macros and re-seeding the std
+ *        cells. This function does not care which -- it only assumes positions are already set.
  */
 void Placer::performIterationZero()
 {
@@ -82,23 +75,10 @@ Placer::Placer(std::string config_filepath_arg)
     config_filepath = config_filepath_arg;
 
     setupDesign();
-    Logger::log_detail("Database setup time: " +
-            std::to_string(Logger::getFunctionTime("setupDesign") / 1.0e6) + " s");
-
     setupGrid();
     createRunOutputStructure();
     configureGammaSchedule();
     initializePositionDump();
-}
-
-/**
- * @brief Reset all nodes and nets in preparation for the next iteration
- */
-void Placer::iterationReset()
-{
-    TIME_FUNCTION();
-    grid.iterationReset();
-    db.iterationReset();
 }
 
 AIEPLACE_NAMESPACE_END

@@ -69,6 +69,7 @@ private:
     bool hasCoarseDivergence();        // HPWL blown past 2x the best known solution
     bool checkFineDivergenceGuard();   // near-converged-band divergence guard (burns life)
     bool checkOverflowCountdown();     // XPlace-style post-threshold countdown to stop
+    bool checkForNaN();  // hard divergence: nan_detected (Partials.cpp), bypasses checkConvergence()
     float getMemoryUsageMB();
 
 public:
@@ -401,7 +402,6 @@ public:
 
     // Pre-run preparation
     void initializePlacement();
-    void iterationReset();
     void initializeDensityWeight();
 
     // Functions implemented on CPU
@@ -446,6 +446,7 @@ public:
     void stepAllNodes();                // Algorithm 1, lines 2–4
     void enforceDieBoundaries(Node* node_p);           // clamp next.node_pos to die area
     void advanceIterationState();       // promote next → current for all nodes
+    void iterationReset();              // clear per-node/per-bin accumulators before a gradient eval
     void updateSchedule();              // throttled γ/λ update (skip_update gate)
     void updateDensityWeight();
     void updateGamma(float overflow);

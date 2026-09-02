@@ -162,6 +162,9 @@ void Placer::appendIterationLog(float hpwl, float overflow)
 /// stop_reason is the StopReason enum as an int (RUNNING=0 CONVERGED=1 MAX_ITERATIONS=2
 /// NAN_METRICS=3 NAN_PARTIALS=4 DIVERGED_HPWL=5 DIVERGENCE_GUARD=6); phase is 1-based. Meow.
 void Placer::dumpScheduleTrace() {
+    // Dumps can be quite large, so exit unless config enabled
+    if (!cfg["output"]["dump_schedule_trace"].value_or(false)) return;
+
     std::ofstream f;
     fs::path path = output_dir;
     f.open(path.append("schedule_trace.csv"), std::ios_base::app);

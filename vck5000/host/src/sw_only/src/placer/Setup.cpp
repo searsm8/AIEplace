@@ -76,6 +76,8 @@ void Placer::setupDesign()
     analyzeDesignArea(bins_auto);
     configurePreconditioner();
     applyMixedSizeStopPolicy();   // needs num_movable_macros from analyzeDesignArea
+    Logger::log_detail("Database setup time: " +
+            std::to_string(Logger::getFunctionTime("setupDesign") / 1.0e6) + " s");
 }
 
 void Placer::setupGrid()

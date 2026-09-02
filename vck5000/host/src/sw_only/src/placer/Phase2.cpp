@@ -2,12 +2,20 @@
  * @file Phase2.cpp
  * @brief The mixed-size phase-1 -> phase-2 transition (TODO #13).
  *
- * XPlace's mixed-size flow is three stages (run_placement_nesterov.py:167-230):
- *   1. Mixed-GP        — macros and standard cells placed together. This is phase 1.
- *   2. Macro legalization — an LP that removes macro overlap at minimum displacement.
- *   3. A second full GP pass with the macros FIXED, standard cells re-seeded from scratch.
+ * Placer::Phase (AIEplace.h) has exactly two states:
+ *   Phase::MIXED_SIZE          — phase 1: macros and standard cells placed together.
+ *   Phase::STDCELL_FIXED_MACRO — phase 2: macros frozen as obstacles, standard cells re-seeded
+ *                                 and re-solved from scratch.
  *
- * The thing that makes stage 3 work is not subtle: while a macro is movable it is an
+ * XPlace's own mixed-size flow is three STAGES (run_placement_nesterov.py:167-230); stages 2 and
+ * 3 together are what our single phase 2 covers:
+ *   1. Mixed-GP            — phase 1, above.
+ *   2. Macro legalization  — an LP that removes macro overlap at minimum displacement.
+ *   3. A second full GP pass with the macros FIXED, standard cells re-seeded from scratch.
+ *      (2) and (3) together are phase 2 — there is no separate Phase enumerator for the
+ *      legalization step; it runs inside beginPhase2() on the way from phase 1 to phase 2.
+ *
+ * The thing that makes phase 2 work is not subtle: while a macro is movable it is an
  * incompressible lump of area that the density field can never satisfy at target_density < 1,
  * so it radiates a standing force forever. Freezing it turns it into an obstacle the standard
  * cells simply flow around. XPlace's own newblue5 goes 0.1697 -> 0.0452 exact overflow across
@@ -129,12 +137,11 @@ void Placer::beginPhase2()
                      std::to_string(db.getFillerStartIndex()) + " movable cells, stop overflow " +
                      PREC(overflow_threshold));
 
-    // Re-bootstrap the gradients and the density weight at the new positions -- this is
-    // performIterationZero() without re-running iteration-zero bookkeeping.
-    iterationReset();
-    computeHpwlPartials();
-    computeElectricFields();
-    initializeDensityWeight();
+    // Re-bootstrap the gradients and the density weight at the new positions. Positions were set
+    // above by reinitializeStdCells() (std cells) and freezeMovableMacros() (macros), not by
+    // initializePlacement() -- performIterationZero() correctly assumes only "positions already
+    // set by someone," not who set them or how, so it is safe and correct to reuse here.
+    performIterationZero();
 
     // ...and the re-seeded starting state, so the GIF shows what phase 2 actually begins from.
     dumpIterationPositions("reseeded");

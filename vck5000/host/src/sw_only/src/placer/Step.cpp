@@ -328,6 +328,20 @@ void Placer::advanceIterationState()
 }
 
 
+/**
+ * @brief Reset per-node and per-bin accumulators before a fresh gradient evaluation.
+ *
+ * Every call site is immediately followed by computeHpwlPartials() + computeElectricFields() --
+ * this is the "clear the scratch state" half of that pair, not a step in its own right.
+ */
+void Placer::iterationReset()
+{
+    TIME_FUNCTION();
+    grid.iterationReset();
+    db.iterationReset();
+}
+
+
 /// @brief Log per-iteration step diagnostics (gradient norms, step length, overflow) — DEBUG only.
 void Placer::logStepDiagnostics()
 {
