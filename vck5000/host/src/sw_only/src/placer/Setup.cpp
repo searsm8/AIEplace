@@ -80,112 +80,6 @@ void Placer::setupDesign()
             std::to_string(Logger::getFunctionTime("setupDesign") / 1.0e6) + " s");
 }
 
-void Placer::setupGrid()
-{
-    grid = Grid(db.getDieArea(), bins_per_row, bins_per_row);
-    grid.setClampDensity(enable_density_clamp);
-    grid.setTargetDensity(target_density);
-    die_size = min(grid.getDieWidth(), grid.getDieHeight());
-}
-
-/**
- * @brief Tag movable macros with XPlace's is_mov_macro rule (database.py:621-632). Consumed by
- *        DataBase::addFillers (which works in the standard-cell frame), the macro deposit weight
- *        in computeNodeFootprint (TODO #11b), and the macro legalizer. A MOVABLE node is a macro
- *        iff all three hold:
- *          1. height > 2.01 * row_height          (taller than ~two standard-cell rows)
- *          2. area   > 10 * mean(area of the smallest 99.9% of movable nodes)
- *          3. both dimensions non-degenerate
- *        Fillers are excluded (XPlace's masked_fill spans only the real movable range), as are
- *        FIXED nodes (XPlace clears is_mov_macro above mov_rhs).
- *
- * row_height uses the mean movable cell height — the same proxy analyzeDesignArea already uses for
- * the ePlace grid formula; sw_only has no parsed row pitch exposed here.
- *
- * NOTE: this is a finer rule than the die-area heuristic behind Placer::num_movable_macros (which
- * drives the auto-preconditioner). Two macro definitions now coexist — unify later, see TODO #11.
- */
-void Placer::tagMovableMacros()
-{
-    std::vector<float> movable_areas;
-    float height_sum = 0.0f;
-    for (const auto& item : db.getComponents()) {
-        if (item.second->getStatus() == FIXED) continue;
-        movable_areas.push_back(item.second->getArea());
-        height_sum += item.second->getYsize();
-    }
-    if (movable_areas.empty()) return;
-
-    float row_height = height_sum / movable_areas.size();
-
-    // Threshold from the smallest 99.9% of movable areas, so a handful of huge macros cannot drag
-    // the mean up and hide themselves.
-    std::vector<float> ascending_areas = movable_areas;
-    std::sort(ascending_areas.begin(), ascending_areas.end());
-    size_t small_count = std::max<size_t>(1, (size_t)(ascending_areas.size() * 0.999));
-    float mean_small_area = std::accumulate(ascending_areas.begin(),
-                                            ascending_areas.begin() + small_count, 0.0f) / small_count;
-    float macro_area_threshold = 10.0f * mean_small_area;
-
-    int tagged = 0;
-    for (const auto& item : db.getComponents()) {
-        Component* comp_p = item.second;
-        if (comp_p->getStatus() == FIXED) continue;
-        bool is_tall  = comp_p->getYsize() > 2.01f * row_height;
-        bool is_large = comp_p->getArea() > macro_area_threshold;
-        bool is_sized = comp_p->getXsize() > 1e-4f && comp_p->getYsize() > 1e-4f;
-        comp_p->setMovableMacro(is_tall && is_large && is_sized);
-        if (comp_p->isMovableMacro()) tagged++;
-    }
-    Logger::log_detail("Movable macros (XPlace is_mov_macro rule): " + std::to_string(tagged)
-        + "  [row_height=" + PREC(row_height) + ", area_thresh=" + SCI(macro_area_threshold) + "]");
-}
-
-/**
- * @brief Decide bins_per_row from an explicit config override; otherwise defer to the
- *        ePlace-formula grid computed once the database is read (see analyzeDesignArea).
- * @return true if the grid still needs to be auto-sized (no explicit override was given)
- */
-bool Placer::resolveGridResolution()
-{
-    bool bins_auto = !bool(cfg["params"]["bins_per_row"]);
-    if (!bins_auto) {
-        bins_per_row = cfg["params"]["bins_per_row"].value_or(bins_per_row);
-        Logger::log_info("Grid resolution: " + std::to_string(bins_per_row) + " x " + std::to_string(bins_per_row));
-    }
-    return bins_auto;
-}
-
-/// @brief Read the LEF/DEF design files and apply the benchmark's maximum_utilization if given.
-void Placer::loadDesignDatabase()
-{
-    db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
-
-    // Benchmark-specified maximum_utilization overrides config default
-    if (db.getMaximumUtilization() > 0.0f) {
-        target_density = db.getMaximumUtilization();
-        Logger::log_info("Using benchmark maximum_utilization: " +
-                        std::to_string(target_density));
-    }
-}
-
-/**
- * @brief Size and create the filler cells, then build the flat node index.
- *
- * Runs after tagMovableMacros because the filler math is standard-cell-only, and before
- * analyzeDesignArea because addFillers may RAISE target_density (XPlace does the same when a
- * design is denser than its target) and the grid formula reads it.
- */
-void Placer::createFillers()
-{
-    if (ConfigUtils::require<bool>(cfg, "params", "enable_filler"))
-        target_density = db.addFillers(target_density);
-
-    // Every node now exists and every PlacementStatus is final, so the flat iteration index
-    // the threaded loops walk can be built once here.
-    db.buildNodeIndex();
-}
-
 /**
  * @brief Parse the TOML config file named by config_filepath into cfg (toml++), then read
  *        every hyperparameter, compute-method, and convergence setting.
@@ -280,6 +174,104 @@ void Placer::loadConfiguration()
     // Read other stuff
     input_dir = fs::path(ConfigUtils::require<std::string>(cfg, "input", "benchmark"));
     results_dir = fs::path(ConfigUtils::require<std::string>(cfg, "output", "results_dir"));
+}
+
+/**
+ * @brief Decide bins_per_row from an explicit config override; otherwise defer to the
+ *        ePlace-formula grid computed once the database is read (see analyzeDesignArea).
+ * @return true if the grid still needs to be auto-sized (no explicit override was given)
+ */
+bool Placer::resolveGridResolution()
+{
+    bool bins_auto = !bool(cfg["params"]["bins_per_row"]);
+    if (!bins_auto) {
+        bins_per_row = cfg["params"]["bins_per_row"].value_or(bins_per_row);
+        Logger::log_info("Grid resolution: " + std::to_string(bins_per_row) + " x " + std::to_string(bins_per_row));
+    }
+    return bins_auto;
+}
+
+/// @brief Read the LEF/DEF design files and apply the benchmark's maximum_utilization if given.
+void Placer::loadDesignDatabase()
+{
+    db = DataBase(input_dir); // TODO: Database initialization should be multithreaded?
+
+    // Benchmark-specified maximum_utilization overrides config default
+    if (db.getMaximumUtilization() > 0.0f) {
+        target_density = db.getMaximumUtilization();
+        Logger::log_info("Using benchmark maximum_utilization: " +
+                        std::to_string(target_density));
+    }
+}
+
+/**
+ * @brief Tag movable macros with XPlace's is_mov_macro rule (database.py:621-632). Consumed by
+ *        DataBase::addFillers (which works in the standard-cell frame), the macro deposit weight
+ *        in computeNodeFootprint (TODO #11b), and the macro legalizer. A MOVABLE node is a macro
+ *        iff all three hold:
+ *          1. height > 2.01 * row_height          (taller than ~two standard-cell rows)
+ *          2. area   > 10 * mean(area of the smallest 99.9% of movable nodes)
+ *          3. both dimensions non-degenerate
+ *        Fillers are excluded (XPlace's masked_fill spans only the real movable range), as are
+ *        FIXED nodes (XPlace clears is_mov_macro above mov_rhs).
+ *
+ * row_height uses the mean movable cell height — the same proxy analyzeDesignArea already uses for
+ * the ePlace grid formula; sw_only has no parsed row pitch exposed here.
+ *
+ * NOTE: this is a finer rule than the die-area heuristic behind Placer::num_movable_macros (which
+ * drives the auto-preconditioner). Two macro definitions now coexist — unify later, see TODO #11.
+ */
+void Placer::tagMovableMacros()
+{
+    std::vector<float> movable_areas;
+    float height_sum = 0.0f;
+    for (const auto& item : db.getComponents()) {
+        if (item.second->getStatus() == FIXED) continue;
+        movable_areas.push_back(item.second->getArea());
+        height_sum += item.second->getYsize();
+    }
+    if (movable_areas.empty()) return;
+
+    float row_height = height_sum / movable_areas.size();
+
+    // Threshold from the smallest 99.9% of movable areas, so a handful of huge macros cannot drag
+    // the mean up and hide themselves.
+    std::vector<float> ascending_areas = movable_areas;
+    std::sort(ascending_areas.begin(), ascending_areas.end());
+    size_t small_count = std::max<size_t>(1, (size_t)(ascending_areas.size() * 0.999));
+    float mean_small_area = std::accumulate(ascending_areas.begin(),
+                                            ascending_areas.begin() + small_count, 0.0f) / small_count;
+    float macro_area_threshold = 10.0f * mean_small_area;
+
+    int tagged = 0;
+    for (const auto& item : db.getComponents()) {
+        Component* comp_p = item.second;
+        if (comp_p->getStatus() == FIXED) continue;
+        bool is_tall  = comp_p->getYsize() > 2.01f * row_height;
+        bool is_large = comp_p->getArea() > macro_area_threshold;
+        bool is_sized = comp_p->getXsize() > 1e-4f && comp_p->getYsize() > 1e-4f;
+        comp_p->setMovableMacro(is_tall && is_large && is_sized);
+        if (comp_p->isMovableMacro()) tagged++;
+    }
+    Logger::log_detail("Movable macros (XPlace is_mov_macro rule): " + std::to_string(tagged)
+        + "  [row_height=" + PREC(row_height) + ", area_thresh=" + SCI(macro_area_threshold) + "]");
+}
+
+/**
+ * @brief Size and create the filler cells, then build the flat node index.
+ *
+ * Runs after tagMovableMacros because the filler math is standard-cell-only, and before
+ * analyzeDesignArea because addFillers may RAISE target_density (XPlace does the same when a
+ * design is denser than its target) and the grid formula reads it.
+ */
+void Placer::createFillers()
+{
+    if (ConfigUtils::require<bool>(cfg, "params", "enable_filler"))
+        target_density = db.addFillers(target_density);
+
+    // Every node now exists and every PlacementStatus is final, so the flat iteration index
+    // the threaded loops walk can be built once here.
+    db.buildNodeIndex();
 }
 
 /**
@@ -411,6 +403,14 @@ void Placer::applyMixedSizeStopPolicy()
     Logger::log_info("Mixed-size mode: " + std::to_string(num_movable_macros)
         + " movable macros (XPlace include_macros phase; stop overflow stays at "
         + PREC(overflow_threshold) + " until TODO #13 adds phase 2).");
+}
+
+void Placer::setupGrid()
+{
+    grid = Grid(db.getDieArea(), bins_per_row, bins_per_row);
+    grid.setClampDensity(enable_density_clamp);
+    grid.setTargetDensity(target_density);
+    die_size = min(grid.getDieWidth(), grid.getDieHeight());
 }
 
 /**
