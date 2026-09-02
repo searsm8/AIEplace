@@ -582,72 +582,7 @@ float Placer::getMemoryUsageMB()
 }
 #endif
 
-void Placer::recordIterationResults()
-{
-    TIME_FUNCTION();
-    // Measured at the LOOKAHEAD v_k (at_probe = true), matching XPlace's single position variable
-    // (TODO #32/7a; see snapshotBestPlacement). This is the one `hpwl` XPlace's evaluator_fn
-    // produces: it feeds the recorder's delta_hpwl, convergence, AND update_best_sol alike, so all
-    // three describe the same placement as the overflow computed just below.
-    float hpwl = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), cfg["params"]["ignore_net_degree"].value_or(100), true);
-    // Drive convergence off the smoothed overflow (clamped footprints; equivalent to XPlace's
-    // expand_ratio-inflated field): the smoothed density the optimizer minimizes, which descends
-    // toward the stop threshold. The exact overflow is reported separately as the physical result.
-    // Fillers are EXCLUDED, as XPlace's overflow_fn excludes them: it runs on `mov_density_map`,
-    // the movable-only slice `[mov_lhs:mov_rhs]`, and `filler_density_map` (`[mov_rhs:]`) is added
-    // only afterwards, and only for the FORCE (electronic_density_layer.py:36-50, 272-292;
-    // fillers are appended past mov_rhs by get_mov_node_info, database.py:901-904). The reported
-    // "exact Overflow" excludes them too (get_obj_overflow, evaluator.py:26-50).
-    // A `convergence_include_fillers` toggle briefly forced this TRUE in phase 2 (2026-08-02) on
-    // the opposite belief; retracted and deleted 2026-08-07 after the 16-design A/B — TODO #19a.
-    float overflow = computeOverflow(true, nullptr, false); // convergence signal
-
-    hpwl_history.push_back(hpwl);
-    step_length_history.push_back(step_length);
-    ovfw_history.push_back(overflow);
-
-    // Best-solution tracking, ported from XPlace's update_best_sol (param_scheduler.py:390-451).
-    // Skip early iterations to let the solver stabilize (XPlace: `iter - init_iter < 50`).
-    // PHASE-RELATIVE, as XPlace's is (param_scheduler.py:393, and init_iter is reset at every
-    // optimizer restart): after the phase-2 mixed-size restart the solver is re-seeded and
-    // re-estimates its step, so it needs the same 50-iteration settling window phase 1 got.
-    // This was absolute until TODO #32/7b, which made phase 2 start tracking immediately.
-    if (phaseIteration() < BEST_SOL_MIN_ITER) return;
-
-    const bool converged_now = (overflow < overflow_threshold);
-
-    // XPlace frees the rollback net on the FIRST converged iteration (param_scheduler.py:396-405).
-    // That lifetime is what lets the selection rule give rollback absolute priority: if it is still
-    // around, the run never converged and there is nothing else to choose. Once dropped it stays
-    // dropped, even if overflow later climbs back above the threshold.
-    if (converged_now && !ever_converged) {
-        ever_converged = true;
-        best_rollback  = BestSolution{};
-    }
-
-    // Rollback: near-converged band, before any converged solution exists. Overflow must improve;
-    // HPWL is allowed to creep 1% to buy it (param_scheduler.py:407-428).
-    if (!ever_converged && overflow < 5.0f * overflow_threshold &&
-        hpwl < best_rollback.hpwl * ROLLBACK_UPDATE_HPWL_RATIO && overflow < best_rollback.overflow)
-    {
-        best_rollback = {hpwl, overflow, iteration, true};
-        snapshotBestPlacement(BestSlot::ROLLBACK);
-    }
-
-    // Aux: converged, driving overflow down, paying at most 0.5% HPWL per update (:434-441).
-    // This is NOT a divergence guard -- it is the spread-out solution the selection rule PREFERS.
-    // Measured against the aux snapshot's OWN previous HPWL, which is what makes this a different
-    // budget from aux_select_hpwl_ratio despite both being 0.5% (TODO #33).
-    if (converged_now && hpwl < best_aux.hpwl * AUX_UPDATE_HPWL_RATIO && overflow < best_aux.overflow) {
-        best_aux = {hpwl, overflow, iteration, true};
-        snapshotBestPlacement(BestSlot::AUX);
-    }
-
-    // Primary: converged, lowest HPWL (:444-450).
-    if (converged_now && hpwl < best_primary.hpwl) {
-        best_primary = {hpwl, overflow, iteration, true};
-        snapshotBestPlacement(BestSlot::PRIMARY);
-    }
-}
+// recordIterationResults() moved to BestSolution.cpp (2026-09-02) -- it drives the same three
+// trackers restoreBestSolution() ships, not output/reporting.
 
 AIEPLACE_NAMESPACE_END

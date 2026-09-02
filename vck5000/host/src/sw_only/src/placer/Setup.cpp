@@ -17,53 +17,10 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-/**
- * @brief Pick the OpenMP team size: every logical CPU but one, unless OMP_NUM_THREADS says
- *        otherwise.
- *
- * Not a micro-optimization — it is insurance against sharing the machine, which on this box is
- * the normal case (overnight DSE/A-B sweeps). libgomp's default wait policy is a busy spin, so
- * the workers keep every CPU occupied through the serial stretches between parallel regions. A
- * team that already fills every CPU therefore has nowhere to put a co-scheduled job, and the
- * master ends up descheduled by its own idle workers. Measured with a loop of small parallel
- * regions separated by serial work, on this 8-vCPU box:
- *
- *     threads      1      2      4      6      7      8
- *     idle       0.68   0.68   0.69   0.71   0.72   0.73   s
- *     one other
- *     job running  -      -    0.70     -    0.73   5.89   s   <-- 8x
- *
- * Reserving one CPU costs nothing when the box is idle and avoids the collapse when it is not.
- * The placer itself showed the same thing: 8.1 -> 13.4 s on adaptec1 with a sweep running,
- * before this was in place.
- *
- * OMP_WAIT_POLICY=passive also avoids the collapse but is the wrong trade — it is ~20% SLOWER
- * on an idle box (0.88 s vs 0.72 s above) — and it cannot be set from here anyway: libgomp
- * reads its environment in a library constructor, so a setenv() in main() is already too late
- * (verified directly). The thread count is settable at runtime; the wait policy is not.
- *
- * An explicit OMP_NUM_THREADS always wins, so a concurrent sweep can still divide the box up —
- * and must: N runs x all-but-one-core each oversubscribes N-fold (tools/dse.py does this).
- */
-static void configureThreadPool()
-{
-#ifdef _OPENMP
-    if (getenv("OMP_NUM_THREADS")) {
-        Logger::log_detail("OpenMP threads: " + std::to_string(omp_get_max_threads())
-                           + " (from OMP_NUM_THREADS)");
-        return;
-    }
-    int threads = std::max(1, omp_get_num_procs() - 1);
-    omp_set_num_threads(threads);
-    Logger::log_detail("OpenMP threads: " + std::to_string(threads) + " of "
-                       + std::to_string(omp_get_num_procs()) + " CPUs (one reserved; see "
-                       "configureThreadPool). Override with OMP_NUM_THREADS.");
-#else
-    Logger::log_detail("Built without OpenMP: placement runs single-threaded.");
-#endif
-}
+static void configureThreadPool(); // defined below, near its one call site in setupDesign()
 
-/// @brief Config parse + grid decision + DB read + fillers + area analysis, timed as one unit.
+/// @brief Config parse + grid decision + DB read + fillers + area analysis + grid construction,
+///        timed as one unit.
 void Placer::setupDesign()
 {
     TIME_FUNCTION();
@@ -76,6 +33,7 @@ void Placer::setupDesign()
     analyzeDesignArea(bins_auto);
     configurePreconditioner();
     applyMixedSizeStopPolicy();   // needs num_movable_macros from analyzeDesignArea
+    setupGrid();                  // needs bins_per_row/target_density, settled by the calls above
     Logger::log_detail("Database setup time: " +
             std::to_string(Logger::getFunctionTime("setupDesign") / 1.0e6) + " s");
 }
@@ -174,6 +132,52 @@ void Placer::loadConfiguration()
     // Read other stuff
     input_dir = fs::path(ConfigUtils::require<std::string>(cfg, "input", "benchmark"));
     results_dir = fs::path(ConfigUtils::require<std::string>(cfg, "output", "results_dir"));
+}
+
+/**
+ * @brief Pick the OpenMP team size: every logical CPU but one, unless OMP_NUM_THREADS says
+ *        otherwise.
+ *
+ * Not a micro-optimization — it is insurance against sharing the machine, which on this box is
+ * the normal case (overnight DSE/A-B sweeps). libgomp's default wait policy is a busy spin, so
+ * the workers keep every CPU occupied through the serial stretches between parallel regions. A
+ * team that already fills every CPU therefore has nowhere to put a co-scheduled job, and the
+ * master ends up descheduled by its own idle workers. Measured with a loop of small parallel
+ * regions separated by serial work, on this 8-vCPU box:
+ *
+ *     threads      1      2      4      6      7      8
+ *     idle       0.68   0.68   0.69   0.71   0.72   0.73   s
+ *     one other
+ *     job running  -      -    0.70     -    0.73   5.89   s   <-- 8x
+ *
+ * Reserving one CPU costs nothing when the box is idle and avoids the collapse when it is not.
+ * The placer itself showed the same thing: 8.1 -> 13.4 s on adaptec1 with a sweep running,
+ * before this was in place.
+ *
+ * OMP_WAIT_POLICY=passive also avoids the collapse but is the wrong trade — it is ~20% SLOWER
+ * on an idle box (0.88 s vs 0.72 s above) — and it cannot be set from here anyway: libgomp
+ * reads its environment in a library constructor, so a setenv() in main() is already too late
+ * (verified directly). The thread count is settable at runtime; the wait policy is not.
+ *
+ * An explicit OMP_NUM_THREADS always wins, so a concurrent sweep can still divide the box up —
+ * and must: N runs x all-but-one-core each oversubscribes N-fold (tools/dse.py does this).
+ */
+static void configureThreadPool()
+{
+#ifdef _OPENMP
+    if (getenv("OMP_NUM_THREADS")) {
+        Logger::log_detail("OpenMP threads: " + std::to_string(omp_get_max_threads())
+                           + " (from OMP_NUM_THREADS)");
+        return;
+    }
+    int threads = std::max(1, omp_get_num_procs() - 1);
+    omp_set_num_threads(threads);
+    Logger::log_detail("OpenMP threads: " + std::to_string(threads) + " of "
+                       + std::to_string(omp_get_num_procs()) + " CPUs (one reserved; see "
+                       "configureThreadPool). Override with OMP_NUM_THREADS.");
+#else
+    Logger::log_detail("Built without OpenMP: placement runs single-threaded.");
+#endif
 }
 
 /**

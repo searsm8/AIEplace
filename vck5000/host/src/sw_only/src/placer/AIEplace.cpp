@@ -74,8 +74,7 @@ Placer::Placer(std::string config_filepath_arg)
 {
     config_filepath = config_filepath_arg;
 
-    setupDesign();
-    setupGrid();
+    setupDesign();              // now also builds the Grid (setupGrid() folded in, 2026-09-02)
     createRunOutputStructure();
     configureGammaSchedule();
     initializePositionDump();

@@ -36,7 +36,7 @@ private:
     std::string config_filepath;
 
     // Constructor phases (see Placer::Placer)
-    void setupDesign();                    // timed: config parse + grid decision + DB read + fillers + area analysis
+    void setupDesign();                    // timed: config parse + grid decision + DB read + fillers + area analysis + grid construction
     void loadConfiguration();              // parse the config file into cfg and read all hyperparameters
     bool resolveGridResolution();          // explicit bins_per_row override, or defer to the ePlace formula
     void loadDesignDatabase();             // read LEF/DEF, apply benchmark max_util
@@ -45,7 +45,7 @@ private:
     void analyzeDesignArea(bool bins_auto); // movable/fixed area stats, macro count, ePlace-formula grid size
     void configurePreconditioner();        // auto-enable decision from num_movable_macros
     void applyMixedSizeStopPolicy();       // XPlace include_macros phase: 2x stop overflow, no plateau kill
-    void setupGrid();                      // build the Grid from bins_per_row, clamp density, set die_size
+    void setupGrid();                      // build the Grid from bins_per_row, clamp density, set die_size -- called from setupDesign()
     void configureGammaSchedule();         // grid-independent base_gamma, gamma/inv_gamma, LUT init
     void initializePositionDump();         // config output.dump_positions; opens generation 0 (TODO #16)
 
