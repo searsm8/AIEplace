@@ -1,6 +1,10 @@
-// Density.cpp
-// Electric field and density computation functions
-// Separated from AIEplace.cpp for better organization
+/**
+ * @file Density.cpp
+ * @brief Electrostatic density gradient (∇D): overlap/footprint scatter into bins, then the DCT
+ *        spectral field solve for the per-bin force. Paired with Partials.cpp's ∇HPWL -- together
+ *        they are the two terms performNextStep() (Step.cpp) takes a step against.
+ *        Split out of AIEplace.cpp; provides the cpu (DCT) / naive backends.
+ */
 
 #include "AIEplace.h"
 #include "DCT.h"

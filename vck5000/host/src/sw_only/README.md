@@ -19,14 +19,14 @@ make host HOST=sw_only
 
 ## Where to start reading
 
-`src/placer/AIEplace.cpp` is ~110 lines and holds the whole loop skeleton — read it first, then
+`src/placer/AIEplace.cpp` is ~80 lines and holds the whole loop skeleton — read it first, then
 `../common/include/Node.h` for the per-node state the loop acts on.
 
 ## Core classes — this variant
 
 | | |
 |---|---|
-| **Placer** (`AIEplace.h`, `src/placer/`) | The optimizer. Owns every hyperparameter and all iteration state. Split across `AIEplace.cpp` (loop skeleton), `Setup.cpp` (bring-up + initial placement), `Partials.cpp` (∇wirelength), `Density.cpp` (∇density), `Step.cpp` (BB/Nesterov step), `Schedule.cpp` (γ/λ policy + convergence), `Output.cpp` (reporting), `Phase2.cpp`/`MacroLegalize.cpp` (mixed-size phase 2), `PositionDump.cpp` (node-position export for the offline visualizer). |
+| **Placer** (`AIEplace.h`, `src/placer/`) | The optimizer. Owns every hyperparameter and all iteration state. **Core algorithm**, in call order: **`AIEplace.cpp`** (loop skeleton), **`Partials.cpp`** (∇wirelength), **`Density.cpp`** (∇density), **`Step.cpp`** (BB/Nesterov step), **`Schedule.cpp`** (γ/λ policy + convergence). Supporting machinery: `Setup.cpp` (bring-up + initial placement), `BestSolution.cpp` (three-tracker best-solution bookkeeping + restore), `Output.cpp` (reporting), `Phase2.cpp`/`MacroLegalize.cpp` (mixed-size phase 2), `PositionDump.cpp` (node-position export for the offline visualizer). |
 | **DCT** (`DCT.h/.cpp`) | 1D DCT / IDCT / IDXST — a naive O(N²) reference *and* an O(N log N) FFT (Makhoul) implementation, verified equal. |
 
 ## Core classes — shared (`../common/`, also built into `pl_algo`)

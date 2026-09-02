@@ -1,3 +1,10 @@
+/**
+ * @file AIEplace.cpp
+ * @brief The algorithm's loop skeleton: Placer::run()/performIteration()/performIterationZero()
+ *        and the constructor. ~80 lines, pure orchestration -- read this first to see the whole
+ *        algorithm at a glance, then follow the calls out into Setup/Step/Partials/Density/
+ *        Schedule.cpp for what each phase actually does.
+ */
 #include "DCT.h"
 #include "AIEplace.h"
 #include <cassert>

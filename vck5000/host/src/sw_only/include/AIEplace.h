@@ -1,3 +1,11 @@
+/**
+ * @file AIEplace.h
+ * @brief Declares Placer: every hyperparameter, all current/next iteration state, and the full
+ *        method surface implementing the ePlace algorithm. Methods are declared here but defined
+ *        across a dozen placer/*.cpp files, one per concern (grouping comments below name which).
+ *        Start reading at AIEplace.cpp (the loop skeleton) instead of here; see README.md for the
+ *        full algorithm-flow map.
+ */
 #pragma once
 
 #include "Common.h"
