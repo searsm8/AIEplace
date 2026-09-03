@@ -1,7 +1,9 @@
 # HANDOFF — sw_only readability refactor session (#1, #39)
 
-**Dates:** 2026-08-31 → 2026-09-01 · **Branch:** `pl_algo` · **Commits:** `1ed9ea7`, `652ba25`,
-`5867600` · **Status:** landed, `make test-regress-slow` green, session closed.
+**Dates:** 2026-08-31 → 2026-09-02 · **Branch:** `pl_algo` · **Commits:** `1ed9ea7`, `652ba25`,
+`5867600` (08-31→09-01 session below), then `a2a2c1b`, `df6a2c2`, `3ef1d61`, `5cf7491`, `5fbd182`
+(09-02 session, own heading below) · **Status:** all four "suggestions for next session" items but
+one landed; `make test-regress[-slow]` green throughout. Not yet closed — see Open below.
 
 This is a handoff-in-progress in the sense CLAUDE.md now defines it: written at the end of an
 active session for the next one to pick up from. If #39 concludes cleanly, fold the durable
@@ -147,42 +149,69 @@ hand; that's why this session produced 3 commits instead of the planned 4 — co
 separately isolated `checkForNaN()`/`dumpScheduleTrace` from `iterationReset`/`beginPhase2` stopped
 being independently useful once bisect itself was no longer going to run over them.
 
-## Suggestions for next session — #1 and #39
+## Session 2026-09-02 — picked up items 2-4, left item 1 open
 
-**#39 (readability), roughly in priority order:**
+Continuation of the same #39 thread, same mechanism (every move verified `make test-regress[-slow]`
+bit-identical before landing; `make host` clean first). Five commits, each independently verified:
 
-1. **Understand the order-sensitivity mechanism**, if it's ever worth the time. Not urgent — the
-   code is correct and green right now — but it's a real, undocumented, load-bearing
-   statement-order dependency hiding behind what looks like harmless reordering, and that is
-   exactly the shape of bug that comes back. A cheap first step: dump the FPU control/status word
-   (`_mm_getcsr()` on x86) immediately before `updateDensityWeight()`'s `std::pow()` call, once with
-   each ordering, and diff them. If that doesn't explain it, disassembling `updateDensityWeight()`
-   under both orderings and diffing the emitted instructions would be decisive but slower.
-2. **`Setup.cpp`** — same declared-order-vs-call-order mismatch `performNextStep()` originally had:
-   `setupDesign()` calls `loadConfiguration()` first, but it's declared last among its siblings.
-   Mechanical, well-scoped, low-risk — a good place to pick back up.
-3. **`Output.cpp`'s `recordIterationResults()`** — flagged twice now (class-map session, and again
-   here): it runs every iteration but sits at the bottom of the file, and it does real
-   best-solution-tracking work, not just printing. Worth deciding whether it moves to
-   `BestSolution.cpp` (by content) or just up in `Output.cpp` (by call frequency) before touching
-   it — those are different fixes.
-4. **Sweep `Density.cpp`, `Partials.cpp`, `Phase2.cpp`, `PositionDump.cpp`** for the same
-   orchestrator/callee-order pattern. Verify before reordering — Density.cpp and Partials.cpp's
-   dispatchers already lead their files; don't manufacture churn where the class-map session
-   already found nothing (see its "found clean, no refactor taken" note, itself since partially
-   superseded — read the live thread in tasks.md #1, not that snapshot, before trusting either
-   verdict).
+- **`a2a2c1b` — `Setup.cpp` reordered to match call order.** Item 2 above. `setupDesign()`'s
+  callees (`loadConfiguration`/`resolveGridResolution`/`loadDesignDatabase`/`tagMovableMacros`/
+  `createFillers`) now follow it in call order, same convention as Step.cpp/Schedule.cpp.
+- **`df6a2c2` — `configureThreadPool()` relocated + `setupGrid()` folded into `setupDesign()` +
+  `recordIterationResults()` moved to `BestSolution.cpp`.** Three separate asks from Mark in the
+  same session: (a) `configureThreadPool()` (a static helper with one caller) moved down to its
+  call-order slot right after `loadConfiguration()`, behind a forward declaration, so
+  `setupDesign()` leads the file; (b) `setupGrid()`'s call moved from the constructor into
+  `setupDesign()` as its last step — safe because nothing ran between the two calls in the
+  constructor; (c) item 3 above — `recordIterationResults()` drives the same three best-solution
+  trackers the rest of `BestSolution.cpp` manages, not output/reporting, so it moved there, right
+  before its callee `snapshotBestPlacement()`. A breadcrumb left in `Output.cpp`, matching the
+  existing `restoreBestSolution()` one.
+- **`3ef1d61` — `@file` doc comments + README refresh.** Not one of the original 4 items — a
+  separate ask, same session: `AIEplace.h` (every file includes it, had zero doc) and
+  `AIEplace.cpp` (the loop skeleton every sibling file already pointed readers to) got brief
+  `@file` blocks; `Density.cpp`'s plain header upgraded to the same style as `Partials.cpp`.
+  `README.md` fixed a stale line count, added the missing `BestSolution.cpp` row, and marked
+  which five files are the core algorithm vs. supporting machinery.
+- **`5cf7491` — `ConfigUtils::require` moved to the end of `AIEplace.h`.** Also a separate ask.
+  It's a template with no `Placer` dependency used from 5 different `.cpp` files, so it has to
+  stay in a header — "move it to where config is read" (`Setup.cpp`) would have broken the other
+  four translation units. Relocated past the `Placer` class instead, so the header opens directly
+  with the class it exists to declare.
+- **`5fbd182` — item 4: swept `Density.cpp`/`Partials.cpp`/`Phase2.cpp`/`PositionDump.cpp`.**
+  `PositionDump.cpp` checked clean (its four entry points are already lifecycle-ordered, each
+  callee already follows its sole caller) — not touched, per the "verify before reordering, don't
+  manufacture churn" instruction. Three real mismatches found and fixed:
+  - `Density.cpp`: `computeOverlaps()` is `computeElectricFields()`'s FIRST call but sat ~200 lines
+    below it, after the naive/DCT reference pair. Moved up. Left naive-before-DCT alone —
+    deliberate reference-first pattern (README says so explicitly), and naive is unreachable from
+    config, so there's no live call order there to violate.
+  - `Partials.cpp`: `computeHpwlPartials()` checks `"cpu"` before `"simple"`, and `cpu` is the
+    default/golden path (README + `default_config.toml` + the function's own doc comment all
+    agree) — but the file presented `simple`'s LUT machinery first. Swapped the two backend blocks.
+  - `Phase2.cpp`: `reportPhaseSummary()` is `beginPhase2()`'s first local callee but sat at the very
+    end of the file. Moved up to lead the block.
 
-**#1 (clean house), once #39 concludes:** fold #39's still-relevant findings back into tasks.md/#1
-per the existing plan (there's already a stale-marked pointer for this in #1). At that point this
-handoff can convert into a permanent report or be retired — don't let it linger past that point.
+All landed, `tasks.md` #39 updated to match (each item marked done, dated, commit-linked).
+
+## Open — what's left before #39 can close
+
+1. **Understand the print/updateSchedule order-sensitivity mechanism** (item 1, carried over
+   unchanged from the 08-31→09-01 session — still not investigated, still not urgent). See the
+   bisection section above for what's known: the effect, not yet the cause.
+2. **Fold #39's findings back into `#1`** once (1) is either resolved or explicitly deferred — `#1`
+   already has a stale-marked pointer waiting for this. That is also the trigger to retire this
+   handoff (convert to REPORT or delete, per the CLAUDE.md policy this file itself follows).
+
+Both are #1's/#39's own open bullets in tasks.md — check there for current status before assuming
+this file is authoritative; tasks.md is updated same-session, this handoff is not always.
 
 ## How to verify this session's work independently
 
 ```bash
 cd vck5000
-make test-regress-slow   # ~12 min; all 3 designs must show bit-identical
-git log --oneline -3      # 5867600, 652ba25, 1ed9ea7
+make test-regress-slow   # ~7 min; all 3 designs must show bit-identical
+git log --oneline -8      # 5fbd182, 5cf7491, 3ef1d61, 8fcc0fa, df6a2c2, ffe7227, a2a2c1b, 0f3416e
 ```
 
 If either check disagrees with what's written here, trust the check and update this file or flag

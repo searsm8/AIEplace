@@ -856,10 +856,43 @@ Open / queued for a future session:
       output/reporting — placed right before its callee `snapshotBestPlacement()`. A one-line
       breadcrumb left in `Output.cpp`, matching the existing `restoreBestSolution()` breadcrumb.
       Verified: `make host` clean, `make test-regress-slow` bit-identical on all three baselines.
-- [ ] Sweep the remaining `placer/*.cpp` files (`Density.cpp`, `Partials.cpp`, `Phase2.cpp`,
-      `PositionDump.cpp`) for the same pattern — reorder only where a real orchestrator/callee
-      mismatch exists, not for its own sake (Density.cpp and Partials.cpp's dispatchers already
-      lead their files; verify before touching).
+- [x] **DONE 2026-09-02 — @file doc comments for `AIEplace.h`/`.cpp` + `Density.cpp`, README
+      refresh (`3ef1d61`).** Fresh-reader orientation gap closed: `AIEplace.h` (every file includes
+      it, had zero doc) and `AIEplace.cpp` (the loop skeleton every sibling `.cpp` already pointed
+      readers to) now carry brief `@file` blocks naming what's there and where to read next.
+      `Density.cpp`'s plain comment header upgraded to the same `@file` style as its gradient-pair
+      sibling `Partials.cpp`. `README.md`: fixed the stale ~110-line claim for `AIEplace.cpp` (now
+      ~80), added `BestSolution.cpp` to the Placer file-split table (missing since it was created
+      2026-08-31), marked which five files are the core algorithm (AIEplace/Partials/Density/Step/
+      Schedule) vs. supporting machinery. Comment-only; verified `make host` + `make test-regress`
+      bit-identical.
+- [x] **DONE 2026-09-02 — `ConfigUtils::require` moved to the end of `AIEplace.h` (`5cf7491`).**
+      It's a generic TOML helper with no `Placer` dependency, used from 5 different placer/*.cpp
+      files (has to stay in a header, since it's a template) — moving it into `Setup.cpp` where
+      config is actually read wasn't an option without breaking the other four TUs. `AIEplace.h`
+      now opens directly with the `Placer` class the file exists to declare. Verified: `make host`
+      clean (all 5 call sites), `make test-regress` bit-identical.
+- [x] **DONE 2026-09-02 — swept `Density.cpp`/`Partials.cpp`/`Phase2.cpp`/`PositionDump.cpp`
+      (`5fbd182`).** `PositionDump.cpp` checked clean, not touched — its four entry points are
+      already lifecycle-ordered and each callee already immediately follows its sole caller. Three
+      real mismatches found and fixed:
+      - **`Density.cpp`**: `computeOverlaps()` is `computeElectricFields()`'s FIRST call, but sat
+        ~200 lines below it, after the naive/DCT reference implementations. Moved up to lead the
+        callee block. Left naive-before-DCT alone — that's the deliberate
+        reference-implementation-first pattern (README: "kept alongside as the verification
+        reference"), and naive is unreachable from config, so there's no live call order to
+        violate there.
+      - **`Partials.cpp`**: `computeHpwlPartials()` checks `"cpu"` before `"simple"`, and `cpu` is
+        the default/golden path (README, `default_config.toml`, and the function's own doc comment
+        all agree) — but the file presented the simple/LUT backend's implementation first. Swapped
+        the two blocks so the golden path leads, matching both the dispatcher's branch order and
+        the file's own doc-comment ("cpu / simple").
+      - **`Phase2.cpp`**: `reportPhaseSummary()` is `beginPhase2()`'s first local callee (called
+        right after the best-solution restore, before freeze/legalize/re-seed), but sat at the very
+        end of the file. Moved up to lead the block.
+      Pure reordering of out-of-line definitions, no logic changed. Verified: `make host` clean,
+      `make test-regress-slow` bit-identical on all three baselines (mms_adaptec1 exercises
+      `Phase2.cpp`).
 - [ ] Fold this task into `#1`'s two 2026-08-31 sub-items once concluded — see the superseded note
       there; that "found clean, no refactor taken" verdict was true at the time but is now stale.
 
