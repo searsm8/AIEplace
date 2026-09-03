@@ -148,6 +148,49 @@ void Placer::beginPhase2()
 }
 
 /**
+ * @brief Emit a short report at a phase boundary, and stash phase 1's numbers for the final
+ *        summary. Mark asked for this explicitly: without it a two-phase run reports only the
+ *        phase-2 endpoint and the macro-placement quality phase 1 is responsible for is invisible.
+ */
+void Placer::reportPhaseSummary()
+{
+    float overflow_smoothed = computeOverflow(true,  nullptr, false);  // filler-EXCLUDED, as XPlace overflow_fn is
+    float overflow_exact    = computeOverflow(false, nullptr, false);  // filler-EXCLUDED, as XPlace reports it
+    // Macro-EXCLUDED as well: XPlace evaluates this checkpoint under ps.zero_macro_grad=True,
+    // which drops the is_mov_macro nodes (evaluator.py:26-45). Only computable while the macros
+    // are still movable, which is why it lives here and not in computeFinalMetrics.
+    float overflow_macro_ex = computeOverflow(false, nullptr, false, true);
+    // Measured on the restored best, so read HPWL from the tracker rather than hpwl_history --
+    // the history's last entry belongs to the last ITERATED placement, which the restore replaced.
+    BestChoice best = selectBestSolution();
+    float hpwl = best.sol ? best.sol->hpwl
+                          : (hpwl_history.empty() ? 0.0f : hpwl_history.back());
+    // Unmasked companion, recomputed on the geometry actually in the database (the huge cap
+    // includes every degree; -1 would exclude every net). Same call computeFinalMetrics makes.
+    float hpwl_exact = db.computeTotalWirelength(
+        ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), 1000000000);
+
+    phase1_summary = { .valid              = true,
+                         .iterations         = iteration,
+                         .hpwl               = hpwl,
+                         .hpwl_exact         = hpwl_exact,
+                         .overflow_smoothed  = overflow_smoothed,
+                         .overflow_exact     = overflow_exact,
+                         .overflow_macro_excluded = overflow_macro_ex,
+                         .stop_reason        = stop_reason };
+
+    Logger::log_info("[PHASE] name=" + std::string(phaseName(phase)) +
+                     " end_iteration=" + std::to_string(iteration) +
+                     " reason=" + std::string(stopReasonName(stop_reason)) +
+                     " hpwl=" + SCI(hpwl) +
+                     " hpwl_exact=" + SCI(hpwl_exact) +
+                     " ovfw_smoothed=" + PREC(overflow_smoothed) +
+                     " ovfw_exact=" + PREC(overflow_exact) +
+                     " ovfw_macro_excluded=" + PREC(overflow_macro_ex) +
+                     " movable_macros=" + std::to_string(num_movable_macros));
+}
+
+/**
  * @brief Stage 2 — remove macro overlap at minimum displacement.
  *
  * Deliberately separate from the transition: stage 3 (everything else in this file) is what
@@ -225,49 +268,6 @@ void Placer::resetSolverState()
     gamma     = gamma_schedule ? 10.0f * base_gamma : base_gamma;
     inv_gamma = 1.0f / gamma;
     if (partials_method == "simple") initHpwlLut();
-}
-
-/**
- * @brief Emit a short report at a phase boundary, and stash phase 1's numbers for the final
- *        summary. Mark asked for this explicitly: without it a two-phase run reports only the
- *        phase-2 endpoint and the macro-placement quality phase 1 is responsible for is invisible.
- */
-void Placer::reportPhaseSummary()
-{
-    float overflow_smoothed = computeOverflow(true,  nullptr, false);  // filler-EXCLUDED, as XPlace overflow_fn is
-    float overflow_exact    = computeOverflow(false, nullptr, false);  // filler-EXCLUDED, as XPlace reports it
-    // Macro-EXCLUDED as well: XPlace evaluates this checkpoint under ps.zero_macro_grad=True,
-    // which drops the is_mov_macro nodes (evaluator.py:26-45). Only computable while the macros
-    // are still movable, which is why it lives here and not in computeFinalMetrics.
-    float overflow_macro_ex = computeOverflow(false, nullptr, false, true);
-    // Measured on the restored best, so read HPWL from the tracker rather than hpwl_history --
-    // the history's last entry belongs to the last ITERATED placement, which the restore replaced.
-    BestChoice best = selectBestSolution();
-    float hpwl = best.sol ? best.sol->hpwl
-                          : (hpwl_history.empty() ? 0.0f : hpwl_history.back());
-    // Unmasked companion, recomputed on the geometry actually in the database (the huge cap
-    // includes every degree; -1 would exclude every net). Same call computeFinalMetrics makes.
-    float hpwl_exact = db.computeTotalWirelength(
-        ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), 1000000000);
-
-    phase1_summary = { .valid              = true,
-                         .iterations         = iteration,
-                         .hpwl               = hpwl,
-                         .hpwl_exact         = hpwl_exact,
-                         .overflow_smoothed  = overflow_smoothed,
-                         .overflow_exact     = overflow_exact,
-                         .overflow_macro_excluded = overflow_macro_ex,
-                         .stop_reason        = stop_reason };
-
-    Logger::log_info("[PHASE] name=" + std::string(phaseName(phase)) +
-                     " end_iteration=" + std::to_string(iteration) +
-                     " reason=" + std::string(stopReasonName(stop_reason)) +
-                     " hpwl=" + SCI(hpwl) +
-                     " hpwl_exact=" + SCI(hpwl_exact) +
-                     " ovfw_smoothed=" + PREC(overflow_smoothed) +
-                     " ovfw_exact=" + PREC(overflow_exact) +
-                     " ovfw_macro_excluded=" + PREC(overflow_macro_ex) +
-                     " movable_macros=" + std::to_string(num_movable_macros));
 }
 
 AIEPLACE_NAMESPACE_END

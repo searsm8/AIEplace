@@ -33,6 +33,52 @@ void Placer::computeElectricFields()
     }
 }
 
+/**
+ * @brief Deposit every component's area into the bin grid to build the density map ρ.
+ *        Two passes: fixed components first (clamped to a per-bin capacity baseline), then
+ *        movable components and fillers, so only density stacked above fixed macros overflows.
+ */
+void Placer::computeOverlaps()
+{
+    TIME_FUNCTION();
+    Logger::log_trace("Begin computeOverlaps()");
+    const auto& fixed   = db.getFixedComponents();
+    const auto& movable = db.getMovableComponents();
+    const auto& fillers = db.getFillers();
+
+    // The two passes are ordered and must stay so: clampFixedDensity reads the fixed baseline.
+    // Within a pass the geometry is per-node and always threaded; only the scatter into shared
+    // bins depends on the policy. Dynamic scheduling because a fixed macro covering thousands
+    // of bins costs orders of magnitude more than a standard cell.
+    auto deposit_pass = [&](const auto& node_vec) {
+        #pragma omp parallel for schedule(dynamic, 512)
+        for (int i = 0; i < (int)node_vec.size(); i++)
+            grid.computeNodeOverlaps(node_vec[i], !g_deterministic);
+        if (!g_deterministic) return;   // the deposit was fused into the pass above
+
+        // Ordered deposit: one thread, node order, and within a node the order its own geometry
+        // loop built the list -- so every bin sees exactly the sequence of adds the
+        // single-threaded code performed. Costs a second pass over the nodes, which is why the
+        // atomics path fuses instead.
+        for (int i = 0; i < (int)node_vec.size(); i++)
+            grid.depositNodeOverlaps(node_vec[i]);
+    };
+
+    // Pass 1: Fixed components — their density is CAPPED per bin at bin_area*td, min(rho,td),
+    // so a bin fully covered by fixed macros contributes no overflow. This is a deliberate
+    // divergence from XPlace (which scales, min(rho,1)*td) — Mark-authorized 2026-08-25, worth
+    // +2.38 pp of MMS mean; see Grid::clampFixedDensity (TODO #35) and CLAUDE.md's divergence
+    // registry. This deposit must track that function; when it lagged, that was TODO #34.
+    deposit_pass(fixed);
+
+    grid.clampFixedDensity(target_density);
+
+    // Pass 2: Movable components and fillers — any density on top of
+    // the clamped fixed baseline counts as real overflow.
+    deposit_pass(movable);
+    deposit_pass(fillers);
+}
+
 /***************
  * CPU FUNCTIONS
  ****************/
@@ -213,52 +259,6 @@ void Placer::compute_eField_DCT()
     }
 }
 
-
-/**
- * @brief Deposit every component's area into the bin grid to build the density map ρ.
- *        Two passes: fixed components first (clamped to a per-bin capacity baseline), then
- *        movable components and fillers, so only density stacked above fixed macros overflows.
- */
-void Placer::computeOverlaps()
-{
-    TIME_FUNCTION();
-    Logger::log_trace("Begin computeOverlaps()");
-    const auto& fixed   = db.getFixedComponents();
-    const auto& movable = db.getMovableComponents();
-    const auto& fillers = db.getFillers();
-
-    // The two passes are ordered and must stay so: clampFixedDensity reads the fixed baseline.
-    // Within a pass the geometry is per-node and always threaded; only the scatter into shared
-    // bins depends on the policy. Dynamic scheduling because a fixed macro covering thousands
-    // of bins costs orders of magnitude more than a standard cell.
-    auto deposit_pass = [&](const auto& node_vec) {
-        #pragma omp parallel for schedule(dynamic, 512)
-        for (int i = 0; i < (int)node_vec.size(); i++)
-            grid.computeNodeOverlaps(node_vec[i], !g_deterministic);
-        if (!g_deterministic) return;   // the deposit was fused into the pass above
-
-        // Ordered deposit: one thread, node order, and within a node the order its own geometry
-        // loop built the list -- so every bin sees exactly the sequence of adds the
-        // single-threaded code performed. Costs a second pass over the nodes, which is why the
-        // atomics path fuses instead.
-        for (int i = 0; i < (int)node_vec.size(); i++)
-            grid.depositNodeOverlaps(node_vec[i]);
-    };
-
-    // Pass 1: Fixed components — their density is CAPPED per bin at bin_area*td, min(rho,td),
-    // so a bin fully covered by fixed macros contributes no overflow. This is a deliberate
-    // divergence from XPlace (which scales, min(rho,1)*td) — Mark-authorized 2026-08-25, worth
-    // +2.38 pp of MMS mean; see Grid::clampFixedDensity (TODO #35) and CLAUDE.md's divergence
-    // registry. This deposit must track that function; when it lagged, that was TODO #34.
-    deposit_pass(fixed);
-
-    grid.clampFixedDensity(target_density);
-
-    // Pass 2: Movable components and fillers — any density on top of
-    // the clamped fixed baseline counts as real overflow.
-    deposit_pass(movable);
-    deposit_pass(fillers);
-}
 
 /**
  * @brief Overflow metric with fillers excluded. smooth=true gives the *smoothed* overflow

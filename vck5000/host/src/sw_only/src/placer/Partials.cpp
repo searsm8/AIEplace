@@ -36,106 +36,9 @@ void Placer::computeHpwlPartials()
     }
 }
 
-/***************
- * CPU FUNCTIONS
- ****************/
-
-/**
- * @brief Build the normalized exp(-x) lookup table for the 'simple' HPWL gradient.
- *        Stores exp(-i * LUT_STEP_NORM) for x = d/gamma. Built once; only inv_lut_step and
- *        hpwl_lut_range depend on gamma and are refreshed by updateGamma() per iteration.
- */
-void Placer::initHpwlLut()
-{
-    hpwl_lut_size = int(LUT_GAMMA_MULTIPLIER / LUT_STEP_NORM) + 2; // fixed: 52
-    hpwl_lut.resize(hpwl_lut_size);
-    for (int i = 0; i < hpwl_lut_size; i++)
-        hpwl_lut[i] = exp(-i * LUT_STEP_NORM);
-    // Set gamma-dependent scalars for the initial gamma value
-    hpwl_lut_range = LUT_GAMMA_MULTIPLIER * gamma;
-    inv_lut_step   = 1.0f / (LUT_STEP_NORM * gamma);
-    Logger::log_detail("HPWL LUT initialized: " + std::to_string(hpwl_lut_size)
-        + " entries (normalized), init_gamma=" + std::to_string(gamma));
-}
-
-// updateGamma() moved to Schedule.cpp with the rest of the gamma schedule (2026-08-31).
-
-/// @brief Linearly interpolate into the precomputed exp(-d/gamma) LUT.
-inline float Placer::lutLookup(float d) const
-{
-    float idx_f = d * inv_lut_step;
-    int idx = int(idx_f);
-    float frac = idx_f - idx;
-    return hpwl_lut[idx] * (1.0f - frac) + hpwl_lut[idx + 1] * frac;
-}
-
-/**
- * @brief Fast LUT-based WA-HPWL gradient approximation (2-node softmax): for a node at
- *        distance d_max from the net's max edge and d_min from the min edge,
- *        grad ≈ [exp(-d_max/γ) - exp(-d_min/γ)] / [1 + exp(-span/γ)], exp() from the LUT.
- *        Nodes farther than 5γ from both edges contribute ≈0 and are skipped.
- */
-void Placer::computeHpwlPartials_simple()
-{
-    TIME_FUNCTION();
-
-    const float range = hpwl_lut_range;
-
-    int ignore_net_degree = cfg["params"]["ignore_net_degree"].value_or(100); // XPlace net_mask
-    const auto& nets = db.getNetsVector();
-
-    #pragma omp parallel for schedule(dynamic, 256) if(!g_deterministic)
-    for (int net_index = 0; net_index < (int)nets.size(); net_index++) {
-        Net* net_p = nets[net_index];
-        const std::vector<NetPin>& pins = net_p->getPins();
-        int net_size = net_p->getDegree();
-        if (net_size <= 1 || net_size > ignore_net_degree) continue;
-
-        // Find bounding box using pin positions (node + offset)
-        float min_x = __FLT_MAX__, min_y = __FLT_MAX__;
-        float max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
-        for (const NetPin& pin : pins) {
-            Position p = pin.getProbePos();
-            min_x = std::min(min_x, p.x); max_x = std::max(max_x, p.x);
-            min_y = std::min(min_y, p.y); max_y = std::max(max_y, p.y);
-        }
-
-        float span_x = max_x - min_x;
-        float span_y = max_y - min_y;
-
-        // Normalization: 1/(1+exp(-span/γ)) — corrects for small-span nets
-        // where the gradient magnitude should be < 1.
-        float norm_x = (span_x < range) ? 1.0f / (1.0f + lutLookup(span_x)) : 1.0f;
-        float norm_y = (span_y < range) ? 1.0f / (1.0f + lutLookup(span_y)) : 1.0f;
-
-        for (const NetPin& pin : pins) {
-            Position p = pin.getProbePos();
-
-            float d_max_x = max_x - p.x;
-            float d_min_x = p.x - min_x;
-            float d_max_y = max_y - p.y;
-            float d_min_y = p.y - min_y;
-
-            float plus_x  = (d_max_x < range) ? lutLookup(d_max_x) * norm_x : 0.0f;
-            float minus_x = (d_min_x < range) ? lutLookup(d_min_x) * norm_x : 0.0f;
-
-            float plus_y  = (d_max_y < range) ? lutLookup(d_max_y) * norm_y : 0.0f;
-            float minus_y = (d_min_y < range) ? lutLookup(d_min_y) * norm_y : 0.0f;
-
-            // Gradient accumulates onto the parent node -- shared across nets, see the CPU
-            // backend for why the add is atomic under !g_deterministic.
-            if (g_deterministic) {
-                pin.node_p->next.probe_grad.x += plus_x - minus_x;
-                pin.node_p->next.probe_grad.y += plus_y - minus_y;
-            } else {
-                #pragma omp atomic
-                pin.node_p->next.probe_grad.x += plus_x - minus_x;
-                #pragma omp atomic
-                pin.node_p->next.probe_grad.y += plus_y - minus_y;
-            }
-        }
-    }
-}
+/**********************
+ * CPU (golden) BACKEND
+ ***********************/
 
 /*
  * Divergence diagnostics for computeHpwlPartials_CPU. Both dump the full local state of the
@@ -341,6 +244,107 @@ void Placer::buildPinPartialIndex()
     }
     net_pin_offset[nets.size()] = running_total;
     pin_partials.resize(running_total);
+}
+
+/**********************
+ * SIMPLE (LUT) BACKEND
+ ***********************/
+
+/**
+ * @brief Build the normalized exp(-x) lookup table for the 'simple' HPWL gradient.
+ *        Stores exp(-i * LUT_STEP_NORM) for x = d/gamma. Built once; only inv_lut_step and
+ *        hpwl_lut_range depend on gamma and are refreshed by updateGamma() per iteration.
+ */
+void Placer::initHpwlLut()
+{
+    hpwl_lut_size = int(LUT_GAMMA_MULTIPLIER / LUT_STEP_NORM) + 2; // fixed: 52
+    hpwl_lut.resize(hpwl_lut_size);
+    for (int i = 0; i < hpwl_lut_size; i++)
+        hpwl_lut[i] = exp(-i * LUT_STEP_NORM);
+    // Set gamma-dependent scalars for the initial gamma value
+    hpwl_lut_range = LUT_GAMMA_MULTIPLIER * gamma;
+    inv_lut_step   = 1.0f / (LUT_STEP_NORM * gamma);
+    Logger::log_detail("HPWL LUT initialized: " + std::to_string(hpwl_lut_size)
+        + " entries (normalized), init_gamma=" + std::to_string(gamma));
+}
+
+// updateGamma() moved to Schedule.cpp with the rest of the gamma schedule (2026-08-31).
+
+/// @brief Linearly interpolate into the precomputed exp(-d/gamma) LUT.
+inline float Placer::lutLookup(float d) const
+{
+    float idx_f = d * inv_lut_step;
+    int idx = int(idx_f);
+    float frac = idx_f - idx;
+    return hpwl_lut[idx] * (1.0f - frac) + hpwl_lut[idx + 1] * frac;
+}
+
+/**
+ * @brief Fast LUT-based WA-HPWL gradient approximation (2-node softmax): for a node at
+ *        distance d_max from the net's max edge and d_min from the min edge,
+ *        grad ≈ [exp(-d_max/γ) - exp(-d_min/γ)] / [1 + exp(-span/γ)], exp() from the LUT.
+ *        Nodes farther than 5γ from both edges contribute ≈0 and are skipped.
+ */
+void Placer::computeHpwlPartials_simple()
+{
+    TIME_FUNCTION();
+
+    const float range = hpwl_lut_range;
+
+    int ignore_net_degree = cfg["params"]["ignore_net_degree"].value_or(100); // XPlace net_mask
+    const auto& nets = db.getNetsVector();
+
+    #pragma omp parallel for schedule(dynamic, 256) if(!g_deterministic)
+    for (int net_index = 0; net_index < (int)nets.size(); net_index++) {
+        Net* net_p = nets[net_index];
+        const std::vector<NetPin>& pins = net_p->getPins();
+        int net_size = net_p->getDegree();
+        if (net_size <= 1 || net_size > ignore_net_degree) continue;
+
+        // Find bounding box using pin positions (node + offset)
+        float min_x = __FLT_MAX__, min_y = __FLT_MAX__;
+        float max_x = -__FLT_MAX__, max_y = -__FLT_MAX__;
+        for (const NetPin& pin : pins) {
+            Position p = pin.getProbePos();
+            min_x = std::min(min_x, p.x); max_x = std::max(max_x, p.x);
+            min_y = std::min(min_y, p.y); max_y = std::max(max_y, p.y);
+        }
+
+        float span_x = max_x - min_x;
+        float span_y = max_y - min_y;
+
+        // Normalization: 1/(1+exp(-span/γ)) — corrects for small-span nets
+        // where the gradient magnitude should be < 1.
+        float norm_x = (span_x < range) ? 1.0f / (1.0f + lutLookup(span_x)) : 1.0f;
+        float norm_y = (span_y < range) ? 1.0f / (1.0f + lutLookup(span_y)) : 1.0f;
+
+        for (const NetPin& pin : pins) {
+            Position p = pin.getProbePos();
+
+            float d_max_x = max_x - p.x;
+            float d_min_x = p.x - min_x;
+            float d_max_y = max_y - p.y;
+            float d_min_y = p.y - min_y;
+
+            float plus_x  = (d_max_x < range) ? lutLookup(d_max_x) * norm_x : 0.0f;
+            float minus_x = (d_min_x < range) ? lutLookup(d_min_x) * norm_x : 0.0f;
+
+            float plus_y  = (d_max_y < range) ? lutLookup(d_max_y) * norm_y : 0.0f;
+            float minus_y = (d_min_y < range) ? lutLookup(d_min_y) * norm_y : 0.0f;
+
+            // Gradient accumulates onto the parent node -- shared across nets, see the CPU
+            // backend for why the add is atomic under !g_deterministic.
+            if (g_deterministic) {
+                pin.node_p->next.probe_grad.x += plus_x - minus_x;
+                pin.node_p->next.probe_grad.y += plus_y - minus_y;
+            } else {
+                #pragma omp atomic
+                pin.node_p->next.probe_grad.x += plus_x - minus_x;
+                #pragma omp atomic
+                pin.node_p->next.probe_grad.y += plus_y - minus_y;
+            }
+        }
+    }
 }
 
 AIEPLACE_NAMESPACE_END
