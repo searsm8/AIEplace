@@ -21,12 +21,13 @@ If a rule stops being true, flag it for deletion and tell Mark — a stale rule 
   `pl/src/pl_algo/src/modules/`. A block that hasn't cleared this isn't done; optimizing an
   unverified block wastes the effort.
 
-- **Run `make test-regress` before AND after any change under `host/src/sw_only/`** — it
-  asserts the trajectory + final-position hash are bit-identical to the committed baseline.
-
 - **A test asserts, printing only on failure.** The harness computes the verdict itself and exits
   0 (pass) / non-zero (fail). This applies to **every** number it emits as evidence, not
   just the headline one — a printed number nobody `if`-checks is where the bug hides.
+
+- **Run the regression suite before writing a handoff or report** — `make test-regress` for
+  sw_only changes, `cd vck5000 && make test` for pl_algo changes. A report's numbers should be
+  backed by a passing regression at write time, not asserted from memory of an earlier run.
 
 ## Faithfulness to XPlace
 - **Before inventing a heuristic, read how XPlace does it** — `grep -rn "<quantity>" ~/phd/Xplace/src/`.
@@ -43,4 +44,8 @@ If a rule stops being true, flag it for deletion and tell Mark — a stale rule 
   frozen. Match the frozen sw_only; never "fix" a pl_algo mismatch by moving sw_only instead.
 
 ## Git
-- **Commit only when Mark asks,** but prompt Mark to commit if you think it should happen or you pass a major milestone.
+- **Commit when:** a report is written, a `HANDOFF_...` is converted into a `REPORT_...`, or
+  Mark asks. Otherwise don't commit unprompted — these three triggers keep commits tied to
+  verified checkpoints instead of firing on every small edit.
+- Outside those triggers, prompt Mark to commit if you think it should happen (e.g. a major
+  milestone not yet written up) — but wait for his yes.

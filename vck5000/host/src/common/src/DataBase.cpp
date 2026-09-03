@@ -994,12 +994,12 @@ void DataBase::printOverlaps()
     }
 }
 
-bool DataBase::writeDEF(const std::string& output_path) const
+bool DataBase::writeDEF(const fs::path& output_path) const
 {
-    string output_filename = output_path + "/" + m_design_name + ".def";
+    fs::path output_filename = output_path / (m_design_name + ".def");
     std::ofstream out(output_filename);
     if (!out.is_open()) {
-        Logger::log_error("DEF write: invalid output filename: " + output_filename);
+        Logger::log_error("DEF write: invalid output filename: " + output_filename.string());
         return false;
     }
     out.imbue(std::locale::classic()); // set to standard output

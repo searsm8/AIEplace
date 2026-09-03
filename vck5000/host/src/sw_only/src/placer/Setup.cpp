@@ -17,7 +17,7 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-static void configureThreadPool(); // defined below, near its one call site in setupDesign()
+static void configureThreadPool(); // defined below
 
 /// @brief Config parse + grid decision + DB read + fillers + area analysis + grid construction,
 ///        timed as one unit.
@@ -26,11 +26,11 @@ void Placer::setupDesign()
     TIME_FUNCTION();
     loadConfiguration();
     configureThreadPool();
-    bool bins_auto = resolveGridResolution();
+    resolveGridResolution();
     loadDesignDatabase();
     tagMovableMacros();           // must precede createFillers: the filler math is std-cell-only
     createFillers();              // may raise target_density; then builds the flat node index
-    analyzeDesignArea(bins_auto);
+    analyzeDesignArea();
     configurePreconditioner();
     applyMixedSizeStopPolicy();   // needs num_movable_macros from analyzeDesignArea
     setupGrid();                  // needs bins_per_row/target_density, settled by the calls above
@@ -162,6 +162,7 @@ void Placer::loadConfiguration()
  * An explicit OMP_NUM_THREADS always wins, so a concurrent sweep can still divide the box up —
  * and must: N runs x all-but-one-core each oversubscribes N-fold (tools/dse.py does this).
  */
+
 static void configureThreadPool()
 {
 #ifdef _OPENMP
@@ -183,16 +184,16 @@ static void configureThreadPool()
 /**
  * @brief Decide bins_per_row from an explicit config override; otherwise defer to the
  *        ePlace-formula grid computed once the database is read (see analyzeDesignArea).
- * @return true if the grid still needs to be auto-sized (no explicit override was given)
+ *        Sets member bins_auto: true if the grid still needs to be auto-sized (no explicit
+ *        override was given).
  */
-bool Placer::resolveGridResolution()
+void Placer::resolveGridResolution()
 {
-    bool bins_auto = !bool(cfg["params"]["bins_per_row"]);
+    bins_auto = !bool(cfg["params"]["bins_per_row"]);
     if (!bins_auto) {
         bins_per_row = cfg["params"]["bins_per_row"].value_or(bins_per_row);
         Logger::log_info("Grid resolution: " + std::to_string(bins_per_row) + " x " + std::to_string(bins_per_row));
     }
-    return bins_auto;
 }
 
 /// @brief Read the LEF/DEF design files and apply the benchmark's maximum_utilization if given.
@@ -282,10 +283,9 @@ void Placer::createFillers()
  * @brief Scan the design's components: derive the preconditioner's area normalization
  *        (avg_node_size), detect movable macros (num_movable_macros), and compute the
  *        ePlace-formula grid size (formula_bins_per_row) — applied to bins_per_row when
- *        @p bins_auto (no explicit override was given).
- * @param bins_auto result of resolveGridResolution(): true if the grid wasn't pinned by config
+ *        member bins_auto is set (no explicit override was given; see resolveGridResolution).
  */
-void Placer::analyzeDesignArea(bool bins_auto)
+void Placer::analyzeDesignArea()
 {
     // Preconditioner area normalization: average cell area so area term is O(1) for standard cells
     // (XPlace achieves this by normalizing all coordinates by site_width)

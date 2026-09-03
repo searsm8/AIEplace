@@ -1,9 +1,7 @@
 /**
  * @file AIEplace.cpp
- * @brief The algorithm's loop skeleton: Placer::run()/performIteration()/performIterationZero()
- *        and the constructor. ~80 lines, pure orchestration -- read this first to see the whole
- *        algorithm at a glance, then follow the calls out into Setup/Step/Partials/Density/
- *        Schedule.cpp for what each phase actually does.
+ * @brief The algorithm's top level loop, orchestrating the whole algorithm.
+ *        Follow the calls out into Setup/Step/Partials/Density/Schedule.cpp for functionality.
  */
 #include "DCT.h"
 #include "AIEplace.h"
@@ -25,13 +23,12 @@ void Placer::run()
         performIteration();
 
         if (checkConvergence()) {
-            // MMS benchmarks run with Phase::MIXED_SIZE.
-            // Upon converging, lock macros and begin phase 2 (Phase::STDCELL_FIXED_MACRO).
+            // MMS benchmarks need Phase 2 with macros locked
             if (phase == Phase::MIXED_SIZE && readyForPhase2()) {
                 beginPhase2();
-            } else break;
+            } 
+            else break;
         }
-
         if (checkForNaN()) break; // NaN detected, very bad, stop immediately
     }
 }
@@ -51,21 +48,18 @@ void Placer::performIteration()
     if (phaseIteration() == 1)
         estimateInitialStep();
 
-    performNextStep(enable_backtracking);
+    performNextStep();
     recordIterationResults();
     printIterationResults();
 
-    updateSchedule();
+    updateSchedule(); // Update γ, λ, and preconditioner for the next iteration. 
 
     dumpScheduleTrace();
 }
 
 /**
- * @brief Iteration-zero bootstrap: compute the first gradients and initialize solver state from
- *        whatever the current probe positions (v_k = u_k) are. Two callers, two different
- *        position-setters: run() calls it right after initializePlacement() seeds the whole
- *        design; beginPhase2() calls it again after freezing the macros and re-seeding the std
- *        cells. This function does not care which -- it only assumes positions are already set.
+ * @brief Iteration-zero bootstrap: compute the first gradients and initialize solver state
+ *        Two callers: run() and beginPhase2().
  */
 void Placer::performIterationZero()
 {
@@ -77,11 +71,14 @@ void Placer::performIterationZero()
     initializeDensityWeight();
 }
 
+/**
+ * @brief Constructor: read the config file, parse the design and grid, and initialize the schedule.
+ */
 Placer::Placer(std::string config_filepath_arg)
 {
     config_filepath = config_filepath_arg;
 
-    setupDesign();              // now also builds the Grid (setupGrid() folded in, 2026-09-02)
+    setupDesign();
     createRunOutputStructure();
     configureGammaSchedule();
     initializePositionDump();

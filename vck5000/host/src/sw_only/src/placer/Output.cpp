@@ -217,8 +217,7 @@ void Placer::createRunOutputStructure()
     Logger::log_detail("Created output directory: " + output_dir.string());
 }
 
-void Placer::writeResultsCSV(float final_hpwl, float final_hpwl_exact, float final_overflow,
-                              float total_runtime, const std::string& run_id)
+void Placer::writeResultsCSV(float final_hpwl_exact, float total_runtime, const std::string& run_id)
 {
     if (!fs::exists(results_dir))
         fs::create_directories(results_dir);
@@ -353,30 +352,26 @@ void Placer::printFinalResults()
                    + " iteration=" + std::to_string(iteration));
 
     BestChoice chosen = restoreBestSolution();
-
-    // Use the output directory created in constructor
-    std::string run_output_dir = output_dir.string();
     std::string run_id = generateRunId();
 
     FinalMetrics metrics = computeFinalMetrics();
     logOverflowDiagnostics();
     dumpBestPlacementDensity();
 
-    exportSummaryReports(chosen, metrics, run_output_dir);
+    exportSummaryReports(chosen, metrics);
 
     // Write run record to global results CSV
-    writeResultsCSV(metrics.final_hpwl, metrics.final_hpwl_exact, metrics.final_overflow,
-                    metrics.total_runtime, run_id);
+    writeResultsCSV(metrics.final_hpwl_exact, metrics.total_runtime, run_id);
 
     // The restored best placement, tagged so the offline tool can render the same picture the
     // cairo renderer writes as best_solution.png. That shared final frame is what step 2's
     // C++-vs-Python comparison is anchored on (handoff §6).
     dumpIterationPositions("best_solution");
 
-    writeFinalDesignArtifacts(run_output_dir);
+    writeFinalDesignArtifacts();
     finalizePositionDump();
 
-    Logger::log_info("All outputs saved to: " + run_output_dir);
+    Logger::log_info("All outputs saved to: " + output_dir.string());
 }
 
 // restoreBestSolution() moved to BestSolution.cpp (2026-08-31).
@@ -457,8 +452,7 @@ void Placer::dumpBestPlacementDensity()
 
 /// @brief Build and log the console results/hyperparameters tables, then export the run
 ///        summary and per-function timing stats as markdown into the run directory.
-void Placer::exportSummaryReports(const BestChoice& chosen, const FinalMetrics& metrics,
-                                   const std::string& run_output_dir)
+void Placer::exportSummaryReports(const BestChoice& chosen, const FinalMetrics& metrics)
 {
     Table statistics;
     statistics.add_row({"AIEplace Run Statistics"});
@@ -531,19 +525,19 @@ void Placer::exportSummaryReports(const BestChoice& chosen, const FinalMetrics& 
     statistics.add_row({hyperparams});
 
     Logger::log_info(statistics);
-    Logger::export_markdown(statistics, run_output_dir, "run_summary");
+    Logger::export_markdown(statistics, output_dir, "run_summary");
 
     Table function_stats = Logger::printFunctionStats();
-    Logger::export_markdown(function_stats, run_output_dir, "function_statistics");
+    Logger::export_markdown(function_stats, output_dir, "function_statistics");
 }
 
 /// @brief Write the placed design to DEF, and copy the config file into the run directory for reproducibility.
-void Placer::writeFinalDesignArtifacts(const std::string& run_output_dir)
+void Placer::writeFinalDesignArtifacts()
 {
-    db.writeDEF(run_output_dir);
+    db.writeDEF(output_dir);
 
     std::ifstream src(config_filepath);
-    std::ofstream dst(run_output_dir + "/config_used.toml");
+    std::ofstream dst(output_dir / "config_used.toml");
     dst << src.rdbuf();
 }
 

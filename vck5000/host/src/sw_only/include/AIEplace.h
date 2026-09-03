@@ -3,8 +3,7 @@
  * @brief Declares Placer: every hyperparameter, all current/next iteration state, and the full
  *        method surface implementing the ePlace algorithm. Methods are declared here but defined
  *        across a dozen placer/*.cpp files, one per concern (grouping comments below name which).
- *        Start reading at AIEplace.cpp (the loop skeleton) instead of here; see README.md for the
- *        full algorithm-flow map.
+ *        Start reading at AIEplace.cpp; see README.md for the algorithm-flow map.
  */
 #pragma once
 
@@ -29,14 +28,14 @@ class Placer
 private:
     std::string config_filepath;
 
-    // Constructor phases (see Placer::Placer)
-    void setupDesign();                    // timed: config parse + grid decision + DB read + fillers + area analysis + grid construction
+    // Constructor methods (see Placer::Placer)
+    void setupDesign();                    // config parse + grid size decision + DB read + fillers + area analysis + grid construction
     void loadConfiguration();              // parse the config file into cfg and read all hyperparameters
-    bool resolveGridResolution();          // explicit bins_per_row override, or defer to the ePlace formula
+    void resolveGridResolution();          // explicit bins_per_row override, or defer to the ePlace formula
     void loadDesignDatabase();             // read LEF/DEF, apply benchmark max_util
     void tagMovableMacros();               // XPlace is_mov_macro rule; must precede createFillers
     void createFillers();                  // fillers (may raise target_density) + flat node index
-    void analyzeDesignArea(bool bins_auto); // movable/fixed area stats, macro count, ePlace-formula grid size
+    void analyzeDesignArea();              // movable/fixed area stats, macro count, ePlace-formula grid size
     void configurePreconditioner();        // auto-enable decision from num_movable_macros
     void applyMixedSizeStopPolicy();       // XPlace include_macros phase: 2x stop overflow, no plateau kill
     void setupGrid();                      // build the Grid from bins_per_row, clamp density, set die_size -- called from setupDesign()
@@ -45,8 +44,7 @@ private:
 
     // Helper functions for DSE integration and output organization
     void createRunOutputStructure();
-    void writeResultsCSV(float final_hpwl, float final_hpwl_exact, float final_overflow,
-                         float total_runtime, const std::string& run_id);
+    void writeResultsCSV(float final_hpwl_exact, float total_runtime, const std::string& run_id);
 
     // writeResultsCSV's steps, broken out for readability
     std::vector<std::pair<std::string, std::string>> parseDSEParams();
@@ -132,6 +130,7 @@ public:
 
     int die_size; // minimum of width and height of the die area
     int bins_per_row; // grid size
+    bool bins_auto = false; // set by resolveGridResolution: true if bins_per_row wasn't explicitly set by config
 
     // Scratch for the per-iteration reductions that must add in index order (see Common.h).
     // Members, not locals, so the buffers are allocated once for the whole run.
@@ -433,7 +432,7 @@ public:
 
     // Main algorithm iteration functions
     void performIterationZero();        // bootstrap gradients + solver state, before iteration 1
-    void performNextStep(bool backtracking_enabled = true); // Algorithm 2: BkTrk
+    void performNextStep();                // Algorithm 2: BkTrk (backtracks iff enable_backtracking)
     void estimateInitialStep();         // XPlace-style iteration-1 BB learning-rate estimate
     float computeLipschitzEstimate();    // BB step estimate: ||Δv|| / ||Δ∇f||
     void combineGradients();            // subtract electro from probe_grad in-place
@@ -483,9 +482,8 @@ public:
     FinalMetrics computeFinalMetrics();
     void logOverflowDiagnostics();
     void dumpBestPlacementDensity();
-    void exportSummaryReports(const BestChoice& chosen, const FinalMetrics& metrics,
-                              const std::string& run_output_dir);
-    void writeFinalDesignArtifacts(const std::string& run_output_dir);
+    void exportSummaryReports(const BestChoice& chosen, const FinalMetrics& metrics); // writes into output_dir
+    void writeFinalDesignArtifacts();                                                 // writes into output_dir
 };
 
 namespace ConfigUtils {

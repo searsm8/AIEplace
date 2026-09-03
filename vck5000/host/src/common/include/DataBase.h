@@ -285,7 +285,7 @@ public:
     void printOverlaps();
 
     // DEF writer functions
-    bool writeDEF(const std::string& output_path) const;
+    bool writeDEF(const fs::path& output_path) const;
     void writeHeader(std::ofstream& out) const;
     void writeDieArea(std::ofstream& out) const;
     void writeComponents(std::ofstream& out) const;

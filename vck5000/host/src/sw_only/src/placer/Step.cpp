@@ -23,7 +23,7 @@ AIEPLACE_NAMESPACE_BEGIN
  * After the loop, the accepted trial step is committed (positions already at u_{k+1}, v_{k+1})
  * and the Nesterov coefficient is advanced.
  */
-void Placer::performNextStep(bool backtracking_enabled)
+void Placer::performNextStep()
 {
     // Algorithm 1, Line 3: compute momentum coefficient for this iteration
     float a_next = (1.0f + sqrtf(4.0f * nesterov_ak * nesterov_ak + 1.0f)) / 2.0f;
@@ -37,14 +37,14 @@ void Placer::performNextStep(bool backtracking_enabled)
     int tries = 0;
     float prev_step_length;
     do {
-        // Lines 2 & 3: trial step using existing step_length from previous iteration
+        // step using existing step_length from previous iteration
         stepAllNodes();
-
         iterationReset();
-        // Recompute gradients at trial v̂ (the expensive part, accelerated on AIEs)
+
+        // The expensive computation. Recompute gradients at lookahead v̂ 
         computeHpwlPartials();      // ∇HPWL at probe positions → next.probe_grad (HPWL-only)
         computeElectricFields();    // ∇D from ρ → bin eFields
-        combineGradients();         // add electro in-place: next.probe_grad becomes total ∇f
+        combineGradients();
 
         prev_step_length = step_length;
 
@@ -52,8 +52,9 @@ void Placer::performNextStep(bool backtracking_enabled)
         // α = 1 / L = ||v̂ - v_k|| / ||∇f(v̂) - ∇f(v_k)||
         step_length = computeLipschitzEstimate();
 
-        // Accept if α̂ ≤ ε · fresh_bb (step is not too aggressive)
-    } while(backtracking_enabled &&
+        // Accept if α̂ ≤ ε · fresh_bb
+        // Else, step was too aggressive, backtrack!
+    } while(enable_backtracking &&
             prev_step_length > backtrack_epsilon * step_length && // epsilon condition
             ++tries < max_backtracking_attempts);
 
@@ -330,13 +331,10 @@ void Placer::advanceIterationState()
 
 /**
  * @brief Reset per-node and per-bin accumulators before a fresh gradient evaluation.
- *
- * Every call site is immediately followed by computeHpwlPartials() + computeElectricFields() --
- * this is the "clear the scratch state" half of that pair, not a step in its own right.
+ *        Clears the "scratchpad".
  */
 void Placer::iterationReset()
 {
-    TIME_FUNCTION();
     grid.iterationReset();
     db.iterationReset();
 }
