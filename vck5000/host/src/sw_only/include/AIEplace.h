@@ -24,20 +24,6 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-namespace ConfigUtils {
-    /// @brief Required config read: logs an error and exits if [section].key is absent.
-    /// toml++ returns an empty optional for a missing key rather than throwing, so the
-    /// "this key is mandatory" contract has to be expressed here.
-    template <typename T>
-    T require(const toml::table& cfg, std::string_view section, std::string_view key)
-    {
-        if (auto v = cfg[section][key].value<T>())
-            return *v;
-        Logger::log_error("Missing required config key: [" + std::string(section) + "] " + std::string(key));
-        exit(1);
-    }
-}
-
 class Placer
 {
 private:
@@ -501,6 +487,20 @@ public:
                               const std::string& run_output_dir);
     void writeFinalDesignArtifacts(const std::string& run_output_dir);
 };
+
+namespace ConfigUtils {
+    /// @brief Required config read: logs an error and exits if [section].key is absent.
+    /// toml++ returns an empty optional for a missing key rather than throwing, so the
+    /// "this key is mandatory" contract has to be expressed here.
+    template <typename T>
+    T require(const toml::table& cfg, std::string_view section, std::string_view key)
+    {
+        if (auto v = cfg[section][key].value<T>())
+            return *v;
+        Logger::log_error("Missing required config key: [" + std::string(section) + "] " + std::string(key));
+        exit(1);
+    }
+}
 
 AIEPLACE_NAMESPACE_END
 
