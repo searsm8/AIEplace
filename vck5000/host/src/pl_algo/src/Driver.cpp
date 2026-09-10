@@ -991,6 +991,7 @@ int runPlacement(const PlacementConfig& cfg,
     float nesterov_ak    = 1.0f;
     bool  have_prev      = false;
     float prev_hpwl      = 0.0f;   // for the density-weight trend
+    float dev_hpwl       = 0.0f;   // HPWL by-product from the last MODE_HPWL_GRAD (set in eval_gradients). Meow.
     int   conv_remaining = -1;     // overflow-below-stop countdown (-1 until first crossing)
 
     // Preconditioner (sw_only updatePrecondWeights + auto-enable, faithful port). Auto-ON iff the
@@ -1059,6 +1060,14 @@ int runPlacement(const PlacementConfig& cfg,
           r.wait(); }
         b_grad.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
         std::memcpy(g_hpwl.data(), b_grad.map<void*>(), coordM);
+
+        // ---- HPWL by-product (P1b): MODE_HPWL_GRAD summed every net's bbox half-perimeter at the
+        // refreshed pins (v_k) into dct_out[0]. Capture it NOW: the field passes below reuse b_dout
+        // as the DCT output and clobber it. This is the HPWL the host loop consumes -- it must come
+        // from the device, because the host pin array is refreshed only on the device
+        // (MODE_REFRESH_PINS), so a host-side sweep would read stale positions. Sync one float only. Meow.
+        b_dout.sync(XCL_BO_SYNC_BO_FROM_DEVICE, sizeof(float), 0);
+        dev_hpwl = *b_dout.map<float*>();
 
         // ---- density gradient at probe: density_bin -> rho, field solve, force_gather -> g_density ----
         { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad,
@@ -1145,8 +1154,8 @@ int runPlacement(const PlacementConfig& cfg,
         // ---- gradients at v (HPWL + density) ----
         eval_gradients(v, inv_gamma, inv_lut_step);
 
-        // ---- host metrics (verified PL metrics module replicated on host to save a pass) ----
-        const double hpwl = hostHPWL(node_pos.data(), net_ptr, pins, num_nets);
+        // ---- metrics: HPWL from the device by-product (eval_gradients, at v_k); overflow on host ----
+        const double hpwl = dev_hpwl;
         const double overflow = hostOverflow(rho.data(), NBINS, cfg.target_density,
                                              bin_area, total_movable_area);
         out_hpwl_hist[iter-1] = (float)hpwl;

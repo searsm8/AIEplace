@@ -142,27 +142,9 @@ static inline void updatePrecondWeights(float* precond, const int32_t* degree, c
 
 // IGNORE_NET_DEGREE (XPlace net_mask) lives in host_interface.hpp (shared host<->PL contract).
 
-// ---- host HPWL (mirrors metrics.hpp / DataBase::computeTotalWirelength): sum_nets bbox
-// half-perimeter, over nets with 2 <= degree <= IGNORE_NET_DEGREE ----
-static inline double hostHPWL(const coord_t* node_pos, const int32_t* net_ptr,
-                              const NodePin* pins, int num_nets) {
-    double total = 0.0;
-    for (int net = 0; net < num_nets; net++) {
-        const int beg = net_ptr[net], end = net_ptr[net + 1];
-        const int deg = end - beg;
-        if (deg <= 1 || deg > IGNORE_NET_DEGREE) continue;   // XPlace net_mask
-        float maxx = -1e30f, minx = 1e30f, maxy = -1e30f, miny = 1e30f;
-        for (int p = beg; p < end; p++) {
-            const NodePin& r = pins[p];
-            const float x = r.x;   // NodePin carries the absolute position (P2)
-            const float y = r.y;
-            if (x > maxx) maxx = x; if (x < minx) minx = x;
-            if (y > maxy) maxy = y; if (y < miny) miny = y;
-        }
-        total += (double)((maxx - minx) + (maxy - miny));
-    }
-    return total;
-}
+// NOTE: HPWL is no longer computed on the host. Post-P2 the pin array carries absolute positions
+// refreshed only on the device (MODE_REFRESH_PINS), so a host-side sweep would read stale
+// positions; the loop reads MODE_HPWL_GRAD's HPWL by-product instead (Driver.cpp eval_gradients). Meow.
 
 // ---- host overflow (mirrors sw_only Grid::computeTotalOverflow) ----
 // rho is x-major [GRID*GRID]; overflow = bin_area * sum max(0, rho-target) / movable_area.
