@@ -380,8 +380,9 @@ Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
       double-accumulator pathology (II≈7 over `num_pins`), so this is ~30× cheaper than the pass
       it replaces. Cost: LUT +2.4%, BRAM 0, timing unchanged. ⚠️ **New precondition — `bb_DDR`
       must be zeroed before first use** (`host_interface.hpp` NetBBox; both `Driver.cpp` sites do
-      it). Still TODO: delete `metrics::hpwl_sweep` and switch the host off `hostHPWL` — left in
-      place on purpose, `metrics` is the only thing `runMetrics()` covers.
+      it). Host switched off `hostHPWL` 2026-09-09 (see the P2 follow-through item below; that also
+      fixed a stale-position regression). Still TODO: delete `metrics::hpwl_sweep` — left in place on
+      purpose, `metrics` is the only thing `runMetrics()` covers.
       ⚠️ **`pl/Makefile` did not track header dependencies until `21adad6`** — a module-header
       edit left the stale `.xo` and `make` said "Nothing to be done". Two measurements in this
       session were silently stale. Any pre-2026-08-28 synthesis claim that followed a
@@ -406,13 +407,24 @@ Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
       LUT +2.4%, BRAM/DSP/timing unchanged. Tier-1 output **bit-identical** before/after.
       Note the proposal's "NodePin stays 16 B so it is free" was half right — the offsets still
       need a device home (24 B/pin either way); the win is the hot/cold split.
-- [ ] **↪ pl_algo — finish P2: the host must issue `MODE_REFRESH_PINS`.** The device side is
-      built and verified but `Driver.cpp`'s `eval_gradients` does not yet call it before
-      `MODE_HPWL_GRAD` / `MODE_METRICS`. **Until it does, an on-device run silently evaluates the
-      gradient at stale pin positions** — no crash, no obvious symptom. Small change; do it
-      before any sw_emu run of the HPWL path. Then P3 (II fixes) is the next lever —
-      re-read the P1b lesson first: HLS cannot see a rotating array index, partial accumulators
-      need STATIC indices via unrolling. → [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]]
+- [x] **↪ pl_algo — finish P2: the host issues `MODE_REFRESH_PINS` — DONE (verified 2026-09-09).**
+      `Driver.cpp` `eval_gradients` runs `MODE_REFRESH_PINS` (with `r.wait()`) immediately before
+      `MODE_HPWL_GRAD` (Driver.cpp ~1048-1052), so the device pin arrays carry `v_k` before any
+      sweep reads them.
+- [x] **↪ pl_algo — switch the host off `hostHPWL` (P1b follow-through) + FIX a stale-HPWL
+      regression — DONE 2026-09-09.** The `--place` loop now takes HPWL from `MODE_HPWL_GRAD`'s
+      by-product (`dct_out[0]`, captured in `eval_gradients` before the field passes reuse `b_dout`),
+      deleting a full CPU pass over all pins per iteration. **This also fixed a real bug:** `ed25f1a`
+      (P2) rewrote `hostHPWL` to read `r.x` from the *host* `pins` array, which P2 refreshes only on
+      the device (`MODE_REFRESH_PINS`) — so since 2026-08-28 the loop computed HPWL at the **initial**
+      positions every iteration and fed that stale value into `updateDensityWeight` (Driver.cpp:1209),
+      corrupting the λ trend, not just the log. `hostHPWL` deleted from `Placement.hpp` (was its only
+      caller). Verified offline: pl_algo host builds with XRT; `make test` green, assertion `[6]`
+      proves the by-product == double golden at rel 2.1e-08. ⚠️ **Not yet run end-to-end** — the
+      before/after λ-schedule + HPWL-history change needs a `sw_emu` `run-place` A/B (built xclbin).
+      Next lever after that is **P3 (II fixes)** — re-read the P1b lesson first: HLS cannot see a
+      rotating array index, partial accumulators need STATIC indices via unrolling.
+      → [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]]
 - [x] **4. Close the datapath divergences** under that coverage — CLOSED for v1 scope 2026-08-29
       (geometry pair done; macro-weight deferred to step 5). **Geometry pair DONE 2026-08-29
       (`d095a9f`):** `node_footprint.hpp` no longer does the in-die shift #11a deleted (centered box,
@@ -511,6 +523,26 @@ self-normalizing). A host-side fix (`Driver.cpp::runResidentPlacement`, mirrors 
 mode dispatch it needs stalls indefinitely (40-60+ min, zero output, not grid-size-dependent) at
 this design's real scale (31k movable / 29k nets) in sw_emu, for reasons not yet diagnosed (no
 ptrace access this session to get a backtrace). → [[_NEW_HANDOFF_20_pl_only_resident_bringup_20260903.md]] §8.
+
+**2026-09-09 (bring-up ladder landed on real silicon; the sw_emu dispatch stall was sidestepped,
+not fixed in sw_emu).** Rather than keep fighting the 2026-09-04 sw_emu dispatch stall, bring-up
+moved to **real hardware** via a ladder of standalone PL-only harnesses, now committed at
+**`vck5000/bring_up/`** (`709a116`): `add1_pl` (load/run) → `fft_pl` (DCT/IDCT/IDXST) →
+`field_solve_pl` (2D field solve) → `hpwl_pl` (WA HPWL gradient) → `iteration_pl` (the full
+gradient-and-step). `iteration_pl` runs one complete Nesterov step — both gradient sources combined
+into a position update — on the VCK5000 and verifies `u_{k+1}`/`v_{k+1}` against a from-scratch double
+golden (per its README; `rel_rms < 3e-2`, bounded by `hpwl_CU`'s exp-LUT). Each harness `-I`-includes
+the real `modules/`, not copies. Also landed `dct_fft_aie` (AIE FFT) carrying the **bring-up dispatch
+fix** (Mark-confirmed): the graph/kernel path was throwing `open_graph_handle: Operation not
+supported`; the fix **enumerates devices** (probe each card on a multi-card node and use the first
+that accepts the xclbin, not `device(0)`) and creates the graph/kernel through an **`xrt::hw_context`**
+instead of the legacy `device+uuid` constructors (`+ -luuid` on the host link). This work was built on
+the build server and was untracked/stashed there — see `rules.md` "Build server" for how that box is
+reached and why nothing pushed from it directly.
+⚠️ This is **not** the device-resident Stage-5 loop (step 6): no on-chip schedule, convergence test, or
+looping — `iteration_pl` is a single host-driven step. The 2026-09-04 `runResidentPlacement` sw_emu
+stall above is therefore **still open for the resident loop**; what changed is that the datapath is now
+proven on silicon one step at a time, so the resident loop composes hardware-verified blocks.
 
 ---
 

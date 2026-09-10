@@ -14,6 +14,16 @@ If a rule stops being true, flag it for deletion and tell Mark — a stale rule 
   ```
   Bare commands hit the Windows filesystem and fail or do the wrong thing. Other WSL/Vitis
   friction points (background-run death, tmpfs wipe, freopen hang) live in [[noteToSelf.md]].
+- **Build server (`ssh build` → `hacc-build-01.inf.ethz.ch`, via the ETH jumphost).** Vitis/XRT and
+  the VCK5000 card live here; the repo is at **`~/AIEplace`** (NOT `~/phd/AIEplace`). Every hop needs
+  VPN + a password, so for non-interactive use open a multiplexed master **from WSL once** — `wsl ssh
+  -fN build` (enter password), with `ControlMaster auto` / `ControlPath ~/.ssh/cm-%r@%h:%p` /
+  `ControlPersist` set on `Host build` in `~/.ssh/config` — then later `ssh build` reuse it silently.
+  Windows `ssh.exe` can't multiplex, so the master must be WSL-side.
+  - Run remote commands as `ssh build bash --noprofile --norc -s` with the script on stdin — the
+    server's `.bashrc` otherwise spews `module: command not found` into the output stream.
+  - **No GitHub push creds on the server** (HTTPS remote, no helper, can't prompt). Don't push from it:
+    commit there, then `git fetch build:AIEplace <branch>` into the laptop and push from the laptop.
 
 ## Verification — a module isn't done until it's verified
 - **Every PL module is verified offline against a golden before it goes near the device.**
