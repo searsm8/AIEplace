@@ -18,7 +18,7 @@ TARGET     ?= sw_emu
 XILINX_XRT ?= /opt/xilinx/xrt
 
 KERNEL = hpwl_gradient_dhar_top
-INC    = -I../pl/src/pl_algo/src          # module root: "modules/..." and "host_interface.hpp"
+INC    = -I../../pl/src/pl_algo/src          # module root: "modules/..." and "host_interface.hpp"
 
 XO     = $(KERNEL).$(TARGET).xo
 XSA    = $(KERNEL).$(TARGET).xsa
@@ -44,7 +44,7 @@ $(XCLBIN): $(XSA)
 $(HOST): src/host.cpp
 	g++ -std=c++17 -Wall -O2 -o $@ $< $(INC) \
 		-I$(XILINX_XRT)/include -L$(XILINX_XRT)/lib \
-		-lxrt_coreutil -pthread
+		-lxrt_coreutil -luuid -pthread
 
 # 5. Emulation config
 emconfig.json:
