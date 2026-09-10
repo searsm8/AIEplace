@@ -14,16 +14,20 @@ If a rule stops being true, flag it for deletion and tell Mark — a stale rule 
   ```
   Bare commands hit the Windows filesystem and fail or do the wrong thing. Other WSL/Vitis
   friction points (background-run death, tmpfs wipe, freopen hang) live in [[noteToSelf.md]].
-- **Build server (`ssh build` → `hacc-build-01.inf.ethz.ch`, via the ETH jumphost).** Vitis/XRT and
-  the VCK5000 card live here; the repo is at **`~/AIEplace`** (NOT `~/phd/AIEplace`). Every hop needs
-  VPN + a password, so for non-interactive use open a multiplexed master **from WSL once** — `wsl ssh
-  -fN build` (enter password), with `ControlMaster auto` / `ControlPath ~/.ssh/cm-%r@%h:%p` /
-  `ControlPersist` set on `Host build` in `~/.ssh/config` — then later `ssh build` reuse it silently.
-  Windows `ssh.exe` can't multiplex, so the master must be WSL-side.
-  - Run remote commands as `ssh build bash --noprofile --norc -s` with the script on stdin — the
-    server's `.bashrc` otherwise spews `module: command not found` into the output stream.
-  - **No GitHub push creds on the server** (HTTPS remote, no helper, can't prompt). Don't push from it:
-    commit there, then `git fetch build:AIEplace <branch>` into the laptop and push from the laptop.
+- **Build server** (`ssh build` → `hacc-build-01.inf.ethz.ch`; Vitis/XRT + the VCK5000 live there,
+  repo at `~/AIEplace`). Run remote commands like this (the `--norc`/stdin script keeps the server's
+  `module: command not found` `.bashrc` noise out of the output):
+  ```bash
+  wsl -e bash -c "ssh -o BatchMode=yes build bash --noprofile --norc -s" <<'REMOTE'
+  cd ~/AIEplace && <commands>
+  REMOTE
+  ```
+  **If it times out or exits non-zero, the portal isn't open** — the SSH master needs a password I
+  can't type. Stop and ask Mark to run `wsl ssh -fN build` once (he enters the password); that leaves
+  a `ControlPersist` master I then reuse silently. Don't retry blindly.
+  **Once there:** the server has no GitHub creds, so never push from it — commit on the server, then
+  from the laptop `git fetch build:AIEplace <branch>`, rebase onto `origin/<branch>`, and push. I own
+  this push/pull sync.
 
 ## Verification — a module isn't done until it's verified
 - **Every PL module is verified offline against a golden before it goes near the device.**
