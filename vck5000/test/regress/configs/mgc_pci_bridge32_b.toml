@@ -13,8 +13,8 @@
 # =============================================================================
 
 [input]
-#benchmark = "host/benchmarks/ispd2005/adaptec1"
-benchmark = "host/benchmarks/ispd2015/mgc_pci_bridge32_b"
+#benchmark = "../host/benchmarks/ispd2005/adaptec1"
+benchmark = "../host/benchmarks/ispd2015/mgc_pci_bridge32_b"
 
 xclbin = "bin/aieplace.hw.xclbin"
 

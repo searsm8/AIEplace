@@ -23,7 +23,8 @@ import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(REPO, 'host/src/sw_only/src')
+REPO_ROOT = os.path.dirname(REPO)   # host/ lives one level above vck5000/ (REPO)
+SRC = os.path.join(REPO_ROOT, 'host/src/sw_only/src')
 
 # The two idioms sw_only reads config through. Anything else is invisible here, which is why
 # --check-configs is a guard on the CONFIGS rather than proof that a key is dead.
@@ -95,8 +96,8 @@ def check_configs(known):
     """
     import tomlkit
     bad = 0
-    for path in [os.path.join(REPO, 'host/src/sw_only/default_config.toml'),
-                 os.path.join(REPO, 'host/src/sw_only/run_config.toml')]:
+    for path in [os.path.join(REPO_ROOT, 'host/src/sw_only/default_config.toml'),
+                 os.path.join(REPO_ROOT, 'host/src/sw_only/run_config.toml')]:
         if not os.path.isfile(path):
             continue
         doc = tomlkit.parse(open(path, encoding='utf-8').read())

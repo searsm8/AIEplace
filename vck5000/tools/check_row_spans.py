@@ -14,7 +14,7 @@ Usage: check_row_spans.py <design> <placement.pl> [<placement.pl> ...]
 import sys
 from pathlib import Path
 
-BENCH = Path("/home/msears/phd/AIEplace/vck5000/host/benchmarks/mms")
+BENCH = Path("/home/msears/phd/AIEplace/host/benchmarks/mms")
 
 
 def read_rows(scl_path):

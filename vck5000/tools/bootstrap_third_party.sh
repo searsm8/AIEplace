@@ -147,7 +147,7 @@ done
 if [[ $boost_syms -ne 0 ]]; then
     echo "   WARNING: the linked Limbo archives now reference $boost_syms compiled boost:: symbols." >&2
     echo "   The header/library version split above is no longer harmless -- see the comment" >&2
-    echo "   in this script and in host/src/sw_only/makeflags.mk." >&2
+    echo "   in this script and in ../host/src/sw_only/makeflags.mk." >&2
 else
     echo "   linked Limbo archives need no compiled Boost (0 undefined boost:: symbols) -- OK"
 fi

@@ -48,7 +48,7 @@ pl-algo:
 	$(MAKE) pl PL=pl_algo HOST=pl_algo TARGET=$(TARGET)
 
 host:
-	$(MAKE) -C host PROJECT_ROOT=$(PROJECT_ROOT) HOST=$(HOST)
+	$(MAKE) -C $(HOST_ROOT) PROJECT_ROOT=$(PROJECT_ROOT) HOST=$(HOST)
 
 aie:
 	$(MAKE) -C aie all \
@@ -103,7 +103,7 @@ clean:
 		TARGET=$(TARGET) PL=$(PL) AIE=$(AIE) \
 		AIE_PARTIALS_INSTANCES=$(AIE_PARTIALS_INSTANCES) \
 		AIE_DENSITY_INSTANCES=$(AIE_DENSITY_INSTANCES)
-	$(MAKE) -C host clean \
+	$(MAKE) -C $(HOST_ROOT) clean \
 		TARGET=$(TARGET) PL=$(PL) AIE=$(AIE) \
 		AIE_PARTIALS_INSTANCES=$(AIE_PARTIALS_INSTANCES) \
 		AIE_DENSITY_INSTANCES=$(AIE_DENSITY_INSTANCES)
@@ -184,7 +184,7 @@ define EMU_RUN
 	$(HOST_EXE) $(1) $(XCLBIN) $(2)
 endef
 
-BENCH ?= $(PROJECT_ROOT)/host/benchmarks/ispd2015/mgc_pci_bridge32_b
+BENCH ?= $(HOST_ROOT)/benchmarks/ispd2015/mgc_pci_bridge32_b
 PLACE_ITERS ?= 2
 
 # --- PL-only modes (AIE ports are present in the top, but unused) ---

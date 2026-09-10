@@ -23,17 +23,17 @@ ITERS=${2:-20}
 SET=${3:-fast}
 ROOT=/home/msears/phd/AIEplace/vck5000
 EXE=${EXE:-$ROOT/build/hw/host/sw_only/aieplace_sw_only.exe}
-BASE=$ROOT/host/src/sw_only/default_config.toml
+BASE=$ROOT/../host/src/sw_only/default_config.toml
 
 FAST="
-adaptec1:host/benchmarks/ispd2005/adaptec1
-mgc_fft_1:host/benchmarks/ispd2015/mgc_fft_1
-mgc_matrix_mult_1:host/benchmarks/ispd2015/mgc_matrix_mult_1
-adaptec1_g1024:host/benchmarks/ispd2005/adaptec1:1024
+adaptec1:../host/benchmarks/ispd2005/adaptec1
+mgc_fft_1:../host/benchmarks/ispd2015/mgc_fft_1
+mgc_matrix_mult_1:../host/benchmarks/ispd2015/mgc_matrix_mult_1
+adaptec1_g1024:../host/benchmarks/ispd2005/adaptec1:1024
 "
 SLOW="
-superblue11:host/benchmarks/ispd2015/mgc_superblue11_a
-newblue3:host/benchmarks/mms/newblue3
+superblue11:../host/benchmarks/ispd2015/mgc_superblue11_a
+newblue3:../host/benchmarks/mms/newblue3
 "
 
 DESIGNS=$FAST

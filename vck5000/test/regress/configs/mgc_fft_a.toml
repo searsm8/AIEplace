@@ -13,8 +13,8 @@
 # =============================================================================
 
 [input]
-#benchmark = "host/benchmarks/ispd2005/adaptec1"
-benchmark = "host/benchmarks/ispd2015/mgc_fft_a"
+#benchmark = "../host/benchmarks/ispd2005/adaptec1"
+benchmark = "../host/benchmarks/ispd2015/mgc_fft_a"
 
 xclbin = "bin/aieplace.hw.xclbin"
 

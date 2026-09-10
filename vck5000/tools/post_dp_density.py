@@ -48,7 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import benchmarks
 from check_row_spans import read_rows, read_sizes
 
-BENCH = Path("/home/msears/phd/AIEplace/vck5000/host/benchmarks/mms")
+BENCH = Path("/home/msears/phd/AIEplace/host/benchmarks/mms")
 
 
 

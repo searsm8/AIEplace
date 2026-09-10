@@ -40,11 +40,11 @@ if you proceed anyway). This check also catches the subtler case — another ses
 working, and leaves the repo dirty for a one-off run.
 
 ```bash
-sed -e 's|^benchmark = .*|benchmark = "host/benchmarks/<suite>/<design>"|' \
-    host/src/sw_only/default_config.toml > <scratch>/<design>.toml
+sed -e 's|^benchmark = .*|benchmark = "../host/benchmarks/<suite>/<design>"|' \
+    ../host/src/sw_only/default_config.toml > <scratch>/<design>.toml
 ```
 
-Then run it from the repo root — paths inside the config are relative to the working directory:
+Then run it from `vck5000/` — paths inside the config are relative to the working directory:
 
 ```bash
 ./build/hw/host/sw_only/aieplace_sw_only.exe <scratch>/<design>.toml

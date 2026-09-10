@@ -1,5 +1,7 @@
 
-PROJECT_ROOT ?= $(CURDIR)/..
+# host/ lives at the repo root; common.mk (the vck5000-platform build vars) lives in vck5000/,
+# a sibling directory, not the parent -- unlike aie/, pl/, test/, which are nested under vck5000/.
+PROJECT_ROOT ?= $(CURDIR)/../vck5000
 
 include $(PROJECT_ROOT)/common.mk
 include $(HOST_DIR)/makeflags.mk

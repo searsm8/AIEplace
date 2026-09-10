@@ -4,8 +4,8 @@
 # by vck5000/tools/bootstrap_third_party.sh.
 *.a
 *.out
-python/AIEmath
-python/results
+archive/python/AIEmath
+archive/python/results
 results
 *:Zone.Identifier
 *.cfg
@@ -28,8 +28,8 @@ __pycache__/
 /tat
 /vck5000/bin/
 /vck5000/.claude/
-# stray host build output (the real output goes to build/)
-/vck5000/host/src/objs/
+# stray host build output (the real output goes to vck5000/build/)
+/host/src/objs/
 
 # Scratch output of `make test-regress`. The committed part of that test is
 # test/regress/{configs,baselines}/; this is just where the run under test lands.
@@ -58,7 +58,7 @@ __pycache__/
 # 0_TODO, plus 1_REVIEW and 2_ARTIFACTS wholesale. One hidden dir, so a newcomer browsing the repo
 # sees code first. The catch-all still ignores 0_OVERNIGHT_WORK and anything else numbered.
 [0-9]_*/
-vck5000/host/benchmarks/mms/
+host/benchmarks/mms/
 
 # /.claude/1_REVIEW/ -- the REPORTS ARE TRACKED (Mark, 2026-08-07). The negation must come after
 # the catch-all above AND must win on the DIRECTORY: git does not descend into an excluded

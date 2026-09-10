@@ -73,8 +73,8 @@ import benchmarks  # master manifest: design list, XPlace grid + target_density
 import lgdp        # per-design legalization + detailed placement via XPlace (TODO #30)
 
 EXE_PATH = "build/hw/host/sw_only/aieplace_sw_only.exe"
-TEMPLATE_PATH = "host/src/sw_only/default_config.toml"
-BENCH_ROOT = "host/benchmarks"
+TEMPLATE_PATH = "../host/src/sw_only/default_config.toml"
+BENCH_ROOT = "../host/benchmarks"
 
 # CLAUDE CODE: one file per owner, and the name says who wrote it -- the exe appends gp_only.csv,
 # the LG worker owns lgdp.json, dse.py produces this.

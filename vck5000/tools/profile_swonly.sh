@@ -9,20 +9,20 @@ OUT=${1:-/tmp/mt12/profile}
 ITERS=${2:-20}
 ROOT=/home/msears/phd/AIEplace/vck5000
 EXE=$ROOT/build/hw/host/sw_only/aieplace_sw_only.exe
-BASE=$ROOT/host/src/sw_only/default_config.toml
+BASE=$ROOT/../host/src/sw_only/default_config.toml
 
 mkdir -p "$OUT"
 cd "$ROOT" || exit 1
 
 # label:benchmark_path[:bins_per_row]
 DESIGNS="
-adaptec1_auto:host/benchmarks/ispd2005/adaptec1
-mgc_fft_1_auto:host/benchmarks/ispd2015/mgc_fft_1
-mgc_fft_1_g512:host/benchmarks/ispd2015/mgc_fft_1:512
-newblue3_auto:host/benchmarks/mms/newblue3
-superblue11_auto:host/benchmarks/ispd2015/mgc_superblue11_a
-adaptec1_g1024:host/benchmarks/ispd2005/adaptec1:1024
-adaptec1_g2048:host/benchmarks/ispd2005/adaptec1:2048
+adaptec1_auto:../host/benchmarks/ispd2005/adaptec1
+mgc_fft_1_auto:../host/benchmarks/ispd2015/mgc_fft_1
+mgc_fft_1_g512:../host/benchmarks/ispd2015/mgc_fft_1:512
+newblue3_auto:../host/benchmarks/mms/newblue3
+superblue11_auto:../host/benchmarks/ispd2015/mgc_superblue11_a
+adaptec1_g1024:../host/benchmarks/ispd2005/adaptec1:1024
+adaptec1_g2048:../host/benchmarks/ispd2005/adaptec1:2048
 "
 
 for entry in $DESIGNS; do

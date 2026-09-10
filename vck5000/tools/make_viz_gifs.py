@@ -29,7 +29,8 @@ import sys
 import tomlkit
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TEMPLATE = os.path.join(REPO, "host/src/sw_only/default_config.toml")
+REPO_ROOT = os.path.dirname(REPO)   # host/ lives one level above vck5000/ (REPO)
+TEMPLATE = os.path.join(REPO_ROOT, "host/src/sw_only/default_config.toml")
 EXE = os.path.join(REPO, "build/hw/host/sw_only/aieplace_sw_only.exe")
 
 # design -> (xplace_grid, xplace_target_density), from tools/benchmarks.py _ROWS (mms tier).
@@ -56,7 +57,7 @@ def write_config(design, cfg_dir, out_root, seed, every):
     with open(TEMPLATE) as f:
         cfg = tomlkit.parse(f.read())
 
-    cfg["input"]["benchmark"] = f"host/benchmarks/mms/{design}"
+    cfg["input"]["benchmark"] = f"../host/benchmarks/mms/{design}"
 
     params = cfg["params"]
     params["bins_per_row"] = grid
