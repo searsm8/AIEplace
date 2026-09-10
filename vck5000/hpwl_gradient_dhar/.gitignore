@@ -1,0 +1,21 @@
+# Build artifacts -- everything here is regenerable by `make`. Track only src/, Makefile,
+# run_hw.sh, README.md.
+host
+*.xo
+*.xsa
+*.xclbin
+*.ltx
+*.log
+*.jou
+*.info
+*.link_summary
+*.compile_summary
+*.package_summary
+*.run_summary
+package.*
+emconfig.json
+_x/
+.Xil/
+.run/
+*.pb
+*.pb3

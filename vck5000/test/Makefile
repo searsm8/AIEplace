@@ -26,7 +26,7 @@ BUILD     = build
 # match that run's config_used.json, or the stop check will fail against the wrong threshold.
 TRACE ?= fixtures/schedule_trace_adaptec1.csv
 
-HARNESSES = density_model density_bin_model node_footprint_test force_gather_test metrics_test iteration_update_test spectral_test fft_pl_test field_solve_test hpwl_grad_test bb_reduce_test sched_verify
+HARNESSES = density_model density_bin_model node_footprint_test force_gather_test metrics_test iteration_update_test spectral_test fft_pl_test field_solve_test hpwl_grad_test hpwl_dhar_test bb_reduce_test sched_verify
 BINS      = $(addprefix $(BUILD)/, $(HARNESSES))
 
 .PHONY: all test clean
@@ -54,9 +54,20 @@ $(BUILD)/hpwl_grad_test_asan: hpwl_grad_test.cpp
 	@mkdir -p $(BUILD)
 	$(CXX) $(ASAN_FLAGS) $(INCLUDES) $< -o $@
 
+# Same bounds-check rationale for the Dhar variant: the load guard (k<deg) on the padded-16 block
+# and the phase-Z pre-zero of dropped >16 pins are only visible to a sanitizer, not a value check.
+.PHONY: test-asan-dhar
+test-asan-dhar: $(BUILD)/hpwl_dhar_test_asan
+	@echo "=== hpwl_dhar_test (address,undefined) ==="
+	@setarch $$(uname -m) -R $(BUILD)/hpwl_dhar_test_asan
+
+$(BUILD)/hpwl_dhar_test_asan: hpwl_dhar_test.cpp
+	@mkdir -p $(BUILD)
+	$(CXX) $(ASAN_FLAGS) $(INCLUDES) $< -o $@
+
 test: $(BINS)
 	@fail=0; \
-	for h in density_model density_bin_model node_footprint_test force_gather_test metrics_test iteration_update_test spectral_test fft_pl_test field_solve_test hpwl_grad_test bb_reduce_test; do \
+	for h in density_model density_bin_model node_footprint_test force_gather_test metrics_test iteration_update_test spectral_test fft_pl_test field_solve_test hpwl_grad_test hpwl_dhar_test bb_reduce_test; do \
 		printf '\n=== %s ===\n' "$$h"; \
 		$(BUILD)/$$h || fail=1; \
 	done; \
