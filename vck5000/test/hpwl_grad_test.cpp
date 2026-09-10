@@ -88,6 +88,7 @@ struct Design {
     std::vector<int>     net_ptr;            // [num_nets+1] CSR
     std::vector<NodePin> pins;               // [num_pins] net-major
     std::vector<NodePin> node_pins;          // node-major, movable + gradient-bearing only
+    std::vector<int>     pin_to_npin;        // [num_pins] net-major -> node-major slot, -1 if none
     std::vector<int>       masked_pin_idx;   // indices into pins[] belonging to masked nets
     std::vector<PinOffset> pin_off;          // [num_pins] static, parallel to pins
     std::vector<PinOffset> node_pin_off;     // [num_node_pins] static, parallel to node_pins
@@ -159,6 +160,13 @@ static Design build_design(unsigned seed) {
     std::stable_sort(order.begin(), order.end(),
                      [&](int a, int b) { return d.pins[a].node_idx < d.pins[b].node_idx; });
     for (int p : order) { d.node_pins.push_back(d.pins[p]); d.node_pin_off.push_back(d.pin_off[p]); }
+
+    // Static scatter permutation for phase 2.5: the inverse of `order`. order[i] is the net-major
+    // pin that landed in node-major slot i, so pin_to_npin[order[i]] = i. Pins with no gradient
+    // slot (masked net, or fixed node) never appear in order and stay -1. Built by the host from
+    // this same sort (Packer.cpp); replicated here for the same reason as the golden.
+    d.pin_to_npin.assign(d.pins.size(), -1);
+    for (int i = 0; i < (int)order.size(); i++) d.pin_to_npin[order[i]] = i;
     return d;
 }
 
@@ -256,12 +264,16 @@ static void run_module(const Design& d, float inv_gamma, const std::vector<float
     // Verified 2026-08-28 by poisoning this with a non-zero box -- [6] fails at rel 1.27.
     std::vector<NetBBox> bb(d.num_nets, NetBBox{0.0f, 0.0f, 0.0f, 0.0f});
     std::vector<NetSums> sums(d.num_nets);
+    // Phase-2.5 scratch, sized EXACTLY (assertion [5] is the sanitizer): the scatter must never
+    // land outside a real allocation. Poisoned so a dropped/duplicated scatter shows as garbage,
+    // not a lucky zero -- every live slot is written exactly once by construction.
+    std::vector<coord_t> pin_grad(d.node_pins.size(), coord_t{-9.9e30f, -9.9e30f});
     float hpwl_emitted = -1.0f;
     // Poison the output, do NOT pre-zero it: clear_grad is the module's own zeroing pass and
     // assertion [3] is only meaningful if the harness is not doing that job for it.
     grad.assign(d.M, coord_t{-7.7e30f, -7.7e30f});
-    hpwl_gradient(d.net_ptr.data(), d.pins.data(), d.node_pins.data(),
-            lut.data(), bb.data(), sums.data(), grad.data(), &hpwl_emitted,
+    hpwl_gradient(d.net_ptr.data(), d.pins.data(), d.node_pins.data(), d.pin_to_npin.data(),
+            lut.data(), bb.data(), sums.data(), pin_grad.data(), grad.data(), &hpwl_emitted,
             inv_gamma, inv_lut_step, lut_size,
             d.num_nets, d.M, (int)d.node_pins.size());
     if (bb_out)   *bb_out   = bb;

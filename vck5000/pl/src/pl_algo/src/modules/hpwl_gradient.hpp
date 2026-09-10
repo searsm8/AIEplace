@@ -26,13 +26,18 @@
 //   DEGREE 2 (53% are degree-2), so a per-net drain loop pays pipeline fill/drain on
 //   a 166-deep datapath and lands ~4.4M cycles against phase 2's 2.8M. Re-streaming
 //   net_pins is sequential and burstable; it is the cheap half. See REPORT_20 P1.
-//   PHASE B  -- gradient, segmented over NODES (node_pins_DDR, node-major sorted).
-//   Read bb_DDR/sums_DDR[net] per pin (random READ-ONLY -> II=1); accumulate the WA
-//   partial in registers; write node_grad_DDR[node] once at the node change. The
-//   output is write-once in node order (-> sequential, burst), never read-modified.
+//   PHASE 2.5 -- per-pin gradient, segmented over NETS (net_pins_DDR again). At each net
+//   change read that net's final bb_DDR/sums_DDR (once/net, ascending -> sequential); the WA
+//   partial of each pin is a function of the pin's (x,y) and those net scalars alone, so it is
+//   computed here in net order and SCATTERED into node-major order via a static permutation
+//   (pin_to_npin_DDR). This replaces the old phase B's per-node-pin random gather of
+//   bb/sums (12 floats at a random net) with a per-pin random WRITE of the 2-float gradient.
+//   PHASE 3  -- reduction, segmented over NODES. pin_grad_DDR is already node-major, so this is
+//   a pure sequential stream: sum pin_grad_DDR[p], flush node_grad_DDR[node] at the node change
+//   (node_pins_DDR read for node_idx only). Write-once in node order (-> sequential, burst).
 //
-// bb_DDR/sums_DDR (DDR scratch, [num_nets]) bridge A->B so phase B, in node order,
-// can read any net's reduction. node_grad in DDR -> arbitrary num_movable.
+// bb_DDR/sums_DDR (DDR scratch, [num_nets]) bridge phase 2 -> 2.5; pin_grad_DDR (scratch,
+// [num_node_pins]) bridges 2.5 -> 3. node_grad in DDR -> arbitrary num_movable.
 //
 // NOTE (accuracy watch): the LUT is an approximation of exp. Expected harmless
 // (small per-iteration errors don't accumulate across the solve), to be re-checked
@@ -67,11 +72,13 @@ static inline float hpwl_lut_exp(const float lut_BRAM[HPWL_GRADIENT_LUT_MAX], in
 // is a pure sequential stream -- the random gathers this used to do are now a single pass in
 // refresh_net_pins / refresh_node_pins (below in this file), which must run first.
 static void hpwl_gradient(const int*     net_ptr_DDR,    // [num_nets+1] CSR (unused: kept for ABI)
-                    const NodePin* net_pins_DDR,       // [num_pins] NET-major (phase 1&2)
-                    const NodePin* node_pins_DDR,      // [num_node_pins] NODE-major (phase 3)
+                    const NodePin* net_pins_DDR,       // [num_pins] NET-major (phases 1, 2, 2.5)
+                    const NodePin* node_pins_DDR,      // [num_node_pins] NODE-major (phase 3: node_idx only)
+                    const int*     pin_to_npin_DDR,    // [num_pins] net-major -> node-major slot, -1 if none
                     const float*   exp_lut_DDR,    // [lut_size] exp(-t) table
                     NetBBox*       bb_DDR,         // [num_nets] scratch (A writes, B reads)
                     NetSums*       sums_DDR,       // [num_nets] scratch (A writes, B reads)
+                    coord_t*       pin_grad_DDR,   // [num_node_pins] scratch (2.5 scatters, 3 reduces)
                     coord_t*       node_grad_DDR,  // [num_movable] gradient (output)
                     float*         out_hpwl_DDR,   // [1] total HPWL at these positions (output)
                     float          inv_gamma,
@@ -226,9 +233,64 @@ sweep_sums:
         sums_DDR[bc_net] = s;
     }
 
-    // ===== PHASE 3: per-node gradient, segmented over nodes =====
-    // node_grad is write-once per node; nodes with no gradient-bearing pin never
-    // appear in node_pins, so zero the output first (sequential -> burst).
+    // ===== PHASE 2.5: per-pin gradient in NET-major order, scattered to node order =====
+    // The per-pin WA partial needs only the pin's own (x,y) plus its net's FINAL bbox and B/C
+    // sums -- all net-level scalars, so each pin's gradient is independent once the net is closed.
+    // Computing it HERE, net-major, means bb_DDR/sums_DDR are read once per net at the boundary,
+    // sequentially in ascending net order (burstable) -- NOT the per-node-pin random gather the
+    // old phase 3 did (a NetBBox+NetSums = 12 floats fetched at a random r.net for EVERY node
+    // pin). The result is written out via a static permutation into node-major order, so the
+    // reduction that follows is a pure sequential stream. Net memory change: one 12-float random
+    // READ per node-pin -> one 2-float random WRITE per pin. Same transaction count, ~6x fewer
+    // bytes, and a write (fire-and-forget, no return latency on the datapath) instead of a read.
+    //
+    // The scatter target pin_to_npin_DDR[p] is the node-major slot of net-major pin p, or -1 if
+    // the pin has no gradient slot (masked net, or a fixed node with node_idx >= num_movable). It
+    // is a STATIC permutation (the net set never changes) built once by the host from the same
+    // node-major sort Packer already does; each live pin maps to a DISTINCT slot, so the write is
+    // injective and write-only -> no read-modify-write recurrence, II=1. Meow.
+    int     pg_net = -1;
+    NetBBox pgb{};                                   // current net's final bbox
+    NetSums pgs{};                                   // current net's final B/C sums
+    float   pg_bpx2 = 0, pg_bmx2 = 0, pg_bpy2 = 0, pg_bmy2 = 0;   // 1/B^2, per net (const over pins)
+pin_grad:
+    for (int p = 0; p < num_pins; p++) {
+#pragma HLS PIPELINE
+        const NodePin r = net_pins_DDR[p];          // sequential (one big burstable block)
+        if (r.net < 0) continue;                    // masked net: no gradient
+        if (r.net != pg_net) {                       // net boundary -> load finals (once/net)
+            pg_net = r.net;
+            pgb = bb_DDR[r.net];                     // ascending net order -> sequential/burstable
+            pgs = sums_DDR[r.net];
+            pg_bpx2 = 1.0f / (pgs.Bpx * pgs.Bpx);
+            pg_bmx2 = 1.0f / (pgs.Bmx * pgs.Bmx);
+            pg_bpy2 = 1.0f / (pgs.Bpy * pgs.Bpy);
+            pg_bmy2 = 1.0f / (pgs.Bmy * pgs.Bmy);
+        }
+        const int slot = pin_to_npin_DDR[p];         // sequential read of the permutation
+        if (slot < 0) continue;                      // fixed-node pin on a live net: no grad slot
+        const float x = r.x;                         // absolute position, already folded in
+        const float y = r.y;
+        const float apx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, pgb.mxx - x);
+        const float amx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, x - pgb.mnx);
+        const float apy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, pgb.mxy - y);
+        const float amy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, y - pgb.mny);
+        const float px = ((1.0f + x * inv_gamma) * pgs.Bpx - pgs.Cpx * inv_gamma) * (apx * pg_bpx2)
+                       - ((1.0f - x * inv_gamma) * pgs.Bmx + pgs.Cmx * inv_gamma) * (amx * pg_bmx2);
+        const float py = ((1.0f + y * inv_gamma) * pgs.Bpy - pgs.Cpy * inv_gamma) * (apy * pg_bpy2)
+                       - ((1.0f - y * inv_gamma) * pgs.Bmy + pgs.Cmy * inv_gamma) * (amy * pg_bmy2);
+        coord_t g; g.x = px; g.y = py;
+        pin_grad_DDR[slot] = g;                      // SCATTER: random write, injective -> II=1
+    }
+
+    // ===== PHASE 3: per-node reduction, now fully SEQUENTIAL =====
+    // pin_grad_DDR is laid out in node-major order (phase 2.5 scattered through the same
+    // permutation node_pins is sorted by), so pin_grad_DDR[p] is exactly the gradient of
+    // node_pins_DDR[p]. Summing them in this order reproduces the old seg_reduce accumulation
+    // order EXACTLY -- the result is bit-identical, only the random reads are gone. node_pins is
+    // still read, but for node_idx alone (the segment key); its x/y/net are now unused here.
+    // node_grad is write-once per node; nodes with no gradient-bearing pin never appear, so zero
+    // the output first (sequential -> burst).
 clear_grad:
     for (int n = 0; n < num_movable; n++) {
 #pragma HLS PIPELINE II=1
@@ -238,41 +300,23 @@ clear_grad:
 
     int   cur_node = -1;
     float ax = 0.0f, ay = 0.0f;
-seg_reduce:
+node_reduce:
     for (int p = 0; p < num_node_pins; p++) {
 #pragma HLS PIPELINE
-        const NodePin r = node_pins_DDR[p];
-        if (r.node_idx != cur_node) {               // node boundary -> flush previous
+        const int     node = node_pins_DDR[p].node_idx;   // sequential (segment key)
+        const coord_t g    = pin_grad_DDR[p];             // sequential (node-major layout)
+        if (node != cur_node) {                     // node boundary -> flush previous
             if (cur_node >= 0) {
-                coord_t g; g.x = ax; g.y = ay;
-                node_grad_DDR[cur_node] = g;
+                coord_t o; o.x = ax; o.y = ay;
+                node_grad_DDR[cur_node] = o;
             }
-            cur_node = r.node_idx; ax = 0.0f; ay = 0.0f;
+            cur_node = node; ax = 0.0f; ay = 0.0f;
         }
-        const float x = r.x;                        // absolute position, already folded in
-        const float y = r.y;
-
-
-        const NetBBox bb = bb_DDR[r.net];           // random READ-ONLY -> II=1
-        const NetSums s  = sums_DDR[r.net];
-
-        const float apx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, bb.mxx - x);
-        const float amx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, x - bb.mnx);
-        const float apy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, bb.mxy - y);
-        const float amy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, y - bb.mny);
-        const float bpx2 = 1.0f / (s.Bpx * s.Bpx);
-        const float bmx2 = 1.0f / (s.Bmx * s.Bmx);
-        const float bpy2 = 1.0f / (s.Bpy * s.Bpy);
-        const float bmy2 = 1.0f / (s.Bmy * s.Bmy);
-        const float px = ((1.0f + x * inv_gamma) * s.Bpx - s.Cpx * inv_gamma) * (apx * bpx2)
-                       - ((1.0f - x * inv_gamma) * s.Bmx + s.Cmx * inv_gamma) * (amx * bmx2);
-        const float py = ((1.0f + y * inv_gamma) * s.Bpy - s.Cpy * inv_gamma) * (apy * bpy2)
-                       - ((1.0f - y * inv_gamma) * s.Bmy + s.Cmy * inv_gamma) * (amy * bmy2);
-        ax += px; ay += py;
+        ax += g.x; ay += g.y;
     }
     if (cur_node >= 0) {                             // flush last node
-        coord_t g; g.x = ax; g.y = ay;
-        node_grad_DDR[cur_node] = g;
+        coord_t o; o.x = ax; o.y = ay;
+        node_grad_DDR[cur_node] = o;
     }
 }
 

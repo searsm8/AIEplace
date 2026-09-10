@@ -27,6 +27,10 @@ struct PackedDesign {
     // the constant part and are uploaded once. See host_interface.hpp NodePin/PinOffset.
     std::vector<PinOffset> pin_off;   // [num_pins]
     std::vector<PinOffset> npin_off;  // [num_npins]
+    // Static scatter permutation for the HPWL phase-2.5 restructure: pin_to_npin[p] is the
+    // node-major slot (index into npins) of net-major pin p, or -1 if p has no gradient slot
+    // (masked net, or a fixed node). The inverse of the sort that builds npins. Uploaded once.
+    std::vector<int32_t> pin_to_npin; // [num_pins]
 };
 
 } // namespace plalgo

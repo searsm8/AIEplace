@@ -1,0 +1,27 @@
+===== GRID 512 : BUILD =====
+GRID 512 build+firstrun: 7 s
+===== GRID 512 : TIMED EMULATION (deps satisfied) =====
+GRID 512 emulation: 5 s
+[resident] iter1 bootstrap: gwl_L1=2.769170e+03 gden_L1=4.189147e+14 init_mult=8.000e-05
+[resident] iter   1  HPWL=8.793969e+08  overflow=0.3048  lambda=5.2883e-16  alpha=4.9365e+04  gamma=1.2500e+05  stop=0
+[resident] iter   2  HPWL=8.922672e+08  overflow=0.9374  lambda=5.2883e-16  alpha=2.1560e-06  gamma=1.2500e+05  stop=0
+[resident] iter   3  HPWL=8.922672e+08  overflow=0.9374  lambda=5.5527e-16  alpha=0.0000e+00  gamma=9.0759e+04  stop=0
+[resident] iter   4  HPWL=8.922672e+08  overflow=0.9374  lambda=5.5527e-16  alpha=0.0000e+00  gamma=9.0759e+04  stop=0
+[resident] iter   5  HPWL=8.922672e+08  overflow=0.9374  lambda=5.5527e-16  alpha=0.0000e+00  gamma=9.0759e+04  stop=1
+[resident] ran=5 iters, stop=1, final HPWL=8.92267e+08 overflow=0.9374  mean node move=13326.060
+[resident] PASS (finite; cells moved)
+
+===== GRID 128 : BUILD =====
+GRID 128 build+firstrun: 4 s
+===== GRID 128 : TIMED EMULATION (deps satisfied) =====
+GRID 128 emulation: 5 s
+[resident] iter1 bootstrap: gwl_L1=2.769170e+03 gden_L1=4.189147e+14 init_mult=8.000e-05
+[resident] iter   1  HPWL=8.793969e+08  overflow=0.3048  lambda=5.2883e-16  alpha=4.9365e+04  gamma=1.2500e+05  stop=0
+[resident] iter   2  HPWL=8.922672e+08  overflow=0.9374  lambda=5.2883e-16  alpha=2.1560e-06  gamma=1.2500e+05  stop=0
+[resident] iter   3  HPWL=8.922672e+08  overflow=0.9374  lambda=5.5527e-16  alpha=0.0000e+00  gamma=9.0759e+04  stop=0
+[resident] iter   4  HPWL=8.922672e+08  overflow=0.9374  lambda=5.5527e-16  alpha=0.0000e+00  gamma=9.0759e+04  stop=0
+[resident] iter   5  HPWL=8.922672e+08  overflow=0.9374  lambda=5.5527e-16  alpha=0.0000e+00  gamma=9.0759e+04  stop=1
+[resident] ran=5 iters, stop=1, final HPWL=8.92267e+08 overflow=0.9374  mean node move=13326.060
+[resident] PASS (finite; cells moved)
+
+SWEEP DONE

@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cmath>
 #include <vector>
+#include <chrono>
 
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_kernel.h"
@@ -1244,7 +1245,7 @@ int runResidentPlacement(const PlacementConfig& cfg,
                          int first_macro, int first_filler,
                          const coord_t* node_pos_init, const NodeBox* node_box_init,
                          const int* net_ptr, const NodePin* pins, const NodePin* npins,
-                         const PinOffset* pin_off, const PinOffset* npin_off,
+                         const PinOffset* pin_off, const PinOffset* npin_off, const int* pin_to_npin,
                          const float* exp_lut, int lut_size, const float* area, int max_iters,
                          float* out_status, coord_t* out_final_pos, const char* xclbin_path) {
     const int    N = num_nodes, M = num_movable, G = DENSITY_GRID;
@@ -1262,21 +1263,29 @@ int runResidentPlacement(const PlacementConfig& cfg,
     xrt::device device(0);
     xrt::uuid   uuid = device.load_xclbin(xclbin_path);
     xrt::kernel top(device, uuid, "top");
-    xrt::graph  fft(device, uuid, "density_fft_graph");
+#ifndef PL_ONLY
+    xrt::graph  fft(device, uuid, "density_fft_graph");   // AIE FFT pool; absent in the PL-only build
+#endif
 
     // Every kernel arg must be bound. Groups 0-13 are the shared ports; 14-27 the resident buffers.
     xrt::bo b_np    = xrt::bo(device, coordN, top.group_id(0));    // node_pos (probe v), in/out
     xrt::bo b_ptr   = xrt::bo(device, (size_t)(num_nets+1)*sizeof(int32_t), top.group_id(1));
     xrt::bo b_pin   = xrt::bo(device, (size_t)num_pins*sizeof(NodePin), top.group_id(2));
     xrt::bo b_npin  = xrt::bo(device, npinN*sizeof(NodePin), top.group_id(3));
-    xrt::bo b_lut   = xrt::bo(device, (size_t)lut_size*sizeof(float), top.group_id(4));
+    // gmem4/10/11 are widened past their MODE_PLACE-only sizes: the iteration-0 bootstrap below
+    // (bring-up-mode round trips, matching runPlacement's estimate_initial_step) reuses them for
+    // exp_lut/precond and the full density matrices before MODE_PLACE ever runs.
+    const size_t lutB  = (size_t)lut_size*sizeof(float);
+    const size_t precB = (size_t)M*sizeof(float);
+    const size_t lp4   = lutB > precB ? lutB : precB;
+    xrt::bo b_lut   = xrt::bo(device, lp4, top.group_id(4));
     xrt::bo b_bb    = xrt::bo(device, (size_t)num_nets*sizeof(NetBBox), top.group_id(5));
     xrt::bo b_sums  = xrt::bo(device, (size_t)num_nets*sizeof(NetSums), top.group_id(6));
     xrt::bo b_grad  = xrt::bo(device, coordM, top.group_id(7));    // g_hpwl
     xrt::bo b_box   = xrt::bo(device, (size_t)N*sizeof(NodeBox), top.group_id(8));
     xrt::bo b_bd    = xrt::bo(device, matB, top.group_id(9));      // rho (force map)
-    xrt::bo b_din   = xrt::bo(device, sizeof(float), top.group_id(10));   // dct_in : unused by MODE_PLACE
-    xrt::bo b_dout  = xrt::bo(device, sizeof(float), top.group_id(11));   // dct_out: unused by MODE_PLACE
+    xrt::bo b_din   = xrt::bo(device, matB, top.group_id(10));     // bootstrap: rho/Ey/g_density
+    xrt::bo b_dout  = xrt::bo(device, matB, top.group_id(11));     // bootstrap: Ex/u_trial
     xrt::bo b_poff  = xrt::bo(device, (size_t)num_pins*sizeof(PinOffset), top.group_id(12));
     xrt::bo b_npoff = xrt::bo(device, npinN*sizeof(PinOffset), top.group_id(13));
     xrt::bo b_u     = xrt::bo(device, coordM, top.group_id(14));
@@ -1293,6 +1302,11 @@ int runResidentPlacement(const PlacementConfig& cfg,
     xrt::bo b_tY    = xrt::bo(device, matB, top.group_id(25));
     xrt::bo b_Ex    = xrt::bo(device, matB, top.group_id(26));
     xrt::bo b_Ey    = xrt::bo(device, matB, top.group_id(27));
+    // gmem28/29: HPWL phase-2.5 (appended to top() AFTER mode, so they are kernel ARGS 50/51 --
+    // group_id takes the argument index, not the bundle number). pin_to_npin is the static scatter
+    // permutation (uploaded once); pin_grad is device-only scratch (never synced from host).
+    xrt::bo b_p2n   = xrt::bo(device, (size_t)num_pins*sizeof(int32_t), top.group_id(50));
+    xrt::bo b_pgrad = xrt::bo(device, npinN*sizeof(coord_t), top.group_id(51));
 
     // ---- uploads (once) ----
     std::memcpy(b_np.map<void*>(),   node_pos_init, coordN);
@@ -1300,6 +1314,7 @@ int runResidentPlacement(const PlacementConfig& cfg,
     std::memcpy(b_ptr.map<void*>(),  net_ptr, (size_t)(num_nets+1)*sizeof(int32_t));
     std::memcpy(b_pin.map<void*>(),  pins,    (size_t)num_pins*sizeof(NodePin));
     std::memcpy(b_poff.map<void*>(), pin_off, (size_t)num_pins*sizeof(PinOffset));
+    std::memcpy(b_p2n.map<void*>(),  pin_to_npin, (size_t)num_pins*sizeof(int32_t));
     if (num_npins > 0) {
         std::memcpy(b_npin.map<void*>(),  npins,    (size_t)num_npins*sizeof(NodePin));
         std::memcpy(b_npoff.map<void*>(), npin_off, (size_t)num_npins*sizeof(PinOffset));
@@ -1315,16 +1330,188 @@ int runResidentPlacement(const PlacementConfig& cfg,
 
     b_np.sync(XCL_BO_SYNC_BO_TO_DEVICE);   b_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     b_ptr.sync(XCL_BO_SYNC_BO_TO_DEVICE);  b_pin.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-    b_poff.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    b_poff.sync(XCL_BO_SYNC_BO_TO_DEVICE); b_p2n.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     if (num_npins > 0) { b_npin.sync(XCL_BO_SYNC_BO_TO_DEVICE); b_npoff.sync(XCL_BO_SYNC_BO_TO_DEVICE); }
     b_lut.sync(XCL_BO_SYNC_BO_TO_DEVICE);  b_u.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     b_vprev.sync(XCL_BO_SYNC_BO_TO_DEVICE); b_gtot.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     b_prec.sync(XCL_BO_SYNC_BO_TO_DEVICE); b_bb.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
+    // ---- iteration-0 bootstrap (sw_only estimateInitialStep), HOST-side ----------------------
+    // resident_iteration seeds alpha=init_step (=seed*site_width, ~2.0) at k==1 because an
+    // in-kernel BB trial step segfaulted the HLS elaborator (see resident_place's comment). That
+    // seed is ~1e5x too small vs sw_only's real BB-calibrated alpha, so v0 barely moves, the k==2
+    // BB estimate collapses toward 0, and the run freezes (HANDOFF #20 Finding A). Fix: run the
+    // SAME trial-step BB estimate runPlacement already does (Placement.hpp bbStepLength /
+    // initDensityWeight), here, via the shared bring-up-mode ports (0-13) BEFORE MODE_PLACE --
+    // one extra gradient evaluation, exactly mirroring sw_only Step.cpp estimateInitialStep.
+    std::vector<coord_t> node_pos_h(node_pos_init, node_pos_init + N);
+    std::vector<NodeBox> node_box_h(node_box_init, node_box_init + N);
+    std::vector<float> rho_h((size_t)DENSITY_NBINS), Ex_h((size_t)DENSITY_NBINS), Ey_h((size_t)DENSITY_NBINS);
+#ifndef PL_ONLY
+    std::vector<float> t1_h((size_t)DENSITY_NBINS), auv_h((size_t)DENSITY_NBINS),
+                       Exh_h((size_t)DENSITY_NBINS), Eyh_h((size_t)DENSITY_NBINS),
+                       tE_h((size_t)DENSITY_NBINS),  tY_h((size_t)DENSITY_NBINS);
+#endif
+    // Matches sched_state_init's seed (gamma_schedule=1 in resident_place): the bootstrap's HPWL
+    // gradient must use the SAME gamma iteration 1 will, so g_hpwl0 is bit-identical either way.
+    const float inv_gamma0    = 1.0f / (10.0f * cfg.base_gamma);
+    const float inv_lut_step0 = inv_gamma0 * 20.0f;
+    // Must equal resident_place's sp.init_multiplier (top.cpp) -- both derive lambda from the
+    // SAME formula/inputs, so this has to track it exactly or the two lambdas silently diverge.
+    const float INIT_MULTIPLIER = 8e-5f;
+
+    auto run_mode1 = [&](int mode) {
+        auto t0 = std::chrono::steady_clock::now();
+        // ALL 28 buffers (groups 0-27) must be bound even in a bring-up mode: top() gained the
+        // resident buffers 14-27, and xrt binds positionally, so omitting them shifts every scalar
+        // 14 slots early -- `mode` ends up unset (=0=MODE_HPWL_GRAD) and num_nets gets a float's
+        // bit pattern (~1e9), spinning the net sweep forever. Groups 14-27 are inert here. Meow.
+        xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad, b_box, b_bd,
+                         b_din, b_dout, b_poff, b_npoff,
+                         b_u, b_vprev, b_gtot, b_gden, b_prec, b_stat,
+                         b_t1, b_auv, b_exh, b_eyh, b_tE, b_tY, b_Ex, b_Ey,
+                         inv_gamma0, inv_lut_step0, lut_size, num_nets, M, num_npins, N,
+                         cfg.bin_w, cfg.bin_h, cfg.target_density, 0, 0,
+                         first_macro, first_filler, cfg.base_gamma, kappa_coef, cfg.overflow_threshold,
+                         bin_area, movable_area, init_step, max_iters, mode,
+                         b_p2n, b_pgrad);   // args 50/51: MODE_HPWL_GRAD reaches phase 2.5
+        r.wait();
+        auto t1 = std::chrono::steady_clock::now();
+        printf("[bootstrap timing] mode=%d took %.3f s\n", mode,
+               std::chrono::duration<double>(t1 - t0).count());
+        fflush(stdout);
+    };
+    // One gradient evaluation at `probe` (refresh -> HPWL grad -> density bin -> field solve ->
+    // force gather), mirroring runPlacement's eval_gradients exactly over the same shared ports.
+    // Inherits that function's pre-existing limitation: the bring-up MODE_DENSITY_BIN/FORCE_GATHER
+    // hardcode first_macro=first_filler=num_movable (std-cell-only verify pack, top.cpp comment),
+    // so on a design WITH movable macros this bootstrap's alpha0 estimate skips the #11b deposit-
+    // weight override that resident_iteration's real per-iteration call applies. Harmless here
+    // (this design has 0 movable macros); worth a real MODE_DENSITY_BIN arg for macro-bearing runs.
+    auto eval_probe = [&](const std::vector<coord_t>& probe,
+                          std::vector<coord_t>& g_hpwl_out, std::vector<coord_t>& g_density_out) {
+        for (int n = 0; n < M; n++) {
+            node_pos_h[n] = probe[n]; node_box_h[n].x = probe[n].x; node_box_h[n].y = probe[n].y;
+        }
+        std::memcpy(b_np.map<void*>(),  node_pos_h.data(), coordN);
+        std::memcpy(b_box.map<void*>(), node_box_h.data(), (size_t)N*sizeof(NodeBox));
+        b_np.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        b_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+        run_mode1((int)MODE_REFRESH_PINS);
+        run_mode1((int)MODE_HPWL_GRAD);
+        b_grad.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        g_hpwl_out.resize(M);
+        std::memcpy(g_hpwl_out.data(), b_grad.map<void*>(), coordM);
+
+        run_mode1((int)MODE_DENSITY_BIN);
+        b_bd.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        std::memcpy(rho_h.data(), b_bd.map<void*>(), matB);
+
+#ifdef PL_ONLY
+        // On-chip field solve, no AIE (small-grid bring-up build; needs -DPL_FIELD_SOLVE).
+        std::memcpy(b_din.map<void*>(), rho_h.data(), matB);
+        b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        run_mode1((int)MODE_FIELD_SOLVE_PL);
+        b_dout.sync(XCL_BO_SYNC_BO_FROM_DEVICE);   // Ex
+        b_bd.sync(XCL_BO_SYNC_BO_FROM_DEVICE);     // Ey
+        std::memcpy(Ex_h.data(), b_dout.map<void*>(), matB);
+        std::memcpy(Ey_h.data(), b_bd.map<void*>(),   matB);
+#else
+        // Real AIE FFT chain, mirroring runPlacement's field_pass. UNVERIFIED this session (full
+        // AIE resident sw_emu is intractable at GRID=1024 -- see HANDOFF #20 SS1); ready for a
+        // real-hardware or small-grid AIE sw_emu run to confirm.
+        auto field_pass = [&](const float* src, float* dst, int mode, int sub) {
+            std::memcpy(b_din.map<void*>(), src, matB);
+            b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+            if (mode == (int)MODE_DCT_TRANSPOSE) fft.run(G / DENSITY_LANES);
+            xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad, b_box, b_bd,
+                             b_din, b_dout, b_poff, b_npoff,
+                             b_u, b_vprev, b_gtot, b_gden, b_prec, b_stat,   // groups 14-27 inert here; bind to align scalars. Meow.
+                             b_t1, b_auv, b_exh, b_eyh, b_tE, b_tY, b_Ex, b_Ey,
+                             0.0f, 0.0f, 0, 0, 0, 0, 0, 1.0f, 1.0f, 1.0f, sub, G,
+                             first_macro, first_filler, cfg.base_gamma, kappa_coef, cfg.overflow_threshold,
+                             bin_area, movable_area, init_step, max_iters, mode);
+            r.wait();
+            if (mode == (int)MODE_DCT_TRANSPOSE) fft.wait();
+            b_dout.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+            std::memcpy(dst, b_dout.map<void*>(), matB);
+        };
+        field_pass(rho_h.data(), t1_h.data(),  (int)MODE_DCT_TRANSPOSE, (int)TFH_DCT);
+        field_pass(t1_h.data(),  auv_h.data(), (int)MODE_DCT_TRANSPOSE, (int)TFH_DCT);
+        field_pass(auv_h.data(), Exh_h.data(), (int)MODE_SPECTRAL, 0);
+        field_pass(auv_h.data(), Eyh_h.data(), (int)MODE_SPECTRAL, 1);
+        field_pass(Exh_h.data(), tE_h.data(),  (int)MODE_DCT_TRANSPOSE, (int)TFH_IDCT);
+        field_pass(tE_h.data(),  Ex_h.data(),  (int)MODE_DCT_TRANSPOSE, (int)TFH_IDXST);
+        field_pass(Eyh_h.data(), tY_h.data(),  (int)MODE_DCT_TRANSPOSE, (int)TFH_IDXST);
+        field_pass(tY_h.data(),  Ey_h.data(),  (int)MODE_DCT_TRANSPOSE, (int)TFH_IDCT);
+#endif
+        std::memcpy(b_bd.map<void*>(),  Ex_h.data(), matB);
+        std::memcpy(b_din.map<void*>(), Ey_h.data(), matB);
+        b_bd.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        run_mode1((int)MODE_FORCE_GATHER);
+        b_grad.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        g_density_out.resize(M);
+        std::memcpy(g_density_out.data(), b_grad.map<void*>(), coordM);
+    };
+
+    const std::vector<coord_t> v0(node_pos_init, node_pos_init + M);
+    std::vector<coord_t> g_hpwl0, g_density0;
+    eval_probe(v0, g_hpwl0, g_density0);
+    const float lambda0 = initDensityWeight(g_hpwl0.data(), g_density0.data(), M, INIT_MULTIPLIER);
+    std::vector<coord_t> gtot0(M);
+    for (int n = 0; n < M; n++) {
+        gtot0[n].x = g_hpwl0[n].x - lambda0 * g_density0[n].x;
+        gtot0[n].y = g_hpwl0[n].y - lambda0 * g_density0[n].y;
+    }
+
+    // Trial step v' = v0 - (seed*site_width)*P*g0 (precond OFF -> P=1) via MODE_ITERATION_UPDATE.
+    { std::vector<float> ones(M, 1.0f);
+      std::memcpy(b_np.map<void*>(),   v0.data(),        coordM);   // u_k
+      std::memcpy(b_lut.map<void*>(),  ones.data(),      precB);    // precond
+      std::memcpy(b_grad.map<void*>(), g_hpwl0.data(),   coordM);
+      std::memcpy(b_din.map<void*>(),  g_density0.data(),coordM);
+      b_np.sync(XCL_BO_SYNC_BO_TO_DEVICE); b_lut.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+      b_grad.sync(XCL_BO_SYNC_BO_TO_DEVICE); b_din.sync(XCL_BO_SYNC_BO_TO_DEVICE); }
+    { xrt::run r = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad, b_box, b_bd,
+                       b_din, b_dout, b_poff, b_npoff,
+                       b_u, b_vprev, b_gtot, b_gden, b_prec, b_stat,   // groups 14-27 inert here; bind to align scalars. Meow.
+                       b_t1, b_auv, b_exh, b_eyh, b_tE, b_tY, b_Ex, b_Ey,
+                       /*lambda*/lambda0, /*alpha*/init_step, lut_size, num_nets, M, num_npins, N,
+                       /*coeff*/0.0f, /*die_xmax*/cfg.die_x, /*die_ymax*/cfg.die_y, 0, 0,
+                       first_macro, first_filler, cfg.base_gamma, kappa_coef, cfg.overflow_threshold,
+                       bin_area, movable_area, init_step, max_iters, (int)MODE_ITERATION_UPDATE);
+      r.wait(); }
+    b_bd.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::vector<coord_t> v_trial(M);
+    std::memcpy(v_trial.data(), b_bd.map<void*>(), coordM);
+
+    std::vector<coord_t> g_hpwl_t, g_density_t;
+    eval_probe(v_trial, g_hpwl_t, g_density_t);
+    std::vector<coord_t> gtot_t(M);
+    for (int n = 0; n < M; n++) {
+        gtot_t[n].x = g_hpwl_t[n].x - lambda0 * g_density_t[n].x;
+        gtot_t[n].y = g_hpwl_t[n].y - lambda0 * g_density_t[n].y;
+    }
+    const float alpha0 = bbStepLength(v_trial.data(), v0.data(), gtot_t.data(), gtot0.data(), M);
+    printf("[resident] bootstrap: lambda0=%.6e  BB alpha0=%.6e  (crude seed alpha was %.4g)\n",
+           lambda0, alpha0, init_step);
+
+    // Restore v0 into node_pos/node_box: eval_probe(v_trial) left the probe at v_trial, but the
+    // resident loop's iteration 1 must start from v0 (u/v_prev/g_total_prev were already seeded
+    // to v0/v0/0 above and are untouched by this bootstrap -- only node_pos/node_box moved).
+    std::memcpy(b_np.map<void*>(),  node_pos_init, coordN);
+    std::memcpy(b_box.map<void*>(), node_box_init, (size_t)N*sizeof(NodeBox));
+    b_np.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    b_box.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
     // AIE FFT graph: 6 DCT_TRANSPOSE passes per gradient eval, each streaming G rows = G/LANES graph
     // iterations; the loop runs exactly max_iters evals (no early stop), so the count matches.
+#ifndef PL_ONLY
     const int graph_iters = 6 * (G / DENSITY_LANES) * max_iters;
     fft.run(graph_iters);
+#endif
 
     xrt::run run = top(b_np, b_ptr, b_pin, b_npin, b_lut, b_bb, b_sums, b_grad, b_box, b_bd,
                        b_din, b_dout, b_poff, b_npoff,
@@ -1333,9 +1520,12 @@ int runResidentPlacement(const PlacementConfig& cfg,
                        0.0f, 0.0f, lut_size, num_nets, M, num_npins, N,
                        cfg.bin_w, cfg.bin_h, cfg.target_density, 0, 0,
                        first_macro, first_filler, cfg.base_gamma, kappa_coef, cfg.overflow_threshold,
-                       bin_area, movable_area, init_step, max_iters, (int)MODE_PLACE);
+                       bin_area, movable_area, alpha0, max_iters, (int)MODE_PLACE,
+                       b_p2n, b_pgrad);   // args 50/51: the resident loop's hpwl_gradient scatter
     run.wait();
+#ifndef PL_ONLY
     fft.wait();
+#endif
 
     b_np.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     b_stat.sync(XCL_BO_SYNC_BO_FROM_DEVICE);

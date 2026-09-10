@@ -152,6 +152,12 @@ PackedDesign packDesign(AIEplace::DataBase& db) {
     pk.npin_off.reserve(order.size());
     for (int32_t p : order) { pk.npins.push_back(pk.pins[p]); pk.npin_off.push_back(pk.pin_off[p]); }
 
+    // Scatter permutation for hpwl_gradient phase 2.5: the inverse of `order`. order[i] is the
+    // net-major pin that landed in node-major slot i, so pin_to_npin[order[i]] = i. Pins with no
+    // gradient slot (masked net, or fixed node) never appear in order and stay -1.
+    pk.pin_to_npin.assign(pk.pins.size(), -1);
+    for (int32_t i = 0; i < (int32_t)order.size(); ++i) pk.pin_to_npin[order[i]] = i;
+
     pk.header = DesignHeader{ M, N, (int32_t)nets.size(), (int32_t)pk.pins.size(),
                               first_macro, first_filler };
     return pk;

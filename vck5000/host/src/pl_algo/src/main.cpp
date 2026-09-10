@@ -416,7 +416,8 @@ int main(int argc, char** argv) {
         const int ran = plalgo::runResidentPlacement(cfg, N, M, num_nets, num_pins, num_npins,
             pk.header.first_macro, pk.header.first_filler,
             pk.node_pos.data(), pk.node_box.data(), pk.net_ptr.data(), pk.pins.data(), pk.npins.data(),
-            pk.pin_off.data(), pk.npin_off.data(), lut.data(), lut_size, area.data(), max_iters,
+            pk.pin_off.data(), pk.npin_off.data(), pk.pin_to_npin.data(),
+            lut.data(), lut_size, area.data(), max_iters,
             status.data(), final_pos.data(), argv[3]);
 
         double moved = 0.0; float mov_area = 0.0f;

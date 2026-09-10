@@ -21,6 +21,9 @@
 
 #include "host_interface.hpp"
 #include "formats.hpp"
+#ifndef __SYNTHESIS__
+#include <cstdio>   // sw_emu per-iteration progress beacon only (compiled out for real HW). Meow.
+#endif
 #include "modules/hpwl_gradient.hpp"   // also defines refresh_net_pins / refresh_node_pins (MODE_REFRESH_PINS)
 #include "modules/density_bin.hpp"
 #include "modules/dct_1d.hpp"
@@ -32,8 +35,9 @@
 #include "modules/metrics.hpp"
 #include "modules/param_scheduler.hpp"    // device-resident schedule + convergence (resident loop)
 #include "modules/bb_reduce.hpp"          // device-resident Barzilai-Borwein norms (resident loop)
-#ifdef PL_FIELD_SOLVE
-#include "modules/field_solve_pl.hpp"   // PL-only field solve (small-grid build only)
+#if defined(PL_FIELD_SOLVE) || defined(PL_ONLY)
+#include "modules/field_solve_pl.hpp"   // PL-only field solve (small-grid build only; also the
+                                        // resident loop's density backend under PL_ONLY -- Path B)
 #endif
 
 using namespace plalgo;
@@ -59,24 +63,30 @@ using namespace plalgo;
 //    refresh reads node_pos, density reads node_box -- the Memory Writer updates both. The exact
 //    single-writer contract is a wiring detail to settle at sw_emu.
 
-#ifndef PL_ONLY
-// ---- density gradient: node geometry -> rho -> field solve (AIE FFT) -> force gather ----------
-// The field solve is chained ON-DEVICE with DDR-resident intermediates and the FREE-RUNNING AIE FFT
-// pool (the host starts the graph once for the whole placement; the PL streams every pass through
-// it). Sequence mirrors the host field solve (Driver.cpp:547-556). Meow.
+// ---- density gradient: node geometry -> rho -> field solve -> force gather --------------------
+// One scatter/gather envelope, two field-solve backends selected at compile time:
+//   !PL_ONLY  -- chained through the FREE-RUNNING AIE FFT pool (throughput path, GRID=1024; the host
+//                starts the graph once, the PL streams every pass. Mirrors Driver.cpp:547-556).
+//   PL_ONLY   -- the whole solve on-chip via field_solve_pl, NO AIE (small grid only, PL_GRID=64).
+//                The tractable bring-up vehicle: sw_emu of the AIE FFT model is intractable at 1024,
+//                so this is how the resident-loop WIRING is verified before the AIE datapath. Meow.
 static void density_gradient(
     const NodeBox* node_box, int num_movable, int num_nodes, int first_macro, int first_filler,
     float bin_w, float bin_h, float target_density,
-    float* rho, float* t1, float* a_uv, float* Ex_hat, float* Ey_hat,   // DDR scratch matrices
+    float* rho, float* t1, float* a_uv, float* Ex_hat, float* Ey_hat,   // DDR scratch (AIE path only)
     float* tE, float* tY, float* Ex, float* Ey,                          // (GRID*GRID each)
-    coord_t* g_density,                                                  // out: per-movable gradient
-    hls::stream<axis_t>& fa0, hls::stream<axis_t>& fa1, hls::stream<axis_t>& fa2, hls::stream<axis_t>& fa3,
-    hls::stream<axis_t>& fa4, hls::stream<axis_t>& fa5, hls::stream<axis_t>& fa6, hls::stream<axis_t>& fa7,
-    hls::stream<axis_t>& fb0, hls::stream<axis_t>& fb1, hls::stream<axis_t>& fb2, hls::stream<axis_t>& fb3,
-    hls::stream<axis_t>& fb4, hls::stream<axis_t>& fb5, hls::stream<axis_t>& fb6, hls::stream<axis_t>& fb7)
+    coord_t* g_density                                                   // out: per-movable gradient
+#ifndef PL_ONLY
+    , hls::stream<axis_t>& fa0, hls::stream<axis_t>& fa1, hls::stream<axis_t>& fa2, hls::stream<axis_t>& fa3
+    , hls::stream<axis_t>& fa4, hls::stream<axis_t>& fa5, hls::stream<axis_t>& fa6, hls::stream<axis_t>& fa7
+    , hls::stream<axis_t>& fb0, hls::stream<axis_t>& fb1, hls::stream<axis_t>& fb2, hls::stream<axis_t>& fb3
+    , hls::stream<axis_t>& fb4, hls::stream<axis_t>& fb5, hls::stream<axis_t>& fb6, hls::stream<axis_t>& fb7
+#endif
+    )
 {
     // 1. scatter movable areas (incl. fillers, macros at the #11b weight) into rho  [FORCE map, [0,M)]
     density_bin(node_box, rho, num_movable, num_nodes, first_macro, first_filler, bin_w, bin_h, target_density);
+#ifndef PL_ONLY
     // 2. forward 2D DCT: rho -> a_uv  (two fused transform+transpose passes through the AIE FFT)
     dct_transpose_pass(rho, t1,   TF_DCT, fa0,fa1,fa2,fa3,fa4,fa5,fa6,fa7, fb0,fb1,fb2,fb3,fb4,fb5,fb6,fb7);
     dct_transpose_pass(t1,  a_uv, TF_DCT, fa0,fa1,fa2,fa3,fa4,fa5,fa6,fa7, fb0,fb1,fb2,fb3,fb4,fb5,fb6,fb7);
@@ -88,6 +98,25 @@ static void density_gradient(
     dct_transpose_pass(tE,     Ex, TF_IDXST, fa0,fa1,fa2,fa3,fa4,fa5,fa6,fa7, fb0,fb1,fb2,fb3,fb4,fb5,fb6,fb7);
     dct_transpose_pass(Ey_hat, tY, TF_IDXST, fa0,fa1,fa2,fa3,fa4,fa5,fa6,fa7, fb0,fb1,fb2,fb3,fb4,fb5,fb6,fb7);
     dct_transpose_pass(tY,     Ey, TF_IDCT,  fa0,fa1,fa2,fa3,fa4,fa5,fa6,fa7, fb0,fb1,fb2,fb3,fb4,fb5,fb6,fb7);
+#else
+    // 2-4. PL-only on-chip field solve (no AIE). rho is DDR (metrics still reads it as the FORCE
+    //       map), so stream it into BRAM; write Ex,Ey back to DDR for force_gather. The DDR FFT
+    //       scratch (t1/a_uv/Ex_hat/Ey_hat/tE/tY) is inert here. On-chip statics fit only at small
+    //       PL_GRID -- GRID*GRID floats per array.
+    // _BRAM suffix marks on-chip residence (bring-up sim only; at PL_GRID>=256 these 1 MB+ arrays
+    // would really map to URAM -- revisit the suffix if this PL-only path is ever synthesized). Meow.
+    static float rho_BRAM[GRID * GRID], Ex_BRAM[GRID * GRID], Ey_BRAM[GRID * GRID];
+    static float tA_BRAM[GRID * GRID], tB_BRAM[GRID * GRID];
+    for (int i = 0; i < GRID * GRID; i++) {
+#pragma HLS PIPELINE II=1
+        rho_BRAM[i] = rho[i];
+    }
+    field_solve_pl(rho_BRAM, Ex_BRAM, Ey_BRAM, tA_BRAM, tB_BRAM);
+    for (int i = 0; i < GRID * GRID; i++) {
+#pragma HLS PIPELINE II=1
+        Ex[i] = Ex_BRAM[i]; Ey[i] = Ey_BRAM[i];
+    }
+#endif
     // 5. gather the field over each movable node's footprint -> density gradient (adjoint of step 1)
     force_gather(node_box, Ex, Ey, g_density, num_movable, first_macro, first_filler, bin_w, bin_h, target_density);
 }
@@ -98,7 +127,8 @@ static void resident_iteration(
     coord_t* node_pos, NodeBox* node_box, coord_t* u, coord_t* v_prev, coord_t* g_total_prev,
     coord_t* g_hpwl, coord_t* g_density, const float* precond,
     const int* net_ptr, NodePin* pins, NodePin* npins, const PinOffset* pin_off,
-    const PinOffset* npin_off, const float* exp_lut, NetBBox* bb, NetSums* sums,
+    const PinOffset* npin_off, const int* pin_to_npin, const float* exp_lut,
+    NetBBox* bb, NetSums* sums, coord_t* pin_grad,
     float* rho, float* t1, float* a_uv, float* Ex_hat, float* Ey_hat, float* tE, float* tY,
     float* Ex, float* Ey, float* status,
     SchedState& st, const SchedParams& sp,
@@ -106,24 +136,30 @@ static void resident_iteration(
     int first_macro, int first_filler, float bin_w, float bin_h, float target_density,
     float die_x, float die_y, float inv_lut_step, int lut_size, float bin_area, float movable_area,
     float init_step,
-    float& inv_gamma, float& alpha, float& coeff, float& lambda, int& stop,
-    hls::stream<axis_t>& fa0, hls::stream<axis_t>& fa1, hls::stream<axis_t>& fa2, hls::stream<axis_t>& fa3,
-    hls::stream<axis_t>& fa4, hls::stream<axis_t>& fa5, hls::stream<axis_t>& fa6, hls::stream<axis_t>& fa7,
-    hls::stream<axis_t>& fb0, hls::stream<axis_t>& fb1, hls::stream<axis_t>& fb2, hls::stream<axis_t>& fb3,
-    hls::stream<axis_t>& fb4, hls::stream<axis_t>& fb5, hls::stream<axis_t>& fb6, hls::stream<axis_t>& fb7)
+    float& inv_gamma, float& alpha, float& coeff, float& lambda, int& stop
+#ifndef PL_ONLY
+    , hls::stream<axis_t>& fa0, hls::stream<axis_t>& fa1, hls::stream<axis_t>& fa2, hls::stream<axis_t>& fa3
+    , hls::stream<axis_t>& fa4, hls::stream<axis_t>& fa5, hls::stream<axis_t>& fa6, hls::stream<axis_t>& fa7
+    , hls::stream<axis_t>& fb0, hls::stream<axis_t>& fb1, hls::stream<axis_t>& fb2, hls::stream<axis_t>& fb3
+    , hls::stream<axis_t>& fb4, hls::stream<axis_t>& fb5, hls::stream<axis_t>& fb6, hls::stream<axis_t>& fb7
+#endif
+    )
 {
     // 0. fold the current probe v_k into the pin arrays' absolute positions (before any gradient)
     refresh_net_pins(node_pos, pin_off, pins, net_ptr[num_nets]);
     refresh_node_pins(node_pos, npin_off, npins, num_npins);
 
     // 1. HPWL gradient at v_k  (status[0] receives the HPWL by-product; overwritten by metrics below)
-    hpwl_gradient(net_ptr, pins, npins, exp_lut, bb, sums, g_hpwl, status,
+    hpwl_gradient(net_ptr, pins, npins, pin_to_npin, exp_lut, bb, sums, pin_grad, g_hpwl, status,
                   inv_gamma, inv_lut_step, lut_size, num_nets, num_movable, num_npins);
 
     // 2. density gradient at v_k  (node_box.{x,y} == v_k)
     density_gradient(node_box, num_movable, num_nodes, first_macro, first_filler, bin_w, bin_h,
-                     target_density, rho, t1, a_uv, Ex_hat, Ey_hat, tE, tY, Ex, Ey, g_density,
-                     fa0,fa1,fa2,fa3,fa4,fa5,fa6,fa7, fb0,fb1,fb2,fb3,fb4,fb5,fb6,fb7);
+                     target_density, rho, t1, a_uv, Ex_hat, Ey_hat, tE, tY, Ex, Ey, g_density
+#ifndef PL_ONLY
+                     , fa0,fa1,fa2,fa3,fa4,fa5,fa6,fa7, fb0,fb1,fb2,fb3,fb4,fb5,fb6,fb7
+#endif
+                     );
 
     // 3. Barzilai-Borwein reduction: displacement/grad-delta norms + materialize g_total_k.
     //    g_total_prev is BOTH the previous combined gradient (read) and this iter's output (written):
@@ -147,6 +183,13 @@ static void resident_iteration(
         gwl_L1  += std::fabs(g_hpwl[n].x)    + std::fabs(g_hpwl[n].y);
         gden_L1 += std::fabs(g_density[n].x) + std::fabs(g_density[n].y);
     }
+#ifndef __SYNTHESIS__
+    if (st.iteration == 0) {
+        printf("[resident] iter1 bootstrap: gwl_L1=%.6e gden_L1=%.6e init_mult=%.3e\n",
+               gwl_L1, gden_L1, sp.init_multiplier);
+        fflush(stdout);
+    }
+#endif
     const float kappa = sched_kappa(lambda, sp.kappa_coef);          // XPlace weighted_weight (precond OFF)
     param_scheduler(st, sp, hpwl, overflow, pos_norm_sq, grad_norm_sq, kappa,
                     gwl_L1, gden_L1, inv_gamma, alpha, coeff, lambda, stop);
@@ -188,18 +231,22 @@ static void resident_place(
     coord_t* node_pos, NodeBox* node_box, coord_t* u, coord_t* v_prev, coord_t* g_total_prev,
     coord_t* g_hpwl, coord_t* g_density, const float* precond,
     const int* net_ptr, NodePin* pins, NodePin* npins, const PinOffset* pin_off,
-    const PinOffset* npin_off, const float* exp_lut, NetBBox* bb, NetSums* sums,
+    const PinOffset* npin_off, const int* pin_to_npin, const float* exp_lut,
+    NetBBox* bb, NetSums* sums, coord_t* pin_grad,
     float* rho, float* t1, float* a_uv, float* Ex_hat, float* Ey_hat, float* tE, float* tY,
     float* Ex, float* Ey, float* status,
     int num_nets, int num_movable, int num_nodes, int num_npins,
     int first_macro, int first_filler, float bin_w, float bin_h, float target_density,
     float die_x, float die_y, int lut_size,
     float base_gamma, float kappa_coef, float overflow_threshold, float bin_area, float movable_area,
-    float init_step, int max_iters,
-    hls::stream<axis_t>& fa0, hls::stream<axis_t>& fa1, hls::stream<axis_t>& fa2, hls::stream<axis_t>& fa3,
-    hls::stream<axis_t>& fa4, hls::stream<axis_t>& fa5, hls::stream<axis_t>& fa6, hls::stream<axis_t>& fa7,
-    hls::stream<axis_t>& fb0, hls::stream<axis_t>& fb1, hls::stream<axis_t>& fb2, hls::stream<axis_t>& fb3,
-    hls::stream<axis_t>& fb4, hls::stream<axis_t>& fb5, hls::stream<axis_t>& fb6, hls::stream<axis_t>& fb7)
+    float init_step, int max_iters
+#ifndef PL_ONLY
+    , hls::stream<axis_t>& fa0, hls::stream<axis_t>& fa1, hls::stream<axis_t>& fa2, hls::stream<axis_t>& fa3
+    , hls::stream<axis_t>& fa4, hls::stream<axis_t>& fa5, hls::stream<axis_t>& fa6, hls::stream<axis_t>& fa7
+    , hls::stream<axis_t>& fb0, hls::stream<axis_t>& fb1, hls::stream<axis_t>& fb2, hls::stream<axis_t>& fb3
+    , hls::stream<axis_t>& fb4, hls::stream<axis_t>& fb5, hls::stream<axis_t>& fb6, hls::stream<axis_t>& fb7
+#endif
+    )
 {
     // Resident schedule state + fixed params (on-chip; mirrors the host PlacementConfig / sw_only).
     static SchedState st;
@@ -225,20 +272,33 @@ place_loop:
         // PLACE_STEP_NORM (the constant the host builds the exp LUT with: lut[i] = exp(-i*0.05)).
         const float inv_lut_step = inv_gamma * 20.0f;
         resident_iteration(node_pos, node_box, u, v_prev, g_total_prev, g_hpwl, g_density, precond,
-                           net_ptr, pins, npins, pin_off, npin_off, exp_lut, bb, sums,
-                           rho, t1, a_uv, Ex_hat, Ey_hat, tE, tY, Ex, Ey, status,
+                           net_ptr, pins, npins, pin_off, npin_off, pin_to_npin, exp_lut, bb, sums,
+                           pin_grad, rho, t1, a_uv, Ex_hat, Ey_hat, tE, tY, Ex, Ey, status,
                            st, sp, num_nets, num_movable, num_nodes, num_npins, net_ptr[num_nets],
                            first_macro, first_filler, bin_w, bin_h, target_density,
                            die_x, die_y, inv_lut_step, lut_size, bin_area, movable_area, init_step,
-                           inv_gamma, alpha, coeff, lambda, stop,
-                           fa0,fa1,fa2,fa3,fa4,fa5,fa6,fa7, fb0,fb1,fb2,fb3,fb4,fb5,fb6,fb7);
+                           inv_gamma, alpha, coeff, lambda, stop
+#ifndef PL_ONLY
+                           , fa0,fa1,fa2,fa3,fa4,fa5,fa6,fa7, fb0,fb1,fb2,fb3,fb4,fb5,fb6,fb7
+#endif
+                           );
+#ifndef __SYNTHESIS__
+        // Progress beacon: the resident loop is otherwise silent (host sees output only after
+        // top() returns), so a sw_emu run shows no forward motion until it is wholly done. One
+        // line per iteration -- the two convergence signals (HPWL, overflow) and the schedule
+        // scalars -- turns "is it alive?" into an answerable question. status[] was just written
+        // by metrics inside resident_iteration; overflow scales the raw sum like the loop does. Meow.
+        printf("[resident] iter %3d  HPWL=%.6e  overflow=%.4f  lambda=%.4e  alpha=%.4e  gamma=%.4e  stop=%d\n",
+               k, status[0], status[1] * bin_area / movable_area, lambda, alpha,
+               (inv_gamma > 0.0f ? 1.0f / inv_gamma : 0.0f), stop);
+        fflush(stdout);
+#endif
         if (stop) break;
     }
     // status[0]/[1] hold the last iteration's HPWL / overflow_sum (set by metrics); append run info.
     status[2] = (float)((k > max_iters) ? max_iters : k);   // iterations run
     status[3] = (float)stop;                                 // 1 = scheduler stopped, 0 = hit max_iters
 }
-#endif // !PL_ONLY
 
 // Stage 5c dataflow region: iteration_update (producer) -> stream -> memory_writer (consumer).
 // Kept as a dedicated function so #pragma HLS DATAFLOW sits at a canonical function-body top
@@ -319,7 +379,12 @@ void top(
     float          init_step,           // init_step_seed * site_width (iteration-0 BB seed, TODO #23)
     int            max_iters,
     // ---- mode selector ----
-    int            mode
+    int            mode,
+    // ---- HPWL phase-2.5 restructure (group_id 28-29). APPENDED at the end so every existing
+    //      positional top(...) call in the driver stays a valid prefix -- only the MODE_PLACE /
+    //      MODE_HPWL_GRAD launches, which actually use these, need to bind them. ----
+    const int*     pin_to_npin,   // [num_pins] net-major -> node-major slot, -1 if none (static)
+    coord_t*       pin_grad       // [num_npins] kernel scratch: 2.5 scatters, 3 reduces
 #ifndef PL_ONLY
     ,
     // ---- AIE FFT pool streams: 8 lanes as SEPARATE named ports (HW-wired via link.cfg,
@@ -403,6 +468,12 @@ void top(
 // bursts in flight, hiding the ~70-cyc DDR latency instead of paying it per tile-row.
 #pragma HLS INTERFACE m_axi port=dct_in      offset=slave bundle=gmem10 num_read_outstanding=32 max_read_burst_length=64
 #pragma HLS INTERFACE m_axi port=dct_out     offset=slave bundle=gmem11 num_write_outstanding=32 max_write_burst_length=64
+// gmem28/29: HPWL phase-2.5. pin_to_npin is a sequential read of the static permutation (burst);
+// pin_grad is the phase-2.5 SCATTER target -- random write-only, so it wants outstanding write
+// depth, not burst length (the P5a note above: depth is the only latency-hiding lever for a
+// non-sequential access). Sized like the random gather ports it replaces.
+#pragma HLS INTERFACE m_axi port=pin_to_npin offset=slave bundle=gmem28 max_read_burst_length=64
+#pragma HLS INTERFACE m_axi port=pin_grad    offset=slave bundle=gmem29 num_write_outstanding=64
 
 
 /* 
@@ -458,6 +529,8 @@ void top(
 #pragma HLS INTERFACE s_axilite port=init_step          bundle=control
 #pragma HLS INTERFACE s_axilite port=max_iters          bundle=control
 #pragma HLS INTERFACE s_axilite port=mode           bundle=control
+#pragma HLS INTERFACE s_axilite port=pin_to_npin    bundle=control
+#pragma HLS INTERFACE s_axilite port=pin_grad       bundle=control
 
 /*
  * AXIS interfaces PL to AIE (for the 8-lane AIE FFT pool)
@@ -489,22 +562,28 @@ void top(
         density_bin(node_box, bin_density, num_movable, num_nodes, num_movable, num_movable,
                     bin_w, bin_h, target_density);
     }
-#ifndef PL_ONLY
     else if (mode == MODE_PLACE) {
         // Stage 5 proper: the whole device-resident GP loop (see resident_place / resident_iteration /
         // density_gradient above -- that is the DATAFLOW per-iteration diagram). die = bin_w/h * GRID.
+        // Available in BOTH builds: !PL_ONLY streams the density solve through the AIE FFT pool;
+        // PL_ONLY runs it on-chip (field_solve_pl, small grid) with no AIE stream args (Path B). Meow.
         resident_place(node_pos, node_box, u, v_prev, g_total_prev, node_grad /*g_hpwl*/, g_density,
-                       precond, net_ptr, pins, npins, pin_off, npin_off, exp_lut, bb, sums,
+                       precond, net_ptr, pins, npins, pin_off, npin_off, pin_to_npin, exp_lut, bb, sums,
+                       pin_grad,
                        bin_density /*rho*/, fft_t1, fft_a_uv, fft_ex_hat, fft_ey_hat, fft_tE, fft_tY,
                        fft_Ex, fft_Ey, status,
                        num_nets, num_movable, num_nodes, num_npins, first_macro, first_filler,
                        bin_w, bin_h, target_density, bin_w * GRID, bin_h * GRID, lut_size,
-                       base_gamma, kappa_coef, overflow_threshold, bin_area, movable_area, init_step, max_iters,
-                       fft_to_aie_0, fft_to_aie_1, fft_to_aie_2, fft_to_aie_3,
+                       base_gamma, kappa_coef, overflow_threshold, bin_area, movable_area, init_step, max_iters
+#ifndef PL_ONLY
+                       , fft_to_aie_0, fft_to_aie_1, fft_to_aie_2, fft_to_aie_3,
                        fft_to_aie_4, fft_to_aie_5, fft_to_aie_6, fft_to_aie_7,
                        fft_from_aie_0, fft_from_aie_1, fft_from_aie_2, fft_from_aie_3,
-                       fft_from_aie_4, fft_from_aie_5, fft_from_aie_6, fft_from_aie_7);
+                       fft_from_aie_4, fft_from_aie_5, fft_from_aie_6, fft_from_aie_7
+#endif
+                       );
     }
+#ifndef PL_ONLY
     else if (mode == MODE_DCT_1D) {
         // single lane: use lane 0 of the pool (Stage 2 bring-up).
         dct_1d(dct_in, dct_out, num_frames, dct_stage, fft_to_aie_0, fft_from_aie_0);
@@ -590,8 +669,8 @@ void top(
         // separate pass for it. Same output slot metrics uses for HPWL, so the readback
         // contract is unchanged. The host's dummy dct_out in this mode is sizeof(float) --
         // exactly the one element written (Driver.cpp:103).
-        hpwl_gradient(net_ptr, pins, npins, exp_lut, bb, sums, node_grad, dct_out,
-                inv_gamma, inv_lut_step, lut_size, num_nets, num_movable, num_npins);
+        hpwl_gradient(net_ptr, pins, npins, pin_to_npin, exp_lut, bb, sums, pin_grad, node_grad,
+                dct_out, inv_gamma, inv_lut_step, lut_size, num_nets, num_movable, num_npins);
     }
 }
 } // extern "C"

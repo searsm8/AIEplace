@@ -503,6 +503,15 @@ not the geometry), so it needs a step-3 harness or it will not be noticed.
 **Still open** (report §10, third question): pin sw_only to grid 1024 for the A/B, or build pl_algo
 per-design with `-DPL_GRID`?
 
+**2026-09-04 (Path B / tier-3 sw_emu, mid-task):** the degenerate resident trajectory found
+2026-09-03 is root-caused to the α seed alone (a real BB trial-step estimate is ~88,700x larger than
+the crude `init_step_seed*site_width` fallback; the density-weight scale anomaly is a red herring,
+self-normalizing). A host-side fix (`Driver.cpp::runResidentPlacement`, mirrors `runPlacement`'s
+`estimate_initial_step`) is implemented and syntax-clean but **blocked, unverified**: the bring-up-
+mode dispatch it needs stalls indefinitely (40-60+ min, zero output, not grid-size-dependent) at
+this design's real scale (31k movable / 29k nets) in sw_emu, for reasons not yet diagnosed (no
+ptrace access this session to get a backtrace). → [[_NEW_HANDOFF_20_pl_only_resident_bringup_20260903.md]] §8.
+
 ---
 
 ## #21 — Repo restructure: one host at the top level (opened 2026-08-07)

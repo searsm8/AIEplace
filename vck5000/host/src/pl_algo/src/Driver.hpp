@@ -160,7 +160,7 @@ int runResidentPlacement(const PlacementConfig& cfg,
                          int first_macro, int first_filler,
                          const coord_t* node_pos_init, const NodeBox* node_box_init,
                          const int* net_ptr, const NodePin* pins, const NodePin* npins,
-                         const PinOffset* pin_off, const PinOffset* npin_off,
+                         const PinOffset* pin_off, const PinOffset* npin_off, const int* pin_to_npin,
                          const float* exp_lut, int lut_size, const float* area, int max_iters,
                          float* out_status, coord_t* out_final_pos, const char* xclbin_path);
 
