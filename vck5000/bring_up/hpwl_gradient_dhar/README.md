@@ -1,10 +1,10 @@
 # hpwl_gradient_dhar -- standalone kernel for the Dhar HPWL-gradient module
 
-A self-contained Vitis design that wraps the pl_algo module
-[[hpwl_gradient_dhar.hpp]] (`vck5000/pl/src/pl_algo/src/modules/`) as a single PL kernel and
-drives it from a native XRT host. This is the **tier-3** (emulation / on-device) counterpart of the
-tier-1 offline harness `vck5000/test/hpwl_dhar_test.cpp`: same module, same capped WA-HPWL gradient
-golden, exercised across the real host<->PL transfer path.
+A self-contained Vitis design that wraps [[hpwl_gradient_dhar.hpp]] (`src/modules/`, local to this
+directory -- it is a bring-up-only module, never included from pl_algo's `top.cpp`) as a single PL
+kernel and drives it from a native XRT host. This is the **tier-3** (emulation / on-device)
+counterpart of the tier-1 offline harness `vck5000/test/hpwl_dhar_test.cpp`: same module, same
+capped WA-HPWL gradient golden, exercised across the real host<->PL transfer path.
 
 Pure PL, no AIE (modelled on `~/phd/toy_design`). Versal 3-step flow: `v++ -c` -> `-l` -> `-p`.
 
@@ -22,7 +22,7 @@ Pure PL, no AIE (modelled on `~/phd/toy_design`). Versal 3-step flow: `v++ -c` -
 ```bash
 source /tools/Xilinx/Vitis/2022.2/settings64.sh
 source /opt/xilinx/xrt/setup.sh
-cd ~/phd/AIEplace/vck5000/hpwl_gradient_dhar
+cd ~/phd/AIEplace/vck5000/bring_up/hpwl_gradient_dhar
 make run          # -> "TEST PASSED"
 ```
 `v++` finds the platform via `PLATFORM_REPO_PATHS` (normally exported by `~/.bashrc`). In a fresh,

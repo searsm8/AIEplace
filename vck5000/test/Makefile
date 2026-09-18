@@ -16,8 +16,10 @@
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O2
 # The harnesses #include the real PL modules ("modules/fft_pl.hpp"), not a copy of them --
-# that is the point, so a module edit is what the test actually exercises.
-INCLUDES  = -I../pl/src/pl_algo/src
+# that is the point, so a module edit is what the test actually exercises. The second path is
+# for hpwl_dhar_test only: hpwl_gradient_dhar.hpp is a bring-up-only module (never included from
+# pl_algo's top.cpp), so it lives under bring_up/ instead of the shared modules/ tree.
+INCLUDES  = -I../pl/src/pl_algo/src -I../bring_up/hpwl_gradient_dhar/src
 BUILD     = build
 
 # sched_verify replays a recorded sw_only schedule against the PL scheduler. The trace and the

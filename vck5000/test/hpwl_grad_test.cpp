@@ -125,16 +125,16 @@ static Design build_design(unsigned seed) {
 
         const int beg = (int)d.pins.size();
         for (int k = 0; k < deg; k++) {
-            int nd;
+            int node;
             if (masked_only_net && k < 4) {
                 // Seed masked nets with the masked-only nodes so those nodes have pins that
                 // exist in `pins` but must never reach `node_pins` or the gradient.
-                nd = ISOLATED_END + (net_id + k) % (MASKED_ONLY_END - ISOLATED_END);
+                node = ISOLATED_END + (net_id + k) % (MASKED_ONLY_END - ISOLATED_END);
             } else {
-                do { nd = node_pick(rng); } while (nd < MASKED_ONLY_END);
+                do { node = node_pick(rng); } while (node < MASKED_ONLY_END);
             }
             NodePin r;
-            r.node_idx = nd;
+            r.node_idx = node;
             r.x = r.y = 0.0f;                               // filled by refresh_net_pins
             r.net   = net_id;
             d.pins.push_back(r);
@@ -201,11 +201,10 @@ static void golden(const Design& d, float inv_gamma, const std::vector<float>& l
                    int lut_size, float inv_lut_step, bool use_lut,
                    std::vector<double>& gx, std::vector<double>& gy) {
     gx.assign(d.M, 0.0); gy.assign(d.M, 0.0);
-    const double ig = (double)inv_gamma;
 
-    auto E = [&](float dist) -> double {
+    auto lut_exp = [&](float dist) -> double {
         return use_lut ? lut_exp_ref(lut, lut_size, inv_lut_step, dist)
-                       : std::exp(-(double)dist * ig);
+                       : std::exp(-(double)dist * inv_gamma);
     };
 
     std::vector<double> Apx, Amx, Apy, Amy;
@@ -216,36 +215,36 @@ static void golden(const Design& d, float inv_gamma, const std::vector<float>& l
         // Pin positions are formed in FLOAT exactly as the module does, so the bounding box is
         // bit-identical and the comparison is not polluted by a differing max/min.
         const int deg = end - beg;
-        std::vector<float> px(deg), py(deg);
-        float mxx = -1e30f, mnx = 1e30f, mxy = -1e30f, mny = 1e30f;
+        std::vector<float> pin_x(deg), pin_y(deg);
+        float max_x = -1e30f, min_x = 1e30f, max_y = -1e30f, min_y = 1e30f;
         for (int k = 0; k < deg; k++) {
             const NodePin& r = d.pins[beg + k];
-            px[k] = r.x;                       // absolute, filled by refresh_pin_pos
-            py[k] = r.y;
-            mxx = std::max(mxx, px[k]); mnx = std::min(mnx, px[k]);
-            mxy = std::max(mxy, py[k]); mny = std::min(mny, py[k]);
+            pin_x[k] = r.x;                       // absolute, filled by refresh_pin_pos
+            pin_y[k] = r.y;
+            max_x = std::max(max_x, pin_x[k]); min_x = std::min(min_x, pin_x[k]);
+            max_y = std::max(max_y, pin_y[k]); min_y = std::min(min_y, pin_y[k]);
         }
 
         Apx.assign(deg, 0); Amx.assign(deg, 0); Apy.assign(deg, 0); Amy.assign(deg, 0);
         double Bpx = 0, Bmx = 0, Bpy = 0, Bmy = 0, Cpx = 0, Cmx = 0, Cpy = 0, Cmy = 0;
         for (int k = 0; k < deg; k++) {
-            Apx[k] = E(mxx - px[k]); Amx[k] = E(px[k] - mnx);
-            Apy[k] = E(mxy - py[k]); Amy[k] = E(py[k] - mny);
+            Apx[k] = lut_exp(max_x - pin_x[k]); Amx[k] = lut_exp(pin_x[k] - min_x);
+            Apy[k] = lut_exp(max_y - pin_y[k]); Amy[k] = lut_exp(pin_y[k] - min_y);
             Bpx += Apx[k]; Bmx += Amx[k]; Bpy += Apy[k]; Bmy += Amy[k];
-            Cpx += Apx[k] * (double)px[k]; Cmx += Amx[k] * (double)px[k];
-            Cpy += Apy[k] * (double)py[k]; Cmy += Amy[k] * (double)py[k];
+            Cpx += Apx[k] * (double)pin_x[k]; Cmx += Amx[k] * (double)pin_x[k];
+            Cpy += Apy[k] * (double)pin_y[k]; Cmy += Amy[k] * (double)pin_y[k];
         }
 
-        const double ipx = 1.0 / (Bpx * Bpx), imx = 1.0 / (Bmx * Bmx);
-        const double ipy = 1.0 / (Bpy * Bpy), imy = 1.0 / (Bmy * Bmy);
+        const double inv_Bpx2 = 1.0 / (Bpx * Bpx), inv_Bmx2 = 1.0 / (Bmx * Bmx);
+        const double inv_Bpy2 = 1.0 / (Bpy * Bpy), inv_Bmy2 = 1.0 / (Bmy * Bmy);
         for (int k = 0; k < deg; k++) {
-            const int nd = d.pins[beg + k].node_idx;
-            if (nd >= d.M) continue;                 // fixed node: no gradient slot
-            const double x = px[k], y = py[k];
-            gx[nd] += ((1.0 + x * ig) * Bpx - Cpx * ig) * (Apx[k] * ipx)
-                    - ((1.0 - x * ig) * Bmx + Cmx * ig) * (Amx[k] * imx);
-            gy[nd] += ((1.0 + y * ig) * Bpy - Cpy * ig) * (Apy[k] * ipy)
-                    - ((1.0 - y * ig) * Bmy + Cmy * ig) * (Amy[k] * imy);
+            const int node = d.pins[beg + k].node_idx;
+            if (node >= d.M) continue;                 // fixed node: no gradient slot
+            const double x = pin_x[k], y = pin_y[k];
+            gx[node] += ((1.0 + x * inv_gamma) * Bpx - Cpx * inv_gamma) * (Apx[k] * inv_Bpx2)
+                    - ((1.0 - x * inv_gamma) * Bmx + Cmx * inv_gamma) * (Amx[k] * inv_Bmx2);
+            gy[node] += ((1.0 + y * inv_gamma) * Bpy - Cpy * inv_gamma) * (Apy[k] * inv_Bpy2)
+                    - ((1.0 - y * inv_gamma) * Bmy + Cmy * inv_gamma) * (Amy[k] * inv_Bmy2);
         }
     }
 }
@@ -289,15 +288,15 @@ static double golden_hpwl(const Design& d) {
     for (int net_id = 0; net_id < d.num_nets; net_id++) {
         const int beg = d.net_ptr[net_id], end = d.net_ptr[net_id + 1];
         if (beg == end || d.pins[beg].net < 0) continue;      // masked (or empty) net
-        float mxx = -1e30f, mnx = 1e30f, mxy = -1e30f, mny = 1e30f;
+        float max_x = -1e30f, min_x = 1e30f, max_y = -1e30f, min_y = 1e30f;
         for (int p = beg; p < end; p++) {
             const NodePin& r = d.pins[p];
             const float x = r.x;
             const float y = r.y;
-            mxx = std::max(mxx, x); mnx = std::min(mnx, x);
-            mxy = std::max(mxy, y); mny = std::min(mny, y);
+            max_x = std::max(max_x, x); min_x = std::min(min_x, x);
+            max_y = std::max(max_y, y); min_y = std::min(min_y, y);
         }
-        total += (double)((mxx - mnx) + (mxy - mny));
+        total += (double)((max_x - min_x) + (max_y - min_y));
     }
     return total;
 }
@@ -420,8 +419,8 @@ int main() {
     for (int net_id = 0; net_id < d.num_nets; net_id++) {
         const int beg = d.net_ptr[net_id], end = d.net_ptr[net_id + 1];
         if (beg == end || d.pins[beg].net < 0) continue;   // masked: bb[net] never written
-        hpwl_from_bb += (double)((bb[net_id].mxx - bb[net_id].mnx) +
-                                 (bb[net_id].mxy - bb[net_id].mny));
+        hpwl_from_bb += (double)((bb[net_id].max_x - bb[net_id].min_x) +
+                                 (bb[net_id].max_y - bb[net_id].min_y));
     }
     const double hpwl_ref = golden_hpwl(d);
     const double hpwl_rel = std::fabs(hpwl_from_bb - hpwl_ref) / hpwl_ref;

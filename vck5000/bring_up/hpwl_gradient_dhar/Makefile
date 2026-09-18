@@ -18,7 +18,10 @@ TARGET     ?= sw_emu
 XILINX_XRT ?= /opt/xilinx/xrt
 
 KERNEL = hpwl_gradient_dhar_top
-INC    = -I../../pl/src/pl_algo/src          # module root: "modules/..." and "host_interface.hpp"
+# hpwl_gradient_dhar.hpp lives locally (src/modules/) -- it is a bring-up-only module, never
+# included from pl_algo's top.cpp. It still reuses hpwl_gradient.hpp (hpwl_lut_exp,
+# refresh_net_pins/refresh_node_pins) from the shared tree, hence the second -I.
+INC    = -Isrc -I../../pl/src/pl_algo/src    # local "modules/..." + shared "modules/..." / "host_interface.hpp"
 
 XO     = $(KERNEL).$(TARGET).xo
 XSA    = $(KERNEL).$(TARGET).xsa

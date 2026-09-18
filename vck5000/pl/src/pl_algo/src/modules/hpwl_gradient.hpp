@@ -113,7 +113,7 @@ sweep_bbox:
         if (r.net < 0) continue;                   // pin of a no-gradient net
         if (r.net != bb_net) {                      // net boundary -> flush previous
             if (bb_net >= 0) {
-                NetBBox b; b.mxx = maxx; b.mnx = minx; b.mxy = maxy; b.mny = miny;
+                NetBBox b; b.max_x = maxx; b.min_x = minx; b.max_y = maxy; b.min_y = miny;
                 bb_DDR[bb_net] = b;
             }
             bb_net = r.net;
@@ -127,7 +127,7 @@ sweep_bbox:
         if (y < miny) miny = y;
     }
     if (bb_net >= 0) {                              // flush last net
-        NetBBox b; b.mxx = maxx; b.mnx = minx; b.mxy = maxy; b.mny = miny;
+        NetBBox b; b.max_x = maxx; b.min_x = minx; b.max_y = maxy; b.min_y = miny;
         bb_DDR[bb_net] = b;
     }
 
@@ -189,7 +189,7 @@ hpwl_reduce:
                 const NetBBox b = bb_DDR[idx];             // sequential in idx -> burstable
                 // net's HPWL contribution = half-perimeter = x-extent + y-extent. Sum in double,
                 // net order, matching metrics so the harness bit-comparison holds (narrowed at *out).
-                hpwl_part[k] += (double)((b.mxx - b.mnx) + (b.mxy - b.mny));
+                hpwl_part[k] += (double)((b.max_x - b.min_x) + (b.max_y - b.min_y));
             }
         }
     }
@@ -220,10 +220,10 @@ sweep_sums:
         }
         const float x = r.x;                        // absolute position, already folded in
         const float y = r.y;
-        const float apx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, b.mxx - x);
-        const float amx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, x - b.mnx);
-        const float apy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, b.mxy - y);
-        const float amy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, y - b.mny);
+        const float apx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, b.max_x - x);
+        const float amx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, x - b.min_x);
+        const float apy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, b.max_y - y);
+        const float amy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, y - b.min_y);
         Bpx += apx; Bmx += amx; Cpx += apx * x; Cmx += amx * x;
         Bpy += apy; Bmy += amy; Cpy += apy * y; Cmy += amy * y;
     }
@@ -271,10 +271,10 @@ pin_grad:
         if (slot < 0) continue;                      // fixed-node pin on a live net: no grad slot
         const float x = r.x;                         // absolute position, already folded in
         const float y = r.y;
-        const float apx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, pgb.mxx - x);
-        const float amx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, x - pgb.mnx);
-        const float apy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, pgb.mxy - y);
-        const float amy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, y - pgb.mny);
+        const float apx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, pgb.max_x - x);
+        const float amx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, x - pgb.min_x);
+        const float apy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, pgb.max_y - y);
+        const float amy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, y - pgb.min_y);
         const float px = ((1.0f + x * inv_gamma) * pgs.Bpx - pgs.Cpx * inv_gamma) * (apx * pg_bpx2)
                        - ((1.0f - x * inv_gamma) * pgs.Bmx + pgs.Cmx * inv_gamma) * (amx * pg_bmx2);
         const float py = ((1.0f + y * inv_gamma) * pgs.Bpy - pgs.Cpy * inv_gamma) * (apy * pg_bpy2)

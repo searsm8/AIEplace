@@ -132,7 +132,7 @@ struct PinOffset { float off_x, off_y; };
 // == -1) never reaches the flush. Zeroed, those entries are a zero-extent box and contribute
 // nothing; un-zeroed, they add garbage to the HPWL. One memset at allocation is sufficient:
 // the net set is static, so a masked entry stays zero for the whole run.
-struct NetBBox { float mxx, mnx, mxy, mny; };                     // bounding box
+struct NetBBox { float max_x, min_x, max_y, min_y; };                     // bounding box
 struct NetSums { float Bpx, Bmx, Cpx, Cmx, Bpy, Bmy, Cpy, Cmy; }; // WA B/C sums
 
 // ===========================================================================

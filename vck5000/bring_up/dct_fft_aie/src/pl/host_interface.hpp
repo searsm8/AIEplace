@@ -80,7 +80,7 @@ struct NodePin {
 // to DDR (bb_DDR / sums_DDR, [num_nets]) so pass 3 -- which streams node-major --
 // can read any net's reduction. Kernel-internal scratch: the host only allocates
 // the DDR buffers (num_nets * sizeof), it neither fills nor reads them.
-struct NetBBox { float mxx, mnx, mxy, mny; };                     // bounding box
+struct NetBBox { float max_x, min_x, max_y, min_y; };                     // bounding box
 struct NetSums { float Bpx, Bmx, Cpx, Cmx, Bpy, Bmy, Cpy, Cmy; }; // WA B/C sums
 
 // ===========================================================================

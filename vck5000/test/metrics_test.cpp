@@ -65,13 +65,13 @@ static double golden_hpwl(const Design& d) {
     for (int net_id = 0; net_id < d.num_nets; net_id++) {
         const int beg = d.net_ptr[net_id], end = d.net_ptr[net_id + 1];
         if (beg == end || d.pins[beg].net < 0) continue;    // masked / empty
-        float mxx = -1e30f, mnx = 1e30f, mxy = -1e30f, mny = 1e30f;
+        float max_x = -1e30f, min_x = 1e30f, max_y = -1e30f, min_y = 1e30f;
         for (int p = beg; p < end; p++) {
             const float x = d.pins[p].x, y = d.pins[p].y;
-            mxx = std::max(mxx, x); mnx = std::min(mnx, x);
-            mxy = std::max(mxy, y); mny = std::min(mny, y);
+            max_x = std::max(max_x, x); min_x = std::min(min_x, x);
+            max_y = std::max(max_y, y); min_y = std::min(min_y, y);
         }
-        total += (double)((mxx - mnx) + (mxy - mny));
+        total += (double)((max_x - min_x) + (max_y - min_y));
     }
     return total;
 }

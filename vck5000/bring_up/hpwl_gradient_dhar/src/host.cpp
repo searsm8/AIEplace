@@ -6,7 +6,7 @@
 // then runs the kernel and checks the returned per-node gradient (rel_rms) and total HPWL. Same
 // golden as test/hpwl_dhar_test.cpp -- this is that test carried across the real host<->PL path.
 //
-// Reuses the module header for the POD types, the refresh passes, DHAR_MAX_NET_DEGREE and the exp
+// Reuses the module header for the POD types, the refresh passes, MAX_NET_DEGREE and the exp
 // LUT geometry; the HLS pragmas inside are ignored under g++.
 
 #include <cstdio>
@@ -107,8 +107,7 @@ static void golden(const Design& d, float inv_gamma, const std::vector<float>& l
                    int lut_size, float inv_lut_step,
                    std::vector<double>& gx, std::vector<double>& gy) {
     gx.assign(d.M, 0.0); gy.assign(d.M, 0.0);
-    const double ig = (double)inv_gamma;
-    auto E = [&](float dist) -> double {
+    auto lut_exp = [&](float dist) -> double {
         float idx_f = dist * inv_lut_step;
         int   idx   = (int)idx_f;
         if (idx >= lut_size - 1) return 0.0;
@@ -120,33 +119,33 @@ static void golden(const Design& d, float inv_gamma, const std::vector<float>& l
         const int beg = d.net_ptr[net_id], end = d.net_ptr[net_id + 1];
         if (beg == end || d.pins[beg].net < 0) continue;
         const int deg = end - beg;
-        if (deg > DHAR_MAX_NET_DEGREE) continue;               // Dhar cap
-        std::vector<float> px(deg), py(deg);
-        float mxx = -1e30f, mnx = 1e30f, mxy = -1e30f, mny = 1e30f;
+        if (deg > MAX_NET_DEGREE) continue;               // Dhar cap
+        std::vector<float> pin_x(deg), pin_y(deg);
+        float max_x = -1e30f, min_x = 1e30f, max_y = -1e30f, min_y = 1e30f;
         for (int k = 0; k < deg; k++) {
-            px[k] = d.pins[beg + k].x; py[k] = d.pins[beg + k].y;
-            mxx = std::max(mxx, px[k]); mnx = std::min(mnx, px[k]);
-            mxy = std::max(mxy, py[k]); mny = std::min(mny, py[k]);
+            pin_x[k] = d.pins[beg + k].x; pin_y[k] = d.pins[beg + k].y;
+            max_x = std::max(max_x, pin_x[k]); min_x = std::min(min_x, pin_x[k]);
+            max_y = std::max(max_y, pin_y[k]); min_y = std::min(min_y, pin_y[k]);
         }
         Apx.assign(deg, 0); Amx.assign(deg, 0); Apy.assign(deg, 0); Amy.assign(deg, 0);
         double Bpx = 0, Bmx = 0, Bpy = 0, Bmy = 0, Cpx = 0, Cmx = 0, Cpy = 0, Cmy = 0;
         for (int k = 0; k < deg; k++) {
-            Apx[k] = E(mxx - px[k]); Amx[k] = E(px[k] - mnx);
-            Apy[k] = E(mxy - py[k]); Amy[k] = E(py[k] - mny);
+            Apx[k] = lut_exp(max_x - pin_x[k]); Amx[k] = lut_exp(pin_x[k] - min_x);
+            Apy[k] = lut_exp(max_y - pin_y[k]); Amy[k] = lut_exp(pin_y[k] - min_y);
             Bpx += Apx[k]; Bmx += Amx[k]; Bpy += Apy[k]; Bmy += Amy[k];
-            Cpx += Apx[k] * (double)px[k]; Cmx += Amx[k] * (double)px[k];
-            Cpy += Apy[k] * (double)py[k]; Cmy += Amy[k] * (double)py[k];
+            Cpx += Apx[k] * (double)pin_x[k]; Cmx += Amx[k] * (double)pin_x[k];
+            Cpy += Apy[k] * (double)pin_y[k]; Cmy += Amy[k] * (double)pin_y[k];
         }
-        const double ipx = 1.0 / (Bpx * Bpx), imx = 1.0 / (Bmx * Bmx);
-        const double ipy = 1.0 / (Bpy * Bpy), imy = 1.0 / (Bmy * Bmy);
+        const double inv_Bpx2 = 1.0 / (Bpx * Bpx), inv_Bmx2 = 1.0 / (Bmx * Bmx);
+        const double inv_Bpy2 = 1.0 / (Bpy * Bpy), inv_Bmy2 = 1.0 / (Bmy * Bmy);
         for (int k = 0; k < deg; k++) {
-            const int nd = d.pins[beg + k].node_idx;
-            if (nd >= d.M) continue;
-            const double x = px[k], y = py[k];
-            gx[nd] += ((1.0 + x * ig) * Bpx - Cpx * ig) * (Apx[k] * ipx)
-                    - ((1.0 - x * ig) * Bmx + Cmx * ig) * (Amx[k] * imx);
-            gy[nd] += ((1.0 + y * ig) * Bpy - Cpy * ig) * (Apy[k] * ipy)
-                    - ((1.0 - y * ig) * Bmy + Cmy * ig) * (Amy[k] * imy);
+            const int node = d.pins[beg + k].node_idx;
+            if (node >= d.M) continue;
+            const double x = pin_x[k], y = pin_y[k];
+            gx[node] += ((1.0 + x * inv_gamma) * Bpx - Cpx * inv_gamma) * (Apx[k] * inv_Bpx2)
+                    - ((1.0 - x * inv_gamma) * Bmx + Cmx * inv_gamma) * (Amx[k] * inv_Bmx2);
+            gy[node] += ((1.0 + y * inv_gamma) * Bpy - Cpy * inv_gamma) * (Apy[k] * inv_Bpy2)
+                    - ((1.0 - y * inv_gamma) * Bmy + Cmy * inv_gamma) * (Amy[k] * inv_Bmy2);
         }
     }
 }
@@ -156,13 +155,13 @@ static double golden_hpwl(const Design& d) {
     for (int net_id = 0; net_id < d.num_nets; net_id++) {
         const int beg = d.net_ptr[net_id], end = d.net_ptr[net_id + 1];
         if (beg == end || d.pins[beg].net < 0) continue;
-        if (end - beg > DHAR_MAX_NET_DEGREE) continue;
-        float mxx = -1e30f, mnx = 1e30f, mxy = -1e30f, mny = 1e30f;
+        if (end - beg > MAX_NET_DEGREE) continue;
+        float max_x = -1e30f, min_x = 1e30f, max_y = -1e30f, min_y = 1e30f;
         for (int p = beg; p < end; p++) {
-            mxx = std::max(mxx, d.pins[p].x); mnx = std::min(mnx, d.pins[p].x);
-            mxy = std::max(mxy, d.pins[p].y); mny = std::min(mny, d.pins[p].y);
+            max_x = std::max(max_x, d.pins[p].x); min_x = std::min(min_x, d.pins[p].x);
+            max_y = std::max(max_y, d.pins[p].y); min_y = std::min(min_y, d.pins[p].y);
         }
-        total += (double)((mxx - mnx) + (mxy - mny));
+        total += (double)((max_x - min_x) + (max_y - min_y));
     }
     return total;
 }
