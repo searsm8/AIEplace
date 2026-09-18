@@ -50,9 +50,13 @@ namespace plalgo {
 
 // Dhar's cap (Dhar et al., FPL 2019, Sec. III) -- NOT IGNORE_NET_DEGREE (100, XPlace's mask, applied
 // host-side). Nets with more than this many pins are ignored here (their gradient AND their HPWL
-// contribution are dropped). Dhar reports such nets are <0.25% of a real netlist and that
-// ignoring them slightly IMPROVES average quality, since HPWL grossly underestimates the routed
-// wirelength of large nets. Padding target for the adder tree is this value. Meow.
+// contribution are dropped). Padding target for the adder tree is this value.
+// TODO(#40): the cap is a QUALITY BUG on our benchmarks, not Dhar's "slight improvement" (his
+// FPGA netlists have <0.25% such nets). Measured 2026-09-18: +12.4% mean post-DP HPWL, 28/28
+// ISPD designs worse, since 17..100-pin nets carry 20-27% of ISPD2005 pins. Planned fix, not yet
+// built: exact chunking -- buffer the net, accumulate the net-level B/C sums over ceil(deg/16)
+// chunks, then run the combiners per chunk with those totals. Fold it into #40's lane-narrowing.
+// See .claude/1_REVIEW/reports/_NEW_PLAN_40_dhar_large_net_chunking_20260918.md. Meow.
 constexpr int MAX_NET_DEGREE = 16;
 
 // Depth-4 balanced adder tree over 16 inputs -- Dhar's Fig. 6 in the single-net form. Fully
