@@ -146,6 +146,9 @@
   every scored run (`detail_placement.py:374`, unconditional in `run_lg`), so it earns nothing at
   scoring time — but it runs *inside* phase 2 and conditions the GP result, so deleting it is not
   free. `macro_legalization = true|false` A/B over MMS decides it. See tasks.md #38.
+- **#40 — `hpwl_gradient_dhar` fails P&R timing, AND its 16-pin net cap costs +12.4% post-DP HPWL**
+  (28/28 worse, ISPD2005 +30.6%; 2026-09-18). Plan: exact ⌈d/16⌉-block chunking, folded into the
+  lane-narrowing timing fix. → [[_NEW_REPORT_40_net_degree_cap16_20260918.md]]
 
 ## Also open
 - **#21 — repo restructure** (host to top level, one host binary). Proposal only, nothing started.

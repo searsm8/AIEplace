@@ -51,7 +51,7 @@ def _xplace_env():
 def _bookshelf_template(suite, design):
     """The .pl the design's .aux NAMES — not always <design>.pl, and the wrong one drops the
     /FIXED terminal markers (that was adaptec3's legalizer segfault, TODO #3)."""
-    design_dir = REPO / "host/benchmarks" / suite / design
+    design_dir = REPO.parent / "host/benchmarks" / suite / design
     names = re.findall(r"[A-Za-z0-9._]+\.pl", (design_dir / f"{design}.aux").read_text())
     return design_dir / names[0]
 
