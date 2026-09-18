@@ -25,13 +25,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <random>
+#include <string>
 #include <vector>
 #include <algorithm>
 
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_kernel.h"
 #include "xrt/xrt_bo.h"
-#include "experimental/xrt_system.h"
 
 #include "host_interface.hpp"
 
@@ -364,26 +364,20 @@ int main(int argc, char** argv) {
     std::printf("[iteration_pl] M=%d N=%d nets=%d npins=%d GRID=%d  span=%.3g gamma=%.3g lut=%d\n",
                M, N, NUM_NETS, num_npins, GRID, span, gamma, lut_size);
 
-    // ---- device / xclbin (probe all enumerated devices; see ../../hpwl_pl) ----
+    // ---- device / xclbin ----
+    // find the VCK5000 card (default bdf c1:00.1)
+    const char* bdf_env = std::getenv("VCK5000_BDF"); // env var to override the default BDF
+    const std::string bdf = bdf_env ? bdf_env : "c1:00.1"; // default VCK5000 BDF
     xrt::device device;
-    xrt::uuid   uuid;
-    bool        loaded = false;
-    unsigned int ndev = xrt::system::enumerate_devices();
-    for (unsigned int i = 0; i < ndev; i++) {
-        try {
-            xrt::device d = xrt::device(i);
-            uuid = d.load_xclbin(xclbin_path);
-            device = d;
-            loaded = true;
-            break;
-        } catch (const std::exception&) {
-            continue;
-        }
-    }
-    if (!loaded) {
-        std::printf("failed to load %s on any of %u device(s)\n", xclbin_path, ndev);
+    try {
+        device = xrt::device(bdf);
+    } catch (const std::exception& e) {
+        std::printf("failed to open device at BDF %s: %s\n", bdf.c_str(), e.what());
         return EXIT_FAILURE;
     }
+
+    // load the xclbin and create the kernel object
+    xrt::uuid uuid = device.load_xclbin(xclbin_path);
     xrt::kernel k = xrt::kernel(device, uuid, "iteration_top");
 
     // ---- buffers: net_ptr(0) pins(1) npins(2) exp_lut(3) bb(4) sums(5) node_box(6)

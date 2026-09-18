@@ -1,6 +1,6 @@
 # AIEplacer.py
-# Implement the a rudimentary ePlace algorithm to place designs
-# Intended only to run on small designs, such as a 5.row8 AIE array
+# My first attempt to implement the ePlace algorithm
+# Not very well optimized, but it works. Kind of.
 
 import AIEmath.computeTerm
 import AIEmath.customDCT

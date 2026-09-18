@@ -5,13 +5,13 @@
  */
 #include "DCT.h"
 #include "AIEplace.h"
-#include <cassert>
+#include <cassert> // Can this be removed?
 
 AIEPLACE_NAMESPACE_BEGIN
 
 /**
  * @brief Run the ePlace algorithm.
- *        Perform iterations until the convergence condition is met.
+ *        Perform setup, then loop iterations until the convergence condition is met.
  */
 void Placer::run()
 {
@@ -35,7 +35,7 @@ void Placer::run()
 
 /**
  * @brief Run one placement iteration: compute the wirelength and density gradients, combine them,
- *        take a Nesterov step, then update thegamma/lambda schedule and best-solution tracking.
+ *        take a Nesterov step, then update the gamma/lambda schedule and best-solution tracking.
  */
 void Placer::performIteration()
 {
@@ -59,7 +59,6 @@ void Placer::performIteration()
 
 /**
  * @brief Iteration-zero bootstrap: compute the first gradients and initialize solver state
- *        Two callers: run() and beginPhase2().
  */
 void Placer::performIterationZero()
 {

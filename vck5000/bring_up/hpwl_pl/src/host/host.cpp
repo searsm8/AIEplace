@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <random>
+#include <string>
 #include <vector>
 #include <algorithm>
 #include <chrono>
@@ -29,7 +30,6 @@
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_kernel.h"
 #include "xrt/xrt_bo.h"
-#include "experimental/xrt_system.h"
 
 #include "host_interface.hpp"
 
@@ -192,30 +192,19 @@ int main(int argc, char** argv) {
                M, N, NUM_NETS, num_pins, num_npins, span, gamma, lut_size);
 
     // ---- device / xclbin ----
-    // The node can have multiple cards (e.g. U55C + VCK5000); probe each enumerated device
-    // and use the first one that accepts this xclbin (see ../../fft_pl, ../../field_solve_pl
-    // and ../../add1_pl -- same fix, verified on real hardware). Expect an XRT "err = -22"
-    // line per non-VCK5000 card probed before the load lands; that is benign wrong-device
-    // noise, not a failure.
+    // find the VCK5000 card (default bdf c1:00.1)
+    const char* bdf_env = std::getenv("VCK5000_BDF"); // env var to override the default BDF
+    const std::string bdf = bdf_env ? bdf_env : "c1:00.1"; // default VCK5000 BDF
     xrt::device device;
-    xrt::uuid   uuid;
-    bool        loaded = false;
-    unsigned int ndev = xrt::system::enumerate_devices();
-    for (unsigned int i = 0; i < ndev; i++) {
-        try {
-            xrt::device d = xrt::device(i);
-            uuid = d.load_xclbin(xclbin_path);
-            device = d;
-            loaded = true;
-            break;
-        } catch (const std::exception&) {
-            continue;
-        }
-    }
-    if (!loaded) {
-        std::printf("failed to load %s on any of %u device(s)\n", xclbin_path, ndev);
+    try {
+        device = xrt::device(bdf);
+    } catch (const std::exception& e) {
+        std::printf("failed to open device at BDF %s: %s\n", bdf.c_str(), e.what());
         return EXIT_FAILURE;
     }
+
+    // load the xclbin and create the kernel object
+    xrt::uuid uuid = device.load_xclbin(xclbin_path);
     xrt::kernel k = xrt::kernel(device, uuid, "hpwl_top");
 
     // ---- buffers: node_pos(0) net_ptr(1) pins(2) npins(3) exp_lut(4) bb(5) sums(6)

@@ -35,7 +35,7 @@ BUILD         ?= build/$(TARGET)
 PL_GRID ?= 64
 
 # Real module lives in the pl_algo tree; include it, don't copy it.
-PL_ALGO_SRC = ../vck5000/pl/src/pl_algo/src
+PL_ALGO_SRC = ../../pl/src/pl_algo/src
 
 VPP_TEMPS = --temp_dir $(BUILD)/_x --log_dir $(BUILD)/logs --report_dir $(BUILD)/reports
 

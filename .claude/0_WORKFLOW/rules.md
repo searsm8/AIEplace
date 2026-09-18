@@ -25,6 +25,12 @@ If a rule stops being true, flag it for deletion and tell Mark — a stale rule 
   **If it times out or exits non-zero, the portal isn't open** — the SSH master needs a password I
   can't type. Stop and ask Mark to run `wsl ssh -fN build` once (he enters the password); that leaves
   a `ControlPersist` master I then reuse silently. Don't retry blindly.
+  **The tunnel times out fast when unattended (minutes, not hours) — only Mark's own action reopens
+  it, waiting or retrying never does.** So: ask once, then STOP — don't poll for it to come back
+  (2026-09-11: a session polled every ~30 min for 3+ hours across a long background build, every
+  single check finding it closed; each was a wasted round trip Mark had to see and respond to
+  anyway). If a background job on the build server needs the tunnel to report its result later,
+  say so and wait for Mark to come back and reopen it himself — don't schedule a check-in loop.
   **Once there:** the server has no GitHub creds, so never push from it — commit on the server, then
   from the laptop `git fetch build:AIEplace <branch>`, rebase onto `origin/<branch>`, and push. I own
   this push/pull sync.

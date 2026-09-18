@@ -939,6 +939,129 @@ Open / queued for a future session:
 
 ---
 
+## #40 — `hpwl_gradient_dhar`: real-hardware failure is a TIMING CLOSURE bug, not a logic/readback bug (opened 2026-09-10)
+
+↪ pl_algo bring-up. One of the `vck5000/bring_up/` standalone hardware harnesses (#20's 2026-09-09
+ladder: `add1_pl`→`fft_pl`→`field_solve_pl`→`hpwl_pl`→`iteration_pl`). `hpwl_gradient_dhar` is a
+separate fast-adder-tree HPWL-gradient kernel.
+
+**ROOT-CAUSED 2026-09-10: the design does not meet timing on real silicon.** Read the routed
+(post-place-and-route) `v++` timing report from the `hw` build already sitting on the build server
+(`_x/reports/link/imp/impl_1_..._timing_summary_routed.rpt`) — never rebuilt, the report already
+existed from the run that failed. `WNS = -0.710 ns`, `TNS = -11,741.808 ns`, **43,859 / 196,028
+endpoints (22%) fail setup** on the kernel's own 300 MHz clock (`clkwiz_aclk_kernel_00_clk_out1`).
+`v++` shipped the xclbin anyway — the default flow warns on unmet timing but doesn't block bitstream
+generation, so nothing upstream would have caught this short of reading the report.
+
+**Every one of the 10 worst violated paths lands inside `grp_hpwl_gradient_dhar_Pipeline_net_loop_fu_336`**
+— the `net_loop:` pipeline region in `hpwl_gradient_dhar.hpp`, the fully-unrolled 16-lane
+term-gen/adder-tree/combiner block. The worst path is **85% route delay, 15% logic** (only 5 logic
+levels) — a congestion signature, not a too-deep datapath. Destination register names
+(`lut_BRAM_load_127_reg`, `ce_reg_replica_15`) point at the cause: `term_gen` calls `hpwl_lut_exp`
+4×/lane × 16 lanes (fully `UNROLL`ed) = 64 concurrent on-chip LUT reads per cycle, and a BRAM/LUTRAM
+only has 1-2 read ports, so HLS replicated the LUT cache (and its control fan-out) many times over to
+feed all 64 readers at once — long-distance routing to reach the replicas within one cycle. Kernel
+resource utilization is only **6.36% LUT / 3.99% REG** of the reconfigurable region, so this is
+*local* fan-out congestion, not a capacity problem.
+
+**Functionality is verified correct — tier-1 (`make test`, pure g++) passes at ~1e-6, unchanged.**
+This is a classic FPGA physical-design problem (too much parallel logic crammed into one pipeline
+stage), not a bug in the math, the DDR readback, or the host/device transfer path.
+
+⚠️ **hw_emu would not have caught this and is not worth running for this bug** — it is cycle-accurate
+to the HLS-*scheduled* RTL, not to post-place-and-route timing, so it almost certainly passes. Chasing
+it would burn a build cycle to learn nothing.
+
+<details><summary>Superseded 2026-09-10: original working hypothesis (DDR-bank/host readback), written
+before the timing report was read — kept for the record, now refuted</summary>
+
+> **Tier-1 offline (`make test`, pure g++) PASSES** — same kernel, same golden, ~1e-6. **Real-hardware
+> run FAILS**: `bo_grad` (the per-node gradient array, `krnl.group_id(6)`) comes back wrong by orders
+> of magnitude (rel_rms ~18, max_rel ~296), while `bo_hpwl` (the single scalar at `group_id(7)`) is
+> correct to rel=2e-8 — same order as the tier-1 run. HPWL being right means net/pin/LUT loading and
+> the segmented-reduction passes that feed *both* outputs are executing correctly, which localizes the
+> bug to the grad-specific readback path (`bo_pin_grad`/`bo_grad`, group_id(5)/(6)) rather than the
+> kernel math itself (already proven correct offline).
+>
+> **Working hypothesis, not yet confirmed:** a DDR-bank/connectivity or host/device size-mismatch
+> issue specific to real hardware (untested in tier-1 C-sim and presumably `sw_emu`) — not a
+> timing/precision bug, the magnitude is too large for that.
+>
+> Refuted by the routed timing report: HPWL reads correct not because its path is clean but because
+> (apparently) enough of its narrower accumulation path avoided the 22%-failing region, while the
+> wide `net_loop` combinational block did not. No DDR-bank/size-mismatch evidence was ever found —
+> the real cause was sitting in a report that already existed and had not been read.
+
+</details>
+
+**2026-09-11: three pragma-level experiments tried against the LUT/port-contention diagnosis above
+— one confirmed net-negative, two confirmed no-ops.** All verified via a real `v++ -c` C-synthesis
+re-run on the build server (not guessed), and the design's own compile log/guidance report read
+directly rather than just the packaged summary:
+
+- **`lut_BRAM` cyclic-partitioned (factor=16)** — DID what it targeted: `BRAM_18K` 14→0, the 64
+  concurrent reads moved onto 16 LUTRAM banks (confirmed in the csynth resource report). **But a
+  full P&R rebuild then FAILED to route at all** — 1126 unrouted signals, 771 illegal node overlaps,
+  worse than the pre-fix "routes but misses timing" baseline. The +42% LUT cost (69k→98k) landed as
+  LUTRAM in the *same* SLICEM fabric the surrounding `fmul`/`fmadd`/`faddfsub` DSP-adjacent logic
+  already needed, worsening local congestion rather than fixing it — confirmed by the P&R log's
+  top-10 congested-node list, which is dominated by that floating-point logic, not `lut_BRAM` itself.
+  **REVERTED** (`hpwl_gradient_dhar.hpp`, at `lut_BRAM`'s declaration — the revert note is load-bearing,
+  don't reapply without also cutting `net_loop`'s parallelism first).
+- **`load_net` UNROLL→PIPELINE II=1** — no effect whatsoever; identical `Final II=16, Depth=411,
+  Fmax=349.47MHz` and identical `gmem1` port-conflict warning, both before and after. Root cause:
+  Vitis HLS automatically flattens/re-unrolls loops nested inside an already-`PIPELINE`d outer loop
+  (`net_loop` itself), overriding the inner loop's own pragma. Left in place (harmless, doesn't hurt),
+  but does not fix `gmem1`'s contention — that needs real restructuring (see below), not a pragma.
+- **`hpwl_total` split into 8 named lane accumulators + `switch(n&7)`** (mirroring
+  `hpwl_gradient.hpp`'s `HPWL_LANES` trick) — the underlying carried-dependence warning did NOT
+  disappear, it just moved to `hpwl_part6`. The sibling's actual trick is a **statically-unrolled**
+  outer-stride loop (`hpwl_part[k]` for compile-time-constant `k`, 8 *textually distinct*
+  statements) — HLS's dependence checker doesn't reason about `n&7`'s modular arithmetic to prove
+  a runtime `switch` never revisits the same lane on consecutive iterations, so it stayed
+  conservative. Kept as-is (cheap, harmless), but not a validated fix.
+
+**The real pattern across all three: `net_loop` fully unrolls 16 lanes of the ENTIRE
+term-gen→adder-tree→combine chain (dozens of parallel float multiply/FMA/add DSP units) into ONE
+HLS pipeline region, and that is simply too dense to legally route regardless of which piece you
+relocate.** Fixing the LUT reads didn't help because the LUT was never the only over-subscribed
+resource; it just moved the pain. **Next step: reduce `net_loop`'s parallelism WIDTH, not relocate
+its resource usage** — partially unroll `term_gen`/the adder trees/`combine` (e.g. 4 or 8 lanes per
+wave instead of 16), trading more cycles/net for materially less floating-point hardware
+co-resident in one place. Not yet attempted.
+
+- [ ] Design and implement the partial-unroll restructure (lane width TBD — start at 8, halving the
+      per-cycle DSP/LUT count, and measure via C-synthesis before committing to a P&R run).
+- [ ] Validate via the cheap loop first: tier-1 (`make test`, seconds) → C-synthesis-only `v++ -c`
+      resource/II numbers (~15 min) → only THEN spend a full P&R run (~4 hrs) once the numbers look
+      genuinely better. Do not go straight to P&R on a guess again — the 2026-09-11 `lut_BRAM`
+      experiment cost a full P&R cycle to learn it regressed.
+- [ ] `gmem1`/`gmem3` (`load_net`'s DDR-port contention, forcing `Final II=16` independent of
+      everything else) still needs its own fix — likely duplicating `net_pins_DDR`/`pin_to_npin_DDR`
+      across multiple `m_axi` bundles, or genuinely decoupling `load_net` into its own pipelined
+      region separate from `net_loop` (mirroring how `hpwl_gradient.hpp` splits load/compute into
+      distinct phases instead of fusing them per-net). Not yet scoped in detail.
+
+**2026-09-18: the 16-pin cap itself is a quality bug — measured, not Dhar's "slight improvement".**
+`ignore_net_degree=16` vs the frozen golden (100), 28 ISPD designs, post-DP legal-vs-legal: **28/28
+worse, mean +12.44%** (ISPD2005 +30.6%, up to +51% bigblue4; ISPD2015 +5.2%). 17–100-pin nets hold
+20–27% of ISPD2005 pins. Run `vck5000/results/DSE_20260918_124001/`. **Fix = exact chunking** (same WA
+math in ⌈d/16⌉ blocks, net-level B/C sums accumulated across blocks): +6–9% blocks on ISPD2005, no
+quality experiment needed, and it is the SAME restructure as the lane-narrowing above — do together.
+- [ ] Fold arbitrary-degree support (chunked, ≤100 pins) into the partial-unroll restructure; switch
+      `hpwl_dhar_test` to the uncapped golden and add 17/32/33/100-pin nets. Drop phase Z after.
+→ [[_NEW_REPORT_40_net_degree_cap16_20260918.md]] (measurement) ·
+[[_NEW_PLAN_40_dhar_large_net_chunking_20260918.md]] (design; NOT yet built, Mark 2026-09-18)
+
+→ [[_NEW_HANDOFF_40_hpwl_gradient_dhar_hw_grad_bug_20260910.md]]
+
+**2026-09-18: v1 is being REBUILT, not patched** — a new `bring_up/hpwl_gradient_dhar_v2/` (one axis per
+call, structure-of-arrays data, loop structure ready for chunking; Mark places the pragmas and reviews
+10–20-line chunks). The checklist items above are superseded by its lessons list and its D1–D9
+design questions. → [[_NEW_HANDOFF_40_dhar_v2_rewrite_20260918.md]]
+
+---
+
 # Improvements
 
 Algorithmic ideas beyond faithfulness cleanup — hypotheses, not yet scoped.

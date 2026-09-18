@@ -141,7 +141,7 @@ zero_pin_grad:
     double hpwl_part4 = 0.0, hpwl_part5 = 0.0, hpwl_part6 = 0.0, hpwl_part7 = 0.0;
 net_loop:
     for (int n = 0; n < num_nets; n++) {
-#pragma HLS PIPELINE
+#pragma HLS PIPELINE // outer loop pipelined. Nested loops are therefore unrolled, trying to get II=1 for this outer loop.
         const int beg = net_ptr_DDR[n];
         const int end = net_ptr_DDR[n + 1];
         const int deg = end - beg;
@@ -220,17 +220,17 @@ net_loop:
         for (int k = 0; k < MAX_NET_DEGREE; k++) {
 #pragma HLS UNROLL
             if (k < deg) {
-                // apx = a^+_x = exp(max_x - x) -- shift avoids overflow
-                const float apx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, max_x - x_block[k]);
-                const float amx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, x_block[k] - min_x);
-                const float apy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, max_y - y_block[k]);
-                const float amy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, y_block[k] - min_y);
-                // amy = a^-_y = exp(y - min_y)
+                // Apx = a^+_x = exp(max_x - x) -- shift avoids overflow
+                const float Apx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, max_x - x_block[k]);
+                const float Amx = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, x_block[k] - min_x);
+                const float Apy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, max_y - y_block[k]);
+                const float Amy = hpwl_lut_exp(lut_BRAM, lut_size, inv_lut_step, y_block[k] - min_y);
+                // Amy = a^-_y = exp(y - min_y)
 
-                Bpx_terms[k] = apx;        Cpx_terms[k] = apx * x_block[k];
-                Bmx_terms[k] = amx;        Cmx_terms[k] = amx * x_block[k];
-                Bpy_terms[k] = apy;        Cpy_terms[k] = apy * y_block[k];
-                Bmy_terms[k] = amy;        Cmy_terms[k] = amy * y_block[k];
+                Bpx_terms[k] = Apx;        Cpx_terms[k] = Apx * x_block[k];
+                Bmx_terms[k] = Amx;        Cmx_terms[k] = Amx * x_block[k];
+                Bpy_terms[k] = Apy;        Cpy_terms[k] = Apy * y_block[k];
+                Bmy_terms[k] = Amy;        Cmy_terms[k] = Amy * y_block[k];
             } else {
                 Bpx_terms[k] = Cpx_terms[k] = Bmx_terms[k] = Cmx_terms[k] = 0.0f;
                 Bpy_terms[k] = Cpy_terms[k] = Bmy_terms[k] = Cmy_terms[k] = 0.0f;
@@ -252,7 +252,7 @@ net_loop:
 #pragma HLS UNROLL
             if (k >= deg || npin_slot[k] < 0) continue;               // pad, or fixed-node pin: no slot
             const float pin_x = x_block[k], pin_y = y_block[k];
-            // Bpx_terms holds apx values
+            // Bpx_terms holds Apx values
             const float partial_x = ((1.0f + pin_x * inv_gamma) * Bpx - Cpx * inv_gamma) * (Bpx_terms[k] * inv_Bpx2)
                            - ((1.0f - pin_x * inv_gamma) * Bmx + Cmx * inv_gamma) * (Bmx_terms[k] * inv_Bmx2);
             const float partial_y = ((1.0f + pin_y * inv_gamma) * Bpy - Cpy * inv_gamma) * (Bpy_terms[k] * inv_Bpy2)
