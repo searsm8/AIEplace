@@ -1060,6 +1060,82 @@ call, structure-of-arrays data, loop structure ready for chunking; Mark places t
 10–20-line chunks). The checklist items above are superseded by its lessons list and its D1–D9
 design questions. → [[_NEW_HANDOFF_40_dhar_v2_rewrite_20260918.md]]
 
+**2026-09-21: v2's bbox/HPWL milestone hit II=1 on `compute`, II=8 on `input_controller`** — the
+remaining II=8 is `pin_x`'s single `m_axi` port serving 8 simultaneous reads/net, a DDR-bandwidth-
+shape problem, not a logic one. Spawned a new module, **`hpwl_computer`**
+(`bring_up/hpwl_computer/`): `LANES=16` (matches the 512-bit beat exactly), nets bucketed by degree
+and packed `nets_per_beat = floor(16/degree)` to a beat (Dhar Method 1), so one beat/cycle feeds
+compute directly — no separate beat-parsing controller needed (one was designed, then abandoned
+once the padded/grouped layout made it unnecessary). Compute reuses **Dhar's Fig. 6/7 multi-output
+tree + selector unchanged, with comparators in place of adders** (max/min are
+associative/commutative exactly like sum, so the structure carries over).
+
+**2026-09-22: `hpwl_computer` DONE — built, tier-1-verified, C-synthesizes at II=1.**
+`resolve_beat` (beat-granularity degree resolution) → `dhar_tree<MaxOp>`/`dhar_tree<MinOp>` (the
+34-output tree, now a template over the combining operator, ready for an `AddOp` instantiation in
+#41) → `select_lane_hpwl` (the 16 per-lane muxes) → packed into one `OutBeat` per input beat.
+Tier-1: bit-exact over 279 real nets (independent golden at every stage). C-synthesis journey
+measured step by step (not guessed): `PIPELINE II=1` on `beat_loop` was first **rejected outright**
+(a variable-trip-count subloop can't be unrolled) → fixed-width guarded loop → pipelines but II=12
+(`TreeOutputs` arrays not partitioned) → `ARRAY_PARTITION` → II=8 (bottleneck moves to `lane_hpwl`)
+→ `ARRAY_PARTITION` again → II=8 unchanged (bottleneck moves to scalar DDR writes, up to 8/beat on
+one port) → **pack all real values into one wide `OutBeat`, one write/beat → II=1.** This last fix
+is the output-side mirror of the module's own reason for existing (wide beats beat narrow
+multi-request I/O) — same lesson, symmetric top to bottom. Output is beat-aligned (not tightly
+packed), and total output DDR traffic is bounded at exactly 50% of input traffic regardless of
+degree mix (`OutBeat` is half `InBeat`'s width, one of each per beat).
+→ [[REPORT_40_hpwl_computer_20260921.md]] (full build + synthesis table) ·
+[[DIAGRAM_hpwl_computer.md]] (`.claude/2_ARTIFACTS/diagrams/`). **Unblocks #41.**
+
+---
+
+## #41 — `hpwl_gradient_computer`: extend `hpwl_computer` to the full WA gradient (opened 2026-09-21)
+
+**#40 landed 2026-09-22 — unblocked.** `hpwl_computer` (#40) is deliberately scoped to bbox/HPWL
+only — two comparator trees (Dhar Fig. 6/7 reused with max/min instead of sum, now a
+`dhar_tree<Op>` template built specifically so an `AddOp` instantiation drops in here), one beat of
+16 same-degree pins in, one `hpwl_span` out per net, verified tier-1 + C-synthesis (II=1). This task
+is the follow-on: add the remaining stages needed to get the actual wirelength-average **gradient**
+per pin, on top of the same now-proven multi-net-per-beat pattern.
+
+**Scope — the stages `hpwl_computer` explicitly skips, from Dhar's Method 1 (§III-B) and the v2
+handoff's D1–D9:**
+- **Term generation (Fig. 5):** for each of the 16 incoming pins, `e^x`, `e^-x`, `x*e^x`, `x*e^-x`
+  (the packed-pair LUT design, D8, already decided: `(lut[i], lut[i+1])` in one 64-bit word).
+- **Two more multi-output trees** (adder, not comparator — sum, not max/min) for the `e^x`/`e^-x`
+  term sums, reusing the same Fig. 6/7 structure a third and fourth time (four trees total once
+  bbox's two are counted, exactly matching Dhar's own count).
+- **Adder result selector (Fig. 7)** — per-pin, not per-block like `hpwl_computer`'s degree-only
+  selector: picks the correct one of the 34 sums for *each* of the 16 pin positions, since gradient
+  (unlike HPWL) is a per-pin output, not a per-net one.
+  - **Combiner (Fig. 8):** the actual gradient formula per pin from the 4 selected term-sums.
+- **Same tail-partial-beat handling as #40** applies here too — inherit that solution rather than
+  re-deriving it.
+
+**Naming note:** `hpwl_computer` was named for what it does now (HPWL only); this task's module
+adds "gradient" to both the computation and the name, hence `hpwl_gradient_computer`. Whether it
+replaces `hpwl_computer` in place or is a new module that reuses/wraps it (the bbox trees are a
+strict subset of what the gradient needs) is an open question for when this task starts — decide it
+the same way #40 decided its own module boundary: discuss dataflow with Mark before any datapath
+code.
+
+- [x] **#40 (`hpwl_computer`) landed and verified 2026-09-22** — tier-1 + C-synthesis (II=1). This
+      task now builds on its proven multi-net-per-beat pattern and its `dhar_tree<Op>` template.
+- [x] **Pin→node summation strategy decided 2026-09-22 (Mark): on-chip scatter-add, not DDR.** A
+      scatter or gather through DDR is ~10–50× short of the trees' 4.8 G pins/s per axis. Instead,
+      `node_grad`/`node_pos` sit in banked URAM (8 MB budget, float accumulation), and the host
+      precomputes a conflict-free beat packing. Prototype `vck5000/bring_up/beat_packer/`:
+      **32 banks + pre-crossbar merge of same-node lanes = ≥99.69% of ideal beats on all 44
+      designs**; 16 banks + merge reaches ≥94.3%. The dominant obstacle was a cell with 2+ pins on
+      one net (~10% of ISPD2005 nets). → [[_NEW_REPORT_41_beat_packer_20260922.md]]
+      Open: pos+grad vs grad-only on chip (6 designs >8 MB with both); emit the real host→device
+      record format. URAM budget vs density's bin scatter deferred until the whole-iteration dataflow is clearer.
+- [ ] Settle module boundary (extend `hpwl_computer` vs. new module) with Mark before writing code.
+- [ ] Port Dhar's term generator (Fig. 5), the two additional adder trees, the per-pin adder result
+      selector (Fig. 7), and the combiner (Fig. 8) — same small-chunk working agreement as #40/v2.
+- [ ] Tier-1 golden: bit-exact per-pin gradient vs. the existing `hpwl_gradient_dhar_v2`/v1 CPU
+      reference, same tolerance bar as the rest of this family (~1e-6 rel_rms).
+
 ---
 
 # Improvements
