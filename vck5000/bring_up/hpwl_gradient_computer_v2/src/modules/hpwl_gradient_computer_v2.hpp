@@ -115,7 +115,7 @@ compute_pass:
                            offset_BRAM, lut_BRAM, lut_size, inv_lut_step, inv_gamma, grad_URAM,
                            desc.first_fixed_slot, out_beats_DDR + desc.record_beat_offset, offset_bits);
         if (chunked) export_ghost_gradients(desc, import_slots_DDR, grad_URAM, exchange_DDR);
-        else         fold_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, grad_URAM);
+        else         fold_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, grad_URAM, pos_URAM);
         drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR + desc.slot_beat_offset);
     }
 
@@ -125,7 +125,7 @@ fold_pass:
         const int movable_slot_beats = desc.first_fixed_slot / pinrec::LANES;
         load_slot_array(grad_DDR + desc.slot_beat_offset, movable_slot_beats, grad_URAM);
         add_ghost_gradients(desc, num_chunks, blocks_DDR, export_slots_DDR, exchange_DDR, grad_URAM);
-        fold_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, grad_URAM);
+        fold_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, grad_URAM, pos_URAM);
         drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR + desc.slot_beat_offset);
     }
 }

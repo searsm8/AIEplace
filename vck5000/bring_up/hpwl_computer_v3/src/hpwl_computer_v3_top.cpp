@@ -29,7 +29,6 @@ extern "C" void hpwl_computer_v3_top(
 #pragma HLS INTERFACE m_axi port=exchange     bundle=gmem6 offset=slave
 #pragma HLS INTERFACE m_axi port=offset_table bundle=gmem0 offset=slave
 #pragma HLS INTERFACE m_axi port=out_beats    bundle=gmem7 offset=slave
-#pragma HLS INTERFACE s_axilite port=return   bundle=control
 
     hpwl_computer_v3(chunks, num_chunks, records, pos, macro_pins, import_slots, export_slots, blocks, exchange,
                      offset_table, offset_table_size, out_beats, offset_bits);

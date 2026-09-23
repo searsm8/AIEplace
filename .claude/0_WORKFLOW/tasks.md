@@ -1137,12 +1137,28 @@ code.
       on ISPD. **41/44 designs round-trip exactly** (a decode-based checker, 6/6 mutants caught).
       The only misses are MMS bigblue3/4 and newblue7, which are over the node count (chunking)
       and have movable-macro offsets. → same report, Part 2.
-- [ ] Take the hazard H from synthesis; update `resolve_beat` for EMPTY lanes (partial beats mid-group).
-- [ ] Settle module boundary (extend `hpwl_computer` vs. new module) with Mark before writing code.
-- [ ] Port Dhar's term generator (Fig. 5), the two additional adder trees, the per-pin adder result
-      selector (Fig. 7), and the combiner (Fig. 8) — same small-chunk working agreement as #40/v2.
-- [ ] Tier-1 golden: bit-exact per-pin gradient vs. the existing `hpwl_gradient_dhar_v2`/v1 CPU
-      reference, same tolerance bar as the rest of this family (~1e-6 rel_rms).
+- [x] **Four record-stream modules built overnight 2026-09-22 (Mark's brief).**
+      - `hpwl_computer_v2` (on-chip gather)
+      - `hpwl_gradient_computer` (Dhar Method 1 + on-chip merge / scatter-add + macro fold)
+      - `hpwl_computer_v3` and `hpwl_gradient_computer_v2` (chunking: ghosts through a
+        consumer-major DDR exchange buffer)
+
+      Each is tier-1 verified against a golden from the parsed netlist (HPWL bit-exact; gradient
+      rel_rms ~4e-7, tol 1e-5), mutation-tested, and in `make test`. Also:
+      - Packer is a library now, with movable-macro pin slots.
+      - All 44 designs encode (≤29 bits, ≤131 offsets) and chunk at 1 M slots (8 need K=2–3,
+        ghosts 4–19%).
+      - C-synthesis: v2 / v3 are II=1 at full capacity. The gather needed a masked-readout
+        rewrite: a dynamic index hung the HLS front end (bisected).
+
+      → [[_NEW_REPORT_41_record_datapath_20260922.md]]. (The old "module boundary / port Dhar
+      stages / tier-1 golden" boxes are what this delivered: new modules, not an in-place
+      extension.)
+- [ ] Take `HAZARD_DISTANCE` from the synthesized RMW depth (see the report); v1's count-based
+      `resolve_beat` is superseded by EMPTY lanes from v2 on.
+- [ ] Nets of 17..100 pins: still out of scope; 20–29% of ISPD2005 pins. The #40 chunking plan
+      now has to be designed on the record protocol.
+- [ ] Optional: a min-cut partitioner if bigblue4 / newblue7 ghost cost (13–19%) matters.
 
 ---
 

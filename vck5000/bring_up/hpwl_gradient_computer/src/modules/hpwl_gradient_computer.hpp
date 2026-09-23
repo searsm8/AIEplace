@@ -81,27 +81,29 @@ drain_slots:
     }
 }
 
-// Macro-pin gradients fold into their macro. The list is grouped by macro_slot, so a run of
-// entries accumulates in a register and the macro is written once at the run's end. A macro has
-// no pin of its own on any net (every one was rewritten to a macro-pin slot), so its slot holds 0
-// until this write. Reads macro-pin slots, writes macro slots: disjoint. Meow.
+// Macro-pin gradients fold into their macro: grad[macro] = sum of grad[its pin slots].
+// The running sum lives in acc_URAM at the macro's slot, not in a register: a register chain
+// carries a float add from one entry to the next, which HLS could only schedule at II=3 (4.9 ns
+// path, measured 2026-09-22). In memory it is a read-add-write, and the host orders the list so a
+// macro recurs only every HAZARD_DISTANCE entries (schedule_macro_pins) -- the same contract as the
+// scatter-add. FIRST starts the sum; LAST writes it into grad. The caller passes pos_URAM as
+// acc_URAM: positions are dead once the beat loop is done. Meow.
 static void fold_macro_pins(const pinrec::MacroPinRef* macro_pins_DDR, int num_macro_pins,
-                            float grad_URAM[pinrec::BANKS][ROWS_PER_BANK]) {
-    int   macro_slot = -1;
-    float macro_grad = 0.0f;
+                            float grad_URAM[pinrec::BANKS][ROWS_PER_BANK],
+                            float acc_URAM[pinrec::BANKS][ROWS_PER_BANK]) {
 fold_macros:
     for (int e = 0; e < num_macro_pins; e++) {
 #pragma HLS PIPELINE II=1
 #pragma HLS DEPENDENCE variable=grad_URAM inter false
+#pragma HLS DEPENDENCE variable=acc_URAM type=inter direction=RAW distance=pinrec::HAZARD_DISTANCE dependent=true
         const pinrec::MacroPinRef ref = macro_pins_DDR[e];
-        if (ref.macro_slot != macro_slot) {
-            if (macro_slot >= 0) grad_URAM[macro_slot % pinrec::BANKS][macro_slot / pinrec::BANKS] = macro_grad;
-            macro_slot = ref.macro_slot;
-            macro_grad = 0.0f;
-        }
-        macro_grad += grad_URAM[ref.pin_slot % pinrec::BANKS][ref.pin_slot / pinrec::BANKS];
+        if (ref.pin_slot == pinrec::MACRO_PIN_SKIP) continue;
+        const int macro_bank = ref.macro_slot % pinrec::BANKS, macro_row = ref.macro_slot / pinrec::BANKS;
+        const float pin_grad = grad_URAM[ref.pin_slot % pinrec::BANKS][ref.pin_slot / pinrec::BANKS];
+        const float sum = (ref.flags & pinrec::MACRO_PIN_FIRST) ? pin_grad : acc_URAM[macro_bank][macro_row] + pin_grad;
+        if (ref.flags & pinrec::MACRO_PIN_LAST) grad_URAM[macro_bank][macro_row] = sum;
+        else                                    acc_URAM[macro_bank][macro_row] = sum;
     }
-    if (macro_slot >= 0) grad_URAM[macro_slot % pinrec::BANKS][macro_slot / pinrec::BANKS] = macro_grad;
 }
 
 // The per-net sums the combiner needs, one set per net position of the beat. Meow.
@@ -285,7 +287,7 @@ cache_counts:
     gradient_beat_loop(records_DDR, num_beats, beat_count_REG, pos_URAM, offset_BRAM, lut_BRAM, lut_size,
                        inv_lut_step, inv_gamma, grad_URAM, first_fixed_slot, out_beats_DDR, offset_bits);
 
-    fold_macro_pins(macro_pins_DDR, num_macro_pins, grad_URAM);
+    fold_macro_pins(macro_pins_DDR, num_macro_pins, grad_URAM, pos_URAM);
     drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR);
 }
 

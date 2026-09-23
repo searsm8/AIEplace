@@ -23,7 +23,6 @@ extern "C" void hpwl_computer_v2_top(
 #pragma HLS INTERFACE m_axi port=macro_pins   bundle=gmem3 offset=slave
 #pragma HLS INTERFACE m_axi port=offset_table bundle=gmem4 offset=slave
 #pragma HLS INTERFACE m_axi port=out_beats    bundle=gmem5 offset=slave
-#pragma HLS INTERFACE s_axilite port=return   bundle=control
 
     hpwl_computer_v2(records, num_beats, beat_count, pos, num_slot_beats, macro_pins, num_macro_pins,
                      offset_table, offset_table_size, out_beats, offset_bits);

@@ -32,11 +32,19 @@ struct RecordBeat { uint32_t r[LANES]; };   // one 512-bit DDR beat of the stati
 struct SlotBeat   { float    v[LANES]; };   // one 512-bit DDR beat of a slot-major array
 
 // A movable macro's pin is its own slot: pos[pin_slot] = pos[macro_slot] + offset, refreshed on
-// chip each call; its gradient folds back into the macro. Entries are grouped by macro_slot. Meow.
+// chip each call; its gradient folds back into the macro as a read-add-write, so the host orders
+// the list with no macro repeated within HAZARD_DISTANCE entries (padding with SKIP entries when a
+// macro dominates). FIRST starts a macro's sum instead of adding to it; LAST writes the total into
+// the macro's gradient -- no separate zeroing or copy pass. 16 bytes: a 12-byte entry straddles
+// bus words and cost refresh_macros II=2. Meow.
+constexpr int32_t MACRO_PIN_SKIP  = -1;   // pin_slot of a padding entry
+constexpr int32_t MACRO_PIN_FIRST = 1;
+constexpr int32_t MACRO_PIN_LAST  = 2;
 struct MacroPinRef {
     int32_t pin_slot;
     int32_t macro_slot;
     float   offset;      // this axis
+    int32_t flags;       // MACRO_PIN_FIRST | MACRO_PIN_LAST
 };
 
 // ---- Chunking (a design larger than one on-chip slot space) ----

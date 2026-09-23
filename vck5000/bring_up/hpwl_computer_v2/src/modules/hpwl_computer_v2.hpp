@@ -24,8 +24,9 @@
 namespace plalgo {
 
 // On-chip arrays too big for a software stack are static in tier-1 builds only. Under synthesis
-// they must not be: a static array carries an initial value HLS has to materialize, and v2's C
-// front end ran for 9+ minutes on the static 1M-entry banks before this. Meow.
+// they are plain locals: a static local would mean state that persists across kernel calls (and
+// an initial value to materialize), which no caller relies on. (Suspected first, wrongly, of the
+// front-end hang that the gather readout turned out to cause -- see gather_pin_positions.) Meow.
 #ifdef __SYNTHESIS__
 #define ONCHIP_ARRAY
 #else
@@ -71,6 +72,7 @@ refresh_macros:   // reads macro slots, writes macro-pin slots: disjoint, so no 
 #pragma HLS PIPELINE II=1
 #pragma HLS DEPENDENCE variable=pos_URAM inter false
         const pinrec::MacroPinRef ref = macro_pins_DDR[e];
+        if (ref.pin_slot == pinrec::MACRO_PIN_SKIP) continue;   // fold-schedule padding
         const float macro_pos = pos_URAM[ref.macro_slot % pinrec::BANKS][ref.macro_slot / pinrec::BANKS];
         pos_URAM[ref.pin_slot % pinrec::BANKS][ref.pin_slot / pinrec::BANKS] = macro_pos + ref.offset;
     }
@@ -105,7 +107,10 @@ static DecodedLanes decode_lanes(const pinrec::RecordBeat& rb, int offset_bits) 
 }
 
 // Bank-major gather: bank b reads the row of the (at most one distinct) node addressing it, then
-// each lane takes its bank's value. Lanes of one repeated node share the read. Meow.
+// each lane takes its bank's value. Lanes of one repeated node share the read.
+// The lane readout is a masked loop over the banks, NOT `bank_pos[slot % BANKS]`: with the dynamic
+// index, the HLS C front end ran for 10+ minutes without finishing (bisected 2026-09-22); the masked
+// form compiles in seconds and schedules beat_loop at II=1, depth 21. Same 32:1 mux either way. Meow.
 static void gather_pin_positions(const DecodedLanes& d, const float pos_URAM[pinrec::BANKS][ROWS_PER_BANK],
                                  const float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX],
                                  float pin_pos[pinrec::LANES]) {
@@ -118,8 +123,12 @@ static void gather_pin_positions(const DecodedLanes& d, const float pos_URAM[pin
             if (!d.empty[i] && d.slot[i] % pinrec::BANKS == (uint32_t)b) row = d.slot[i] / pinrec::BANKS;
         bank_pos[b] = pos_URAM[b][row];
     }
-    for (int i = 0; i < pinrec::LANES; i++)
-        pin_pos[i] = bank_pos[d.slot[i] % pinrec::BANKS] + offset_BRAM[i][d.offset_idx[i]];
+    for (int i = 0; i < pinrec::LANES; i++) {
+        float value = 0.0f;
+        for (int b = 0; b < pinrec::BANKS; b++)
+            if (d.slot[i] % pinrec::BANKS == (uint32_t)b) value = bank_pos[b];
+        pin_pos[i] = value + offset_BRAM[i][d.offset_idx[i]];
+    }
 }
 
 // The record stream -> per-net HPWL, against positions already resident in pos_URAM. Meow.

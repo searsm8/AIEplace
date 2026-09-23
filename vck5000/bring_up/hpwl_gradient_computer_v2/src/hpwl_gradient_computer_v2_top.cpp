@@ -36,7 +36,6 @@ extern "C" void hpwl_gradient_computer_v2_top(
 #pragma HLS INTERFACE m_axi port=exp_lut      bundle=gmem0 offset=slave
 #pragma HLS INTERFACE m_axi port=out_beats    bundle=gmem7 offset=slave
 #pragma HLS INTERFACE m_axi port=grad         bundle=gmem8 offset=slave
-#pragma HLS INTERFACE s_axilite port=return   bundle=control
 
     hpwl_gradient_computer_v2(chunks, num_chunks, records, pos, macro_pins, import_slots, export_slots, blocks,
                               exchange, offset_table, offset_table_size, exp_lut, lut_size, out_beats, grad,
