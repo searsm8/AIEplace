@@ -16,10 +16,14 @@
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O2
 # The harnesses #include the real PL modules ("modules/fft_pl.hpp"), not a copy of them --
-# that is the point, so a module edit is what the test actually exercises. The second path is
-# for hpwl_dhar_test only: hpwl_gradient_dhar.hpp is a bring-up-only module (never included from
-# pl_algo's top.cpp), so it lives under bring_up/ instead of the shared modules/ tree.
-INCLUDES  = -I../pl/src/pl_algo/src -I../bring_up/hpwl_gradient_dhar/src
+# that is the point, so a module edit is what the test actually exercises. The second, third and
+# fourth paths are for hpwl_dhar_test / hpwl_dhar_v2_test / hpwl_computer_test only:
+# hpwl_gradient_dhar[.hpp|_v2.hpp]/hpwl_computer.hpp are bring-up-only modules (never included
+# from pl_algo's top.cpp), so they live under bring_up/ instead of the shared modules/ tree.
+# The pin-record family (#41) adds beat_packer (the host library + protocol header the harnesses
+# encode with) and one path per record-consuming module.
+INCLUDES  = -I../pl/src/pl_algo/src -I../bring_up/hpwl_gradient_dhar/src -I../bring_up/hpwl_gradient_dhar_v2/src -I../bring_up/hpwl_computer/src \
+            -I../bring_up/beat_packer -I../bring_up/hpwl_computer_v2/src -I../bring_up/hpwl_gradient_computer/src
 BUILD     = build
 
 # sched_verify replays a recorded sw_only schedule against the PL scheduler. The trace and the
@@ -28,7 +32,7 @@ BUILD     = build
 # match that run's config_used.json, or the stop check will fail against the wrong threshold.
 TRACE ?= fixtures/schedule_trace_adaptec1.csv
 
-HARNESSES = density_model density_bin_model node_footprint_test force_gather_test metrics_test iteration_update_test spectral_test fft_pl_test field_solve_test hpwl_grad_test hpwl_dhar_test bb_reduce_test sched_verify
+HARNESSES = density_model density_bin_model node_footprint_test force_gather_test metrics_test iteration_update_test spectral_test fft_pl_test field_solve_test hpwl_grad_test hpwl_dhar_test hpwl_dhar_v2_test hpwl_computer_test hpwl_computer_v2_test hpwl_gradient_computer_test bb_reduce_test sched_verify
 BINS      = $(addprefix $(BUILD)/, $(HARNESSES))
 
 .PHONY: all test clean
@@ -69,7 +73,7 @@ $(BUILD)/hpwl_dhar_test_asan: hpwl_dhar_test.cpp
 
 test: $(BINS)
 	@fail=0; \
-	for h in density_model density_bin_model node_footprint_test force_gather_test metrics_test iteration_update_test spectral_test fft_pl_test field_solve_test hpwl_grad_test hpwl_dhar_test bb_reduce_test; do \
+	for h in density_model density_bin_model node_footprint_test force_gather_test metrics_test iteration_update_test spectral_test fft_pl_test field_solve_test hpwl_grad_test hpwl_dhar_test hpwl_dhar_v2_test hpwl_computer_test hpwl_computer_v2_test hpwl_gradient_computer_test bb_reduce_test; do \
 		printf '\n=== %s ===\n' "$$h"; \
 		$(BUILD)/$$h || fail=1; \
 	done; \
