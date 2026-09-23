@@ -76,6 +76,16 @@
   → [[_NEW_REPORT_26_fence_regions_20260811.md]]
 
 ## Where pl_algo stands — THE ACTIVE THREAD as of 2026-08-28
+- **#41 WA gradient on a static pin-record stream (2026-09-22/23, bring_up).** DDR carries only
+  32-bit records (`node_slot | offset_idx`, 16 per beat); positions and gradients live in 32-bank
+  URAM. All random access is on chip, and the host precomputes a bank-conflict-free,
+  hazard-spaced packing.
+  - Four modules: `hpwl_computer_v2` and `hpwl_gradient_computer`, plus chunked `_v3` / `_v2` for
+    designs over 1 M slots.
+  - Verification: tier-1 exact (HPWL bit-exact, gradient ~4e-7), and C-synthesis II=1 on every loop.
+  - All 44 designs encode; 8 need chunks.
+  - Open: nets of 17..100 pins (plan awaiting Mark), plus post-route timing and URAM.
+  → [[_NEW_REPORT_41_record_datapath_20260922.md]], protocol in `vck5000/bring_up/beat_packer/README.md`.
 - All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
 - **v1 scope DECIDED (Mark, 2026-08-28):** phase-1 GP, device-resident, bit-comparable. **No phase 2,
   no backtracking** (deferred until needed). **pl_algo pins to the frozen sw_only HEAD.** (Third §10
@@ -146,9 +156,14 @@
   every scored run (`detail_placement.py:374`, unconditional in `run_lg`), so it earns nothing at
   scoring time — but it runs *inside* phase 2 and conditions the GP result, so deleting it is not
   free. `macro_legalization = true|false` A/B over MMS decides it. See tasks.md #38.
-- **#40 — `hpwl_gradient_dhar` fails P&R timing, AND its 16-pin net cap costs +12.4% post-DP HPWL**
-  (28/28 worse, ISPD2005 +30.6%; 2026-09-18). Plan: exact ⌈d/16⌉-block chunking, folded into the
-  lane-narrowing timing fix. → [[_NEW_REPORT_40_net_degree_cap16_20260918.md]]
+- **#40 — `hpwl_computer` DONE (2026-09-22): built, tier-1-verified, C-synthesizes at II=1.**
+  `bring_up/hpwl_computer/`: beat-granularity degree resolution → `dhar_tree<Op>` (Dhar Fig. 6/7,
+  now a template over the combining operator) → 16-lane selector → one packed `OutBeat`/beat. II=1
+  took 4 synthesis iterations (fixed-width write loop, then `ARRAY_PARTITION` on two arrays, then
+  the wide-output-beat fix) — full table in the report. → [[REPORT_40_hpwl_computer_20260921.md]]
+- **#41 — `hpwl_gradient_computer`**, opened 2026-09-21, unblocked by #40: extends `hpwl_computer`
+  with Dhar's term-gen/LUT/adder-trees/combiner (`dhar_tree<AddOp>`) to get the actual per-pin
+  gradient, not just HPWL. Not started.
 
 ## Also open
 - **#21 — repo restructure** (host to top level, one host binary). Proposal only, nothing started.

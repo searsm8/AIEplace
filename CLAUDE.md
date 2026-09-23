@@ -56,7 +56,7 @@ the #26 fence bullet is the always-loaded statement of a decision whose record l
 
 ### Keep tasks.md from bloating
 Every session may load this file whole, so anything finished that stays in it is paid for again on
-every future session. Also, Mark needs to read it sometimes! Four rules:
+every future session. Also, Mark needs to read it sometimes! Tasks.md rules:
 
 1. **When a task is completed, move the whole section to `.claude/0_WORKFLOW/history.md`**
    - Prepend history.md with a summary line: the task number "#n" and a brief description of what was accomplished. Reference other tasks as needed.

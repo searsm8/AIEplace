@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
     const int lut_size = (int)(GAMMA_MULT / PLACE_STEP_NORM) + 2;
     std::vector<float> lut(lut_size);
     for (int i = 0; i < lut_size; i++) lut[i] = std::exp(-(float)i * PLACE_STEP_NORM);
-    const float gamma        = 120.0f;
+    const float gamma        = 120.0f; // why start at 120?
     const float inv_gamma    = 1.0f / gamma;
     const float inv_lut_step = 1.0f / (PLACE_STEP_NORM * gamma);
 

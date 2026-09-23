@@ -17,6 +17,34 @@ status. **Never rewrite an entry; annotate.** The retraction trail is the point.
 
 ---
 
+## 2026-09-22 — evicted from summary.md: #40's mid-build `hpwl_computer` snapshot, superseded by DONE
+
+> - **#40 — v2 rewrite's bbox/HPWL milestone hit II=1 compute / II=8 DDR-port-bound load** (2026-09-21);
+>   spawned **`hpwl_computer`** (`bring_up/hpwl_computer/`, not yet built): `LANES=16`, nets packed
+>   `floor(16/degree)`-per-beat (Dhar Method 1), one beat/cycle feeds compute directly (no separate
+>   beat-parsing controller). Compute reuses Dhar's Fig. 6/7 tree+selector with comparators instead of
+>   adders. Design settled, no code yet. → [[_NEW_HANDOFF_40_hpwl_computer_20260921.md]]
+> - **#41 — `hpwl_gradient_computer`**, opened 2026-09-21, blocked on #40: extends `hpwl_computer` with
+>   Dhar's term-gen/LUT/adder-trees/combiner to get the actual per-pin gradient, not just HPWL.
+
+Superseded same-day: the module was built, tier-1-verified and C-synthesized to II=1 within the same
+session this snapshot was written in — see summary.md's current #40 line and
+[[REPORT_40_hpwl_computer_20260921.md]] (the handoff this pointed at, now converted to that report).
+
+---
+
+## 2026-09-21 — evicted from summary.md: #40's pre-v2-rewrite snapshot, superseded by the `hpwl_computer` spawn
+
+> - **#40 — `hpwl_gradient_dhar` fails P&R timing, AND its 16-pin net cap costs +12.4% post-DP HPWL**
+>   (28/28 worse, ISPD2005 +30.6%; 2026-09-18). Plan: exact ⌈d/16⌉-block chunking, folded into the
+>   lane-narrowing timing fix. → [[_NEW_REPORT_40_net_degree_cap16_20260918.md]]
+
+Superseded by the 2026-09-18 v2 rewrite ([[_NEW_HANDOFF_40_dhar_v2_rewrite_20260918.md]]), which
+replaced the timing-closure/16-pin-cap problem this snapshot describes with a from-scratch module;
+that milestone in turn spawned `hpwl_computer` (2026-09-21, see summary.md's current #40 line).
+
+---
+
 ## 2026-08-28 — evicted from summary.md: #14, #32, #39 closed-task narration, stale under the soft cap
 
 All three closed **before** 2026-08-27 and have full task-indexed records in [[history.md]] (search

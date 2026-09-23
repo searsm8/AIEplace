@@ -19,3 +19,4 @@ _x/
 .run/
 *.pb
 *.pb3
+synth_check_prj/
