@@ -8,12 +8,12 @@ gradient and the on-chip scatter), `hpwl_computer_v3` (the chunking extension) a
 [[vck5000/bring_up/beat_packer/README.md]].
 
 ## Status at a glance
-| module | tier 1 (offline golden) | mutation test | tier 2 (C-synthesis, 1 M slots) |
-|---|---|---|---|
-| `hpwl_computer_v2` | bit-exact, 3 packer configs × 2 axes | 4/5 caught (1 equivalent) | every loop II=1 |
-| `hpwl_gradient_computer` | rel_rms 3.9e-7 (tol 1e-5); HPWL bit-exact | 10/11 caught (1 equivalent) | every loop II=1 |
-| `hpwl_computer_v3` | bit-exact on 7 chunks and on 1 | 5/5 caught | every loop II=1 |
-| `hpwl_gradient_computer_v2` | rel_rms 3.6e-7 on 7 chunks; HPWL bit-exact | 4/5 caught (1 equivalent) | every loop II=1 |
+| module | tier 1 (offline golden) | mutation test | tier 2 (C-synthesis, 1 M slots) | RTL co-simulation |
+|---|---|---|---|---|
+| `hpwl_computer_v2` | bit-exact, 3 packer configs × 2 axes | 4/5 caught (1 equivalent) | every loop II=1 | — |
+| `hpwl_gradient_computer` | rel_rms 3.9e-7 (tol 1e-5); HPWL bit-exact | 10/11 caught (1 equivalent) | every loop II=1 | **pass** at spacing 4; fails at 3/2/1 |
+| `hpwl_computer_v3` | bit-exact on 7 chunks and on 1 | 5/5 caught | every loop II=1 | — |
+| `hpwl_gradient_computer_v2` | rel_rms 3.6e-7 on 7 / 23 chunks; HPWL bit-exact | 4/5 caught (1 equivalent) | every loop II=1 | **pass**, 8 chunks |
 
 `make test` (tier 1) passes all 20 harnesses. Commits: `bc3d636` (packer library + macro pins),
 `cac980f` (v2 + gradient), `0752b6f` (the landed #40 sources, see Housekeeping), `4e8fd0f`
@@ -86,6 +86,19 @@ Raw table: `.claude/2_ARTIFACTS/beat_packer/run_chunked_cap1M.txt`.
 | newblue5 / 6 | 1.23 / 1.25 M | 2 | 124 K / 123 K | 10.1 / 9.9 |
 | newblue7 | 2.48 M | 3 | 325 K | 13.1 |
 
+**A bug found and fixed (`54f9978`).** A node that is a ghost in several chunks appears in several
+of its producer's blocks. With small blocks, two of its entries could land fewer than
+`HAZARD_DISTANCE` apart across a block boundary, which would race the producer's read-add-write,
+exactly the failure co-simulation shows. `check_chunked` caught it at a 256-slot capacity: I had
+checked for it but never handled it. The 1 M-slot runs never hit it because their blocks are
+huge. Fix:
+- The producer's sequence is ordered greedily within each block.
+- Padding segments are inserted where nothing fits. They have slot −1, take no exchange
+  position, and the device skips them.
+- `ChunkDesc` gains `num_export_blocks`.
+
+Tier 1 now includes a 768-slot configuration (23 chunks) that asserts padding really occurs.
+
 The other 36 designs are one chunk. Ghost cost grows with K: adaptec1 forced to 3 / 6 chunks
 gives 19% / 45%. A real partitioner (min-cut, FM refinement) is the lever if that matters; the
 breadth-first cut was simply the first thing that verified.
@@ -146,8 +159,11 @@ cannot execute**. That makes this co-simulation the only gate for any change to 
 `HAZARD_DISTANCE` or the packer's scheduler. Hazards 3 and 1 fail identically because the error is
 dominated by the macro fold: with 3 macros both schedules come out strict round-robin at spacing 3.
 Run: `LIBRARY_PATH=/usr/lib/x86_64-linux-gnu vitis_hls -f cosim.tcl` (about 15 min), then
-`COSIM_HAZARDS="…" vitis_hls -f cosim_rerun.tcl`. The chunked module's ghost-gradient add uses the
-same mechanism but is not co-simulated.
+`COSIM_HAZARDS="…" vitis_hls -f cosim_rerun.tcl`.
+
+The **chunked** module (`bring_up/hpwl_gradient_computer_v2/cosim/`) also passes RTL
+co-simulation. The run covered 8 chunks and 769 ghosts: export, compute and fold passes, the
+exchange buffer, and the ghost-gradient read-add-write with padding. Result: rel_rms 5.6e-7.
 
 | module | DSP | LUT | FF | BRAM | beat-loop depth |
 |---|---|---|---|---|---|
