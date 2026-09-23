@@ -14,7 +14,7 @@ DESIGNS = $(foreach d,$(ISPD2005),--bookshelf $(BENCH)/ispd2005/$(d) $(d)) \
           $(foreach d,$(ISPD2015),--def $(BENCH)/ispd2015/$(d)/floorplan.def $(d)) \
           $(foreach d,$(MMS),--bookshelf $(BENCH)/mms/$(d) $(d))
 
-beat_packer: beat_packer.cpp
+beat_packer: beat_packer.cpp beat_packer.hpp pin_record.hpp
 	g++ -std=c++17 -O2 -Wall -o $@ $<
 
 run: beat_packer
