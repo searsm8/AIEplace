@@ -48,23 +48,35 @@ int main(int argc, char** argv) {
         }
     }
 
-    const golden::Lut lut = golden::make_lut();
+    // Co-simulation copies `depth` elements from every m_axi pointer (cosim_top.cpp), so every
+    // buffer is padded up to its port's depth. Meow.
+    auto at_least = [](size_t n, size_t depth) { return n > depth ? n : depth; };
+    golden::Lut lut = golden::make_lut();
+    std::vector<float> lut_table = lut.table;
+    lut_table.resize(at_least(lut_table.size(), 1024), 0.0f);
     const std::vector<float> node_pos[2] = {fixture::random_positions(nl.movable.size(), 11u, golden::EXTENT),
                                             fixture::random_positions(nl.movable.size(), 12u, golden::EXTENT)};
     bool ok = true;
     for (int axis = 0; axis < 2; axis++) {
         const long num_beats = (long)enc.issue.size();
-        std::vector<pinrec::RecordBeat> records(num_beats);
+        std::vector<pinrec::RecordBeat> records(at_least(num_beats, 1024));
         std::memcpy(records.data(), enc.records[axis].data(), num_beats * sizeof(pinrec::RecordBeat));
         const std::vector<float> image = packer::slot_positions(enc, axis, node_pos[axis]);
-        std::vector<pinrec::SlotBeat> pos(enc.num_slots / pinrec::LANES);
+        const long num_slot_beats = enc.num_slots / pinrec::LANES;
+        std::vector<pinrec::SlotBeat> pos(at_least(num_slot_beats, 512));
         std::memcpy(pos.data(), image.data(), image.size() * sizeof(float));
-        const std::vector<pinrec::MacroPinRef> refs = packer::macro_pin_refs(enc, axis);
-        std::vector<pinrec::SlotBeat> grad(enc.first_fixed_slot / pinrec::LANES);
-        std::vector<plalgo::OutBeat> out(num_beats);
-        hpwl_gradient_computer_top(records.data(), (int)num_beats, enc.beat_count.data(), pos.data(), (int)pos.size(),
-                                   refs.data(), (int)refs.size(), enc.offset_table[axis].data(),
-                                   (int)enc.offset_table[axis].size(), lut.table.data(), lut.size, out.data(), grad.data(),
+        std::vector<pinrec::MacroPinRef> refs = packer::macro_pin_refs(enc, axis);
+        const long num_refs = (long)refs.size();
+        refs.resize(at_least(refs.size(), 2048));
+        std::vector<float> offsets = enc.offset_table[axis];
+        const long num_offsets = (long)offsets.size();
+        offsets.resize(at_least(offsets.size(), 1024), 0.0f);
+        std::vector<pinrec::SlotBeat> grad(at_least(enc.first_fixed_slot / pinrec::LANES, 512));
+        std::vector<plalgo::OutBeat> out(at_least(num_beats, 1024));
+        std::vector<int> beat_count = enc.beat_count;
+        hpwl_gradient_computer_top(records.data(), (int)num_beats, beat_count.data(), pos.data(), (int)num_slot_beats,
+                                   refs.data(), (int)num_refs, offsets.data(), (int)num_offsets,
+                                   lut_table.data(), lut.size, out.data(), grad.data(),
                                    (int)enc.first_fixed_slot, enc.offset_bits, 1.0f / golden::GAMMA, lut.inv_step);
         const float* grad_slots = reinterpret_cast<const float*>(grad.data());
         std::vector<float> node_grad(nl.movable.size(), 0.0f);

@@ -127,11 +127,27 @@ Getting there needed three fixes, all found by synthesis and none visible to tie
 Also fixed: an explicit `s_axilite port=return bundle=control` split the control bundle (a hard
 error once the front end got through).
 
-**The hazard contract, as far as HLS says:** the scatter-add, the ghost-gradient add and the
-macro fold each declare a TRUE RAW dependence of distance `HAZARD_DISTANCE`=4 on their URAM, and
-HLS scheduled all three at II=1. By HLS's own analysis the read-add-write round trip fits inside
-4 beats, the distance the packer schedules to. ⚠️ This is the one property tier-1 C simulation
-cannot see, because it runs sequentially. RTL co-simulation would be the independent check.
+**The hazard contract, confirmed in RTL co-simulation (2026-09-23).** The scatter-add, the
+ghost-gradient add and the macro fold each declare a TRUE RAW dependence of distance
+`HAZARD_DISTANCE`=4 on their URAM, and HLS scheduled all three at II=1. Tier-1 C simulation can't
+check this, because it runs sequentially. So `bring_up/hpwl_gradient_computer/cosim/` runs the
+synthesized RTL (xsim, 8 K-slot build, same pipeline) on a synthetic design packed at different
+spacings, each in a fresh session:
+
+| packer spacing | node updates closer than 4 | C simulation | RTL co-simulation |
+|---|---|---|---|
+| 4 (the contract) | 0 | pass | **pass**, rel_rms 5.5e-7 |
+| 3 | 85 | pass | **FAIL**, rel_rms 48 |
+| 2 | 124 | pass | **FAIL**, rel_rms 0.25 |
+| 1 | 120 | pass | **FAIL**, rel_rms 48 |
+
+So **4 is both sufficient and the minimum**, and **C simulation passes schedules the hardware
+cannot execute**. That makes this co-simulation the only gate for any change to the RMW pipeline,
+`HAZARD_DISTANCE` or the packer's scheduler. Hazards 3 and 1 fail identically because the error is
+dominated by the macro fold: with 3 macros both schedules come out strict round-robin at spacing 3.
+Run: `LIBRARY_PATH=/usr/lib/x86_64-linux-gnu vitis_hls -f cosim.tcl` (about 15 min), then
+`COSIM_HAZARDS="…" vitis_hls -f cosim_rerun.tcl`. The chunked module's ghost-gradient add uses the
+same mechanism but is not co-simulated.
 
 | module | DSP | LUT | FF | BRAM | beat-loop depth |
 |---|---|---|---|---|---|
@@ -151,10 +167,11 @@ cannot see, because it runs sequentially. RTL co-simulation would be the indepen
   timing on exactly this kind of dense float block.
 
 ## Open / next
-- **RTL co-simulation** is the one check that can see a hazard violation (tier 1 is sequential C).
-  It's worth running once on the synthetic design before trusting `HAZARD_DISTANCE`=4 on hardware.
-- **Place-and-route** gives the real verdict on timing and URAM (the two warnings above). The
-  URAM word packing (2 floats per 72-bit word) is still to do.
+- **Place-and-route** gives the real verdict on timing and URAM (the two warnings above). ⚠️ It
+  **can't run on this box**: `export_design -flow impl` stops inside Vivado with no synthesis
+  license for xcvc1902, while vitis_hls still exits 0. It needs the build server;
+  `bring_up/hpwl_gradient_computer/impl_check.tcl` is ready to run there. The URAM word packing
+  (2 floats per 72-bit word) is still to do.
 - **Nets of 17..100 pins** are still out of scope (#40 plan). They carry 20–29% of ISPD2005 pins,
   so this is the largest remaining functional gap, and the plan now has to be designed on the
   record protocol.
