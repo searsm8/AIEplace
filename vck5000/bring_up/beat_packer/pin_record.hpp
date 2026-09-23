@@ -61,10 +61,14 @@ struct ChunkDesc {
     int32_t import_region, num_imports;             // this chunk's region in the exchange buffer
     int32_t import_list_offset;                     // into the concatenated ghost-slot lists
     int32_t export_list_offset;                     // into the concatenated own-slot export lists
-    int32_t export_block_offset;                    // into the block table: num_chunks entries
+    int32_t export_block_offset;                    // into the block table
+    int32_t num_export_blocks;                      // this chunk's segments in the block table
 };
 
-struct ExchangeBlockRef { int32_t offset, count; };   // a producer's block within a consumer region
+// One segment of a producer's export / gradient-return sequence: `count` consecutive exchange
+// positions from `offset`, or -- offset -1 -- `count` padding entries (export slot -1, skipped) that
+// keep a slot HAZARD_DISTANCE entries from itself in the gradient read-add-write. Meow.
+struct ExchangeBlockRef { int32_t offset, count; };
 
 inline uint32_t record_node_slot(uint32_t record, int offset_bits)  { return record >> offset_bits; }
 inline uint32_t record_offset_idx(uint32_t record, int offset_bits) { return record & ((1u << offset_bits) - 1u); }

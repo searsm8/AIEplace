@@ -120,9 +120,17 @@ int main(int argc, char** argv) {
     }
 
     bool ok = true;
-    packer::Chunked ch;
+    packer::Chunked ch, tight;
     ok &= run_config("capacity=2048", nl, 2048, node_pos, lut, true, &ch);
+    ok &= run_config("capacity=768", nl, 768, node_pos, lut, false, &tight);
     ok &= run_config("capacity=1M", nl, SLOT_CAPACITY, node_pos, lut, false);
+
+    // Small chunks put a node's ghost entries near block boundaries, so the producer's
+    // gradient-return sequence needs padding; the tight config must actually exercise it. Meow.
+    long padding = 0;
+    for (const packer::Chunk& c : tight.chunks) padding += std::count(c.export_local.begin(), c.export_local.end(), -1);
+    printf("%s [5] coverage: %ld padding entries in the capacity=768 return sequences\n", padding > 0 ? "ok  " : "FAIL", padding);
+    ok &= padding > 0;
 
     // [5] coverage: the return path must carry real gradient. Share of |grad|^2 on nodes that are
     // ghosts somewhere (their total needs the exchange) -- a dropped return path would lose it.

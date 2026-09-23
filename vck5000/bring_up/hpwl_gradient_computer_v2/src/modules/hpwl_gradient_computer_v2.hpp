@@ -38,19 +38,21 @@ ghost_grads_out:
 }
 
 // Producer side, reversed: add every consumer's gradient for this chunk's exported nodes. The
-// host keeps a slot HAZARD_DISTANCE entries apart across the whole sequence. Meow.
-static void add_ghost_gradients(const pinrec::ChunkDesc& desc, int num_chunks,
+// host keeps a slot HAZARD_DISTANCE entries apart across the whole sequence, inserting padding
+// entries (slot -1, skipped) where a block boundary would bring one closer. Meow.
+static void add_ghost_gradients(const pinrec::ChunkDesc& desc,
                                 const pinrec::ExchangeBlockRef* blocks_DDR, const int32_t* export_slots_DDR,
                                 const float* exchange_DDR, float grad_URAM[pinrec::BANKS][ROWS_PER_BANK]) {
     int entry = desc.export_list_offset;
 ghost_grads_in:
-    for (int k = 0; k < num_chunks; k++) {
+    for (int k = 0; k < desc.num_export_blocks; k++) {
         const pinrec::ExchangeBlockRef block = blocks_DDR[desc.export_block_offset + k];
     ghost_grads_block:
         for (int i = 0; i < block.count; i++) {
 #pragma HLS PIPELINE II=1
 #pragma HLS DEPENDENCE variable=grad_URAM type=inter direction=RAW distance=pinrec::HAZARD_DISTANCE dependent=true
             const int32_t slot = export_slots_DDR[entry + i];
+            if (slot < 0) continue;
             grad_URAM[slot % pinrec::BANKS][slot / pinrec::BANKS] += exchange_DDR[block.offset + i];
         }
         entry += block.count;
@@ -65,7 +67,7 @@ static void hpwl_gradient_computer_v2(
         const pinrec::MacroPinRef*      macro_pins_DDR,    // every chunk's refresh / fold list, this axis
         const int32_t*                  import_slots_DDR,  // every chunk's ghost slots, region order
         const int32_t*                  export_slots_DDR,  // every chunk's exported own slots, block order
-        const pinrec::ExchangeBlockRef* blocks_DDR,        // num_chunks blocks per chunk
+        const pinrec::ExchangeBlockRef* blocks_DDR,        // each chunk's segments (num_export_blocks)
         float*                          exchange_DDR,      // scratch: ghost positions, then ghost gradients
         const float*                    offset_table_DDR,  // [offset_table_size] shared by all chunks
         int                             offset_table_size,
@@ -99,7 +101,7 @@ export_pass:
         const pinrec::ChunkDesc desc = chunks_DDR[j];
         load_slot_array(pos_DDR + desc.slot_beat_offset, desc.num_slot_beats, pos_URAM);
         refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);
-        export_slot_values(desc, num_chunks, blocks_DDR, export_slots_DDR, pos_URAM, exchange_DDR);
+        export_slot_values(desc, blocks_DDR, export_slots_DDR, pos_URAM, exchange_DDR);
     }
 
 compute_pass:
@@ -124,7 +126,7 @@ fold_pass:
         const pinrec::ChunkDesc desc = chunks_DDR[j];
         const int movable_slot_beats = desc.first_fixed_slot / pinrec::LANES;
         load_slot_array(grad_DDR + desc.slot_beat_offset, movable_slot_beats, grad_URAM);
-        add_ghost_gradients(desc, num_chunks, blocks_DDR, export_slots_DDR, exchange_DDR, grad_URAM);
+        add_ghost_gradients(desc, blocks_DDR, export_slots_DDR, exchange_DDR, grad_URAM);
         fold_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, grad_URAM, pos_URAM);
         drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR + desc.slot_beat_offset);
     }

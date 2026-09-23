@@ -795,8 +795,8 @@ struct Chunk {
     std::vector<char> ghost;                 // per local node
     long region_offset = 0;                  // this chunk's ghost region in the exchange buffer
     std::vector<int>  import_local;          // ghost local nodes, region order
-    std::vector<ExchangeBlock> export_blocks;   // [K]: where this chunk's exports land, per consumer
-    std::vector<int>  export_local;          // own local nodes, export_blocks order
+    std::vector<ExchangeBlock> export_blocks;   // segments: exchange positions, or offset -1 = padding
+    std::vector<int>  export_local;          // own local nodes in segment order, -1 for padding
 };
 
 struct Chunked {
@@ -908,33 +908,70 @@ inline bool build_chunks(Chunked& ch, const std::vector<int>& order, int num_chu
         for (char is_ghost : c.ghost) ch.ghosts += is_ghost;
     }
 
-    // Exchange layout: region per consumer, block per producer, block ordered by producer slot.
+    // Exchange layout: region per consumer, block per producer.
     std::vector<std::vector<int>> local_in(num_chunks, std::vector<int>(num_nodes, -1));
     for (int k = 0; k < num_chunks; k++)
         for (size_t l = 0; l < ch.chunks[k].work_node.size(); l++) local_in[k][ch.chunks[k].work_node[l]] = (int)l;
-    for (int j = 0; j < num_chunks; j++) ch.chunks[j].export_blocks.assign(num_chunks, ExchangeBlock{0, 0});
-    long offset = 0;
-    for (int k = 0; k < num_chunks; k++) {
-        Chunk& consumer = ch.chunks[k];
-        consumer.region_offset = offset;
-        for (int j = 0; j < num_chunks; j++) {
-            std::vector<int> block;   // global work nodes
-            for (size_t l = 0; l < consumer.work_node.size(); l++)
-                if (consumer.ghost[l] && ch.owner[consumer.work_node[l]] == j) block.push_back(consumer.work_node[l]);
-            const Encoded& producer = ch.chunks[j].enc;
-            std::sort(block.begin(), block.end(), [&](int a, int b) {
+    std::vector<std::vector<std::vector<int>>> block(num_chunks, std::vector<std::vector<int>>(num_chunks));  // [j][k] work nodes
+    for (int k = 0; k < num_chunks; k++)
+        for (size_t l = 0; l < ch.chunks[k].work_node.size(); l++)
+            if (ch.chunks[k].ghost[l]) block[ch.owner[ch.chunks[k].work_node[l]]][k].push_back(ch.chunks[k].work_node[l]);
+
+    // Producer j adds its returned ghost gradients block by block (k ascending) as a read-add-write,
+    // so a slot must not recur within `hazard` entries. A node ghosted in several chunks appears in
+    // several blocks, and small blocks can put it near a block boundary. Order each block greedily
+    // around the previous entries; where nothing fits, emit padding entries (skipped by the device,
+    // no exchange position). Segments: {block-relative start, count} real, or {-1, count} padding. Meow.
+    struct Segment { int k; long start; long count; };
+    std::vector<std::vector<Segment>> segments(num_chunks);
+    for (int j = 0; j < num_chunks; j++) {
+        const Encoded& producer = ch.chunks[j].enc;
+        std::deque<long> recent;   // last hazard-1 emitted producer slots, -1 for padding
+        auto emit = [&](long slot) { recent.push_back(slot); if ((int)recent.size() >= cfg.hazard) recent.pop_front(); };
+        for (int k = 0; k < num_chunks; k++) {
+            std::vector<int> remaining = block[j][k];
+            std::sort(remaining.begin(), remaining.end(), [&](int a, int b) {
                 return producer.node_slot[local_in[j][a]] < producer.node_slot[local_in[j][b]]; });
-            ch.chunks[j].export_blocks[k] = ExchangeBlock{offset, (long)block.size()};
-            for (int node : block) consumer.import_local.push_back(local_in[k][node]);
-            offset += (long)block.size();
+            std::vector<int> ordered;
+            while (!remaining.empty()) {
+                size_t pick = remaining.size();
+                for (size_t i = 0; i < remaining.size() && pick == remaining.size(); i++)
+                    if (std::find(recent.begin(), recent.end(), producer.node_slot[local_in[j][remaining[i]]]) == recent.end()) pick = i;
+                if (pick == remaining.size()) {
+                    if (segments[j].empty() || segments[j].back().k != -1) segments[j].push_back({-1, -1, 0});
+                    segments[j].back().count++;
+                    emit(-1);
+                    continue;
+                }
+                if (segments[j].empty() || segments[j].back().k != k) segments[j].push_back({k, (long)ordered.size(), 0});
+                segments[j].back().count++;
+                emit(producer.node_slot[local_in[j][remaining[pick]]]);
+                ordered.push_back(remaining[pick]);
+                remaining.erase(remaining.begin() + pick);
+            }
+            block[j][k] = ordered;   // the consumer's region uses this exact order
         }
     }
-    // Producer j's export list is its blocks in consumer order: walking every region in order and
-    // keeping the entries j owns gives exactly that. Meow.
-    for (int k = 0; k < num_chunks; k++)
-        for (int local_ghost : ch.chunks[k].import_local) {
-            const int node = ch.chunks[k].work_node[local_ghost];
-            ch.chunks[ch.owner[node]].export_local.push_back(local_in[ch.owner[node]][node]);
+
+    long offset = 0;
+    std::vector<std::vector<long>> block_offset(num_chunks, std::vector<long>(num_chunks, 0));
+    for (int k = 0; k < num_chunks; k++) {
+        ch.chunks[k].region_offset = offset;
+        for (int j = 0; j < num_chunks; j++) {
+            block_offset[j][k] = offset;
+            for (int node : block[j][k]) ch.chunks[k].import_local.push_back(local_in[k][node]);
+            offset += (long)block[j][k].size();
+        }
+    }
+    for (int j = 0; j < num_chunks; j++)
+        for (const Segment& s : segments[j]) {
+            if (s.k < 0) {
+                ch.chunks[j].export_blocks.push_back(ExchangeBlock{-1, s.count});
+                for (long i = 0; i < s.count; i++) ch.chunks[j].export_local.push_back(-1);
+            } else {
+                ch.chunks[j].export_blocks.push_back(ExchangeBlock{block_offset[j][s.k] + s.start, s.count});
+                for (long i = 0; i < s.count; i++) ch.chunks[j].export_local.push_back(local_in[j][block[j][s.k][s.start + i]]);
+            }
         }
     ch.exchange_size = offset;
     return true;
@@ -998,6 +1035,7 @@ inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const st
         d.import_list_offset = (int32_t)dev.import_slots.size();
         d.export_list_offset = (int32_t)dev.export_slots.size();
         d.export_block_offset = (int32_t)dev.blocks.size();
+        d.num_export_blocks   = (int32_t)c.export_blocks.size();
         dev.desc.push_back(d);
 
         dev.records.insert(dev.records.end(), c.enc.records[axis].begin(), c.enc.records[axis].end());
@@ -1006,7 +1044,7 @@ inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const st
         const std::vector<MacroPinRef> refs = macro_pin_refs(c.enc, axis);
         dev.macro_pins.insert(dev.macro_pins.end(), refs.begin(), refs.end());
         for (int local : c.import_local) dev.import_slots.push_back((int32_t)c.enc.node_slot[local]);
-        for (int local : c.export_local) dev.export_slots.push_back((int32_t)c.enc.node_slot[local]);
+        for (int local : c.export_local) dev.export_slots.push_back(local < 0 ? -1 : (int32_t)c.enc.node_slot[local]);
         for (const ExchangeBlock& block : c.export_blocks) dev.blocks.push_back({(int32_t)block.offset, (int32_t)block.count});
     }
     return dev;
@@ -1042,10 +1080,17 @@ inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg
         const Chunk& p = ch.chunks[j];
         size_t e = 0;
         std::vector<long> fold_slots;
-        for (int k = 0; k < ch.num_chunks; k++)
-            for (long i = 0; i < p.export_blocks[k].count; i++, e++) {
+        for (const ExchangeBlock& segment : p.export_blocks)
+            for (long i = 0; i < segment.count; i++, e++) {
                 if (e >= p.export_local.size()) { fail("export list shorter than its blocks", j); break; }
-                const long position = p.export_blocks[k].offset + i;
+                if (segment.offset < 0) {   // padding: no exchange position, no slot
+                    if (p.export_local[e] != -1) fail("padding segment names a node", j);
+                    fold_slots.push_back(-1);
+                    continue;
+                }
+                if (p.export_local[e] < 0) { fail("real segment holds padding", j); continue; }
+                const long position = segment.offset + i;
+                if (position >= ch.exchange_size) { fail("export past the exchange buffer", j); continue; }
                 writes[position]++;
                 written_node[position] = p.work_node[p.export_local[e]];
                 if (p.ghost[p.export_local[e]]) fail("export of a ghost", j);
@@ -1054,7 +1099,7 @@ inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg
         if (e != p.export_local.size()) fail("export list longer than its blocks", j);
         for (size_t a = 0; a < fold_slots.size(); a++)
             for (size_t b = a + 1; b < fold_slots.size() && b < a + (size_t)cfg.hazard; b++)
-                if (fold_slots[a] == fold_slots[b]) fail("producer fold RAW hazard", j);
+                if (fold_slots[a] >= 0 && fold_slots[a] == fold_slots[b]) fail("producer fold RAW hazard", j);
     }
     for (long position = 0; position < ch.exchange_size; position++) if (writes[position] != 1) fail("exchange entry not written exactly once", position);
     for (int k = 0; k < ch.num_chunks; k++) {

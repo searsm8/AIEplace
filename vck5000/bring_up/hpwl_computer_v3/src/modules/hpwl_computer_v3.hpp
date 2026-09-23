@@ -21,18 +21,20 @@
 
 namespace plalgo {
 
-// Producer side: this chunk's positions that other chunks hold as ghosts, block by block. Meow.
-static void export_slot_values(const pinrec::ChunkDesc& desc, int num_chunks,
+// Producer side: this chunk's positions that other chunks hold as ghosts, segment by segment.
+// Padding entries (slot -1, only there to space the gradient return) write nothing. Meow.
+static void export_slot_values(const pinrec::ChunkDesc& desc,
                                const pinrec::ExchangeBlockRef* blocks_DDR, const int32_t* export_slots_DDR,
                                const float src_URAM[pinrec::BANKS][ROWS_PER_BANK], float* exchange_DDR) {
     int entry = desc.export_list_offset;
 export_blocks:
-    for (int k = 0; k < num_chunks; k++) {
+    for (int k = 0; k < desc.num_export_blocks; k++) {
         const pinrec::ExchangeBlockRef block = blocks_DDR[desc.export_block_offset + k];
     export_block:
         for (int i = 0; i < block.count; i++) {
 #pragma HLS PIPELINE II=1
             const int32_t slot = export_slots_DDR[entry + i];
+            if (slot < 0) continue;
             exchange_DDR[block.offset + i] = src_URAM[slot % pinrec::BANKS][slot / pinrec::BANKS];
         }
         entry += block.count;
@@ -64,7 +66,7 @@ static void hpwl_computer_v3(
         const pinrec::MacroPinRef*      macro_pins_DDR,    // every chunk's refresh list, this axis
         const int32_t*                  import_slots_DDR,  // every chunk's ghost slots, region order
         const int32_t*                  export_slots_DDR,  // every chunk's exported own slots, block order
-        const pinrec::ExchangeBlockRef* blocks_DDR,        // num_chunks blocks per chunk
+        const pinrec::ExchangeBlockRef* blocks_DDR,        // each chunk's segments (num_export_blocks)
         float*                          exchange_DDR,      // scratch: ghost positions, consumer-major
         const float*                    offset_table_DDR,  // [offset_table_size] shared by all chunks
         int                             offset_table_size,
@@ -86,7 +88,7 @@ export_pass:
         const pinrec::ChunkDesc desc = chunks_DDR[j];
         load_slot_array(pos_DDR + desc.slot_beat_offset, desc.num_slot_beats, pos_URAM);
         refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);
-        export_slot_values(desc, num_chunks, blocks_DDR, export_slots_DDR, pos_URAM, exchange_DDR);
+        export_slot_values(desc, blocks_DDR, export_slots_DDR, pos_URAM, exchange_DDR);
     }
 
 compute_pass:
