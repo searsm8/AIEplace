@@ -1156,8 +1156,12 @@ code.
       extension.)
 - [ ] Take `HAZARD_DISTANCE` from the synthesized RMW depth (see the report); v1's count-based
       `resolve_beat` is superseded by EMPTY lanes from v2 on.
-- [ ] Nets of 17..100 pins: still out of scope; 20–29% of ISPD2005 pins. The #40 chunking plan
-      now has to be designed on the record protocol.
+- [ ] **Nets of 17..100 pins:** still dropped; they are 20–29% of ISPD2005 pins (+12.4% HPWL when
+      dropped). **Needs Mark's call before code.** The proposal is L3: exact, three II=1 passes
+      (bbox / sums / combine) on the existing engine. A chunk beat is a degree-16 beat, plus a small
+      net-state table. It costs about 2× gradient cycles on ISPD2005 and 1.04–1.5× on ISPD2015. L2
+      (online rescale, about 1.7×) is a deliberate divergence from sw_only.
+      → [[_NEW_PLAN_41_large_nets_on_records_20260923.md]]
 - [ ] Optional: a min-cut partitioner if bigblue4 / newblue7 ghost cost (13–19%) matters.
 
 ---
