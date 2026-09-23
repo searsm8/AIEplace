@@ -29,15 +29,32 @@ static void report(const Netlist& nl, const Encoded& enc, double seconds, int fa
            uram, uram > VC1902_URAMS ? "!" : " ", seconds, failures ? "FAIL" : "ok");
 }
 
+static void report_chunked(const Netlist& nl, const Chunked& ch, double seconds, int failures) {
+    long movable = 0, max_slots = 0, beats = 0, ideal = 0, bubbles = 0;
+    int max_bits = 0;
+    for (char m : nl.movable) movable += m;
+    for (const Chunk& c : ch.chunks) {
+        max_slots = std::max(max_slots, c.enc.num_slots);
+        beats += (long)c.enc.issue.size(); ideal += c.enc.ideal_beats;
+        for (int b : c.enc.issue) bubbles += b == BUBBLE;
+        max_bits = std::max(max_bits, bits_for(c.enc.max_slot + 1) + c.enc.offset_bits);
+    }
+    printf("%-22s %8ld %3d %8ld %6.2f%% %9ld %7.2f%% %6ld %2d %6.1fs %s\n", nl.name.c_str(), movable, ch.num_chunks,
+           ch.ghosts, 100.0 * ch.ghosts / movable, max_slots, beats ? 100.0 * ideal / beats : 0.0, bubbles,
+           max_bits, seconds, failures ? "FAIL" : "ok");
+}
+
 static void usage() {
     fprintf(stderr,
-        "usage: beat_packer [--hazard H] [--window W] [--seed S] [--repair N]\n"
-        "                   (--bookshelf DIR NAME | --def FILE NAME)...\n");
+        "usage: beat_packer [--hazard H] [--window W] [--seed S] [--repair N] [--capacity SLOTS]\n"
+        "                   (--bookshelf DIR NAME | --def FILE NAME)...\n"
+        "  --capacity: chunk every design to at most SLOTS slots per chunk and report the ghosts\n");
     exit(2);
 }
 
 int main(int argc, char** argv) {
     Config cfg;
+    long capacity = 0;
     std::vector<std::pair<std::string, std::string>> designs;   // (path, name)
     std::vector<char> is_def;
     for (int i = 1; i < argc; i++) {
@@ -47,12 +64,32 @@ int main(int argc, char** argv) {
         else if (arg == "--window") cfg.window = std::stoi(next());
         else if (arg == "--seed")   cfg.seed   = (unsigned)std::stoul(next());
         else if (arg == "--repair") cfg.repair_passes = std::stoi(next());
+        else if (arg == "--capacity") capacity = std::stol(next());
         else if (arg == "--bookshelf" || arg == "--def") {
             std::string path = next(), name = next();
             designs.emplace_back(path, name); is_def.push_back(arg == "--def");
         } else usage();
     }
     if (designs.empty()) usage();
+
+    if (capacity > 0) {
+        printf("chunked: capacity=%ld slots/chunk, hazard=%d   ghost%% = ghost slots / movable nodes\n", capacity, cfg.hazard);
+        printf("%-22s %8s %3s %8s %7s %9s %8s %6s %2s %7s\n", "design", "movable", "K", "ghosts", "ghost%",
+               "max_slots", "effic", "bubble", "b", "time");
+        int total_failures = 0;
+        for (size_t d = 0; d < designs.size(); d++) {
+            const auto start = std::chrono::steady_clock::now();
+            const Netlist nl = is_def[d] ? read_def(designs[d].first, designs[d].second)
+                                         : read_bookshelf(designs[d].first, designs[d].second);
+            const Chunked ch = encode_chunked(nl, cfg, capacity);
+            const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+            const int failures = check_chunked(nl, ch, cfg);
+            total_failures += failures;
+            report_chunked(nl, ch, seconds, failures);
+            fflush(stdout);
+        }
+        return total_failures ? 1 : 0;
+    }
 
     printf("banks=%d hazard=%d window=%d seed=%u   URAM = grad(movable) + pos(all slots), %d floats/word, of %d\n",
            BANKS, cfg.hazard, cfg.window, cfg.seed, FLOATS_PER_WORD, VC1902_URAMS);

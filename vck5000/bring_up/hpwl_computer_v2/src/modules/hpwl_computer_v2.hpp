@@ -23,7 +23,19 @@
 
 namespace plalgo {
 
-constexpr int SLOT_CAPACITY    = 1 << 20;                        // on-chip slots per array
+// On-chip arrays too big for a software stack are static in tier-1 builds only. Under synthesis
+// they must not be: a static array carries an initial value HLS has to materialize, and v2's C
+// front end ran for 9+ minutes on the static 1M-entry banks before this. Meow.
+#ifdef __SYNTHESIS__
+#define ONCHIP_ARRAY
+#else
+#define ONCHIP_ARRAY static
+#endif
+
+#ifndef PL_SLOT_CAPACITY
+#define PL_SLOT_CAPACITY (1 << 20)   // override (-D) only for synthesis experiments
+#endif
+constexpr int SLOT_CAPACITY    = PL_SLOT_CAPACITY;               // on-chip slots per array
 constexpr int ROWS_PER_BANK    = SLOT_CAPACITY / pinrec::BANKS;   // 32K
 constexpr int OFFSET_BITS_MAX  = 10;
 constexpr int OFFSET_TABLE_MAX = 1 << OFFSET_BITS_MAX;           // measured need: <= 131 (44 designs)
@@ -110,34 +122,12 @@ static void gather_pin_positions(const DecodedLanes& d, const float pos_URAM[pin
         pin_pos[i] = bank_pos[d.slot[i] % pinrec::BANKS] + offset_BRAM[i][d.offset_idx[i]];
 }
 
-static void hpwl_computer_v2(
-        const pinrec::RecordBeat*  records_DDR,       // [num_beats] static stream, this axis
-        int                        num_beats,
-        const int*                 beat_count_DDR,    // [NET_DEGREES_PROCESSED] cumulative beats per degree
-        const pinrec::SlotBeat*    pos_DDR,           // [num_slot_beats] slot-major positions, this axis
-        int                        num_slot_beats,
-        const pinrec::MacroPinRef* macro_pins_DDR,    // [num_macro_pins] refresh list, this axis
-        int                        num_macro_pins,
-        const float*               offset_table_DDR,  // [offset_table_size] this axis
-        int                        offset_table_size,
-        OutBeat*                   out_beats_DDR,     // [num_beats] per-net HPWL, 0 for EMPTY nets
-        int                        offset_bits) {
-
-    static float pos_URAM[pinrec::BANKS][ROWS_PER_BANK];
-#pragma HLS ARRAY_PARTITION variable=pos_URAM complete dim=1   // 32 independent banks
-#pragma HLS BIND_STORAGE variable=pos_URAM type=ram_2p impl=uram
-    static float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX];
-#pragma HLS ARRAY_PARTITION variable=offset_BRAM complete dim=1
-
-    int beat_count_REG[pinrec::NET_DEGREES_PROCESSED];
-#pragma HLS ARRAY_PARTITION variable=beat_count_REG complete dim=0
-cache_counts:
-    for (int k = 0; k < pinrec::NET_DEGREES_PROCESSED; k++) beat_count_REG[k] = beat_count_DDR[k];
-
-    load_slot_array(pos_DDR, num_slot_beats, pos_URAM);
-    refresh_macro_pins(macro_pins_DDR, num_macro_pins, pos_URAM);
-    load_offset_table(offset_table_DDR, offset_table_size, offset_BRAM);
-
+// The record stream -> per-net HPWL, against positions already resident in pos_URAM. Meow.
+static void hpwl_beat_loop(const pinrec::RecordBeat* records_DDR, int num_beats,
+                           const int beat_count_REG[pinrec::NET_DEGREES_PROCESSED],
+                           const float pos_URAM[pinrec::BANKS][ROWS_PER_BANK],
+                           const float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX],
+                           OutBeat* out_beats_DDR, int offset_bits) {
 beat_loop:
     for (int beat = 0; beat < num_beats; beat++) {
 #pragma HLS PIPELINE II=1
@@ -163,6 +153,36 @@ beat_loop:
         }
         out_beats_DDR[beat] = out_beat;
     }
+}
+
+static void hpwl_computer_v2(
+        const pinrec::RecordBeat*  records_DDR,       // [num_beats] static stream, this axis
+        int                        num_beats,
+        const int*                 beat_count_DDR,    // [NET_DEGREES_PROCESSED] cumulative beats per degree
+        const pinrec::SlotBeat*    pos_DDR,           // [num_slot_beats] slot-major positions, this axis
+        int                        num_slot_beats,
+        const pinrec::MacroPinRef* macro_pins_DDR,    // [num_macro_pins] refresh list, this axis
+        int                        num_macro_pins,
+        const float*               offset_table_DDR,  // [offset_table_size] this axis
+        int                        offset_table_size,
+        OutBeat*                   out_beats_DDR,     // [num_beats] per-net HPWL, 0 for EMPTY nets
+        int                        offset_bits) {
+
+    ONCHIP_ARRAY float pos_URAM[pinrec::BANKS][ROWS_PER_BANK];
+#pragma HLS ARRAY_PARTITION variable=pos_URAM complete dim=1   // 32 independent banks
+#pragma HLS BIND_STORAGE variable=pos_URAM type=ram_2p impl=uram
+    ONCHIP_ARRAY float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX];
+#pragma HLS ARRAY_PARTITION variable=offset_BRAM complete dim=1
+
+    int beat_count_REG[pinrec::NET_DEGREES_PROCESSED];
+#pragma HLS ARRAY_PARTITION variable=beat_count_REG complete dim=0
+cache_counts:
+    for (int k = 0; k < pinrec::NET_DEGREES_PROCESSED; k++) beat_count_REG[k] = beat_count_DDR[k];
+
+    load_slot_array(pos_DDR, num_slot_beats, pos_URAM);
+    refresh_macro_pins(macro_pins_DDR, num_macro_pins, pos_URAM);
+    load_offset_table(offset_table_DDR, offset_table_size, offset_BRAM);
+    hpwl_beat_loop(records_DDR, num_beats, beat_count_REG, pos_URAM, offset_BRAM, out_beats_DDR, offset_bits);
 }
 
 } // namespace plalgo

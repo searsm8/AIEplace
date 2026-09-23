@@ -36,7 +36,10 @@ inline packer::Netlist build_synthetic(unsigned seed, const SyntheticSpec& spec 
 
     packer::OffsetDict dict[2];
     std::uniform_int_distribution<int> cell_offset(-10, 10);      // x0.5: a 21-value cell library
-    std::uniform_int_distribution<int> big_offset(-400, 400);     // x0.5: macro / fixed pin geometry
+    std::uniform_int_distribution<int> big_offset(-400, 400);     // x0.5: macro pin geometry
+    // Few offsets per fixed node, so one fixed pin node is shared by several nets (and, chunked,
+    // copied into several chunks) -- as an IO pad or a macro pin driving many nets is. Meow.
+    std::uniform_int_distribution<int> fixed_offset(-1, 1);
     std::uniform_real_distribution<double> unit(0.0, 1.0);
     auto pick_degree = [&]() {
         const double u = unit(rng);
@@ -56,10 +59,12 @@ inline packer::Netlist build_synthetic(unsigned seed, const SyntheticSpec& spec 
             else if (u < 0.12)      node = macro_begin + (int)(unit(rng) * spec.macros);
             else if (u < 0.19)      node = fixed_begin + (int)(unit(rng) * spec.fixed);
             else                    node = (int)(unit(rng) * spec.cells);
-            const bool big = node >= macro_begin;
             packer::Pin pin; pin.node = node;
-            for (int axis = 0; axis < 2; axis++)
-                pin.offset_key[axis] = dict[axis].key(0.5f * (big ? big_offset(rng) : cell_offset(rng)), nl.offset_value[axis]);
+            for (int axis = 0; axis < 2; axis++) {
+                const int half_units = node >= fixed_begin ? 150 * fixed_offset(rng)
+                                     : node >= macro_begin ? big_offset(rng) : cell_offset(rng);
+                pin.offset_key[axis] = dict[axis].key(0.5f * half_units, nl.offset_value[axis]);
+            }
             net.push_back(pin);
         }
         nl.nets.push_back(net);

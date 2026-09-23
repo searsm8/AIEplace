@@ -39,6 +39,25 @@ struct MacroPinRef {
     float   offset;      // this axis
 };
 
+// ---- Chunking (a design larger than one on-chip slot space) ----
+// Each chunk is an ordinary stream over its own local slots; the per-chunk arrays are concatenated
+// in DDR and located by this descriptor. Ghost slots (nodes owned by another chunk) are filled
+// from, and return their gradients to, one DDR exchange buffer laid out consumer-major: chunk k's
+// region holds its ghosts as one block per producer. See beat_packer.hpp (encode_chunked). Meow.
+struct ChunkDesc {
+    int32_t record_beat_offset, num_beats;          // into the concatenated record stream
+    int32_t beat_count[NET_DEGREES_PROCESSED];      // this chunk's degree groups
+    int32_t slot_beat_offset, num_slot_beats;       // into the concatenated slot-major images
+    int32_t first_fixed_slot;
+    int32_t macro_pin_offset, num_macro_pins;       // into the concatenated macro-pin lists
+    int32_t import_region, num_imports;             // this chunk's region in the exchange buffer
+    int32_t import_list_offset;                     // into the concatenated ghost-slot lists
+    int32_t export_list_offset;                     // into the concatenated own-slot export lists
+    int32_t export_block_offset;                    // into the block table: num_chunks entries
+};
+
+struct ExchangeBlockRef { int32_t offset, count; };   // a producer's block within a consumer region
+
 inline uint32_t record_node_slot(uint32_t record, int offset_bits)  { return record >> offset_bits; }
 inline uint32_t record_offset_idx(uint32_t record, int offset_bits) { return record & ((1u << offset_bits) - 1u); }
 inline uint32_t make_record(uint32_t node_slot, uint32_t offset_idx, int offset_bits) {

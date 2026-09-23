@@ -110,48 +110,16 @@ struct NetSums {
     float Bm[pinrec::MAX_NETS_PER_BEAT], Cm[pinrec::MAX_NETS_PER_BEAT];
 };
 
-static void hpwl_gradient_computer(
-        const pinrec::RecordBeat*  records_DDR,       // [num_beats] static stream, this axis
-        int                        num_beats,
-        const int*                 beat_count_DDR,    // [NET_DEGREES_PROCESSED]
-        const pinrec::SlotBeat*    pos_DDR,           // [num_slot_beats] slot-major positions, this axis
-        int                        num_slot_beats,
-        const pinrec::MacroPinRef* macro_pins_DDR,    // [num_macro_pins] refresh + fold list, this axis
-        int                        num_macro_pins,
-        const float*               offset_table_DDR,  // [offset_table_size] this axis
-        int                        offset_table_size,
-        const float*               exp_lut_DDR,       // [lut_size] exp(-t) table
-        int                        lut_size,
-        OutBeat*                   out_beats_DDR,     // [num_beats] per-net HPWL (by-product)
-        pinrec::SlotBeat*          grad_DDR,          // [first_fixed_slot / LANES] gradient, movable slots
-        int                        first_fixed_slot,
-        int                        offset_bits,
-        float                      inv_gamma,
-        float                      inv_lut_step) {
-
-    static float pos_URAM[pinrec::BANKS][ROWS_PER_BANK];
-#pragma HLS ARRAY_PARTITION variable=pos_URAM complete dim=1
-#pragma HLS BIND_STORAGE variable=pos_URAM type=ram_2p impl=uram
-    static float grad_URAM[pinrec::BANKS][ROWS_PER_BANK];
-#pragma HLS ARRAY_PARTITION variable=grad_URAM complete dim=1
-#pragma HLS BIND_STORAGE variable=grad_URAM type=ram_2p impl=uram
-    static float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX];
-#pragma HLS ARRAY_PARTITION variable=offset_BRAM complete dim=1
-    static LutPair lut_BRAM[EXP_LOOKUPS][GRAD_LUT_MAX];
-#pragma HLS ARRAY_PARTITION variable=lut_BRAM complete dim=1
-
-    int beat_count_REG[pinrec::NET_DEGREES_PROCESSED];
-#pragma HLS ARRAY_PARTITION variable=beat_count_REG complete dim=0
-cache_counts:
-    for (int k = 0; k < pinrec::NET_DEGREES_PROCESSED; k++) beat_count_REG[k] = beat_count_DDR[k];
-
-    const int movable_slot_beats = first_fixed_slot / pinrec::LANES;
-    load_slot_array(pos_DDR, num_slot_beats, pos_URAM);
-    refresh_macro_pins(macro_pins_DDR, num_macro_pins, pos_URAM);
-    load_offset_table(offset_table_DDR, offset_table_size, offset_BRAM);
-    load_exp_lut(exp_lut_DDR, lut_size, lut_BRAM);
-    fill_slot_array(movable_slot_beats, 0.0f, grad_URAM);
-
+// The record stream -> scatter-added gradient (and per-net HPWL), against positions already
+// resident in pos_URAM and a grad_URAM the caller has zeroed. Meow.
+static void gradient_beat_loop(const pinrec::RecordBeat* records_DDR, int num_beats,
+                               const int beat_count_REG[pinrec::NET_DEGREES_PROCESSED],
+                               const float pos_URAM[pinrec::BANKS][ROWS_PER_BANK],
+                               const float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX],
+                               const LutPair lut_BRAM[EXP_LOOKUPS][GRAD_LUT_MAX], int lut_size,
+                               float inv_lut_step, float inv_gamma,
+                               float grad_URAM[pinrec::BANKS][ROWS_PER_BANK], int first_fixed_slot,
+                               OutBeat* out_beats_DDR, int offset_bits) {
 beat_loop:
     for (int beat = 0; beat < num_beats; beat++) {
 #pragma HLS PIPELINE II=1
@@ -269,6 +237,53 @@ beat_loop:
         }
         out_beats_DDR[beat] = out_beat;
     }
+
+}
+
+static void hpwl_gradient_computer(
+        const pinrec::RecordBeat*  records_DDR,       // [num_beats] static stream, this axis
+        int                        num_beats,
+        const int*                 beat_count_DDR,    // [NET_DEGREES_PROCESSED]
+        const pinrec::SlotBeat*    pos_DDR,           // [num_slot_beats] slot-major positions, this axis
+        int                        num_slot_beats,
+        const pinrec::MacroPinRef* macro_pins_DDR,    // [num_macro_pins] refresh + fold list, this axis
+        int                        num_macro_pins,
+        const float*               offset_table_DDR,  // [offset_table_size] this axis
+        int                        offset_table_size,
+        const float*               exp_lut_DDR,       // [lut_size] exp(-t) table
+        int                        lut_size,
+        OutBeat*                   out_beats_DDR,     // [num_beats] per-net HPWL (by-product)
+        pinrec::SlotBeat*          grad_DDR,          // [first_fixed_slot / LANES] gradient, movable slots
+        int                        first_fixed_slot,
+        int                        offset_bits,
+        float                      inv_gamma,
+        float                      inv_lut_step) {
+
+    ONCHIP_ARRAY float pos_URAM[pinrec::BANKS][ROWS_PER_BANK];
+#pragma HLS ARRAY_PARTITION variable=pos_URAM complete dim=1
+#pragma HLS BIND_STORAGE variable=pos_URAM type=ram_2p impl=uram
+    ONCHIP_ARRAY float grad_URAM[pinrec::BANKS][ROWS_PER_BANK];
+#pragma HLS ARRAY_PARTITION variable=grad_URAM complete dim=1
+#pragma HLS BIND_STORAGE variable=grad_URAM type=ram_2p impl=uram
+    ONCHIP_ARRAY float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX];
+#pragma HLS ARRAY_PARTITION variable=offset_BRAM complete dim=1
+    ONCHIP_ARRAY LutPair lut_BRAM[EXP_LOOKUPS][GRAD_LUT_MAX];
+#pragma HLS ARRAY_PARTITION variable=lut_BRAM complete dim=1
+
+    int beat_count_REG[pinrec::NET_DEGREES_PROCESSED];
+#pragma HLS ARRAY_PARTITION variable=beat_count_REG complete dim=0
+cache_counts:
+    for (int k = 0; k < pinrec::NET_DEGREES_PROCESSED; k++) beat_count_REG[k] = beat_count_DDR[k];
+
+    const int movable_slot_beats = first_fixed_slot / pinrec::LANES;
+    load_slot_array(pos_DDR, num_slot_beats, pos_URAM);
+    refresh_macro_pins(macro_pins_DDR, num_macro_pins, pos_URAM);
+    load_offset_table(offset_table_DDR, offset_table_size, offset_BRAM);
+    load_exp_lut(exp_lut_DDR, lut_size, lut_BRAM);
+    fill_slot_array(movable_slot_beats, 0.0f, grad_URAM);
+
+    gradient_beat_loop(records_DDR, num_beats, beat_count_REG, pos_URAM, offset_BRAM, lut_BRAM, lut_size,
+                       inv_lut_step, inv_gamma, grad_URAM, first_fixed_slot, out_beats_DDR, offset_bits);
 
     fold_macro_pins(macro_pins_DDR, num_macro_pins, grad_URAM);
     drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR);
