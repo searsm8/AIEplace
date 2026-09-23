@@ -1154,8 +1154,13 @@ code.
       → [[_NEW_REPORT_41_record_datapath_20260922.md]]. (The old "module boundary / port Dhar
       stages / tier-1 golden" boxes are what this delivered: new modules, not an in-place
       extension.)
-- [ ] Take `HAZARD_DISTANCE` from the synthesized RMW depth (see the report); v1's count-based
-      `resolve_beat` is superseded by EMPTY lanes from v2 on.
+- [x] **`HAZARD_DISTANCE`=4 confirmed in RTL co-simulation (2026-09-23).** Spacing 4 passes;
+      3 / 2 / 1 corrupt the gradient while C simulation passes them all. Co-simulation, not tier 1,
+      is the gate for the RMW contract. The chunked gradient module also passes co-simulation
+      (8 chunks). Also fixed a producer ghost-gradient hazard at small chunks (padding segments).
+- [ ] **Post-route timing and URAM:** blocked here (no Vivado license for xcvc1902).
+      `bring_up/hpwl_gradient_computer/impl_check.tcl` is ready for the build server. HLS estimates
+      are 3.0–3.9 ns against the 3.33 ns target.
 - [ ] **Nets of 17..100 pins:** still dropped; they are 20–29% of ISPD2005 pins (+12.4% HPWL when
       dropped). **Needs Mark's call before code.** The proposal is L3: exact, three II=1 passes
       (bbox / sums / combine) on the existing engine. A chunk beat is a degree-16 beat, plus a small
