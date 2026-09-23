@@ -1128,8 +1128,16 @@ code.
       **32 banks + pre-crossbar merge of same-node lanes = ≥99.69% of ideal beats on all 44
       designs**; 16 banks + merge reaches ≥94.3%. The dominant obstacle was a cell with 2+ pins on
       one net (~10% of ISPD2005 nets). → [[_NEW_REPORT_41_beat_packer_20260922.md]]
-      Open: pos+grad vs grad-only on chip (6 designs >8 MB with both); emit the real host→device
-      record format. URAM budget vs density's bin scatter deferred until the whole-iteration dataflow is clearer.
+      URAM budget vs density's bin scatter deferred until the whole-iteration dataflow is clearer.
+- [x] **Host→device record designed + prototyped 2026-09-22.** Positions go on chip too, so the
+      refresh gather disappears. The DDR stream is static:
+      `record = node_slot << offset_bits | offset_idx`, 32 bits × 16 lanes per beat, one stream
+      per axis. The flags (EMPTY, fixed, repeated node) are comparisons on `node_slot`, so they
+      cost no bits. Fixed pins get pre-resolved slots, which keeps the offset tables ≤127 entries
+      on ISPD. **41/44 designs round-trip exactly** (a decode-based checker, 6/6 mutants caught).
+      The only misses are MMS bigblue3/4 and newblue7, which are over the node count (chunking)
+      and have movable-macro offsets. → same report, Part 2.
+- [ ] Take the hazard H from synthesis; update `resolve_beat` for EMPTY lanes (partial beats mid-group).
 - [ ] Settle module boundary (extend `hpwl_computer` vs. new module) with Mark before writing code.
 - [ ] Port Dhar's term generator (Fig. 5), the two additional adder trees, the per-pin adder result
       selector (Fig. 7), and the combiner (Fig. 8) — same small-chunk working agreement as #40/v2.

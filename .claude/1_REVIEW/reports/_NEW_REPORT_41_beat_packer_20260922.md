@@ -57,8 +57,53 @@ accumulator only (8.6 MB for bigblue4), only bigblue4 and newblue7 stay over.
 ⚠️ The column counts only nodes that touch a ≤16-pin net. Once 17..100-pin nets are chunked
 (20–29% of ISPD2005 pins), more nodes need slots.
 
+## Part 2 — the host→device record (Mark, 2026-09-22, same day)
+
+**Decisions:**
+- Positions go on chip too. That removes the refresh gather, the other half of the same wall.
+- The DDR stream becomes static: it carries indices, not positions.
+- Names: `node_slot`, `offset_idx`.
+- "Assume it fits" covers URAM node capacity only; chunking comes later. The offset encoding
+  must not add a second size limit.
+
+**Record:** `node_slot << offset_bits | offset_idx`, 32 bits, 16 per beat, one stream per axis.
+- The bit split is a per-design register.
+- The flags (EMPTY, fixed, repeated node) are all comparisons on `node_slot`, so they cost no bits.
+- Fixed pins are pre-resolved into their own slots. See [[vck5000/bring_up/beat_packer/README.md]].
+
+**Result.** 41 of 44 designs pass the full encode→decode round trip at ≥99.64% efficiency.
+Raw table: `.claude/2_ARTIFACTS/beat_packer/run_records_banks32_h4.txt` (32 banks, H=4).
+
+| suite | offset bits | node bits | record bits |
+|---|---|---|---|
+| ISPD2005 (8) | 6–7 | 18–22 | 25–29, **all fit, bigblue4 included** |
+| ISPD2015 (20) | 3–6 | 15–21 | 19–27, all fit |
+| MMS (16) | 8–13 | 18–22 | 28–35. **bigblue3/4 and newblue7 don't fit** (33–35) |
+
+What moved the offset count:
+- **Fixed-pin slots.** ISPD2005 went from 559–3,635 distinct offsets (≤12 bits) to ≤127 (7 bits).
+  The cost is more fixed position slots: bigblue2 goes from 20 K to 103 K. The URAM count doesn't
+  change (192), because fixed rows fill otherwise-empty depth.
+  Without it: `run_records_banks32_h4_fixednodes.txt`.
+- **Real LEF offsets.** The superblue "22 K offsets" were (master, pin) keys over an obfuscated
+  5,677-master library. The actual distinct values are 9–42 on movable cells.
+
+**The one remaining offset pressure is MMS movable macros.** Their pins can't be pre-resolved,
+because they move, so they keep 11–13 offset bits. Combined with node counts past 1 M (21–22
+bits), 3 designs overflow, and those same 3 are also over the URAM budget. A later lever that
+adds no new limit: give each movable-macro pin its own slot, refreshed per iteration from
+the macro position, with its gradient summed back into the macro. This is a small side pass
+over macro pins only.
+
+**URAM** (2 floats per 72-bit word, 32 banks, whole URAMs per bank): 64–192 URAMs for every
+design up to about 700 K nodes. The 8 MB budget is about 222 URAMs. Designs at 256 or more
+need chunking: adaptec5, superblue11_a, bigblue3, superblue12, newblue5/6 at 256–320, and
+bigblue4/newblue7 at 576–640. Physical URAM is 4K×72 only, so 1 float per word would waste 56%.
+
 ## Open
-- Pos on chip too, or grad only? This decides which designs need K=2 range tiling.
-- Should 17..100-pin chunks pack under the same constraints? Presumably yes, as chunk beats.
-- Emit the renumbering and per-lane records (node slot, offset, merge flag) as the real
-  host→device format.
+- The hazard H is still a placeholder. Take it from synthesis (URAM read latency plus
+  pipeline registers). The sweep says H≤16 costs <1.6%.
+- Chunking (URAM capacity, and 17..100-pin nets) comes as one extension. `node_slot` bits and the
+  movable-macro offsets both ride on it.
+- `hpwl_computer`'s `resolve_beat` assumes only the last beat of a degree group is partial.
+  With EMPTY lanes, `real_net_count` should come from the lanes instead.

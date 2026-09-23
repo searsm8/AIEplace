@@ -1,6 +1,6 @@
 # beat_packer -- host prototype for the conflict-free scatter-add packing (#41). Plain g++, no Vitis.
 #   make            build
-#   make run        every manifest design (ISPD2005 + ISPD2015 + MMS), default banks/hazard
+#   make run        every manifest design (ISPD2005 + ISPD2015 + MMS), banks=32 hazard=4
 #   make run ARGS="--banks 32 --hazard 6"
 BENCH ?= /home/msears/phd/AIEplace/host/benchmarks
 ARGS  ?=
