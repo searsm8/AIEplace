@@ -129,13 +129,14 @@ int main(int argc, char** argv) {
                                             fixture::random_positions(nl.movable.size(), 12u, golden::EXTENT)};
     const golden::Lut lut = golden::make_lut();
     packer::Config large;  large.large_nets = true;
+    packer::Config small;  small.large_nets = false;   // the default is on since 2026-10-02
     if (real) return run_config(nl.name.c_str(), nl, large, node_pos, lut, false) ? 0 : 1;
 
     bool ok = true;
     packer::Config narrow = large;  narrow.window = 3;
     packer::Config slow   = large;  slow.hazard = 8;
     ok &= run_config("default", nl, large, node_pos, lut, true);
-    ok &= run_config("large nets off", nl, packer::Config(), node_pos, lut, false);
+    ok &= run_config("large nets off", nl, small, node_pos, lut, false);
     ok &= run_config("window=3", nl, narrow, node_pos, lut, false);
     ok &= run_config("hazard=8", nl, slow, node_pos, lut, false);
 

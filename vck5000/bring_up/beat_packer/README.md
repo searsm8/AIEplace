@@ -58,14 +58,22 @@ short version.
 - Every movable node is **owned** by one chunk (a macro together with its pins). Chunks are cut
   from a breadth-first locality order.
 - Every net is **homed** in the chunk owning most of its nodes.
-- A homed net's foreign nodes become **ghost** slots, and fixed pins are copied.
+- A homed net's nodes owned by other chunks become **external** slots there, and fixed pins are
+  copied (they never move, so they are not external).
 
-Each chunk is an ordinary stream over its own local slots. Ghosts travel through one DDR exchange
-buffer laid out consumer-major (a region per consumer, a block per producer). Positions go out as
-sequential blocks and come in as one sequential region; gradients return the same way.
-`check_chunked` verifies decode, ownership, capacity, exchange consistency and the fold hazard.
-At the real 1 M-slot capacity all 44 designs pass. Eight need K=2–3, with ghosts at 4–19% of
-movable nodes.
+Each chunk is an ordinary stream over its own local slots. External values travel through one DDR
+**mailbox** laid out consumer-major: an **inbox** per consumer, holding one **parcel** per owner.
+Owners send positions as sequential parcels; each consumer reads its inbox as one sequential run.
+In the gradient module the consumer then returns its external slots' gradients into the same
+inbox, and each owner collects its parcels back and adds them in (the fold pass). Each chunk keeps
+two slot lists, each used in both directions: `external_slots` (other chunks' nodes, inbox order)
+and `shared_slots` (its own nodes that other chunks hold, parcel order).
+`check_chunked` verifies decode, ownership, capacity, mailbox consistency and the fold hazard.
+At the real 1 M-slot capacity all 44 designs pass, with 0 large nets dropped. Eight need chunks:
+K=2–4, with external slots at 5–40% of movable nodes (bigblue4 40%, newblue7 27%, the rest ≤16%).
+Small nets only, the same eight were K=2–3 at 4–19%: homing large nets roughly doubles the external
+slots on the biggest designs (#42 asks whether a better partitioner wins that back).
+Data: `.claude/2_ARTIFACTS/large_nets_in_chunks/sweep_{before_small_only,after_large_nets}.txt`.
 
 ## Verification
 - `check()` / `check_chunked()` decode the streams using only what the device sees. They require
@@ -78,8 +86,9 @@ movable nodes.
 make run                               # all 44 manifest designs, one chunk each where they fit
 make run ARGS="--capacity 1048576"     # chunk every design to the on-chip capacity
 ```
-Scope: nets of degree 2..16, plus 17..96 with `Config::large_nets` (opt-in; consumed by
-`hpwl_computer_v2` and `hpwl_gradient_computer`; `encode_chunked` does not carry them yet).
+Scope: nets of degree 2..16, plus 17..96 with `Config::large_nets` (**on by default since
+2026-10-02**; `--small-only` turns it off). Every consumer carries them, chunked designs included:
+`encode_chunked` homes a large net like a small one (rule C2).
 Nets over 100 pins are masked (XPlace's `ignore_net_degree`). **Nets of 97..100 pins are dropped:
 a deliberate divergence from XPlace and sw_only (Mark, 2026-10-02)**, since 96 = 6 full beats.
 

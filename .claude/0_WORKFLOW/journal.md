@@ -17,6 +17,16 @@ status. **Never rewrite an entry; annotate.** The retraction trail is the point.
 
 ---
 
+## 2026-10-02 — evicted from summary.md: #40's DONE bullet (closed; record in history.md), to make room for #42
+
+> - **#40 — `hpwl_computer` DONE (2026-09-22): built, tier-1-verified, C-synthesizes at II=1.**
+>   `bring_up/hpwl_computer/`: beat-granularity degree resolution → `dhar_tree<Op>` (Dhar Fig. 6/7,
+>   now a template over the combining operator) → 16-lane selector → one packed `OutBeat`/beat. II=1
+>   took 4 synthesis iterations (fixed-width write loop, then `ARRAY_PARTITION` on two arrays, then
+>   the wide-output-beat fix) — full table in the report. → [[REPORT_40_hpwl_computer_20260921.md]]
+
+---
+
 ## 2026-09-22 — evicted from summary.md: #40's mid-build `hpwl_computer` snapshot, superseded by DONE
 
 > - **#40 — v2 rewrite's bbox/HPWL milestone hit II=1 compute / II=8 DDR-port-bound load** (2026-09-21);

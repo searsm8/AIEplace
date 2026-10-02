@@ -2,73 +2,74 @@
 #define PL_ALGO_HPWL_GRADIENT_COMPUTER_V2_HPP
 
 // hpwl_gradient_computer_v2 -- hpwl_gradient_computer extended to chunked designs (#41), the
-// gradient counterpart of hpwl_computer_v3. Ghost POSITIONS go out through the exchange buffer as
-// in v3; ghost GRADIENTS come back through the same buffer the other way:
+// gradient counterpart of hpwl_computer_v3. External POSITIONS go out through the mailbox as
+// in v3; external GRADIENTS come back through the same mailbox the other way:
 //
-//   export pass   for each chunk j: load positions, refresh macro pins, export ghost positions
-//   compute pass  for each chunk k: load positions (zeroing grad in the same pass), refresh, import its ghosts, run the
-//                 gradient beat loop, write its ghosts' gradients back into its own region, and
-//                 drain its movable slots to grad_DDR
-//   fold pass     for each chunk j: reload its gradient, add the ghost gradients other chunks
-//                 computed for its nodes (its blocks of every region), fold macro pins, drain
+//   send pass     for each chunk j: load positions, refresh macro pins, send external positions
+//   compute pass  for each chunk k: load positions (zeroing grad in the same pass), refresh, receive its external
+//                 positions, run the gradient beat loop, return its external slots' gradients into its own
+//                 inbox, and drain its movable slots to grad_DDR
+//   fold pass     for each chunk j: reload its gradient, collect the external gradients other chunks
+//                 computed for its nodes (its parcel in every inbox), fold macro pins, drain
 //
-// The macro fold waits for the fold pass because a macro pin can be a ghost elsewhere: its
+// The macro fold waits for the fold pass because a macro pin can be external elsewhere: its
 // gradient is complete only once every chunk's contribution is in. The fold-pass accumulate is a
-// read-add-write like the scatter-add; the host keeps a producer's slots HAZARD_DISTANCE entries
-// apart in its block sequence (check_chunked verifies it). One chunk: no exchange, the macro fold
+// read-add-write like the scatter-add; the host keeps an owner's slots HAZARD_DISTANCE entries
+// apart in its parcel sequence (check_chunked verifies it). One chunk: no mailbox, the macro fold
 // runs in the compute pass, and this is exactly hpwl_gradient_computer.
 //
-// The exchange buffer is reused: chunk k's region is read (positions) before it is written
-// (gradients), and only chunk k touches its region in the compute pass. Meow.
+// The mailbox is reused: chunk k's inbox is read (positions) before it is written
+// (gradients), and only chunk k touches its inbox in the compute pass. Meow.
 
 #include "modules/hpwl_gradient_computer.hpp"
-#include "modules/hpwl_computer_v3.hpp"   // export_slot_values, import_ghost_values, cache_beat_counts
+#include "modules/hpwl_computer_v3.hpp"   // send_external_positions, receive_external_positions, load_group_counts
 
 namespace plalgo {
 
-// Consumer side, reversed: this chunk's ghost gradients, in region order. Meow.
-static void export_ghost_gradients(const pinrec::ChunkDesc& desc, const int32_t* import_slots_DDR,
-                                   const float grad_URAM[pinrec::BANKS][ROWS_PER_BANK], float* exchange_DDR) {
-ghost_grads_out:
-    for (int i = 0; i < desc.num_imports; i++) {
+// Consumer side, reversed: this chunk's external slots' gradients, in inbox order. Meow.
+static void return_external_gradients(const pinrec::ChunkDesc& desc, const int32_t* external_slots_DDR,
+                                      const float grad_URAM[pinrec::BANKS][ROWS_PER_BANK], float* mailbox_DDR) {
+return_gradients:
+    for (int i = 0; i < desc.inbox_size; i++) {
 #pragma HLS PIPELINE II=1
-        const int32_t slot = import_slots_DDR[desc.import_list_offset + i];
-        exchange_DDR[desc.import_region + i] = grad_URAM[slot % pinrec::BANKS][slot / pinrec::BANKS];
+        const int32_t slot = external_slots_DDR[desc.external_list_offset + i];
+        mailbox_DDR[desc.inbox_offset + i] = grad_URAM[slot % pinrec::BANKS][slot / pinrec::BANKS];
     }
 }
 
-// Producer side, reversed: add every consumer's gradient for this chunk's exported nodes. The
+// Owner side, reversed: add every consumer's gradient for this chunk's shared nodes. The
 // host keeps a slot HAZARD_DISTANCE entries apart across the whole sequence, inserting padding
-// entries (slot -1, skipped) where a block boundary would bring one closer. Meow.
-static void add_ghost_gradients(const pinrec::ChunkDesc& desc,
-                                const pinrec::ExchangeBlockRef* blocks_DDR, const int32_t* export_slots_DDR,
-                                const float* exchange_DDR, float grad_URAM[pinrec::BANKS][ROWS_PER_BANK]) {
-    int entry = desc.export_list_offset;
-ghost_grads_in:
-    for (int k = 0; k < desc.num_export_blocks; k++) {
-        const pinrec::ExchangeBlockRef block = blocks_DDR[desc.export_block_offset + k];
-    ghost_grads_block:
-        for (int i = 0; i < block.count; i++) {
+// entries (slot -1, skipped) where a parcel boundary would bring one closer. Meow.
+static void collect_external_gradients(const pinrec::ChunkDesc& desc,
+                                       const pinrec::ParcelRef* parcels_DDR, const int32_t* shared_slots_DDR,
+                                       const float* mailbox_DDR, float grad_URAM[pinrec::BANKS][ROWS_PER_BANK]) {
+    int entry = desc.shared_list_offset;
+collect_parcels:
+    for (int k = 0; k < desc.num_parcels; k++) {
+        const pinrec::ParcelRef parcel = parcels_DDR[desc.parcel_offset + k];
+    collect_parcel:
+        for (int i = 0; i < parcel.count; i++) {
 #pragma HLS PIPELINE II=1
 #pragma HLS DEPENDENCE variable=grad_URAM type=inter direction=RAW distance=pinrec::HAZARD_DISTANCE dependent=true
-            const int32_t slot = export_slots_DDR[entry + i];
+            const int32_t slot = shared_slots_DDR[entry + i];
             if (slot < 0) continue;
-            grad_URAM[slot % pinrec::BANKS][slot / pinrec::BANKS] += exchange_DDR[block.offset + i];
+            grad_URAM[slot % pinrec::BANKS][slot / pinrec::BANKS] += mailbox_DDR[parcel.offset + i];
         }
-        entry += block.count;
+        entry += parcel.count;
     }
 }
 
 static void hpwl_gradient_computer_v2(
         const pinrec::ChunkDesc*        chunks_DDR,        // [num_chunks]
+        const int32_t*                  group_counts_DDR,  // [num_chunks * GROUP_COUNTS]
         int                             num_chunks,
         const pinrec::RecordBeat*       records_DDR,       // every chunk's stream, concatenated, this axis
         const pinrec::SlotBeat*         pos_DDR,           // every chunk's slot-major positions, this axis
         const pinrec::MacroPinRef*      macro_pins_DDR,    // every chunk's refresh / fold list, this axis
-        const int32_t*                  import_slots_DDR,  // every chunk's ghost slots, region order
-        const int32_t*                  export_slots_DDR,  // every chunk's exported own slots, block order
-        const pinrec::ExchangeBlockRef* blocks_DDR,        // each chunk's segments (num_export_blocks)
-        float*                          exchange_DDR,      // scratch: ghost positions, then ghost gradients
+        const int32_t*                  external_slots_DDR, // every chunk's external slots, inbox order
+        const int32_t*                  shared_slots_DDR,  // every chunk's shared own slots, parcel order
+        const pinrec::ParcelRef*        parcels_DDR,       // each chunk's segments (num_parcels)
+        float*                          mailbox_DDR,       // scratch: external positions, then external gradients
         const float*                    offset_table_DDR,  // [offset_table_size] shared by all chunks
         int                             offset_table_size,
         const float*                    exp_lut_DDR,       // [lut_size] exp(-t) table
@@ -98,12 +99,12 @@ static void hpwl_gradient_computer_v2(
     load_offset_table(offset_table_DDR, offset_table_size, offset_BRAM);
     load_exp_lut(exp_lut_DDR, lut_size, lut_BRAM);
 
-export_pass:
+send_pass:
     for (int j = 0; j < num_chunks && chunked; j++) {
         const pinrec::ChunkDesc desc = chunks_DDR[j];
         load_slot_array(pos_DDR + desc.slot_beat_offset, desc.num_slot_beats, pos_URAM);
         refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);
-        export_slot_values(desc, blocks_DDR, export_slots_DDR, pos_URAM, exchange_DDR);
+        send_external_positions(desc, parcels_DDR, shared_slots_DDR, pos_URAM, mailbox_DDR);
     }
 
 compute_pass:
@@ -128,14 +129,12 @@ compute_pass:
             }
         }
         refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);
-        import_ghost_values(desc, import_slots_DDR, exchange_DDR, pos_URAM);
-        cache_beat_counts(desc, beat_count_REG);
-        // Chunks carry no large nets (packer rule C2), so every span group is empty, as in hpwl_computer_v3. Meow.
-        for (int i = 0; i < pinrec::SPAN_GROUPS; i++) span_count_REG[i] = desc.num_beats;
+        receive_external_positions(desc, external_slots_DDR, mailbox_DDR, pos_URAM);
+        load_group_counts(group_counts_DDR + k * pinrec::GROUP_COUNTS, beat_count_REG, span_count_REG);
         gradient_beat_loop(records_DDR + desc.record_beat_offset, desc.num_beats, beat_count_REG, span_count_REG, pos_URAM,
                            offset_BRAM, lut_BRAM, lut_size, inv_lut_step, inv_gamma, grad_URAM,
                            desc.first_fixed_slot, out_beats_DDR + desc.record_beat_offset, offset_bits);
-        if (chunked) export_ghost_gradients(desc, import_slots_DDR, grad_URAM, exchange_DDR);
+        if (chunked) return_external_gradients(desc, external_slots_DDR, grad_URAM, mailbox_DDR);
         else         fold_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, grad_URAM, pos_URAM);
         drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR + desc.slot_beat_offset);
     }
@@ -145,7 +144,7 @@ fold_pass:
         const pinrec::ChunkDesc desc = chunks_DDR[j];
         const int movable_slot_beats = desc.first_fixed_slot / pinrec::LANES;
         load_slot_array(grad_DDR + desc.slot_beat_offset, movable_slot_beats, grad_URAM);
-        add_ghost_gradients(desc, blocks_DDR, export_slots_DDR, exchange_DDR, grad_URAM);
+        collect_external_gradients(desc, parcels_DDR, shared_slots_DDR, mailbox_DDR, grad_URAM);
         fold_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, grad_URAM, pos_URAM);
         drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR + desc.slot_beat_offset);
     }

@@ -114,6 +114,7 @@ int main(int argc, char** argv) {
     bool ok = true;
 
     packer::Config large;   large.large_nets = true;
+    packer::Config small;   small.large_nets = false;   // the default is on since 2026-10-02
     if (real) {
         ok = run_config(nl.name.c_str(), nl, large, node_pos);
         const packer::Encoded enc = packer::encode_netlist(nl, large);
@@ -129,7 +130,7 @@ int main(int argc, char** argv) {
     packer::Config slow   = large;  slow.hazard = 8;
     long empty_narrow = 0;
     ok &= run_config("default", nl, large, node_pos);
-    ok &= run_config("large nets off", nl, packer::Config(), node_pos);
+    ok &= run_config("large nets off", nl, small, node_pos);
     ok &= run_config("window=3", nl, narrow, node_pos, &empty_narrow);
     ok &= run_config("hazard=8", nl, slow, node_pos);
 

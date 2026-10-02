@@ -1,4 +1,4 @@
-# C-synthesis smoke test for hpwl_computer_v3 (chunked: export / import passes + the v2 beat loop).
+# C-synthesis smoke test for hpwl_computer_v3 (chunked: send / receive passes + the v2 beat loop).
 # Run from bring_up/hpwl_computer_v3/: vitis_hls -f synth_check.tcl   (source Vitis settings64.sh first).
 open_project synth_check_prj
 set_top hpwl_computer_v3_top

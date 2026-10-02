@@ -187,7 +187,7 @@ constraints, none decided:
   both axes resident at once does not fit (512). Options: size the capacity to the design, process
   axes in turn, or keep one axis in DDR. Density's bin scatter also needs positions.
 - **Chunking.** The 8 of 44 designs over 1 M slots (`hpwl_computer_v3` / `hpwl_gradient_computer_v2`)
-  cannot hold all positions on chip: their per-chunk load, ghost exchange and drain through DDR
+  cannot hold all positions on chip: their per-chunk load, external-slot mailbox traffic and drain through DDR
   stay, so the Big Fix applies fully only to unchunked designs.
 - **Overlap belongs between modules, through streams.** DATAFLOW between phases that share a URAM
   array does not work: it would ping-pong the array (2x URAM), and `pos_URAM` has several writers.

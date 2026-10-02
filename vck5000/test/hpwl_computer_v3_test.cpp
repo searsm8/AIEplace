@@ -1,14 +1,18 @@
 // Verify hpwl_computer_v3 (bring_up/hpwl_computer_v3) -- per-net HPWL for a design split into
-// chunks, ghost positions exchanged through DDR (#41).
+// chunks, external positions passed through a DDR mailbox (#41).
 //
 // Golden: identical to hpwl_computer_v2_test -- each in-scope net's span, in float, straight from
-// the PARSED netlist -- so it is independent of the partition, the homes, the ghosts, and the
-// exchange layout. Bit-exact. Macro-pin slots AND ghost slots arrive as NaN and the exchange buffer
-// starts as NaN, so a missed refresh, export or import cannot pass.
+// the PARSED netlist -- so it is independent of the partition, the homes, the external slots, and
+// the mailbox layout. Bit-exact. Macro-pin slots AND external slots arrive as NaN and the mailbox
+// starts as NaN, so a missed refresh, send or receive cannot pass.
+//
+// Large nets (17..96 pins) are on (Config default): each is homed in one chunk like a small net, so
+// the golden counts small nets plus every chunk's encoded large nets.
 //
 //   [1] chunked:   capacity 2048 slots (the ~5.5K-slot fixture splits into several chunks)
-//   [2] unchunked: capacity 1M (one chunk: the export pass is skipped; must equal v2's behaviour)
-//   [3] coverage:  several chunks, ghosts of cells AND of macro pins, fixed pins copied to several chunks
+//   [2] unchunked: capacity 1M (one chunk: the send pass is skipped; must equal v2's behaviour)
+//   [3] coverage:  several chunks, external cells AND macro pins, fixed pins copied to several chunks,
+//                  large nets carrying external slots, every span group used
 //
 // `hpwl_computer_v3_test --bookshelf DIR NAME [CAPACITY]` / `--def FILE NAME [CAPACITY]` runs [1] on
 // a real design (random positions); CAPACITY defaults to the on-chip SLOT_CAPACITY. Meow.
@@ -27,10 +31,10 @@ static std::vector<OutBeat> run_axis(const packer::Chunked& ch, int axis, const 
     std::memcpy(records.data(), dev.records.data(), dev.records.size() * sizeof(uint32_t));
     std::vector<pinrec::SlotBeat> pos(dev.slot_images.size() / pinrec::LANES);
     std::memcpy(pos.data(), dev.slot_images.data(), dev.slot_images.size() * sizeof(float));
-    std::vector<float> exchange(dev.exchange_size + 1, NAN);   // +1: never zero-length
+    std::vector<float> mailbox(dev.mailbox_size + 1, NAN);   // +1: never zero-length
     std::vector<OutBeat> out(records.size());
-    hpwl_computer_v3(dev.desc.data(), (int)dev.desc.size(), records.data(), pos.data(), dev.macro_pins.data(),
-                     dev.import_slots.data(), dev.export_slots.data(), dev.blocks.data(), exchange.data(),
+    hpwl_computer_v3(dev.desc.data(), dev.group_counts.data(), (int)dev.desc.size(), records.data(), pos.data(), dev.macro_pins.data(),
+                     dev.external_slots.data(), dev.shared_slots.data(), dev.parcels.data(), mailbox.data(),
                      dev.offset_table.data(), (int)dev.offset_table.size(), out.data(), dev.offset_bits);
     return out;
 }
@@ -72,11 +76,13 @@ static bool run_config(const char* label, const packer::Netlist& nl, long capaci
             base += (long)c.enc.issue.size();
         }
     }
-    long in_scope = 0;
-    for (const auto& net : nl.nets) in_scope += packer::in_scope(net);
-    const bool ok = bad == 0 && nets_seen == in_scope;
-    printf("%s [%s] %d chunks, %ld ghosts, exchange %ld floats, %ld/%ld nets x 2 axes, %ld mismatches\n",
-           ok ? "ok  " : "FAIL", label, ch.num_chunks, ch.ghosts, ch.exchange_size, nets_seen, in_scope, bad);
+    long in_scope = 0, large_in_range = 0;
+    for (const auto& net : nl.nets) { in_scope += packer::in_scope(net); large_in_range += packer::is_large(net); }
+    const long large = (long)packer::chunked_large_nets(ch).size();
+    const bool ok = bad == 0 && nets_seen == in_scope + large && large + ch.large_dropped == large_in_range;
+    printf("%s [%s] %d chunks, %ld external, mailbox %ld floats, %ld nets reported of %ld small + %ld large "
+           "(%ld large dropped) x 2 axes, %ld mismatches\n", ok ? "ok  " : "FAIL", label, ch.num_chunks, ch.externals,
+           ch.mailbox_size, nets_seen, in_scope, large, ch.large_dropped, bad);
     if (keep) *keep = std::move(ch);
     return ok;
 }
@@ -84,7 +90,12 @@ static bool run_config(const char* label, const packer::Netlist& nl, long capaci
 int main(int argc, char** argv) {
     packer::Netlist nl;
     const bool real = argc >= 4 && fixture::load_from_args(4, argv, nl);
-    if (!real) nl = fixture::build_synthetic(20260922u);
+    if (!real) {
+        fixture::SyntheticSpec spec;
+        spec.max_large_degree = packer::IGNORE_NET_DEGREE;   // every span group, and 97..100 left out
+        nl = fixture::build_synthetic(20260922u, spec);
+        fixture::add_large_net_cases(nl);                     // split nodes, nets that must drop
+    }
     const std::vector<float> node_pos[2] = {fixture::random_positions(nl.movable.size(), 11u),
                                             fixture::random_positions(nl.movable.size(), 12u)};
     if (real) {
@@ -98,18 +109,33 @@ int main(int argc, char** argv) {
     ok &= run_config("capacity=1M", nl, SLOT_CAPACITY, node_pos);
 
     // [3] coverage
-    long ghost_macro_pins = 0, ghost_cells = 0;
+    long external_macro_pins = 0, external_cells = 0;
     std::vector<int> fixed_copies(ch.global.kind.size(), 0);
     for (const packer::Chunk& c : ch.chunks)
         for (size_t l = 0; l < c.work_node.size(); l++) {
             const packer::NodeKind kind = ch.global.kind[c.work_node[l]];
-            if (c.ghost[l]) { ghost_macro_pins += kind == packer::MACRO_PIN; ghost_cells += kind == packer::CELL; }
+            if (c.external[l]) { external_macro_pins += kind == packer::MACRO_PIN; external_cells += kind == packer::CELL; }
             if (kind == packer::FIXED_PIN) fixed_copies[c.work_node[l]]++;
         }
     const long multi_copy_fixed = std::count_if(fixed_copies.begin(), fixed_copies.end(), [](int n) { return n > 1; });
-    const bool covered = ch.num_chunks >= 3 && ghost_cells >= 100 && ghost_macro_pins >= 10 && multi_copy_fixed >= 10;
-    printf("%s [3] coverage: %d chunks, %ld cell ghosts, %ld macro-pin ghosts, %ld fixed pins copied to >1 chunk\n",
-           covered ? "ok  " : "FAIL", ch.num_chunks, ghost_cells, ghost_macro_pins, multi_copy_fixed);
+    // A large net with an external node is the case this coverage exists for: its home chunk
+    // computes it from a received position. Meow.
+    long large_with_external = 0;
+    std::vector<char> span_used(pinrec::MAX_SPAN + 1, 0);
+    for (const packer::Chunk& c : ch.chunks) {
+        for (int local : c.enc.large_nets) {
+            bool has_external = false;
+            for (int node : c.enc.unique_nodes[local]) has_external |= (bool)c.external[node];
+            large_with_external += has_external;
+        }
+        for (int b : c.enc.issue) if (b != packer::BUBBLE && c.enc.beats[b].last_of_net) span_used[c.enc.beats[b].span] = 1;
+    }
+    const long spans_used = std::count(span_used.begin() + 2, span_used.end(), 1);
+    const bool covered = ch.num_chunks >= 3 && external_cells >= 100 && external_macro_pins >= 10 && multi_copy_fixed >= 10 &&
+                         large_with_external >= 10 && spans_used == pinrec::SPAN_GROUPS;
+    printf("%s [3] coverage: %d chunks, %ld external cells, %ld external macro pins, %ld fixed pins copied to >1 chunk, "
+           "%ld large nets with external slots, %ld of %d span groups used\n", covered ? "ok  " : "FAIL", ch.num_chunks,
+           external_cells, external_macro_pins, multi_copy_fixed, large_with_external, spans_used, pinrec::SPAN_GROUPS);
     ok &= covered;
 
     printf(ok ? "PASS: hpwl_computer_v3\n" : "FAIL: hpwl_computer_v3\n");

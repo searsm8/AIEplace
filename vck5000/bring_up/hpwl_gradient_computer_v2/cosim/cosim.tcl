@@ -1,5 +1,5 @@
-# RTL co-simulation of hpwl_gradient_computer_v2_top: the chunked passes, the exchange buffer and
-# the ghost-gradient read-add-write as synthesized RTL. Run from bring_up/hpwl_gradient_computer_v2/cosim/:
+# RTL co-simulation of hpwl_gradient_computer_v2_top: the chunked passes, the mailbox and
+# the external-gradient read-add-write as synthesized RTL. Run from bring_up/hpwl_gradient_computer_v2/cosim/:
 #   LIBRARY_PATH=/usr/lib/x86_64-linux-gnu vitis_hls -f cosim.tcl   (source settings64.sh first)
 # PL_SLOT_CAPACITY is shrunk to 8K slots so the RTL memories simulate fast; the pipeline is identical.
 set inc "-I../src -I../../hpwl_gradient_computer/src -I../../hpwl_computer_v3/src -I../../hpwl_computer_v2/src -I../../hpwl_computer/src -I../../beat_packer -I../../../test -I../../../pl/src/pl_algo/src -DPL_SLOT_CAPACITY=8192"

@@ -85,10 +85,10 @@
   - Verification: tier-1 exact (HPWL bit-exact, gradient ~4e-7), and C-synthesis II=1 on every loop.
   - All 44 designs encode; 8 need chunks.
   - The gradient beat loop is 3 DATAFLOW stages (`pin_bbox`/`wa_sums`/`wa_gradient`, bit-identical).
-  - 17..96-pin nets (opt-in span groups, hazard-scheduled with pads, 2026-10-02): **HPWL and
-    gradient both done**. Per-net bbox/sums travel A→B→C on side streams, and RTL co-sim proves
-    the FIFO bound, depth ≥ extent − 1 + pipeline skew (depth 32). Not in chunked designs yet.
-    97..100 dropped by decision. Open: newblue3 `max_rel` (Mark's call), post-route timing, URAM.
+  - 17..96-pin nets, **on by default** (2026-10-02): HPWL and gradient done, chunked designs too
+    (external slots double on bigblue4 / newblue7). Per-net bbox/sums travel A→B→C on side streams;
+    RTL co-sim proves the FIFO bound, depth ≥ extent − 1 + skew (32). 97..100 dropped by decision.
+    Open: MMS `max_rel` (Mark's call), post-route timing, URAM. → [[_NEW_REPORT_41_large_nets_in_chunks_20261002.md]]
   → [[_NEW_REPORT_41_record_datapath_20260922.md]], protocol in `vck5000/bring_up/beat_packer/README.md`.
 - All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
 - **v1 scope DECIDED (Mark, 2026-08-28):** phase-1 GP, device-resident, bit-comparable. **No phase 2,
@@ -160,11 +160,9 @@
   every scored run (`detail_placement.py:374`, unconditional in `run_lg`), so it earns nothing at
   scoring time — but it runs *inside* phase 2 and conditions the GP result, so deleting it is not
   free. `macro_legalization = true|false` A/B over MMS decides it. See tasks.md #38.
-- **#40 — `hpwl_computer` DONE (2026-09-22): built, tier-1-verified, C-synthesizes at II=1.**
-  `bring_up/hpwl_computer/`: beat-granularity degree resolution → `dhar_tree<Op>` (Dhar Fig. 6/7,
-  now a template over the combining operator) → 16-lane selector → one packed `OutBeat`/beat. II=1
-  took 4 synthesis iterations (fixed-width write loop, then `ARRAY_PARTITION` on two arrays, then
-  the wide-output-beat fix) — full table in the report. → [[REPORT_40_hpwl_computer_20260921.md]]
+- **#42 — does a better chunk partitioner pay off end to end (opened 2026-10-02)?** The current one is
+  a BFS cut (not min-cut); external slots are 5–40% on the 8 chunked designs (large nets doubled them). Measure host
+  start-up and the per-iteration mailbox + fold cycles first; close it if that share is small.
 - **#41 — keep in mind for the resident loop (2026-10-01):** standalone, loading positions and
   draining gradients is >=26 K cycles vs a 51.5 K-cycle beat loop per axis (adaptec1); the resident
   loop must keep both in URAM (256 of 463 URAMs per axis). Chunked designs (8/44) keep per-chunk DDR

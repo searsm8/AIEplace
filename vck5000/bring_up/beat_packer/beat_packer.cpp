@@ -39,16 +39,19 @@ static void report_chunked(const Netlist& nl, const Chunked& ch, double seconds,
         for (int b : c.enc.issue) bubbles += b == BUBBLE;
         max_bits = std::max(max_bits, bits_for(c.enc.max_slot + 1) + c.enc.offset_bits);
     }
-    printf("%-22s %8ld %3d %8ld %6.2f%% %9ld %7.2f%% %6ld %2d %6.1fs %s\n", nl.name.c_str(), movable, ch.num_chunks,
-           ch.ghosts, 100.0 * ch.ghosts / movable, max_slots, beats ? 100.0 * ideal / beats : 0.0, bubbles,
-           max_bits, seconds, failures ? "FAIL" : "ok");
+    long large = 0;
+    for (const Chunk& c : ch.chunks) large += (long)c.enc.large_nets.size();
+    printf("%-22s %8ld %3d %8ld %6.2f%% %9ld %7.2f%% %6ld %2d %7ld %5ld %6.1fs %s\n", nl.name.c_str(), movable, ch.num_chunks,
+           ch.externals, 100.0 * ch.externals / movable, max_slots, beats ? 100.0 * ideal / beats : 0.0, bubbles,
+           max_bits, large, ch.large_dropped, seconds, failures ? "FAIL" : "ok");
 }
 
 static void usage() {
     fprintf(stderr,
-        "usage: beat_packer [--hazard H] [--window W] [--seed S] [--repair N] [--capacity SLOTS]\n"
+        "usage: beat_packer [--hazard H] [--window W] [--seed S] [--repair N] [--capacity SLOTS] [--small-only]\n"
         "                   (--bookshelf DIR NAME | --def FILE NAME)...\n"
-        "  --capacity: chunk every design to at most SLOTS slots per chunk and report the ghosts\n");
+        "  --capacity: chunk every design to at most SLOTS slots per chunk and report the external slots\n"
+        "  --small-only: drop 17..96-pin nets (Config::large_nets = false; they are encoded by default)\n");
     exit(2);
 }
 
@@ -65,6 +68,7 @@ int main(int argc, char** argv) {
         else if (arg == "--seed")   cfg.seed   = (unsigned)std::stoul(next());
         else if (arg == "--repair") cfg.repair_passes = std::stoi(next());
         else if (arg == "--capacity") capacity = std::stol(next());
+        else if (arg == "--small-only") cfg.large_nets = false;
         else if (arg == "--bookshelf" || arg == "--def") {
             std::string path = next(), name = next();
             designs.emplace_back(path, name); is_def.push_back(arg == "--def");
@@ -73,9 +77,9 @@ int main(int argc, char** argv) {
     if (designs.empty()) usage();
 
     if (capacity > 0) {
-        printf("chunked: capacity=%ld slots/chunk, hazard=%d   ghost%% = ghost slots / movable nodes\n", capacity, cfg.hazard);
-        printf("%-22s %8s %3s %8s %7s %9s %8s %6s %2s %7s\n", "design", "movable", "K", "ghosts", "ghost%",
-               "max_slots", "effic", "bubble", "b", "time");
+        printf("chunked: capacity=%ld slots/chunk, hazard=%d   ext%% = external slots / movable nodes\n", capacity, cfg.hazard);
+        printf("%-22s %8s %3s %8s %7s %9s %8s %6s %2s %7s %5s %7s\n", "design", "movable", "K", "external", "ext%",
+               "max_slots", "effic", "bubble", "b", "large", "ldrop", "time");
         int total_failures = 0;
         for (size_t d = 0; d < designs.size(); d++) {
             const auto start = std::chrono::steady_clock::now();

@@ -51,7 +51,7 @@ the evidence for this handoff is there**).
      - (c) leave it as is.
 
    Tier 1 is unaffected. I left the tolerance unchanged.
-2. **Should `large_nets` become the default?** Every consumer handles it now; the exception is
+2. **RESOLVED 2026-10-02 (Mark): yes, `large_nets` is the default**, chunked designs included → [[_NEW_REPORT_41_large_nets_in_chunks_20261002.md]]. Original question: **Should `large_nets` become the default?** Every consumer handles it now; the exception is
    chunked designs, which still drop large nets (rule C2).
 
 ## Next steps, ranked
@@ -75,6 +75,12 @@ the evidence for this handoff is there**).
   Continue [[_NEW_HANDOFF_41_pnr_timing_20260923.md]]; don't restart.
 - **Re-measure first** on today's design: the HLS-estimated worst path is now C's combiner (stage
   slack −0.39 ns, top −0.53 ns). A fresh post-route run comes before any fix.
+  **Staged, NOT run (2026-10-02):** launched, then killed during export at Mark's request because
+  another session was still editing the sources. To relaunch, re-copy the sources (the copy in
+  `~/aieplace_pnr_20261002/vck5000/bring_up/hpwl_gradient_computer/` on the build server is stale)
+  and run its `run_pnr.sh` detached (Vitis 2024.2, as on Sep 23). `pnr.done` holds the exit code;
+  the result is in `synth_check_prj/sol1/impl/report/verilog/*export.rpt`. The Sep 23 run took about
+  1.5 h.
 - **First fix (from the fused run):** the top paths start at one float adder HLS shared between
   `refresh_macro_pins` and `fold_macro_pins`, fanning out to all 64 URAM banks. Unshare it and
   register its output before the bank broadcast. Then group the remaining failing endpoints
@@ -88,7 +94,7 @@ the evidence for this handoff is there**).
 - **Build-server rule:** the tunnel needs Mark to run `wsl ssh -fN build`; ask once, launch long
   jobs detached, don't poll.
 
-### 3. Small fix: `hpwl_gradient_computer_v2` loses bursts on its two LUT loads
+### 3. DONE 2026-10-02 — Small fix: `hpwl_gradient_computer_v2` loses bursts on its two LUT loads
 `offset_table` and `exp_lut` (32-bit) share gmem0, which is 1024 bits wide for `ChunkDesc`, so both
 loads have no burst (pipeline depth 75). Give them their own 32-bit bundle, re-run C-synth, check
 the *Inferred Burst Summary* in `csynth.rpt`. Low runtime cost today (small loads), so do it when v2
@@ -96,7 +102,7 @@ is next touched.
 
 ### 4. Chunking walkthrough + large nets in chunks + the resident-loop URAM budget (the Big Fix)
 - **Why later:** chunking only matters once the resident loop decides what stays on chip.
-- **Large nets are not chunked** (rule C2: `encode_chunked` homes only small nets), so the 8
+- **DONE 2026-10-02 — large nets are chunked now** (see the report above; external slots doubled on bigblue4 / newblue7 → #42). Original text: **Large nets are not chunked** (rule C2: `encode_chunked` homes only small nets), so the 8
   designs over 1 M slots, bigblue4 among them, still drop them. Homing a large net in one chunk
   needs its ghosts like any small net. The device side is ready: `hpwl_gradient_computer_v2`
   passes span counts equal to `desc.num_beats` today, which is the only change needed there.

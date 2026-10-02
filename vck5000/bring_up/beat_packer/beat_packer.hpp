@@ -90,12 +90,13 @@
 //      the macro's gradient).                                                        [harness]
 // Chunking (encode_chunked, required to handle designs too big for URAM)
 //  C1  Every movable node is owned by exactly one chunk; a macro and its macro pins by the same one.
-//  C2  Every small net is homed in one chunk; its nodes owned elsewhere are ghost slots there.
-//      Large nets are NOT chunked yet: a chunked design drops them.
-//  C3  The exchange buffer is consumer-major and every entry is written exactly once; a chunk's
-//      import list covers its ghosts in region order; export lists cover their blocks, with -1
+//  C2  Every small net, and with cfg.large_nets every large net, is homed in one chunk (majority
+//      of its movable nodes); its nodes owned elsewhere are external slots there. A large net then
+//      follows L1-L8 inside its home chunk's stream; drops sum into Chunked::large_dropped.
+//  C3  The mailbox is consumer-major and every entry is written exactly once; a chunk's external
+//      list covers its external slots in inbox order; shared lists cover their parcels, with -1
 //      only in padding segments.
-//  C4  A producer's gradient-return sequence repeats no slot within HAZARD_DISTANCE entries
+//  C4  An owner's gradient-collect sequence repeats no slot within HAZARD_DISTANCE entries
 //      (padding segments).                                              [check_chunked: C1-C4]
 //  C5  Each chunk is an ordinary stream: R, S, B and M hold per chunk.   [check_chunked decodes]
 // =================================================================================================
@@ -139,7 +140,7 @@ struct Config {
     int      window        = 4096; // untaken nets the packer / pending beats the scheduler may scan
     int      repair_passes = 50;
     unsigned seed          = 1;
-    bool     large_nets    = false; // emit 17..96-pin nets after the degree-16 group (unchunked designs only, C2)
+    bool     large_nets    = true;  // emit 17..96-pin nets after the degree-16 group (default since 2026-10-02, Mark)
 };
 
 struct Pin {
@@ -1111,30 +1112,35 @@ inline int check(const Netlist& nl, const Encoded& enc, const Config& cfg) {
 // Chunking: when the slots exceed on-chip capacity, split the design into K chunks that each fit.
 //
 // Every movable node is OWNED by one chunk (a macro and its macro pins share one). Every in-scope
-// net is HOMED in the chunk that owns most of its movable nodes; the chunk's stream carries its
-// homed nets. A homed net's node owned elsewhere becomes a GHOST slot in the home chunk; fixed pin
-// nodes are simply copied into every chunk that uses them (their position never changes).
+// net (plus every large net, with cfg.large_nets) is HOMED in the chunk that owns most of its
+// movable nodes; the chunk's stream carries its
+// homed nets. A homed net's node owned elsewhere becomes an EXTERNAL slot in the home chunk (a local
+// copy of another chunk's node); fixed pin nodes are simply copied into every chunk that uses them
+// (their position never changes, so they are not external).
 // Each chunk is then an ordinary Encoded stream over local slots, so node_slot bits shrink too.
 //
-// Ghosts move through one DDR exchange buffer laid out consumer-major: chunk k's REGION holds its
-// ghosts, as one BLOCK per producer j (ascending j), each block ordered by the producer's slot.
-//   positions: producer j, resident, writes its K blocks (sequential within each block);
-//              consumer k reads its one region sequentially into its ghost slots.
-//   gradients: consumer k writes its ghost gradients back into its region, same order;
-//              producer j reads its K blocks and adds them into its own slots.
-// Every DDR access is sequential; the random side is always the on-chip URAM. Meow.
+// External values move through one DDR MAILBOX laid out consumer-major: chunk k's INBOX holds its
+// external slots, as one PARCEL per owner j (ascending j), each parcel ordered by the owner's slot.
+//   positions: owner j, resident, sends its K parcels (sequential within each parcel);
+//              consumer k reads its one inbox sequentially into its external slots.
+//   gradients: consumer k writes its external slots' gradients back into its inbox, same order;
+//              owner j collects its K parcels and adds them into its own slots.
+// So each chunk keeps two slot lists, and each carries positions one way and gradients the other:
+// EXTERNAL slots (other chunks' nodes, inbox order) and SHARED slots (its own nodes that other
+// chunks hold as external, parcel order). Every DDR access is sequential; the random side is
+// always the on-chip URAM. Meow.
 
-struct ExchangeBlock { long offset; long count; };
+struct Parcel { long offset; long count; };
 
 struct Chunk {
     Encoded enc;                             // local: enc.work node ids are chunk-local
     std::vector<int>  net_global;            // local net -> global net (= parsed net index)
     std::vector<int>  work_node;             // local node -> global work node
-    std::vector<char> ghost;                 // per local node
-    long region_offset = 0;                  // this chunk's ghost region in the exchange buffer
-    std::vector<int>  import_local;          // ghost local nodes, region order
-    std::vector<ExchangeBlock> export_blocks;   // segments: exchange positions, or offset -1 = padding
-    std::vector<int>  export_local;          // own local nodes in segment order, -1 for padding
+    std::vector<char> external;              // per local node: owned by another chunk
+    long inbox_offset = 0;                   // this chunk's inbox in the mailbox
+    std::vector<int>  external_local;        // external local nodes, inbox order
+    std::vector<Parcel> parcels;             // segments: mailbox positions, or offset -1 = padding
+    std::vector<int>  shared_local;          // own local nodes in segment order, -1 for padding
 };
 
 struct Chunked {
@@ -1144,8 +1150,9 @@ struct Chunked {
     std::vector<int> owner;                  // per global work node, -1 for fixed
     std::vector<int> home;                   // per global net, -1 if out of scope
     std::vector<Chunk> chunks;
-    long exchange_size = 0;
-    long ghosts = 0;
+    long mailbox_size = 0;
+    long externals = 0;
+    long large_dropped = 0;                  // summed over chunks (see Encoded::large_dropped)
     bool fits = false;
 };
 
@@ -1193,30 +1200,34 @@ inline bool build_chunks(Chunked& ch, const std::vector<int>& order, int num_chu
     for (size_t i = 0; i < order.size(); i++) ch.owner[order[i]] = std::min<long>((long)i / per_chunk, num_chunks - 1);
     for (const MacroPin& mp : g.macro_pins) ch.owner[mp.pin_node] = ch.owner[mp.macro_node];   // same unit
 
+    std::vector<int> homed_nets = g.in_scope_nets;   // small nets first, so a chunk's local net ids follow suit
+    if (cfg.large_nets)
+        for (int net = 0; net < (int)g.work.nets.size(); net++) if (is_large(g.work.nets[net])) homed_nets.push_back(net);
     ch.home.assign(g.work.nets.size(), -1);
     std::vector<long> votes(num_chunks);
-    for (int net : g.in_scope_nets) {
+    for (int net : homed_nets) {
         std::fill(votes.begin(), votes.end(), 0);
         for (int node : g.unique_nodes[net]) if (ch.owner[node] >= 0) votes[ch.owner[node]]++;
         ch.home[net] = (int)(std::max_element(votes.begin(), votes.end()) - votes.begin());
     }
 
     ch.chunks.assign(num_chunks, Chunk());
-    ch.ghosts = 0;
+    ch.externals = 0;
+    ch.large_dropped = 0;
     for (int k = 0; k < num_chunks; k++) {
         Chunk& c = ch.chunks[k];
         std::vector<int> local_of(num_nodes, -1);
-        auto add_node = [&](int node, bool is_ghost) {
+        auto add_node = [&](int node, bool is_external) {
             local_of[node] = (int)c.work_node.size();
             c.work_node.push_back(node);
-            c.ghost.push_back(is_ghost);
+            c.external.push_back(is_external);
         };
         for (int node = 0; node < num_nodes; node++) if (ch.owner[node] == k) add_node(node, false);
         std::vector<int> nets;
-        for (int net : g.in_scope_nets) if (ch.home[net] == k) nets.push_back(net);
+        for (int net : homed_nets) if (ch.home[net] == k) nets.push_back(net);
         for (int net : nets)
             for (int node : g.unique_nodes[net])
-                if (local_of[node] < 0) add_node(node, g.work.movable[node]);   // fixed pins are copies, not ghosts
+                if (local_of[node] < 0) add_node(node, g.work.movable[node]);   // fixed pins are copies, not external
 
         Encoded& e = c.enc;
         e.work.name = g.work.name;
@@ -1233,7 +1244,7 @@ inline bool build_chunks(Chunked& ch, const std::vector<int>& order, int num_chu
             for (Pin& pin : local_net) pin.node = local_of[pin.node];
             std::vector<int> local_unique;
             for (int node : g.unique_nodes[net]) local_unique.push_back(local_of[node]);
-            e.in_scope_nets.push_back((int)e.work.nets.size());
+            if (in_scope(local_net)) e.in_scope_nets.push_back((int)e.work.nets.size());   // pack_large_nets finds the rest by degree
             c.net_global.push_back(net);
             e.work.nets.push_back(std::move(local_net));
             e.unique_nodes.push_back(std::move(local_unique));
@@ -1243,38 +1254,39 @@ inline bool build_chunks(Chunked& ch, const std::vector<int>& order, int num_chu
                 e.macro_pins.push_back({local_of[mp.pin_node], local_of[mp.macro_node], {mp.offset[0], mp.offset[1]}});
         encode_resolved(e, cfg);
         if (!e.fits || e.num_slots > ch.capacity) return false;
-        for (char is_ghost : c.ghost) ch.ghosts += is_ghost;
+        for (char is_external : c.external) ch.externals += is_external;
+        ch.large_dropped += e.large_dropped;
     }
 
-    // Exchange layout: region per consumer, block per producer.
+    // Mailbox layout: an inbox per consumer, a parcel per owner.
     std::vector<std::vector<int>> local_in(num_chunks, std::vector<int>(num_nodes, -1));
     for (int k = 0; k < num_chunks; k++)
         for (size_t l = 0; l < ch.chunks[k].work_node.size(); l++) local_in[k][ch.chunks[k].work_node[l]] = (int)l;
-    std::vector<std::vector<std::vector<int>>> block(num_chunks, std::vector<std::vector<int>>(num_chunks));  // [j][k] work nodes
+    std::vector<std::vector<std::vector<int>>> parcel(num_chunks, std::vector<std::vector<int>>(num_chunks));  // [j][k] work nodes
     for (int k = 0; k < num_chunks; k++)
         for (size_t l = 0; l < ch.chunks[k].work_node.size(); l++)
-            if (ch.chunks[k].ghost[l]) block[ch.owner[ch.chunks[k].work_node[l]]][k].push_back(ch.chunks[k].work_node[l]);
+            if (ch.chunks[k].external[l]) parcel[ch.owner[ch.chunks[k].work_node[l]]][k].push_back(ch.chunks[k].work_node[l]);
 
-    // Producer j adds its returned ghost gradients block by block (k ascending) as a read-add-write,
-    // so a slot must not recur within `hazard` entries. A node ghosted in several chunks appears in
-    // several blocks, and small blocks can put it near a block boundary. Order each block greedily
+    // Owner j adds its returned external gradients parcel by parcel (k ascending) as a read-add-write,
+    // so a slot must not recur within `hazard` entries. A node external in several chunks appears in
+    // several parcels, and small parcels can put it near a parcel boundary. Order each parcel greedily
     // around the previous entries; where nothing fits, emit padding entries (skipped by the device,
-    // no exchange position). Segments: {block-relative start, count} real, or {-1, count} padding. Meow.
+    // no mailbox position). Segments: {parcel-relative start, count} real, or {-1, count} padding. Meow.
     struct Segment { int k; long start; long count; };
     std::vector<std::vector<Segment>> segments(num_chunks);
     for (int j = 0; j < num_chunks; j++) {
-        const Encoded& producer = ch.chunks[j].enc;
-        std::deque<long> recent;   // last hazard-1 emitted producer slots, -1 for padding
+        const Encoded& owner_enc = ch.chunks[j].enc;
+        std::deque<long> recent;   // last hazard-1 emitted owner slots, -1 for padding
         auto emit = [&](long slot) { recent.push_back(slot); if ((int)recent.size() >= cfg.hazard) recent.pop_front(); };
         for (int k = 0; k < num_chunks; k++) {
-            std::vector<int> remaining = block[j][k];
+            std::vector<int> remaining = parcel[j][k];
             std::sort(remaining.begin(), remaining.end(), [&](int a, int b) {
-                return producer.node_slot[local_in[j][a]] < producer.node_slot[local_in[j][b]]; });
+                return owner_enc.node_slot[local_in[j][a]] < owner_enc.node_slot[local_in[j][b]]; });
             std::vector<int> ordered;
             while (!remaining.empty()) {
                 size_t pick = remaining.size();
                 for (size_t i = 0; i < remaining.size() && pick == remaining.size(); i++)
-                    if (std::find(recent.begin(), recent.end(), producer.node_slot[local_in[j][remaining[i]]]) == recent.end()) pick = i;
+                    if (std::find(recent.begin(), recent.end(), owner_enc.node_slot[local_in[j][remaining[i]]]) == recent.end()) pick = i;
                 if (pick == remaining.size()) {
                     if (segments[j].empty() || segments[j].back().k != -1) segments[j].push_back({-1, -1, 0});
                     segments[j].back().count++;
@@ -1283,35 +1295,35 @@ inline bool build_chunks(Chunked& ch, const std::vector<int>& order, int num_chu
                 }
                 if (segments[j].empty() || segments[j].back().k != k) segments[j].push_back({k, (long)ordered.size(), 0});
                 segments[j].back().count++;
-                emit(producer.node_slot[local_in[j][remaining[pick]]]);
+                emit(owner_enc.node_slot[local_in[j][remaining[pick]]]);
                 ordered.push_back(remaining[pick]);
                 remaining.erase(remaining.begin() + pick);
             }
-            block[j][k] = ordered;   // the consumer's region uses this exact order
+            parcel[j][k] = ordered;   // the consumer's inbox uses this exact order
         }
     }
 
     long offset = 0;
-    std::vector<std::vector<long>> block_offset(num_chunks, std::vector<long>(num_chunks, 0));
+    std::vector<std::vector<long>> parcel_start(num_chunks, std::vector<long>(num_chunks, 0));
     for (int k = 0; k < num_chunks; k++) {
-        ch.chunks[k].region_offset = offset;
+        ch.chunks[k].inbox_offset = offset;
         for (int j = 0; j < num_chunks; j++) {
-            block_offset[j][k] = offset;
-            for (int node : block[j][k]) ch.chunks[k].import_local.push_back(local_in[k][node]);
-            offset += (long)block[j][k].size();
+            parcel_start[j][k] = offset;
+            for (int node : parcel[j][k]) ch.chunks[k].external_local.push_back(local_in[k][node]);
+            offset += (long)parcel[j][k].size();
         }
     }
     for (int j = 0; j < num_chunks; j++)
         for (const Segment& s : segments[j]) {
             if (s.k < 0) {
-                ch.chunks[j].export_blocks.push_back(ExchangeBlock{-1, s.count});
-                for (long i = 0; i < s.count; i++) ch.chunks[j].export_local.push_back(-1);
+                ch.chunks[j].parcels.push_back(Parcel{-1, s.count});
+                for (long i = 0; i < s.count; i++) ch.chunks[j].shared_local.push_back(-1);
             } else {
-                ch.chunks[j].export_blocks.push_back(ExchangeBlock{block_offset[j][s.k] + s.start, s.count});
-                for (long i = 0; i < s.count; i++) ch.chunks[j].export_local.push_back(local_in[j][block[j][s.k][s.start + i]]);
+                ch.chunks[j].parcels.push_back(Parcel{parcel_start[j][s.k] + s.start, s.count});
+                for (long i = 0; i < s.count; i++) ch.chunks[j].shared_local.push_back(local_in[j][parcel[j][s.k][s.start + i]]);
             }
         }
-    ch.exchange_size = offset;
+    ch.mailbox_size = offset;
     return true;
 }
 
@@ -1328,11 +1340,11 @@ inline Chunked encode_chunked(const Netlist& nl, const Config& cfg, long capacit
 }
 
 // Slot-major position image of chunk k, one axis. Own cells/macros carry their position, fixed
-// pins position + offset; macro pins AND ghosts are NaN -- the device must refresh / import them. Meow.
+// pins position + offset; macro pins AND external slots are NaN -- the device must refresh / receive them. Meow.
 inline std::vector<float> chunk_slot_positions(const Chunked& ch, int k, int axis, const std::vector<float>& node_pos) {
     const Chunk& c = ch.chunks[k];
     std::vector<float> image = slot_positions(c.enc, axis, node_pos);
-    for (size_t l = 0; l < c.ghost.size(); l++) if (c.ghost[l]) image[c.enc.node_slot[l]] = NAN;
+    for (size_t l = 0; l < c.external.size(); l++) if (c.external[l]) image[c.enc.node_slot[l]] = NAN;
     return image;
 }
 
@@ -1340,40 +1352,42 @@ inline std::vector<float> chunk_slot_positions(const Chunked& ch, int k, int axi
 // by the descriptors. All chunks share the global offset tables, hence one offset_bits. Meow.
 struct ChunkedDevice {
     std::vector<ChunkDesc>        desc;
+    std::vector<int32_t>          group_counts;   // GROUP_COUNTS per chunk: beat_count, then span_beat_count
     std::vector<uint32_t>         records;        // LANES per beat
     std::vector<float>            slot_images;    // slot-major, each chunk a whole number of beats
     std::vector<MacroPinRef>      macro_pins;
-    std::vector<int32_t>          import_slots;   // ghost local slots, region order
-    std::vector<int32_t>          export_slots;   // own local slots, block order
-    std::vector<ExchangeBlockRef> blocks;         // num_chunks per chunk
+    std::vector<int32_t>          external_slots; // external local slots, inbox order
+    std::vector<int32_t>          shared_slots;   // own local slots other chunks hold, parcel order
+    std::vector<ParcelRef>        parcels;        // each chunk's segments (num_parcels)
     std::vector<float>            offset_table;
     int                           offset_bits = 0;
-    long                          exchange_size = 0;
+    long                          mailbox_size = 0;
 };
 
 inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const std::vector<float>& node_pos) {
     ChunkedDevice dev;
     dev.offset_table  = ch.global.offset_table[axis];
     dev.offset_bits   = ch.chunks[0].enc.offset_bits;
-    dev.exchange_size = ch.exchange_size;
+    dev.mailbox_size  = ch.mailbox_size;
     for (int k = 0; k < ch.num_chunks; k++) {
         const Chunk& c = ch.chunks[k];
         if (c.enc.offset_bits != dev.offset_bits) { fprintf(stderr, "chunks disagree on offset_bits\n"); exit(2); }
         ChunkDesc d = {};
         d.record_beat_offset = (int32_t)(dev.records.size() / LANES);
         d.num_beats          = (int32_t)c.enc.issue.size();
-        for (int i = 0; i < NET_DEGREES_PROCESSED; i++) d.beat_count[i] = c.enc.beat_count[i];
+        dev.group_counts.insert(dev.group_counts.end(), c.enc.beat_count.begin(), c.enc.beat_count.end());
+        dev.group_counts.insert(dev.group_counts.end(), c.enc.span_beat_count.begin(), c.enc.span_beat_count.end());
         d.slot_beat_offset   = (int32_t)(dev.slot_images.size() / LANES);
         d.num_slot_beats     = (int32_t)(c.enc.num_slots / LANES);
         d.first_fixed_slot   = (int32_t)c.enc.first_fixed_slot;
         d.macro_pin_offset   = (int32_t)dev.macro_pins.size();
         d.num_macro_pins     = (int32_t)c.enc.macro_order.size();   // the scheduled list, SKIP padding included
-        d.import_region      = (int32_t)c.region_offset;
-        d.num_imports        = (int32_t)c.import_local.size();
-        d.import_list_offset = (int32_t)dev.import_slots.size();
-        d.export_list_offset = (int32_t)dev.export_slots.size();
-        d.export_block_offset = (int32_t)dev.blocks.size();
-        d.num_export_blocks   = (int32_t)c.export_blocks.size();
+        d.inbox_offset       = (int32_t)c.inbox_offset;
+        d.inbox_size         = (int32_t)c.external_local.size();
+        d.external_list_offset = (int32_t)dev.external_slots.size();
+        d.shared_list_offset = (int32_t)dev.shared_slots.size();
+        d.parcel_offset      = (int32_t)dev.parcels.size();
+        d.num_parcels        = (int32_t)c.parcels.size();
         dev.desc.push_back(d);
 
         dev.records.insert(dev.records.end(), c.enc.records[axis].begin(), c.enc.records[axis].end());
@@ -1381,16 +1395,23 @@ inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const st
         dev.slot_images.insert(dev.slot_images.end(), image.begin(), image.end());
         const std::vector<MacroPinRef> refs = macro_pin_refs(c.enc, axis);
         dev.macro_pins.insert(dev.macro_pins.end(), refs.begin(), refs.end());
-        for (int local : c.import_local) dev.import_slots.push_back((int32_t)c.enc.node_slot[local]);
-        for (int local : c.export_local) dev.export_slots.push_back(local < 0 ? -1 : (int32_t)c.enc.node_slot[local]);
-        for (const ExchangeBlock& block : c.export_blocks) dev.blocks.push_back({(int32_t)block.offset, (int32_t)block.count});
+        for (int local : c.external_local) dev.external_slots.push_back((int32_t)c.enc.node_slot[local]);
+        for (int local : c.shared_local) dev.shared_slots.push_back(local < 0 ? -1 : (int32_t)c.enc.node_slot[local]);
+        for (const Parcel& parcel : c.parcels) dev.parcels.push_back({(int32_t)parcel.offset, (int32_t)parcel.count});
     }
     return dev;
 }
 
+// Every chunk's encoded large nets, as global (= parsed) net ids. Meow.
+inline std::vector<int> chunked_large_nets(const Chunked& ch) {
+    std::vector<int> large_nets;
+    for (const Chunk& c : ch.chunks) for (int local : c.enc.large_nets) large_nets.push_back(c.net_global[local]);
+    return large_nets;
+}
+
 // Chunked checker: every chunk decodes on its own (local slots -> parsed geometry); the union must
-// be the in-scope netlist exactly. Plus ownership, capacity, and the exchange: every buffer entry
-// written once, by the owner of the node the consumer expects, and each producer's gradient fold
+// be the in-scope netlist exactly. Plus ownership, capacity, and the mailbox: every entry
+// written once, by the owner of the node the consumer expects, and each owner's gradient-collect
 // sequence keeps a slot `hazard` entries apart. Meow.
 inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg) {
     Failures fail;
@@ -1403,8 +1424,8 @@ inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg
         if (c.enc.num_slots > ch.capacity) fail("chunk exceeds capacity", k);
         for (size_t l = 0; l < c.work_node.size(); l++) {
             const int node = c.work_node[l];
-            if (!c.ghost[l] && ch.global.work.movable[node]) { own_count[node]++; if (ch.owner[node] != k) fail("own node of another chunk", node); }
-            if (c.ghost[l] && ch.owner[node] == k) fail("ghost of an own node", node);
+            if (!c.external[l] && ch.global.work.movable[node]) { own_count[node]++; if (ch.owner[node] != k) fail("own node of another chunk", node); }
+            if (c.external[l] && ch.owner[node] == k) fail("external slot of an own node", node);
             if (c.enc.node_slot[l] < 0) fail("local node without a slot", node);
         }
     }
@@ -1413,45 +1434,45 @@ inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg
     for (const MacroPin& mp : ch.global.macro_pins)
         if (ch.owner[mp.pin_node] != ch.owner[mp.macro_node]) fail("macro pin split from its macro", mp.pin_node);
 
-    std::vector<int> written_node(ch.exchange_size, -1), writes(ch.exchange_size, 0);
+    std::vector<int> written_node(ch.mailbox_size, -1), writes(ch.mailbox_size, 0);
     for (int j = 0; j < ch.num_chunks; j++) {
         const Chunk& p = ch.chunks[j];
         size_t e = 0;
         std::vector<long> fold_slots;
-        for (const ExchangeBlock& segment : p.export_blocks)
+        for (const Parcel& segment : p.parcels)
             for (long i = 0; i < segment.count; i++, e++) {
-                if (e >= p.export_local.size()) { fail("export list shorter than its blocks", j); break; }
-                if (segment.offset < 0) {   // padding: no exchange position, no slot
-                    if (p.export_local[e] != -1) fail("padding segment names a node", j);
+                if (e >= p.shared_local.size()) { fail("shared list shorter than its parcels", j); break; }
+                if (segment.offset < 0) {   // padding: no mailbox position, no slot
+                    if (p.shared_local[e] != -1) fail("padding segment names a node", j);
                     fold_slots.push_back(-1);
                     continue;
                 }
-                if (p.export_local[e] < 0) { fail("real segment holds padding", j); continue; }
+                if (p.shared_local[e] < 0) { fail("real segment holds padding", j); continue; }
                 const long position = segment.offset + i;
-                if (position >= ch.exchange_size) { fail("export past the exchange buffer", j); continue; }
+                if (position >= ch.mailbox_size) { fail("send past the mailbox", j); continue; }
                 writes[position]++;
-                written_node[position] = p.work_node[p.export_local[e]];
-                if (p.ghost[p.export_local[e]]) fail("export of a ghost", j);
-                fold_slots.push_back(p.enc.node_slot[p.export_local[e]]);
+                written_node[position] = p.work_node[p.shared_local[e]];
+                if (p.external[p.shared_local[e]]) fail("external slot listed as shared", j);
+                fold_slots.push_back(p.enc.node_slot[p.shared_local[e]]);
             }
-        if (e != p.export_local.size()) fail("export list longer than its blocks", j);
+        if (e != p.shared_local.size()) fail("shared list longer than its parcels", j);
         for (size_t a = 0; a < fold_slots.size(); a++)
             for (size_t b = a + 1; b < fold_slots.size() && b < a + (size_t)cfg.hazard; b++)
-                if (fold_slots[a] >= 0 && fold_slots[a] == fold_slots[b]) fail("producer fold RAW hazard", j);
+                if (fold_slots[a] >= 0 && fold_slots[a] == fold_slots[b]) fail("owner collect RAW hazard", j);
     }
-    for (long position = 0; position < ch.exchange_size; position++) if (writes[position] != 1) fail("exchange entry not written exactly once", position);
+    for (long position = 0; position < ch.mailbox_size; position++) if (writes[position] != 1) fail("mailbox entry not written exactly once", position);
     for (int k = 0; k < ch.num_chunks; k++) {
         const Chunk& c = ch.chunks[k];
-        long ghosts = 0;
-        for (char is_ghost : c.ghost) ghosts += is_ghost;
-        if ((long)c.import_local.size() != ghosts) fail("import list does not cover every ghost", k);
-        for (size_t i = 0; i < c.import_local.size(); i++) {
-            const long position = c.region_offset + (long)i;
-            if (position >= ch.exchange_size || written_node[position] != c.work_node[c.import_local[i]]) fail("ghost imports the wrong node", k);
+        long externals = 0;
+        for (char is_external : c.external) externals += is_external;
+        if ((long)c.external_local.size() != externals) fail("external list does not cover every external slot", k);
+        for (size_t i = 0; i < c.external_local.size(); i++) {
+            const long position = c.inbox_offset + (long)i;
+            if (position >= ch.mailbox_size || written_node[position] != c.work_node[c.external_local[i]]) fail("external slot receives the wrong node", k);
         }
     }
     std::sort(decoded.begin(), decoded.end());
-    if (decoded != in_scope_geometry(nl)) fail("decoded chunks differ from the input netlist", (long)decoded.size());
+    if (decoded != in_scope_geometry(nl, chunked_large_nets(ch))) fail("decoded chunks differ from the input netlist", (long)decoded.size());
     return fail.count;
 }
 

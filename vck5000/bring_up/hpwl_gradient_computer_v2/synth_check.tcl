@@ -1,4 +1,4 @@
-# C-synthesis smoke test for hpwl_gradient_computer_v2 (chunked: export, compute, fold passes).
+# C-synthesis smoke test for hpwl_gradient_computer_v2 (chunked: send, compute, fold passes).
 # Run from bring_up/hpwl_gradient_computer_v2/: vitis_hls -f synth_check.tcl   (source Vitis settings64.sh first).
 open_project synth_check_prj
 set_top hpwl_gradient_computer_v2_top
