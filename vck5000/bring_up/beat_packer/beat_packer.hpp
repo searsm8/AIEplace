@@ -58,6 +58,7 @@ struct Config {
     int      window        = 4096; // untaken nets the packer / pending beats the scheduler may scan
     int      repair_passes = 50;
     unsigned seed          = 1;
+    bool     large_nets    = false; // emit 17..96-pin nets after the degree-16 group (hpwl_computer_v2 only, for now)
 };
 
 struct Pin {
@@ -87,6 +88,9 @@ struct OffsetDict {
 };
 
 inline bool in_scope(const std::vector<Pin>& net) { return (int)net.size() <= LANES; }
+inline bool is_large(const std::vector<Pin>& net) {
+    return (int)net.size() > LANES && (int)net.size() <= MAX_LARGE_NET_DEGREE;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Parsers. Bookshelf (ISPD2005, MMS): "terminal"/"terminal_NI" in .nodes = fixed; a movable node
@@ -259,6 +263,10 @@ inline Netlist read_def(const std::string& path, const std::string& name) {
 struct Beat {
     int degree;
     std::vector<int> nets;
+    // A large-net beat (degree > LANES) carries the pins of `nodes`, one beat of a `span`-beat net. Meow.
+    int  span        = 1;
+    bool last_of_net = false;
+    std::vector<int> nodes;
 };
 
 struct MacroPin {
@@ -283,6 +291,9 @@ struct Encoded {
     long              ideal_beats = 0;      // sum over degrees of ceil(nets / nets_per_beat)
     std::vector<int>  issue;                // beat index per stream position, BUBBLE = all-EMPTY beat
     std::vector<int>  issue_degree;         // degree group of each stream position (bubbles included)
+    std::vector<int>  large_nets;           // encoded large nets (cfg.large_nets), in stream order
+    long              large_dropped = 0;    // large nets not encodable: span > MAX_SPAN, or a node with > LANES pins
+    long              large_extra_span = 0; // large nets whose span exceeds ceil(degree / LANES)
 
     std::vector<long> node_slot;            // per work node, -1 if none
     long              first_fixed_slot = 0;
@@ -294,6 +305,7 @@ struct Encoded {
 
     std::vector<uint32_t> records[2];       // per axis, LANES per stream position
     std::vector<int>  beat_count;           // [NET_DEGREES_PROCESSED] cumulative positions per degree
+    std::vector<int>  span_beat_count;      // [SPAN_GROUPS] cumulative positions per span, continuing beat_count
     std::vector<float> offset_table[2];     // per axis
     std::vector<int>  net_at;               // [position * MAX_NETS_PER_BEAT + k] -> nl net index or NO_NET
 };
@@ -508,6 +520,56 @@ inline void schedule_beats(Encoded& enc, const Config& cfg) {
     }
 }
 
+// Step 3b (cfg.large_nets): each large net becomes `span` consecutive beats, appended after the
+// small-net stream in ascending span groups. First-fit decreasing over its distinct nodes (a node's
+// pins stay together, as one lane run) into the first beat with lanes left and the node's bank
+// free. No hazard scheduling: only hpwl_computer_v2 consumes these beats, and it writes no
+// gradient. Banks are colored for the small nets only, so a large net can need extra beats. Meow.
+inline void pack_large_nets(Encoded& enc, const Config& cfg) {
+    if (!cfg.large_nets) return;
+    struct Fill { int lanes = 0; uint64_t banks = 0; std::vector<int> nodes; };
+    std::vector<std::vector<std::pair<int, std::vector<Fill>>>> by_span(MAX_SPAN + 1);
+    for (int net = 0; net < (int)enc.work.nets.size(); net++) {
+        if (!is_large(enc.work.nets[net])) continue;
+        std::map<int, int> pin_count;
+        for (const Pin& pin : enc.work.nets[net]) pin_count[pin.node]++;
+        std::vector<int> nodes = enc.unique_nodes[net];
+        std::stable_sort(nodes.begin(), nodes.end(), [&](int a, int b) { return pin_count[a] > pin_count[b]; });
+        if (pin_count[nodes.front()] > LANES) { enc.large_dropped++; continue; }
+        std::vector<Fill> beats;
+        for (int node : nodes) {
+            const uint64_t bank_bit = 1ull << enc.bank[node];
+            auto home = std::find_if(beats.begin(), beats.end(), [&](const Fill& f) {
+                return f.lanes + pin_count[node] <= LANES && !(f.banks & bank_bit); });
+            if (home == beats.end()) home = beats.insert(beats.end(), Fill());
+            home->lanes += pin_count[node];
+            home->banks |= bank_bit;
+            home->nodes.push_back(node);
+        }
+        const int span = (int)beats.size();
+        if (span > MAX_SPAN) { enc.large_dropped++; continue; }
+        const int min_span = ((int)enc.work.nets[net].size() + LANES - 1) / LANES;
+        enc.large_extra_span += span > min_span;
+        enc.ideal_beats += min_span;
+        by_span[span].emplace_back(net, std::move(beats));
+    }
+    for (int span = 2; span <= MAX_SPAN; span++)
+        for (auto& [net, beats] : by_span[span]) {
+            enc.large_nets.push_back(net);
+            for (int b = 0; b < span; b++) {
+                Beat beat;
+                beat.degree      = (int)enc.work.nets[net].size();
+                beat.nets        = {net};
+                beat.span        = span;
+                beat.last_of_net = b == span - 1;
+                beat.nodes       = std::move(beats[b].nodes);
+                enc.issue.push_back((int)enc.beats.size());
+                enc.issue_degree.push_back(beat.degree);
+                enc.beats.push_back(std::move(beat));
+            }
+        }
+}
+
 // Step 4: node_slot = row * BANKS + bank. Movable rows first in every bank, fixed rows after, so
 // `node_slot >= first_fixed_slot` is the device's "read position, skip gradient write" test. Meow.
 inline void assign_node_slots(Encoded& enc) {
@@ -570,6 +632,19 @@ inline void encode_records(Encoded& enc) {
     for (size_t position = 0; position < enc.issue.size(); position++) {
         if (enc.issue[position] == BUBBLE) continue;
         const Beat& beat = enc.beats[enc.issue[position]];
+        if (beat.span > 1) {   // large-net beat: its nodes' pins from lane 0; the net is reported on its last beat
+            if (beat.last_of_net) enc.net_at[position * MAX_NETS_PER_BEAT] = beat.nets[0];
+            std::vector<Pin> pins;
+            for (const Pin& pin : enc.work.nets[beat.nets[0]])
+                if (std::count(beat.nodes.begin(), beat.nodes.end(), pin.node)) pins.push_back(pin);
+            std::stable_sort(pins.begin(), pins.end(),
+                             [&](const Pin& a, const Pin& b) { return enc.node_slot[a.node] < enc.node_slot[b.node]; });
+            for (size_t p = 0; p < pins.size(); p++)
+                for (int axis = 0; axis < 2; axis++)
+                    enc.records[axis][position * LANES + p] =
+                        make_record((uint32_t)enc.node_slot[pins[p].node], (uint32_t)pins[p].offset_key[axis], enc.offset_bits);
+            continue;
+        }
         for (size_t k = 0; k < beat.nets.size(); k++) {
             enc.net_at[position * MAX_NETS_PER_BEAT + k] = beat.nets[k];
             std::vector<Pin> pins = enc.work.nets[beat.nets[k]];
@@ -584,6 +659,10 @@ inline void encode_records(Encoded& enc) {
     enc.beat_count.assign(NET_DEGREES_PROCESSED, 0);
     for (int degree : enc.issue_degree)
         for (int i = degree - MIN_NET_DEGREE; i < NET_DEGREES_PROCESSED; i++) enc.beat_count[i]++;
+    enc.span_beat_count.assign(SPAN_GROUPS, enc.beat_count.back());
+    for (int b : enc.issue)
+        if (b != BUBBLE && enc.beats[b].span > 1)
+            for (int i = enc.beats[b].span - 2; i < SPAN_GROUPS; i++) enc.span_beat_count[i]++;
 }
 
 // Steps 1-5 on an Encoded whose work netlist, kinds, pin-node maps, unique_nodes and in_scope_nets
@@ -593,6 +672,7 @@ inline void encode_resolved(Encoded& enc, const Config& cfg) {
     assign_banks(enc, cfg);
     pack_beats(enc, cfg, rng);
     schedule_beats(enc, cfg);
+    pack_large_nets(enc, cfg);
     assign_node_slots(enc);
     schedule_macro_pins(enc, cfg);
     encode_records(enc);
@@ -650,10 +730,16 @@ inline std::vector<MacroPinRef> macro_pin_refs(const Encoded& enc, int axis) {
 
 using GeomPin = std::tuple<int, float, float>;
 
-inline std::vector<std::vector<GeomPin>> in_scope_geometry(const Netlist& nl) {
+// The in-scope nets plus `large_nets` (indices into nl.nets: the encoder reports which large nets it
+// kept; their geometry is still checked here against the parsed netlist). Meow.
+inline std::vector<std::vector<GeomPin>> in_scope_geometry(const Netlist& nl, const std::vector<int>& large_nets = {}) {
+    std::vector<char> keep(nl.nets.size());
+    for (size_t n = 0; n < nl.nets.size(); n++) keep[n] = in_scope(nl.nets[n]);
+    for (int n : large_nets) keep[n] = 1;
     std::vector<std::vector<GeomPin>> nets;
-    for (const auto& net : nl.nets) {
-        if (!in_scope(net)) continue;
+    for (size_t n = 0; n < nl.nets.size(); n++) {
+        if (!keep[n]) continue;
+        const auto& net = nl.nets[n];
         std::vector<GeomPin> geom;
         for (const Pin& pin : net)
             geom.emplace_back(pin.node, nl.offset_value[0][pin.offset_key[0]], nl.offset_value[1][pin.offset_key[1]]);
@@ -686,7 +772,9 @@ inline void decode_stream(const Encoded& enc, const Config& cfg, Failures& fail,
 
     std::unordered_map<uint32_t, long> last_update;
     const long num_positions = (long)enc.records[0].size() / LANES;
-    for (long position = 0; position < num_positions; position++) {
+    const long small_positions = enc.beat_count.back();
+    if (enc.span_beat_count.back() != num_positions) fail("span_beat_count does not end the stream", num_positions);
+    for (long position = 0; position < small_positions; position++) {
         int degree = MIN_NET_DEGREE;   // resolve_beat's rule, from cumulative counts
         for (int count : enc.beat_count) if (position >= count) degree++;
         const int nets_per_beat = LANES / degree;
@@ -739,6 +827,44 @@ inline void decode_stream(const Encoded& enc, const Config& cfg, Failures& fail,
             }
         }
     }
+    // Large-net section: span from span_beat_count, net boundaries from a beat counter (the
+    // device's rule). Lane 0 always holds a pin, EMPTY lanes only trail, and a node sits in one
+    // beat of its net. No hazard rule: no consumer writes gradients from these beats yet. Meow.
+    for (long position = small_positions; position < num_positions; ) {
+        int span = 2;
+        for (int count : enc.span_beat_count) if (position >= count) span++;
+        std::vector<GeomPin> net;
+        std::vector<uint32_t> net_slots;
+        for (int b = 0; b < span && position < num_positions; b++, position++) {
+            if (enc.records[0][position * LANES] == EMPTY_RECORD) fail("large-net beat with EMPTY lane 0", position);
+            uint64_t banks_used = 0;
+            bool trailing = false;
+            for (int lane = 0; lane < LANES; lane++) {
+                const uint32_t rx = enc.records[0][position * LANES + lane], ry = enc.records[1][position * LANES + lane];
+                if (record_node_slot(rx, ob) != record_node_slot(ry, ob)) fail("x and y node_slot differ", position);
+                if (rx == EMPTY_RECORD) { trailing = true; continue; }
+                if (trailing) { fail("pin after an EMPTY lane in a large-net beat", position); continue; }
+                const uint32_t slot = record_node_slot(rx, ob);
+                auto it = slot_to_node.find(slot);
+                if (it == slot_to_node.end()) { fail("node_slot maps to no node", position); continue; }
+                if (net_slots.empty() || net_slots.back() != slot) {
+                    if (std::count(net_slots.begin(), net_slots.end(), slot)) fail("large-net node split or not adjacent", position);
+                    if (banks_used >> (slot % BANKS) & 1) fail("bank hit twice in one beat", position);
+                    banks_used |= 1ull << (slot % BANKS);
+                    net_slots.push_back(slot);
+                }
+                const int node = it->second;
+                const uint32_t idx_x = record_offset_idx(rx, ob), idx_y = record_offset_idx(ry, ob);
+                if (idx_x >= enc.offset_table[0].size() || idx_y >= enc.offset_table[1].size()) {
+                    fail("offset_idx past table end", position); continue;
+                }
+                net.emplace_back(enc.base_node[node], enc.pinned_offset[node][0] + enc.offset_table[0][idx_x],
+                                                      enc.pinned_offset[node][1] + enc.offset_table[1][idx_y]);
+            }
+        }
+        std::sort(net.begin(), net.end());
+        decoded.push_back(std::move(net));
+    }
     for (const auto& entry : slot_to_node)
         if ((entry.first < enc.first_fixed_slot) != (bool)enc.work.movable[entry.second]) fail("movable/fixed slot range wrong", entry.first);
     for (const MacroPin& mp : enc.macro_pins)
@@ -765,7 +891,7 @@ inline int check(const Netlist& nl, const Encoded& enc, const Config& cfg) {
     for (size_t node = 0; node < nl.movable.size(); node++)
         if (nl.movable[node] && enc.node_slot[node] < 0) fail("movable node without a slot", (long)node);
     std::sort(decoded.begin(), decoded.end());
-    if (decoded != in_scope_geometry(nl)) fail("decoded netlist differs from input", (long)decoded.size());
+    if (decoded != in_scope_geometry(nl, enc.large_nets)) fail("decoded netlist differs from input", (long)decoded.size());
     return fail.count;
 }
 

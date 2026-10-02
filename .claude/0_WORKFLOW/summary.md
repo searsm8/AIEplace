@@ -84,7 +84,8 @@
     designs over 1 M slots.
   - Verification: tier-1 exact (HPWL bit-exact, gradient ~4e-7), and C-synthesis II=1 on every loop.
   - All 44 designs encode; 8 need chunks.
-  - Open: nets of 17..100 pins (plan awaiting Mark), plus post-route timing and URAM.
+  - 17..96-pin nets (opt-in span groups, 2026-10-02): HPWL bit-exact in `hpwl_computer_v2`;
+    97..100 dropped by decision. Open: their gradient (L3), plus post-route timing and URAM.
   → [[_NEW_REPORT_41_record_datapath_20260922.md]], protocol in `vck5000/bring_up/beat_packer/README.md`.
 - All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
 - **v1 scope DECIDED (Mark, 2026-08-28):** phase-1 GP, device-resident, bit-comparable. **No phase 2,

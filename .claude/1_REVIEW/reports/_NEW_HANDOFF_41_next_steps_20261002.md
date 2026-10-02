@@ -22,7 +22,23 @@ after the 2026-10-01/02 sessions, and the ranked next steps. Background:
 
 ## Next steps, ranked
 
-### 1. Decide how nets of 17–100 pins are handled (Mark's call, blocks the engine design)
+### 1. Nets of 17–96 pins — HPWL DONE 2026-10-02, gradient next
+- **Landed (HPWL only), Mark's calls:** large nets are an opt-in packer section (`Config::large_nets`)
+  of span groups 2..`MAX_SPAN`=8 after the degree-16 group (protocol: `beat_packer/README.md`,
+  "Large nets"). The span is whatever bank packing needs, and 97..100-pin nets are dropped.
+  `hpwl_computer_v2` keeps a running bbox per net. That bbox is compared as an integer order key,
+  because a carried `fcmp` cost −0.25 ns of estimated slack. Tier 1 is bit-exact (synthetic: 63
+  nets over all 7 spans; adaptec1 7,013 and newblue2 11,531 large nets, 0 dropped). 3/3 mutants
+  caught. C-synth: II=1, depth 21→23, slack −0.00, LUT +2.4 K. `hpwl_computer_v3` passes empty
+  span groups.
+- **Open:**
+  - **Extra beats:** bank coloring ignores large nets, so about half take an extra beat (+28% large
+    beats on adaptec1). Adding large nets as soft coloring constraints may recover that.
+  - **Chunking:** `encode_chunked` homes only small nets.
+  - **Gradient:** L3, below, in `hpwl_gradient_computer`. Its span section needs the
+    HAZARD_DISTANCE schedule.
+
+*Original framing, kept:* **Decide how nets of 17–100 pins are handled (Mark's call, blocks the engine design)**
 - **Why first:** the biggest correctness gap. Those nets are dropped today: 20–29% of ISPD2005 pins,
   +12.4% HPWL. Whatever is chosen changes the beat loop, so it should land before timing is tuned.
 - **The proposal:** L3, exact, three II=1 passes (bbox / sums / combine) on the existing engine, a

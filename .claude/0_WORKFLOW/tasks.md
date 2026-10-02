@@ -1,7 +1,8 @@
 # Tasks
 
-**Active Task (2026-10-02): #41 `hpwl_gradient_computer`.** Next: Mark's call on nets of 17–100
-pins, then the NMU bandwidth check, then timing closure. → [[_NEW_HANDOFF_41_next_steps_20261002.md]]
+**Active Task (2026-10-02): #41 `hpwl_gradient_computer`.** 17–96-pin nets: HPWL path landed in
+`hpwl_computer_v2`; next is their gradient (L3) in `hpwl_gradient_computer`, then the NMU bandwidth
+check, then timing closure. → [[_NEW_HANDOFF_41_next_steps_20261002.md]]
 
 Open work, one section per task. **Status lives here; evidence lives in a
 report.** Don't reuse task numbers, find the highest number and add one.
@@ -1164,12 +1165,27 @@ code.
 - [ ] **Post-route timing and URAM:** blocked here (no Vivado license for xcvc1902).
       `bring_up/hpwl_gradient_computer/impl_check.tcl` is ready for the build server. HLS estimates
       are 3.0–3.9 ns against the 3.33 ns target.
-- [ ] **Nets of 17..100 pins:** still dropped; they are 20–29% of ISPD2005 pins (+12.4% HPWL when
+- [ ] **Nets of 17..96 pins: HPWL done (2026-10-02), gradient next.** Protocol (Mark, 2026-10-02):
+      large nets follow the degree-16 group, one net per beat over `span` consecutive beats,
+      grouped by span 2..`MAX_SPAN`=8 (`span_beat_count`). They are opt-in (`Config::large_nets`),
+      so the gradient modules' streams are unchanged. Nets of 97..100 pins are dropped (a documented
+      divergence). `hpwl_computer_v2` handles them with a running bbox carried as an integer order
+      key; a carried fcmp cost −0.25 ns. Bit-exact on synthetic (all 7 spans), adaptec1 and
+      newblue2; 0 dropped. C-synth: II=1, depth 23, slack −0.00, +2.4 K LUT. **Open:**
+      - bank coloring ignores large nets, so about half need extra beats (adaptec1: 21.8 K large
+        beats vs 17.1 K minimum);
+      - large nets are not chunked yet (bigblue4, superblue12);
+      - the gradient path is L3 below, still to build.
+      → [[_NEW_HANDOFF_41_next_steps_20261002.md]] step 1
+      <details><summary>Before 2026-10-02</summary>
+
+      Still dropped; they are 20–29% of ISPD2005 pins (+12.4% HPWL when
       dropped). **Needs Mark's call before code.** The proposal is L3: exact, three II=1 passes
       (bbox / sums / combine) on the existing engine. A chunk beat is a degree-16 beat, plus a small
       net-state table. It costs about 2× gradient cycles on ISPD2005 and 1.04–1.5× on ISPD2015. L2
       (online rescale, about 1.7×) is a deliberate divergence from sw_only.
       → [[_NEW_PLAN_41_large_nets_on_records_20260923.md]]
+      </details>
 - [ ] Optional: a min-cut partitioner if bigblue4 / newblue7 ghost cost (13–19%) matters.
 - Slide-deck source for this module (2026-10-01): [[_NEW_EXPLAINER_41_hpwl_gradient_computer_20261001.md]]
 - m_axi bundle experiment (2026-10-01): merging bundles keeps II=1 but loses bursts on every pointer narrower than the port (incl. per-beat `out_beats`) and saves no LUTs; keep bundles grouped by width. DATAFLOW does not fit (URAM ping-pong would need 512/463); setup+drain is ≥40 K cycles vs 51.5 K beat loop on adaptec1, to be removed by the resident iteration. → [[_NEW_REPORT_41_ddr_bundles_20261001.md]]

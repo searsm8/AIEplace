@@ -9,6 +9,7 @@ extern "C" void hpwl_computer_v2_top(
         const pinrec::RecordBeat*  records,
         int                        num_beats,
         const int*                 beat_count,
+        const int*                 span_count,
         const pinrec::SlotBeat*    pos,
         int                        num_slot_beats,
         const pinrec::MacroPinRef* macro_pins,
@@ -19,11 +20,12 @@ extern "C" void hpwl_computer_v2_top(
         int                        offset_bits) {
 #pragma HLS INTERFACE m_axi port=records      bundle=gmem0 offset=slave
 #pragma HLS INTERFACE m_axi port=beat_count   bundle=gmem1 offset=slave
+#pragma HLS INTERFACE m_axi port=span_count   bundle=gmem1 offset=slave
 #pragma HLS INTERFACE m_axi port=pos          bundle=gmem2 offset=slave
 #pragma HLS INTERFACE m_axi port=macro_pins   bundle=gmem3 offset=slave
 #pragma HLS INTERFACE m_axi port=offset_table bundle=gmem4 offset=slave
 #pragma HLS INTERFACE m_axi port=out_beats    bundle=gmem5 offset=slave
 
-    hpwl_computer_v2(records, num_beats, beat_count, pos, num_slot_beats, macro_pins, num_macro_pins,
+    hpwl_computer_v2(records, num_beats, beat_count, span_count, pos, num_slot_beats, macro_pins, num_macro_pins,
                      offset_table, offset_table_size, out_beats, offset_bits);
 }

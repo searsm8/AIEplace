@@ -74,6 +74,18 @@ movable nodes.
 make run                               # all 44 manifest designs, one chunk each where they fit
 make run ARGS="--capacity 1048576"     # chunk every design to the on-chip capacity
 ```
-Scope: nets of degree 2..16. Nets over 100 pins are masked (XPlace's `ignore_net_degree`).
-Nets of 17..100 pins are not handled yet (the #40 large-net chunking plan); the `pin>16` column
-shows their share of pins.
+Scope: nets of degree 2..16, plus 17..96 with `Config::large_nets` (opt-in; only
+`hpwl_computer_v2` consumes them so far, and `encode_chunked` does not carry them yet).
+Nets over 100 pins are masked (XPlace's `ignore_net_degree`). **Nets of 97..100 pins are dropped:
+a deliberate divergence from XPlace and sw_only (Mark, 2026-10-02)**, since 96 = 6 full beats.
+
+## Large nets (`Config::large_nets`)
+After the degree-16 group, each large net takes `span` consecutive beats, one net per beat. Its
+pins start at lane 0, EMPTY lanes come only at the end of a beat, and all of a node's pins sit in
+one beat with distinct banks per beat. Nets are grouped by span 2..`MAX_SPAN` (8), and the
+cumulative `span_beat_count[SPAN_GROUPS]` continues `beat_count`, so the device finds a net's last
+beat with a counter. The span is what first-fit bank packing needs, which can exceed
+⌈degree/16⌉: banks are colored for the small nets only, and about half of the large nets take an
+extra beat (adaptec1: 21.8 K beats vs 17.1 K minimum). A net that needs more than `MAX_SPAN` beats
+is dropped and counted in `large_dropped` (0 on adaptec1 and newblue2). No hazard scheduling
+applies, because no consumer writes gradients from these beats yet.

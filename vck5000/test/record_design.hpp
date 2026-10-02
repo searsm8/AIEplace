@@ -6,8 +6,8 @@
 //
 // The synthetic netlist deliberately contains: cells sharing a small offset library, movable macros
 // and fixed nodes with many distinct pin offsets (-> MACRO_PIN / FIXED_PIN slots), nodes repeated
-// on one net (-> adjacent-lane merge), every degree 2..16, and 17..40-pin nets (out of scope, must
-// be ignored). Meow.
+// on one net (-> adjacent-lane merge), every degree 2..16, and 17..40-pin nets (out of scope unless a
+// harness enables large nets; SyntheticSpec::max_large_degree widens the range). Meow.
 
 #include "beat_packer.hpp"
 
@@ -23,6 +23,7 @@ struct SyntheticSpec {
     int macros = 6;
     int fixed  = 40;
     int nets   = 2600;
+    int max_large_degree = 40;   // large nets are 17..this; 40 keeps the original RNG stream
 };
 
 inline packer::Netlist build_synthetic(unsigned seed, const SyntheticSpec& spec = SyntheticSpec()) {
@@ -43,7 +44,7 @@ inline packer::Netlist build_synthetic(unsigned seed, const SyntheticSpec& spec 
     std::uniform_real_distribution<double> unit(0.0, 1.0);
     auto pick_degree = [&]() {
         const double u = unit(rng);
-        if (u < 0.03) return 17 + (int)(unit(rng) * 24);           // out of scope
+        if (u < 0.03) return 17 + (int)(unit(rng) * (spec.max_large_degree - 16));   // large
         if (u < 0.40) return 2;
         if (u < 0.58) return 3;
         if (u < 0.70) return 4;

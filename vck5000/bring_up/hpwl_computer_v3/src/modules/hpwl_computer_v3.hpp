@@ -80,6 +80,8 @@ static void hpwl_computer_v3(
 #pragma HLS ARRAY_PARTITION variable=offset_BRAM complete dim=1
     int beat_count_REG[pinrec::NET_DEGREES_PROCESSED];
 #pragma HLS ARRAY_PARTITION variable=beat_count_REG complete dim=0
+    int span_count_REG[pinrec::SPAN_GROUPS];
+#pragma HLS ARRAY_PARTITION variable=span_count_REG complete dim=0
 
     load_offset_table(offset_table_DDR, offset_table_size, offset_BRAM);
 
@@ -98,7 +100,9 @@ compute_pass:
         refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);
         import_ghost_values(desc, import_slots_DDR, exchange_DDR, pos_URAM);
         cache_beat_counts(desc, beat_count_REG);
-        hpwl_beat_loop(records_DDR + desc.record_beat_offset, desc.num_beats, beat_count_REG, pos_URAM,
+        // Chunks carry no large nets (only 2..16-pin nets are homed), so every span group is empty. Meow.
+        for (int i = 0; i < pinrec::SPAN_GROUPS; i++) span_count_REG[i] = desc.num_beats;
+        hpwl_beat_loop(records_DDR + desc.record_beat_offset, desc.num_beats, beat_count_REG, span_count_REG, pos_URAM,
                        offset_BRAM, out_beats_DDR + desc.record_beat_offset, offset_bits);
     }
 }
