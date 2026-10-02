@@ -1185,8 +1185,10 @@ code.
         three DATAFLOW stages joined by ≤8-beat FIFOs. **Step 1 DONE:** the small-net loop is split
         into `pin_bbox` / `wa_sums` / `wa_gradient`. Bit-identical outputs, II=1 per stage, co-sim
         spacing 4 PASS / 1 FAIL as before.
-        **Next:** step 2, packer hazard schedule plus padding beats for the large-net section (rule
-        L6). → [[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]]
+        **Step 2 DONE:** the large-net hazard schedule with transparent pads (rules L6/L7), checker
+        enforced. 4,035 pads over 44 designs, 4,002 of them on newblue3.
+        **Next:** step 3, the large-net paths in the three stages.
+        → [[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]]
       → [[_NEW_HANDOFF_41_next_steps_20261002.md]] step 1
       <details><summary>Before 2026-10-02</summary>
 

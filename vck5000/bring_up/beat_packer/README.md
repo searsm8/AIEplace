@@ -104,5 +104,16 @@ Over all 44 designs: **48 excess beats in 1.58 M (0.003%), 0 nets dropped**. Bef
 the balanced packing, about half the nets took an extra beat. The small-net stream is unchanged
 (the coloring is bit-identical with the flag off).
 
-A net needing more than `MAX_SPAN` beats is dropped and counted in `large_dropped`. No hazard
-scheduling applies, because no consumer writes gradients from these beats yet.
+A net needing more than `MAX_SPAN` beats is dropped and counted in `large_dropped`.
+
+**Hazard schedule and pads (contract L6, L7).** The `HAZARD_DISTANCE` rule continues from the
+small-net section:
+- Nets in a span group are list-scheduled, and so are a net's beats within the net.
+- When nothing is ready, the packer emits a **pad**: an all-EMPTY beat, recognised by lane 0 being
+  EMPTY. Pads are invisible to net accounting, so a net's span counts only its real beats.
+- A node split over beats of one net (more than 16 pins on it) always needs pads, because its runs
+  sit inside one contiguous net.
+
+Over all 44 designs there are 4,035 pads, and newblue3 accounts for 4,002 of them: 13% of its
+large-net beats, about 3% of its whole stream, all from about 400 split-node nets. Every other
+design has ≤ 6.

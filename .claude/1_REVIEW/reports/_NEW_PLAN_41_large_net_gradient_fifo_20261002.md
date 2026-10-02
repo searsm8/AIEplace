@@ -166,6 +166,16 @@ its own header. Not three kernels.**
      before. No deadlock.
 2. **Packer:** hazard-schedule the large-net section, with padding beats, and add the checker
    rule. Report pads per design over the 44-design manifest.
+   **DONE 2026-10-02.**
+   - **Pads are invisible to net accounting** (contract L7): lane 0 EMPTY means a pad, which is not
+     counted in a net's span and not shifted into its window. So pads can sit inside a net without
+     changing its span group. `hpwl_computer_v2` handles them: two mux conditions.
+   - **Checker:** enforces L6/L7, and catches a packer that ignores the hazard. 3/3 mutants caught
+     (packer hazard, pad shifts the window, pad counts toward the span).
+   - **Pads:** 4,035 over 44 designs; newblue3 has 4,002 (≈3% of its stream, from split nodes),
+     every other design ≤ 6. All 36 fitting designs are bit-exact in `hpwl_computer_v2`.
+   - **Possible later saving for newblue3:** pins of one node with identical offsets carry identical
+     gradients, so a pin-multiplicity weight could avoid most splits. Not needed now.
 3. **Large-net paths:** A's from v2, B's window sums, C's sums pop.
    *Done when:* a tier-1 gradient golden that includes 17..96-pin nets holds today's tolerance
    (rel_rms ~4e-7, tol 1e-5).

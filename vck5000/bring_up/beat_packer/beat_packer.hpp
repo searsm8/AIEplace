@@ -59,10 +59,10 @@
 //  L1  Follow the small nets, grouped by span 2..MAX_SPAN, ascending and contiguous;
 //      span_beat_count[s-2] is cumulative through span s and continues beat_count. Its last entry
 //      equals the stream length, even with large nets off (then every entry equals it).  [check]
-//  L2  One net per beat; a net's `span` beats are consecutive, so the device finds net boundaries
-//      with a beat counter.                                                 [check: decode rule]
-//  L3  A beat's pins start at lane 0 and EMPTY lanes only trail. The device substitutes lane 0's
-//      position into EMPTY lanes.                                                      [check]
+//  L2  One net per beat; a net's `span` real beats are consecutive apart from pads (L7), so the
+//      device finds net boundaries with a counter of real beats.            [check: decode rule]
+//  L3  A real beat's pins start at lane 0 and EMPTY lanes only trail. The device substitutes lane
+//      0's position into EMPTY lanes.                                                  [check]
 //  L4  Within a beat: distinct nodes use distinct banks, and a node's pins are adjacent. A node
 //      with > LANES pins on the net is split into <= LANES-pin runs in different beats (same
 //      bank, so never in one beat).                                                    [check]
@@ -70,9 +70,15 @@
 //      2026-10-02, deliberate divergence from XPlace/sw_only); nets over IGNORE_NET_DEGREE never
 //      reach the packer (parser mask). Nets needing > MAX_SPAN beats are dropped and counted in
 //      large_dropped.                                  [check: geometry vs enc.large_nets]
-//  L6  NOT YET GUARANTEED: B5's hazard rule on this section. Only hpwl_computer_v2 (no scatter)
-//      consumes it. The gradient path will need it, met by reordering nets and all-EMPTY padding
-//      beats inside a net -- [[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]].
+//  L6  B5's hazard rule holds here too, continuing from the small-net section: a movable node_slot
+//      is not touched again within HAZARD_DISTANCE stream positions, pads included. Met by list-
+//      scheduling nets within a span group and a net's beats within the net, padding only when
+//      nothing is ready (a node split over beats of one net always needs pads).          [check]
+//  L7  A PAD is an all-EMPTY beat in this section, recognised by lane 0 being EMPTY (a real beat
+//      never has an EMPTY lane 0, L3). Pads are invisible to net accounting: the device neither
+//      counts them toward a net's span nor shifts them into its window. A pad may sit between
+//      nets or inside one; its position counts in span_beat_count for the group it sits in.
+//                                                                                      [check]
 // Macro-pin list (macro_pin_refs: refresh, then fold)
 //  M1  Every macro pin appears exactly once; MACRO_PIN_SKIP entries are padding.        [check]
 //  M2  No macro recurs within HAZARD_DISTANCE entries (the fold read-modify-write).     [check]
@@ -362,6 +368,8 @@ struct Encoded {
     long              ideal_beats = 0;      // sum over degrees of ceil(nets / nets_per_beat)
     std::vector<int>  issue;                // beat index per stream position, BUBBLE = all-EMPTY beat
     std::vector<int>  issue_degree;         // degree group of each stream position (bubbles included)
+    std::vector<int>  issue_span;           // span group of each large-net position (pads included); 0 if small
+    long              large_pads = 0;       // pad beats in the large-net section (contract L7)
     std::vector<int>  large_nets;           // encoded large nets (cfg.large_nets), in stream order
     long              large_dropped = 0;    // large nets not encodable: span > MAX_SPAN, or a node with > LANES pins
     long              large_extra_span = 0; // large nets whose span exceeds ceil(degree / LANES)
@@ -616,6 +624,7 @@ inline void schedule_beats(Encoded& enc, const Config& cfg) {
                 if (ready) pick = scan;
             }
             enc.issue_degree.push_back(degree);
+            enc.issue_span.push_back(0);
             if (pick < 0) { enc.issue.push_back(BUBBLE); position++; continue; }
             const int b = pending[pick];
             pending.erase(pending.begin() + pick);
@@ -633,11 +642,13 @@ inline void schedule_beats(Encoded& enc, const Config& cfg) {
 // runs of at most LANES (MMS has cells and fixed pins with up to ~36 pins on one 2-3-node net); runs
 // of one node share a bank, so they land in different beats. Opens the minimum ceil(degree/LANES)
 // beats, then places runs, busiest bank first, into the least-filled beat with lanes left and the
-// run's bank free; a new beat only when none fits. No hazard scheduling: only hpwl_computer_v2 consumes these beats, and it writes no
-// gradient. Banks are colored for the small nets only, so a large net can need extra beats. Meow.
+// run's bank free; a new beat only when none fits.
+// Then the hazard schedule (contract L6), continuing the small-net stream's last-update times: per
+// span group, list-schedule whole nets (the first within `window` that needs no pad, else the one
+// needing fewest), and within a net emit whichever remaining beat is ready, a PAD when none is. Meow.
 inline void pack_large_nets(Encoded& enc, const Config& cfg) {
     if (!cfg.large_nets) return;
-    struct Fill { int lanes = 0; uint64_t banks = 0; std::vector<int> pins; };
+    struct Fill { int lanes = 0; uint64_t banks = 0; std::vector<int> pins; std::vector<int> nodes; };
     std::vector<std::vector<std::pair<int, std::vector<Fill>>>> by_span(MAX_SPAN + 1);
     for (int net = 0; net < (int)enc.work.nets.size(); net++) {
         const std::vector<Pin>& net_pins = enc.work.nets[net];
@@ -666,6 +677,7 @@ inline void pack_large_nets(Encoded& enc, const Config& cfg) {
             home->lanes += (int)pins.size();
             home->banks |= bank_bit;
             home->pins.insert(home->pins.end(), pins.begin(), pins.end());
+            home->nodes.push_back(net_pins[pins[0]].node);
         }
         const int span = (int)beats.size();
         if (span > MAX_SPAN) { enc.large_dropped++; continue; }
@@ -673,21 +685,73 @@ inline void pack_large_nets(Encoded& enc, const Config& cfg) {
         enc.ideal_beats += min_span;
         by_span[span].emplace_back(net, std::move(beats));
     }
-    for (int span = 2; span <= MAX_SPAN; span++)
-        for (auto& [net, beats] : by_span[span]) {
-            enc.large_nets.push_back(net);
-            for (int b = 0; b < span; b++) {
+
+    std::vector<long> last_update(enc.work.movable.size(), -(long)cfg.hazard);
+    for (size_t position = 0; position < enc.issue.size(); position++)
+        if (enc.issue[position] != BUBBLE)
+            for (int net : enc.beats[enc.issue[position]].nets)
+                for (int node : enc.unique_nodes[net]) if (enc.work.movable[node]) last_update[node] = (long)position;
+    auto ready = [&](const Fill& f, long position) {
+        for (int node : f.nodes)
+            if (enc.work.movable[node] && position - last_update[node] < cfg.hazard) return false;
+        return true;
+    };
+    // Emit (or, with commit=false, only count the pads of) one net starting at `position`.
+    auto place_net = [&](int net, std::vector<Fill>& beats, int span, bool commit) {
+        std::vector<long> saved;
+        if (!commit) for (const Fill& f : beats) for (int node : f.nodes) saved.push_back(last_update[node]);
+        std::vector<char> done(beats.size(), 0);
+        long position = (long)enc.issue.size(), pads = 0;
+        for (size_t emitted = 0; emitted < beats.size(); position++) {
+            int pick = -1;
+            for (size_t b = 0; b < beats.size() && pick < 0; b++) if (!done[b] && ready(beats[b], position)) pick = (int)b;
+            if (commit) {
+                enc.issue_degree.push_back((int)enc.work.nets[net].size());
+                enc.issue_span.push_back(span);
+            }
+            if (pick < 0) {
+                pads++;
+                if (commit) { enc.issue.push_back(BUBBLE); enc.large_pads++; }
+                continue;
+            }
+            done[pick] = 1;
+            emitted++;
+            for (int node : beats[pick].nodes) if (enc.work.movable[node]) last_update[node] = position;
+            if (commit) {
                 Beat beat;
                 beat.degree      = (int)enc.work.nets[net].size();
                 beat.nets        = {net};
                 beat.span        = span;
-                beat.last_of_net = b == span - 1;
-                beat.pins        = std::move(beats[b].pins);
+                beat.last_of_net = emitted == beats.size();
+                beat.pins        = std::move(beats[pick].pins);
                 enc.issue.push_back((int)enc.beats.size());
-                enc.issue_degree.push_back(beat.degree);
                 enc.beats.push_back(std::move(beat));
             }
         }
+        if (!commit) {
+            size_t i = 0;
+            for (const Fill& f : beats) for (int node : f.nodes) last_update[node] = saved[i++];
+        }
+        return pads;
+    };
+    for (int span = 2; span <= MAX_SPAN; span++) {
+        auto& group = by_span[span];
+        std::deque<int> pending;
+        for (size_t i = 0; i < group.size(); i++) pending.push_back((int)i);
+        while (!pending.empty()) {
+            int pick = 0;
+            long fewest = -1;
+            for (int scan = 0; scan < (int)pending.size() && scan < cfg.window; scan++) {
+                const long pads = place_net(group[pending[scan]].first, group[pending[scan]].second, span, false);
+                if (fewest < 0 || pads < fewest) { fewest = pads; pick = scan; }
+                if (pads == 0) break;
+            }
+            auto& [net, beats] = group[pending[pick]];
+            pending.erase(pending.begin() + pick);
+            enc.large_nets.push_back(net);
+            place_net(net, beats, span, true);
+        }
+    }
 }
 
 // Step 4: node_slot = row * BANKS + bank. Movable rows first in every bank, fixed rows after, so
@@ -779,9 +843,9 @@ inline void encode_records(Encoded& enc) {
     for (int degree : enc.issue_degree)
         for (int i = degree - MIN_NET_DEGREE; i < NET_DEGREES_PROCESSED; i++) enc.beat_count[i]++;
     enc.span_beat_count.assign(SPAN_GROUPS, enc.beat_count.back());
-    for (int b : enc.issue)
-        if (b != BUBBLE && enc.beats[b].span > 1)
-            for (int i = enc.beats[b].span - 2; i < SPAN_GROUPS; i++) enc.span_beat_count[i]++;
+    for (int span : enc.issue_span)
+        if (span > 1)
+            for (int i = span - 2; i < SPAN_GROUPS; i++) enc.span_beat_count[i]++;
 }
 
 // Steps 1-5 on an Encoded whose work netlist, kinds, pin-node maps, unique_nodes and in_scope_nets
@@ -946,16 +1010,28 @@ inline void decode_stream(const Encoded& enc, const Config& cfg, Failures& fail,
             }
         }
     }
-    // Large-net section: span from span_beat_count, net boundaries from a beat counter (the
-    // device's rule). Lane 0 always holds a pin, EMPTY lanes only trail, and within a beat a
-    // node's pins are adjacent and banks distinct (a node may recur in a later beat of the net). No hazard rule: no consumer writes gradients from these beats yet. Meow.
-    for (long position = small_positions; position < num_positions; ) {
+    // Large-net section, decoded by the device's rules: a pad (lane 0 EMPTY) must be all EMPTY and
+    // is skipped; the span comes from span_beat_count at the net's first real beat, and the net
+    // ends after that many real beats. In a real beat EMPTY lanes only trail, and a node's pins are
+    // adjacent with banks distinct (a node may recur in a later beat of the net). The hazard rule
+    // continues from the small-net section's last_update. Meow.
+    long position = small_positions;
+    auto skip_pads = [&]() {
+        while (position < num_positions && enc.records[0][position * LANES] == EMPTY_RECORD) {
+            for (int lane = 0; lane < LANES; lane++)
+                if (enc.records[0][position * LANES + lane] != EMPTY_RECORD ||
+                    enc.records[1][position * LANES + lane] != EMPTY_RECORD) fail("pad beat not all EMPTY", position);
+            position++;
+        }
+    };
+    for (skip_pads(); position < num_positions; skip_pads()) {
         int span = 2;
         for (int count : enc.span_beat_count) if (position >= count) span++;
         std::vector<GeomPin> net;
-        for (int b = 0; b < span && position < num_positions; b++, position++) {
+        for (int b = 0; b < span; b++, position++) {
+            if (b > 0) skip_pads();
+            if (position >= num_positions) { fail("large net cut short by the stream end", position); break; }
             std::vector<uint32_t> net_slots;
-            if (enc.records[0][position * LANES] == EMPTY_RECORD) fail("large-net beat with EMPTY lane 0", position);
             uint64_t banks_used = 0;
             bool trailing = false;
             for (int lane = 0; lane < LANES; lane++) {
@@ -971,6 +1047,11 @@ inline void decode_stream(const Encoded& enc, const Config& cfg, Failures& fail,
                     if (banks_used >> (slot % BANKS) & 1) fail("bank hit twice in one beat", position);
                     banks_used |= 1ull << (slot % BANKS);
                     net_slots.push_back(slot);
+                    if (slot < enc.first_fixed_slot) {
+                        auto last = last_update.find(slot);
+                        if (last != last_update.end() && position - last->second < cfg.hazard) fail("RAW hazard (large net)", position);
+                        last_update[slot] = position;
+                    }
                 }
                 const int node = it->second;
                 const uint32_t idx_x = record_offset_idx(rx, ob), idx_y = record_offset_idx(ry, ob);

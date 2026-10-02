@@ -133,8 +133,8 @@ int main(int argc, char** argv) {
         long large_beats = 0, min_large_beats = 0;
         for (int b : enc.issue) large_beats += b != packer::BUBBLE && enc.beats[b].span > 1;
         for (int net : enc.large_nets) min_large_beats += ((long)nl.nets[net].size() + pinrec::LANES - 1) / pinrec::LANES;
-        printf("[info] large nets: %ld beats vs %ld at ceil(degree/16); %ld of %zu nets need extra beats\n",
-               large_beats, min_large_beats, enc.large_extra_span, enc.large_nets.size());
+        printf("[info] large nets: %ld beats vs %ld at ceil(degree/16); %ld of %zu nets need extra beats; %ld pad beats\n",
+               large_beats, min_large_beats, enc.large_extra_span, enc.large_nets.size(), enc.large_pads);
         return ok ? 0 : 1;
     }
 
@@ -178,12 +178,12 @@ int main(int argc, char** argv) {
         for (const auto& entry : pins_per_node) split_nodes += entry.second > pinrec::LANES;
     }
     const bool large_covered = (long)enc.large_nets.size() >= 50 && spans_used == pinrec::SPAN_GROUPS &&
-                               enc.large_extra_span >= 6 && enc.large_dropped >= 1 && split_nodes >= 1 &&
+                               enc.large_extra_span >= 6 && enc.large_dropped >= 1 && split_nodes >= 1 && enc.large_pads >= 1 &&
                                over_96 >= 2 && !over_96_encoded &&
                                (long)enc.large_nets.size() + enc.large_dropped == large_in_range;
     printf("%s [2] large nets: %zu encoded over %ld spans, %ld needing extra beats, %ld dropped (> MAX_SPAN), "
-           "%ld of 97..100 pins left out, %ld nodes split over beats\n", large_covered ? "ok  " : "FAIL",
-           enc.large_nets.size(), spans_used, enc.large_extra_span, enc.large_dropped, over_96, split_nodes);
+           "%ld of 97..100 pins left out, %ld nodes split over beats, %ld pad beats\n", large_covered ? "ok  " : "FAIL",
+           enc.large_nets.size(), spans_used, enc.large_extra_span, enc.large_dropped, over_96, split_nodes, enc.large_pads);
     ok &= large_covered;
 
     printf(ok ? "PASS: hpwl_computer_v2\n" : "FAIL: hpwl_computer_v2\n");
