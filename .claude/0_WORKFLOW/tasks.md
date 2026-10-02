@@ -1169,9 +1169,11 @@ code.
       large nets follow the degree-16 group, one net per beat over `span` consecutive beats,
       grouped by span 2..`MAX_SPAN`=8 (`span_beat_count`). They are opt-in (`Config::large_nets`),
       so the gradient modules' streams are unchanged. Nets of 97..100 pins are dropped (a documented
-      divergence). `hpwl_computer_v2` handles them with a running bbox carried as an integer order
-      key; a carried fcmp cost −0.25 ns. Bit-exact on synthetic (all 7 spans), adaptec1 and
-      newblue2; 0 dropped. C-synth: II=1, depth 23, slack −0.00, +2.4 K LUT.
+      divergence). `hpwl_computer_v2` reduces a **window** of the last 8 beats' max/min on a net's
+      last beat (Mark, 2026-10-02: the same no-feedback pattern the gradient's sums need). It
+      replaced a running bbox with an integer order key, which existed only because a carried
+      fcmp cost −0.25 ns. Bit-exact on synthetic (all 7 spans), adaptec1, newblue2 and newblue3.
+      C-synth: II=1, depth 28, slack −0.00, LUT +3.6 K over the pre-large-net baseline.
       **Packing at its minimum (2026-10-02, later):**
       - Coloring treats large nets as a soft per-bank cap; packing is balanced; nodes with more
         than 16 pins on a net split across beats (these were MMS's only drops).

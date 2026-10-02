@@ -85,8 +85,9 @@ the feedback path, so the reduction pipelines freely.
 | state | 8 beats × 4 floats |
 | adders | 4 trees × 7 adders |
 
-The same window could replace A's integer-key running bbox (a masked 8-input max/min tree).
-Optional, for symmetry.
+A uses the same window for its bbox (a masked 8-input max/min tree). That has been in
+`hpwl_computer_v2` since 2026-10-02 and replaced its integer-key running bbox, so A and B share
+one pattern.
 
 ## The scatter-add hazard on large-net beats (packer work)
 The `HAZARD_DISTANCE` contract (a node's read-modify-writes ≥ 4 beats apart) has two new ways to
@@ -155,5 +156,5 @@ its own header. Not three kernels.**
 3. **Padding from the packer is acceptable.** The packer's full contract is now the header of
    `beat_packer.hpp` (rules R/S/B/L/M/C). This large-net hazard rule is listed there as **L6, not
    yet guaranteed**.
-4. Open: whether A's bbox becomes the window/tree form or keeps the integer key (explained to Mark
-   2026-10-02).
+4. **Window form for both A and B:** one pattern, no integer-key trick. Landed in
+   `hpwl_computer_v2` (`reduce_window`).

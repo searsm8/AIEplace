@@ -13,8 +13,9 @@
 //   beat_loop       record beat -> gather 16 positions + offsets -> v1's Dhar trees -> per-net HPWL
 //
 // Large nets (17..96 pins, pin_record.hpp) follow the degree-16 group: one net per beat over
-// span consecutive beats. Each beat's degree-16 tree gives that beat's max/min, a running bbox
-// carries them across the net, and the net's HPWL lands in lane 0 of its last beat.
+// span consecutive beats. Each beat's degree-16 tree gives that beat's max/min; a window of the
+// last MAX_SPAN beats' values is reduced on the net's last beat, and the net's HPWL lands in lane 0
+// of that beat.
 //
 // The host guarantees the 16 lanes of a beat address distinct banks except where lanes carry the
 // SAME node (adjacent pins of one node on one net), so each bank serves at most one row per beat.
@@ -65,13 +66,20 @@ static int resolve_span(int beat, const int span_count_REG[pinrec::SPAN_GROUPS])
     return span;
 }
 
-// The trick: Integer compare gives the same order as float compare, but faster.
-// Negative values are bit flipped to preserve ordering.
-static int32_t float_to_int(float value) {
+// Window form: a large net's per-beat values sit in a shift register of the last MAX_SPAN beats
+// (newest first), and its last beat reduces the newest `span` of them with a balanced tree. The
+// shift has no logic between registers, so no arithmetic is loop-carried and the tree pipelines
+// like the Dhar trees. Older entries take window[0]'s value -- neutral for max and min. Meow.
+template <typename Op>
+static float reduce_window(const float window[pinrec::MAX_SPAN], int span) {
 #pragma HLS INLINE
-    union { float f; uint32_t u; } bits;
-    bits.f = value;
-    return (int32_t)(bits.u >> 31 ? bits.u ^ 0x7FFFFFFFu : bits.u);
+    static_assert(pinrec::MAX_SPAN == 8, "reduce_window is a 3-level tree");
+    float v[pinrec::MAX_SPAN];
+#pragma HLS ARRAY_PARTITION variable=v complete dim=0
+    for (int w = 0; w < pinrec::MAX_SPAN; w++) v[w] = w < span ? window[w] : window[0];
+    const float v_0_1 = Op::apply(v[0], v[1]), v_2_3 = Op::apply(v[2], v[3]);
+    const float v_4_5 = Op::apply(v[4], v[5]), v_6_7 = Op::apply(v[6], v[7]);
+    return Op::apply(Op::apply(v_0_1, v_2_3), Op::apply(v_4_5, v_6_7));
 }
 
 // Slot-major DDR beat b holds slots 16b..16b+15 -> banks (b&1)*16 + j, row b>>1: sixteen distinct
@@ -167,9 +175,10 @@ static void hpwl_beat_loop(const pinrec::RecordBeat* records_DDR, int num_beats,
                            const float pos_URAM[pinrec::BANKS][ROWS_PER_BANK],      
                            const float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX],
                            OutBeat* out_beats_DDR, int offset_bits) {
-    float   net_hi = 0.0f, net_lo = 0.0f;   // running bbox of the large net in flight
-    int32_t net_hi_int = 0, net_lo_int = 0;
-    int   beat_in_net = 0;
+    float hi_window[pinrec::MAX_SPAN] = {}, lo_window[pinrec::MAX_SPAN] = {};   // newest first
+#pragma HLS ARRAY_PARTITION variable=hi_window complete dim=0
+#pragma HLS ARRAY_PARTITION variable=lo_window complete dim=0
+    int beat_in_net = 0;
 beat_loop:
     for (int beat = 0; beat < num_beats; beat++) {
 #pragma HLS PIPELINE II=1
@@ -178,8 +187,8 @@ beat_loop:
         // Since each beat can hold 16 pins, a X-pin large net is processed over a span of ceil(X/16) beats (padding sometimes to avoid URAM bank conflicts)
         const bool large      = beat >= beat_count_REG[pinrec::NET_DEGREES_PROCESSED - 1]; // control signal for the large-net path
         const int  degree     = large ? pinrec::LANES : resolve_degree(beat, beat_count_REG);
-        const bool first_beat = beat_in_net == 0; // true when processing the first beat of a large net, false for subsequent beats.
-        const bool last_beat  = beat_in_net == resolve_span(beat, span_count_REG) - 1; // true when processing the last beat of a large net.
+        const int  span       = resolve_span(beat, span_count_REG);
+        const bool last_beat  = beat_in_net == span - 1; // true when processing the last beat of a large net.
 
         const DecodedLanes d = decode_lanes(records_DDR[beat], offset_bits);
 
@@ -198,16 +207,16 @@ beat_loop:
         const int degree_idx    = degree - pinrec::MIN_NET_DEGREE;
         const int nets_per_beat = pinrec::LANES / degree;
 
-        // For large nets, once per beat, update the running bbox of the net being processed. 
-        if (large) {   // the loop-carried path: an integer compare-select per beat
-            const float   beat_hi = t.max_deg[degree_idx][0], beat_lo = t.min_deg[degree_idx][0];
-            const int32_t beat_hi_int = float_to_int(beat_hi), beat_lo_int = float_to_int(beat_lo);
-            if (first_beat || beat_hi_int > net_hi_int) // integer compare faster than float compare
-                { net_hi = beat_hi; net_hi_int = beat_hi_int; }
-            if (first_beat || beat_lo_int < net_lo_int)
-                { net_lo = beat_lo; net_lo_int = beat_lo_int; }
-            beat_in_net = last_beat ? 0 : beat_in_net + 1;
+        // Every beat shifts its degree-16 max/min into the window; only large nets ever read it.
+        for (int w = pinrec::MAX_SPAN - 1; w > 0; w--) {
+            hi_window[w] = hi_window[w - 1];
+            lo_window[w] = lo_window[w - 1];
         }
+        hi_window[0] = t.max_deg[degree_idx][0];
+        lo_window[0] = t.min_deg[degree_idx][0];
+        const float net_hi = reduce_window<MaxOp>(hi_window, span);
+        const float net_lo = reduce_window<MinOp>(lo_window, span);
+        if (large) beat_in_net = last_beat ? 0 : beat_in_net + 1;
 
         OutBeat out_beat;
 #pragma HLS ARRAY_PARTITION variable=out_beat.v complete dim=0
