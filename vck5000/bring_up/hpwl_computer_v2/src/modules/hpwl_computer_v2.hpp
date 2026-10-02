@@ -171,7 +171,7 @@ static void hpwl_beat_loop(const pinrec::RecordBeat* records_DDR, int num_beats,
                            const float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX],
                            OutBeat* out_beats_DDR, int offset_bits) {
     float   net_hi = 0.0f, net_lo = 0.0f;   // running bbox of the large net in flight
-    int32_t net_hi_key = 0, net_lo_key = 0;
+    int32_t net_hi_int = 0, net_lo_int = 0;
     int   beat_in_net = 0;
 beat_loop:
     for (int beat = 0; beat < num_beats; beat++) {
@@ -204,11 +204,11 @@ beat_loop:
         // For large nets, once per beat, update the running bbox of the net being processed. 
         if (large) {   // the loop-carried path: an integer compare-select per beat
             const float   beat_hi = t.max_deg[degree_idx][0], beat_lo = t.min_deg[degree_idx][0];
-            const int32_t beat_hi_key = float_order_key(beat_hi), beat_lo_key = float_order_key(beat_lo);
-            if (first_beat || beat_hi_key > net_hi_key) // integer compare faster than float compare
-                { net_hi = beat_hi; net_hi_key = beat_hi_key; }
-            if (first_beat || beat_lo_key < net_lo_key)
-                { net_lo = beat_lo; net_lo_key = beat_lo_key; }
+            const int32_t beat_hi_int = float_order_key(beat_hi), beat_lo_int = float_order_key(beat_lo);
+            if (first_beat || beat_hi_int > net_hi_int) // integer compare faster than float compare
+                { net_hi = beat_hi; net_hi_int = beat_hi_int; }
+            if (first_beat || beat_lo_int < net_lo_int)
+                { net_lo = beat_lo; net_lo_int = beat_lo_int; }
             beat_in_net = last_beat ? 0 : beat_in_net + 1;
         }
 

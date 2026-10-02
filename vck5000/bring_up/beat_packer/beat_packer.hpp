@@ -18,6 +18,77 @@
 //   FIXED_PIN  one per distinct (fixed node, offset)  slot: constant absolute position, no gradient
 // Rewriting every macro and fixed pin to its own slot keeps the offset tables to the cell
 // library's pin geometry (tens to a few hundred values) instead of growing with macro pin count. Meow.
+//
+// =================================================================================================
+// THE PACKER'S CONTRACT -- every rule the device modules rely on and do NOT check themselves.
+// A device module that relies on a rule should cite its tag (e.g. "packer rule B4"). Each rule says
+// who verifies it: check() / check_chunked() decode the streams with only what the device sees;
+// "harness" means only a device harness would notice (a wrong result), not the checker.
+// A new device assumption is not real until it is a rule here AND the checker enforces it. Meow.
+//
+// Records (pin_record.hpp)
+//  R1  record = node_slot << offset_bits | offset_idx. The x and y streams are identical except
+//      for offset_idx: same length, same node_slot in every lane.                  [check]
+//  R2  EMPTY_RECORD (all ones) marks a lane with no pin. Every real node_slot is
+//      <= max_real_node_slot(offset_bits), so no real record can equal it.          [check: fits]
+//  R3  offset_idx indexes this axis's offset table; entry 0 is 0.0f (every pin node uses it).
+//                                                                [check: range; harness: value]
+// Slots
+//  S1  node_slot = row * BANKS + bank, one distinct slot per slot-owning node.         [check]
+//  S2  Movable slots (CELL, MACRO, MACRO_PIN) lie below first_fixed_slot; FIXED_PIN slots at or
+//      above it. first_fixed_slot and num_slots are multiples of BANKS (so of LANES): the device
+//      tests "fixed" as node_slot >= first_fixed_slot and loads/drains whole beats.   [check]
+//  S3  Position image (slot_positions): CELL/MACRO slots hold the node position, FIXED_PIN slots
+//      position + offset, MACRO_PIN slots NaN (the device must refresh them).     [harness: NaN]
+//  S4  num_slots <= the device's slot capacity; otherwise the design must be chunked (C rules).
+//                                                                      [harness / check_chunked]
+// Small nets (degree 2..16), stream positions [0, beat_count[NET_DEGREES_PROCESSED-1])
+//  B1  Beats are grouped by degree, ascending and contiguous; beat_count[d-2] is the cumulative
+//      count through degree d (bubbles included), which is how the device finds a beat's degree.
+//                                                                          [check: decode rule]
+//  B2  Net k of a degree-d beat occupies lanes [k*d, (k+1)*d) and is wholly live or wholly EMPTY;
+//      lanes from nets_per_beat*d up are EMPTY. The device calls net k live iff lane k*d holds a
+//      pin.                                                                            [check]
+//  B3  A node's repeated pins on one net sit in adjacent lanes (pins sorted by node_slot); the
+//      device merges equal adjacent slots before the scatter.                          [check]
+//  B4  Within a beat, distinct nodes use distinct banks, across all its nets, so each bank serves
+//      one row per beat; and a node appears in at most one net of a beat.              [check]
+//  B5  A movable node_slot is not touched again within HAZARD_DISTANCE stream positions (the
+//      scatter-add read-modify-write). A BUBBLE (all-EMPTY beat) is a position too.    [check]
+// Large nets (degree 17..96, cfg.large_nets only), positions [beat_count[last], total)
+//  L1  Follow the small nets, grouped by span 2..MAX_SPAN, ascending and contiguous;
+//      span_beat_count[s-2] is cumulative through span s and continues beat_count. Its last entry
+//      equals the stream length, even with large nets off (then every entry equals it).  [check]
+//  L2  One net per beat; a net's `span` beats are consecutive, so the device finds net boundaries
+//      with a beat counter.                                                 [check: decode rule]
+//  L3  A beat's pins start at lane 0 and EMPTY lanes only trail. The device substitutes lane 0's
+//      position into EMPTY lanes.                                                      [check]
+//  L4  Within a beat: distinct nodes use distinct banks, and a node's pins are adjacent. A node
+//      with > LANES pins on the net is split into <= LANES-pin runs in different beats (same
+//      bank, so never in one beat).                                                    [check]
+//  L5  Only degree 17..MAX_LARGE_NET_DEGREE (96) is encoded. 97..100-pin nets are dropped (Mark,
+//      2026-10-02, deliberate divergence from XPlace/sw_only); nets over IGNORE_NET_DEGREE never
+//      reach the packer (parser mask). Nets needing > MAX_SPAN beats are dropped and counted in
+//      large_dropped.                                  [check: geometry vs enc.large_nets]
+//  L6  NOT YET GUARANTEED: B5's hazard rule on this section. Only hpwl_computer_v2 (no scatter)
+//      consumes it. The gradient path will need it, met by reordering nets and all-EMPTY padding
+//      beats inside a net -- [[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]].
+// Macro-pin list (macro_pin_refs: refresh, then fold)
+//  M1  Every macro pin appears exactly once; MACRO_PIN_SKIP entries are padding.        [check]
+//  M2  No macro recurs within HAZARD_DISTANCE entries (the fold read-modify-write).     [check]
+//  M3  FIRST marks a macro's first entry (starts its sum), LAST its last (writes the total into
+//      the macro's gradient).                                                        [harness]
+// Chunking (encode_chunked, designs over capacity)
+//  C1  Every movable node is owned by exactly one chunk; a macro and its macro pins by the same one.
+//  C2  Every small net is homed in one chunk; its nodes owned elsewhere are ghost slots there.
+//      Large nets are NOT chunked yet: a chunked design drops them.
+//  C3  The exchange buffer is consumer-major and every entry is written exactly once; a chunk's
+//      import list covers its ghosts in region order; export lists cover their blocks, with -1
+//      only in padding segments.
+//  C4  A producer's gradient-return sequence repeats no slot within HAZARD_DISTANCE entries
+//      (padding segments).                                              [check_chunked: C1-C4]
+//  C5  Each chunk is an ordinary stream: R, S, B and M hold per chunk.   [check_chunked decodes]
+// =================================================================================================
 
 #include "pin_record.hpp"
 

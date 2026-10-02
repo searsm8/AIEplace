@@ -43,6 +43,10 @@ library's pin geometry: at most 131 values over all 44 designs):
 | FIXED_PIN | constant `pos + offset` (host) | not written |
 
 ## The host guarantees, per beat
+**The complete contract** (records, slots, small and large nets, macro list, chunking; each rule
+tagged and marked with what verifies it) is the header comment of `beat_packer.hpp`. This table is the
+short version.
+
 | # | rule | met by |
 |---|---|---|
 | 1 | a net's distinct nodes use distinct banks | coloring (Welsh-Powell, least-loaded bank, min-conflicts repair) |
