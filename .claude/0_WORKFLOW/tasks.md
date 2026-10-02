@@ -1,8 +1,10 @@
 # Tasks
 
-**Active Task (2026-10-02): #41 `hpwl_gradient_computer`.** 17–96-pin nets: HPWL path landed in
-`hpwl_computer_v2`; next is their gradient (L3) in `hpwl_gradient_computer`, then the NMU bandwidth
-check, then timing closure. → [[_NEW_HANDOFF_41_next_steps_20261002.md]]
+**Active Task (2026-10-02): #41 `hpwl_gradient_computer`, 17–96-pin nets.** Plan steps 1–2 done:
+the DATAFLOW split and the packer's hazard schedule with pads. **Next: step 3**, the large-net
+paths in `pin_bbox` / `wa_sums` / `wa_gradient`. It is designed but not started, and the FIFO-depth
+bound (new rule L8) comes first. Then the NMU bandwidth check, then timing closure.
+→ [[_NEW_HANDOFF_41_next_steps_20261002.md]]
 
 Open work, one section per task. **Status lives here; evidence lives in a
 report.** Don't reuse task numbers, find the highest number and add one.

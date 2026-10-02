@@ -84,7 +84,9 @@
     designs over 1 M slots.
   - Verification: tier-1 exact (HPWL bit-exact, gradient ~4e-7), and C-synthesis II=1 on every loop.
   - All 44 designs encode; 8 need chunks.
-  - 17..96-pin nets (opt-in span groups, 2026-10-02): HPWL bit-exact in `hpwl_computer_v2`;
+  - The gradient beat loop is 3 DATAFLOW stages (`pin_bbox`/`wa_sums`/`wa_gradient`, bit-identical).
+  - 17..96-pin nets (opt-in span groups, hazard-scheduled with pads, 2026-10-02): HPWL bit-exact in
+    `hpwl_computer_v2`; gradient path = plan step 3, designed, not started;
     97..100 dropped by decision. Open: their gradient (L3), plus post-route timing and URAM.
   → [[_NEW_REPORT_41_record_datapath_20260922.md]], protocol in `vck5000/bring_up/beat_packer/README.md`.
 - All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
