@@ -65,12 +65,9 @@ static int resolve_span(int beat, const int span_count_REG[pinrec::SPAN_GROUPS])
     return span;
 }
 
-// Integer key with the same order as the float (NaN aside): negatives get their magnitude bits
-// flipped. The large-net running bbox compares keys, because its compare is loop-carried and an
-// fcmp there missed the 3.33 ns clock by 0.25 ns; the conversion itself sits off the carried path. Meow.
 // The trick: Integer compare gives the same order as float compare, but faster.
-// Negative values are bit flipped to preserve order.
-static int32_t float_order_key(float value) {
+// Negative values are bit flipped to preserve ordering.
+static int32_t float_to_int(float value) {
 #pragma HLS INLINE
     union { float f; uint32_t u; } bits;
     bits.f = value;
@@ -204,7 +201,7 @@ beat_loop:
         // For large nets, once per beat, update the running bbox of the net being processed. 
         if (large) {   // the loop-carried path: an integer compare-select per beat
             const float   beat_hi = t.max_deg[degree_idx][0], beat_lo = t.min_deg[degree_idx][0];
-            const int32_t beat_hi_int = float_order_key(beat_hi), beat_lo_int = float_order_key(beat_lo);
+            const int32_t beat_hi_int = float_to_int(beat_hi), beat_lo_int = float_to_int(beat_lo);
             if (first_beat || beat_hi_int > net_hi_int) // integer compare faster than float compare
                 { net_hi = beat_hi; net_hi_int = beat_hi_int; }
             if (first_beat || beat_lo_int < net_lo_int)

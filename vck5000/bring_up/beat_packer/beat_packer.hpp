@@ -78,7 +78,7 @@
 //  M2  No macro recurs within HAZARD_DISTANCE entries (the fold read-modify-write).     [check]
 //  M3  FIRST marks a macro's first entry (starts its sum), LAST its last (writes the total into
 //      the macro's gradient).                                                        [harness]
-// Chunking (encode_chunked, designs over capacity)
+// Chunking (encode_chunked, required to handle designs too big for URAM)
 //  C1  Every movable node is owned by exactly one chunk; a macro and its macro pins by the same one.
 //  C2  Every small net is homed in one chunk; its nodes owned elsewhere are ghost slots there.
 //      Large nets are NOT chunked yet: a chunked design drops them.
