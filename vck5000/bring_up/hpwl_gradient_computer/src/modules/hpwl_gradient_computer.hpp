@@ -276,10 +276,10 @@ load_pos_zero_grad:
         const pinrec::SlotBeat beat = pos_DDR[b];
         const bool movable = b < movable_slot_beats;
         for (int j = 0; j < pinrec::LANES; j++) {
-            if (b & 1) {
+            if (b & 1) { // odd beat: banks LANES..2*LANES-1, row b>>1
                 pos_URAM[j + pinrec::LANES][b >> 1] = beat.v[j];
                 if (movable) grad_URAM[j + pinrec::LANES][b >> 1] = 0.0f;
-            } else {
+            } else { // even beat: banks 0..LANES-1
                 pos_URAM[j][b >> 1] = beat.v[j];
                 if (movable) grad_URAM[j][b >> 1] = 0.0f;
             }

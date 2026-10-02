@@ -1,5 +1,8 @@
 # Tasks
 
+**Active Task (2026-10-02): #41 `hpwl_gradient_computer`.** Next: Mark's call on nets of 17–100
+pins, then the NMU bandwidth check, then timing closure. → [[_NEW_HANDOFF_41_next_steps_20261002.md]]
+
 Open work, one section per task. **Status lives here; evidence lives in a
 report.** Don't reuse task numbers, find the highest number and add one.
 

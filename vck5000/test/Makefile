@@ -26,6 +26,11 @@ INCLUDES  = -I../pl/src/pl_algo/src -I../bring_up/hpwl_gradient_dhar/src -I../br
             -I../bring_up/beat_packer -I../bring_up/hpwl_computer_v2/src -I../bring_up/hpwl_gradient_computer/src \
             -I../bring_up/hpwl_computer_v3/src -I../bring_up/hpwl_gradient_computer_v2/src
 BUILD     = build
+# -MMD -MP: g++ writes $(BUILD)/<harness>.d listing every header the harness includes, so editing a
+# module header rebuilds exactly the harnesses that use it. Without this the pattern rule saw only
+# the .cpp and `make test` re-ran stale binaries against the old header. A binary whose .d is
+# missing (built before this, or .d deleted) is rebuilt via the empty $(DEPFILES) rule below. Meow.
+DEPFLAGS  = -MMD -MP
 
 # sched_verify replays a recorded sw_only schedule against the PL scheduler. The trace and the
 # config that produced it are committed side by side -- see fixtures/README.md. Point TRACE at
@@ -35,13 +40,14 @@ TRACE ?= fixtures/schedule_trace_adaptec1.csv
 
 HARNESSES = density_model density_bin_model node_footprint_test force_gather_test metrics_test iteration_update_test spectral_test fft_pl_test field_solve_test hpwl_grad_test hpwl_dhar_test hpwl_dhar_v2_test hpwl_computer_test hpwl_computer_v2_test hpwl_gradient_computer_test hpwl_computer_v3_test hpwl_gradient_computer_v2_test bb_reduce_test sched_verify
 BINS      = $(addprefix $(BUILD)/, $(HARNESSES))
+DEPFILES  = $(addsuffix .d, $(BINS) $(BUILD)/hpwl_grad_test_asan $(BUILD)/hpwl_dhar_test_asan)
 
 .PHONY: all test clean
 all: test
 
-$(BUILD)/%: %.cpp
+$(BUILD)/%: %.cpp $(BUILD)/%.d
 	@mkdir -p $(BUILD)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -o $@
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(INCLUDES) $< -o $@
 
 # hpwl_grad_test's assertion [5] is a bounds check, not a value check: dropping either net-mask
 # `continue` in hpwl_gradient leaves the gradient BIT-IDENTICAL but indexes bb_DDR[-1] and then
@@ -57,9 +63,9 @@ test-asan: $(BUILD)/hpwl_grad_test_asan
 	@echo "=== hpwl_grad_test (address,undefined) ==="
 	@setarch $$(uname -m) -R $(BUILD)/hpwl_grad_test_asan
 
-$(BUILD)/hpwl_grad_test_asan: hpwl_grad_test.cpp
+$(BUILD)/hpwl_grad_test_asan: hpwl_grad_test.cpp $(BUILD)/hpwl_grad_test_asan.d
 	@mkdir -p $(BUILD)
-	$(CXX) $(ASAN_FLAGS) $(INCLUDES) $< -o $@
+	$(CXX) $(ASAN_FLAGS) $(DEPFLAGS) $(INCLUDES) $< -o $@
 
 # Same bounds-check rationale for the Dhar variant: the load guard (k<deg) on the padded-16 block
 # and the phase-Z pre-zero of dropped >16 pins are only visible to a sanitizer, not a value check.
@@ -68,9 +74,9 @@ test-asan-dhar: $(BUILD)/hpwl_dhar_test_asan
 	@echo "=== hpwl_dhar_test (address,undefined) ==="
 	@setarch $$(uname -m) -R $(BUILD)/hpwl_dhar_test_asan
 
-$(BUILD)/hpwl_dhar_test_asan: hpwl_dhar_test.cpp
+$(BUILD)/hpwl_dhar_test_asan: hpwl_dhar_test.cpp $(BUILD)/hpwl_dhar_test_asan.d
 	@mkdir -p $(BUILD)
-	$(CXX) $(ASAN_FLAGS) $(INCLUDES) $< -o $@
+	$(CXX) $(ASAN_FLAGS) $(DEPFLAGS) $(INCLUDES) $< -o $@
 
 test: $(BINS)
 	@fail=0; \
@@ -97,3 +103,6 @@ run-%: $(BUILD)/%
 
 clean:
 	rm -rf $(BUILD)
+
+$(DEPFILES): ;
+-include $(wildcard $(DEPFILES))

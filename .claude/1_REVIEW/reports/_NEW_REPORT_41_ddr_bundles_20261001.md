@@ -111,6 +111,19 @@ the gradient in the same loop (`load_pos_zero_grad`), in `hpwl_gradient_computer
 channels behind the NoC), plus `BRAM`. Every m_axi port reaches the same memory, so separate bundles
 cannot be pinned to separate DDR banks on this card.
 
+Measured 2026-10-02 (unpacked platform XSA in `.claude/2_ARTIFACTS/platform_xsa/`, and a Vivado
+`get_sites` query on an empty xcvc1902 design, script in `platform_xsa/noc_sites/q.tcl`):
+- **`MC_NOC0` = 4 DDR4 controllers interleaved at 4 KB** (`top_axi_noc_mc_0.hwh`: `NUM_MC=4`,
+  `MC_INTERLEAVE_SIZE=4096`, `DDR4-3200AA`, 72-bit with ECC = 64 data bits, 4 GB each). Theoretical
+  peak 4 × 3200 MT/s × 8 B = **102.4 GB/s** total; sustained is lower (not measured).
+- **Device NoC sites:** 28 `NOC_NMU512` + 26 `NOC_NMU128` masters, 28 `NOC_NSU512` + 22 `NOC_NSU128`
+  slaves, 4 `DDRMC`, 16 `AIE_NOC` interface tiles, 2 `CPM`, 1 `PS9`. The platform allows at most 30
+  kernel AXI-MM managers (`maxAXIMMManagers` in `xsa.json`).
+- **Not yet checked against the docs:** which NMU type serves PL kernels (expected NMU512), and the
+  per-NMU bandwidth (expected ~16 GB/s per direction, a 128-bit NoC channel at ~1 GHz). If that
+  holds, one 512-bit port at 300 MHz (19.2 GB/s) is NMU-limited, and the `records` stream alone needs
+  that rate.
+
 ## Open
 - Confirm the hardware cost of a non-burst stream with RTL co-simulation (A vs C), if the intuition
   needs a number.
