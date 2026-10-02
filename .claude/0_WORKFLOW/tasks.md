@@ -1168,6 +1168,20 @@ code.
       (online rescale, about 1.7×) is a deliberate divergence from sw_only.
       → [[_NEW_PLAN_41_large_nets_on_records_20260923.md]]
 - [ ] Optional: a min-cut partitioner if bigblue4 / newblue7 ghost cost (13–19%) matters.
+- Slide-deck source for this module (2026-10-01): [[_NEW_EXPLAINER_41_hpwl_gradient_computer_20261001.md]]
+- m_axi bundle experiment (2026-10-01): merging bundles keeps II=1 but loses bursts on every pointer narrower than the port (incl. per-beat `out_beats`) and saves no LUTs; keep bundles grouped by width. DATAFLOW does not fit (URAM ping-pong would need 512/463); setup+drain is ≥40 K cycles vs 51.5 K beat loop on adaptec1, to be removed by the resident iteration. → [[_NEW_REPORT_41_ddr_bundles_20261001.md]]
+- [x] **Gradient zeroing fused into the position load (2026-10-01, Mark).** Inline loop
+      `load_pos_zero_grad` in `hpwl_gradient_computer` and, per chunk, in `hpwl_gradient_computer_v2`;
+      `fill_slot_array` deleted. Saves movable_slot_beats cycles per call (13.2 K on adaptec1, ~20% of
+      the kernel). Tier 1 passes (forced rebuild; a no-zeroing mutant fails both harnesses). C-synth:
+      II=1, depth 3, 512-bit burst kept; LUT −168, clock estimate unchanged. Not re-run: RTL co-sim.
+- [ ] **Big Fix, for the resident loop:** positions and gradients stay in URAM, so load and drain
+      disappear. Open: URAM budget (256 of 463 per axis, both axes do not fit) and chunked designs
+      (8/44 keep per-chunk DDR traffic). Recorded in `pl/src/pl_algo/DATAFLOW.md`.
+- [ ] **`hpwl_gradient_computer_v2` loses bursts on `offset_table` / `exp_lut`** (pre-existing): they
+      share gmem0, which is 1024 bits wide for `ChunkDesc`, so both loads are non-burst (depth 75).
+      Small loads, so low cost; give them their own 32-bit bundle when v2 is next touched. Its
+      clock estimate (3.895 ns, slack −1.46) is also pre-existing.
 
 ---
 

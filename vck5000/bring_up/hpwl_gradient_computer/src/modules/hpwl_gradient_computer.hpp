@@ -5,8 +5,8 @@
 // one axis per call. Extends hpwl_computer_v2 (same on-chip gather, same Dhar bbox trees) with the
 // rest of Dhar's Method 1, and does the pin->node summation as an on-chip scatter-add:
 //
-//   load_pos / refresh_macros / load_offsets   as hpwl_computer_v2
-//   zero_grad        grad_URAM[movable slots] = 0, 16 slots per cycle
+//   load_pos_zero_grad   positions -> pos_URAM and grad_URAM[movable slots] = 0, one pass
+//   refresh_macros / load_offsets   as hpwl_computer_v2
 //   beat_loop        gather -> bbox trees -> per-pin exp terms (Fig. 5) -> four sum trees
 //                    (dhar_tree<AddOp>, Fig. 6/7) -> per-net 1/B^2 -> per-pin combiner (Fig. 8,
 //                    eq. 4) -> merge lanes of a repeated node -> grad[node_slot] += g
@@ -56,17 +56,6 @@ load_lut:
         prev = value;
     }
     for (int copy = 0; copy < EXP_LOOKUPS; copy++) lut_BRAM[copy][lut_size - 1] = LutPair{prev, 0.0f};   // never read: idx < lut_size-1
-}
-
-static void fill_slot_array(int num_slot_beats, float value, float dst_URAM[pinrec::BANKS][ROWS_PER_BANK]) {
-fill_slots:
-    for (int b = 0; b < num_slot_beats; b++) {
-#pragma HLS PIPELINE II=1
-        for (int j = 0; j < pinrec::LANES; j++) {
-            if (b & 1) dst_URAM[j + pinrec::LANES][b >> 1] = value;
-            else       dst_URAM[j][b >> 1]                 = value;
-        }
-    }
 }
 
 static void drain_slot_array(const float src_URAM[pinrec::BANKS][ROWS_PER_BANK], int num_slot_beats,
@@ -205,12 +194,12 @@ beat_loop:
         bool same_as_next[pinrec::LANES];
 #pragma HLS ARRAY_PARTITION variable=same_as_next complete dim=0
         for (int i = 0; i < pinrec::LANES; i++)
-            same_as_next[i] = i + 1 < pinrec::LANES && !d.empty[i] && d.slot[i] == d.slot[i + 1];
+            same_as_next[i] = i + 1 < pinrec::LANES && !d.empty[i] && d.slot_idx[i] == d.slot_idx[i + 1];
         for (int step = 1; step < pinrec::LANES; step *= 2) {
             float next_g[pinrec::LANES];
 #pragma HLS ARRAY_PARTITION variable=next_g complete dim=0
             for (int i = 0; i < pinrec::LANES; i++) {
-                const bool joined = i + step < pinrec::LANES && !d.empty[i] && d.slot[i] == d.slot[i + step];
+                const bool joined = i + step < pinrec::LANES && !d.empty[i] && d.slot_idx[i] == d.slot_idx[i + step];
                 next_g[i] = joined ? g[i] + g[i + step] : g[i];
             }
             for (int i = 0; i < pinrec::LANES; i++) g[i] = next_g[i];
@@ -223,8 +212,8 @@ beat_loop:
             float    add = 0.0f;
             for (int i = 0; i < pinrec::LANES; i++) {
                 const bool head = i == 0 || !same_as_next[i - 1];
-                if (head && !d.empty[i] && d.slot[i] < (uint32_t)first_fixed_slot && d.slot[i] % pinrec::BANKS == (uint32_t)b) {
-                    hit = true; row = d.slot[i] / pinrec::BANKS; add = g[i];
+                if (head && !d.empty[i] && d.slot_idx[i] < (uint32_t)first_fixed_slot && d.slot_idx[i] % pinrec::BANKS == (uint32_t)b) {
+                    hit = true; row = d.slot_idx[i] / pinrec::BANKS; add = g[i];
                 }
             }
             if (hit) grad_URAM[b][row] += add;
@@ -278,11 +267,27 @@ cache_counts:
     for (int k = 0; k < pinrec::NET_DEGREES_PROCESSED; k++) beat_count_REG[k] = beat_count_DDR[k];
 
     const int movable_slot_beats = first_fixed_slot / pinrec::LANES;
-    load_slot_array(pos_DDR, num_slot_beats, pos_URAM);
+    // load_slot_array for positions with the gradient zeroing folded in: grad_URAM is a separate
+    // array, so its writes cost no extra cycles. first_fixed_slot is a multiple of BANKS, so the
+    // movable beats are a prefix of the position beats. Meow.
+load_pos_zero_grad:
+    for (int b = 0; b < num_slot_beats; b++) {
+#pragma HLS PIPELINE II=1
+        const pinrec::SlotBeat beat = pos_DDR[b];
+        const bool movable = b < movable_slot_beats;
+        for (int j = 0; j < pinrec::LANES; j++) {
+            if (b & 1) {
+                pos_URAM[j + pinrec::LANES][b >> 1] = beat.v[j];
+                if (movable) grad_URAM[j + pinrec::LANES][b >> 1] = 0.0f;
+            } else {
+                pos_URAM[j][b >> 1] = beat.v[j];
+                if (movable) grad_URAM[j][b >> 1] = 0.0f;
+            }
+        }
+    }
     refresh_macro_pins(macro_pins_DDR, num_macro_pins, pos_URAM);
     load_offset_table(offset_table_DDR, offset_table_size, offset_BRAM);
     load_exp_lut(exp_lut_DDR, lut_size, lut_BRAM);
-    fill_slot_array(movable_slot_beats, 0.0f, grad_URAM);
 
     gradient_beat_loop(records_DDR, num_beats, beat_count_REG, pos_URAM, offset_BRAM, lut_BRAM, lut_size,
                        inv_lut_step, inv_gamma, grad_URAM, first_fixed_slot, out_beats_DDR, offset_bits);

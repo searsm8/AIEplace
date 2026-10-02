@@ -73,6 +73,8 @@ If something does need amending, an annotation is better than hard edits.
 4. Place new reports in `.claude/1_REVIEW/reports`. These files should be text only, since it is git tracked.
 Large artifacts such as images or gifs should be placed in `.claude/2_ARTIFACTS` which is not git tracked (create if needed).
 
+5. Maintain an "Active Task" line at the top of the file. Check it at the beginning of conversations, and update at the end of conversations. If there is no current Active Task and no obvious one to attach, ask Mark.
+
 ## A handoff IS a report-in-progress (policy, 2026-08-31)
 There is no separate, persistent class of handoff document. A handoff exists only **between
 sessions** — it is the running draft of a report while the work is still open. When the work

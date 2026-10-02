@@ -6,7 +6,7 @@
 // in v3; ghost GRADIENTS come back through the same buffer the other way:
 //
 //   export pass   for each chunk j: load positions, refresh macro pins, export ghost positions
-//   compute pass  for each chunk k: load positions, refresh, import its ghosts, zero grad, run the
+//   compute pass  for each chunk k: load positions (zeroing grad in the same pass), refresh, import its ghosts, run the
 //                 gradient beat loop, write its ghosts' gradients back into its own region, and
 //                 drain its movable slots to grad_DDR
 //   fold pass     for each chunk j: reload its gradient, add the ghost gradients other chunks
@@ -108,10 +108,25 @@ compute_pass:
     for (int k = 0; k < num_chunks; k++) {
         const pinrec::ChunkDesc desc = chunks_DDR[k];
         const int movable_slot_beats = desc.first_fixed_slot / pinrec::LANES;
-        load_slot_array(pos_DDR + desc.slot_beat_offset, desc.num_slot_beats, pos_URAM);
+        // Positions in with grad_URAM zeroed in the same pass (separate arrays, no extra cycles). Meow.
+        const pinrec::SlotBeat* chunk_pos_DDR = pos_DDR + desc.slot_beat_offset;
+    load_pos_zero_grad:
+        for (int b = 0; b < desc.num_slot_beats; b++) {
+#pragma HLS PIPELINE II=1
+            const pinrec::SlotBeat beat = chunk_pos_DDR[b];
+            const bool movable = b < movable_slot_beats;
+            for (int j = 0; j < pinrec::LANES; j++) {
+                if (b & 1) {
+                    pos_URAM[j + pinrec::LANES][b >> 1] = beat.v[j];
+                    if (movable) grad_URAM[j + pinrec::LANES][b >> 1] = 0.0f;
+                } else {
+                    pos_URAM[j][b >> 1] = beat.v[j];
+                    if (movable) grad_URAM[j][b >> 1] = 0.0f;
+                }
+            }
+        }
         refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);
         import_ghost_values(desc, import_slots_DDR, exchange_DDR, pos_URAM);
-        fill_slot_array(movable_slot_beats, 0.0f, grad_URAM);
         cache_beat_counts(desc, beat_count_REG);
         gradient_beat_loop(records_DDR + desc.record_beat_offset, desc.num_beats, beat_count_REG, pos_URAM,
                            offset_BRAM, lut_BRAM, lut_size, inv_lut_step, inv_gamma, grad_URAM,

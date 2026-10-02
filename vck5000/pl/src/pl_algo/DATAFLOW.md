@@ -176,6 +176,23 @@ requires every kernel arg set) -- the bring-up sw_emu modes will error until tha
 > `MODE_PLACE` yet. Composing the resident kernel and wiring the host driver are two steps; the second
 > is pending. Do not re-derive these modules -- they exist and they match.
 
+### #41 record-stream gradient inside the resident loop: keep positions and gradients in URAM (2026-10-01)
+The standalone `bring_up/hpwl_gradient_computer` loads every position from DDR and drains every
+gradient back each call. On adaptec1 that is >=26 K of the ~65 K cycles per axis (51.5 K beat loop;
+the gradient zeroing is already fused into the load). **In the resident loop those two phases must
+disappear:** `iteration_update` writes v_{k+1} straight into the position URAM, and whoever consumes
+the gradient (`bb_reduce` / `iteration_update`) reads it on chip, zeroing as it reads. Open
+constraints, none decided:
+- **URAM budget.** One axis is 256 of 463 URAMs at the 1 M-slot capacity (pos + grad, 128 each), so
+  both axes resident at once does not fit (512). Options: size the capacity to the design, process
+  axes in turn, or keep one axis in DDR. Density's bin scatter also needs positions.
+- **Chunking.** The 8 of 44 designs over 1 M slots (`hpwl_computer_v3` / `hpwl_gradient_computer_v2`)
+  cannot hold all positions on chip: their per-chunk load, ghost exchange and drain through DDR
+  stay, so the Big Fix applies fully only to unchunked designs.
+- **Overlap belongs between modules, through streams.** DATAFLOW between phases that share a URAM
+  array does not work: it would ping-pong the array (2x URAM), and `pos_URAM` has several writers.
+-> [[_NEW_REPORT_41_ddr_bundles_20261001.md]]
+
 ## Open format decisions (to finalize as modules are implemented)
 - AoS vs SoA and 1-vs-2 nodes per beat for the coord/gradient buffers.
 - Exact net packet grouping for the AIE HPWL graph (mirror sw_only `prepareNetGroup`).

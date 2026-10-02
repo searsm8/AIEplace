@@ -1,5 +1,5 @@
-// hpwl_gradient_computer_top.cpp -- kernel top wrapping hpwl_gradient_computer (#41). One m_axi
-// bundle per DDR stream so the sequential streams never share a port; scalars on the control bundle.
+// hpwl_gradient_computer_top.cpp -- kernel top wrapping hpwl_gradient_computer (#41). Scalars go on
+// the AXI-Lite control port. Meow.
 
 #include "modules/hpwl_gradient_computer.hpp"
 
@@ -23,6 +23,9 @@ extern "C" void hpwl_gradient_computer_top(
         int                        offset_bits,
         float                      inv_gamma,
         float                      inv_lut_step) {
+// Bundles are grouped by data WIDTH, not by stream: a bundle's port is as wide as its widest pointer,
+// and HLS 2022.2 infers no burst for a narrower pointer on it (measured, #41 bundle experiment).
+// Streams never overlap, so same-width pointers can share (gmem4). Meow.
 #pragma HLS INTERFACE m_axi port=records      bundle=gmem0 offset=slave
 #pragma HLS INTERFACE m_axi port=beat_count   bundle=gmem1 offset=slave
 #pragma HLS INTERFACE m_axi port=pos          bundle=gmem2 offset=slave

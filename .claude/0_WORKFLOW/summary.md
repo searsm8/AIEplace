@@ -161,9 +161,10 @@
   now a template over the combining operator) → 16-lane selector → one packed `OutBeat`/beat. II=1
   took 4 synthesis iterations (fixed-width write loop, then `ARRAY_PARTITION` on two arrays, then
   the wide-output-beat fix) — full table in the report. → [[REPORT_40_hpwl_computer_20260921.md]]
-- **#41 — `hpwl_gradient_computer`**, opened 2026-09-21, unblocked by #40: extends `hpwl_computer`
-  with Dhar's term-gen/LUT/adder-trees/combiner (`dhar_tree<AddOp>`) to get the actual per-pin
-  gradient, not just HPWL. Not started.
+- **#41 — keep in mind for the resident loop (2026-10-01):** standalone, loading positions and
+  draining gradients is >=26 K cycles vs a 51.5 K-cycle beat loop per axis (adaptec1); the resident
+  loop must keep both in URAM (256 of 463 URAMs per axis). Chunked designs (8/44) keep per-chunk DDR
+  traffic. m_axi bundles are grouped by width. → DATAFLOW.md, [[_NEW_REPORT_41_ddr_bundles_20261001.md]]
 
 ## Also open
 - **#21 — repo restructure** (host to top level, one host binary). Proposal only, nothing started.

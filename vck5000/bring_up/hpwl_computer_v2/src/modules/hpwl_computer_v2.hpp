@@ -70,7 +70,7 @@ static void refresh_macro_pins(const pinrec::MacroPinRef* macro_pins_DDR, int nu
 refresh_macros:   // reads macro slots, writes macro-pin slots: disjoint, so no carried dependence
     for (int e = 0; e < num_macro_pins; e++) {
 #pragma HLS PIPELINE II=1
-#pragma HLS DEPENDENCE variable=pos_URAM inter false
+#pragma HLS DEPENDENCE variable=pos_URAM inter false // tells HLS the read and write are disjoint, so it can schedule II=1
         const pinrec::MacroPinRef ref = macro_pins_DDR[e];
         if (ref.pin_slot == pinrec::MACRO_PIN_SKIP) continue;   // fold-schedule padding
         const float macro_pos = pos_URAM[ref.macro_slot % pinrec::BANKS][ref.macro_slot / pinrec::BANKS];
@@ -90,7 +90,7 @@ load_offsets:
 }
 
 struct DecodedLanes {
-    uint32_t slot[pinrec::LANES];
+    uint32_t slot_idx[pinrec::LANES];
     uint32_t offset_idx[pinrec::LANES];
     bool     empty[pinrec::LANES];
 };
@@ -100,7 +100,7 @@ static DecodedLanes decode_lanes(const pinrec::RecordBeat& rb, int offset_bits) 
     DecodedLanes d;
     for (int i = 0; i < pinrec::LANES; i++) {
         d.empty[i]      = rb.r[i] == pinrec::EMPTY_RECORD;
-        d.slot[i]       = pinrec::record_node_slot(rb.r[i], offset_bits);
+        d.slot_idx[i]       = pinrec::record_node_slot(rb.r[i], offset_bits);
         d.offset_idx[i] = d.empty[i] ? 0u : pinrec::record_offset_idx(rb.r[i], offset_bits);
     }
     return d;
@@ -117,16 +117,21 @@ static void gather_pin_positions(const DecodedLanes& d, const float pos_URAM[pin
 #pragma HLS INLINE
     float bank_pos[pinrec::BANKS];
 #pragma HLS ARRAY_PARTITION variable=bank_pos complete dim=0
+// 5 LSBs of slot_idx are used to select the bank (2^5 = 32 banks), remaining MSBs selects the row within URAM.
+// Fully unrolled, synthesizes to 32 mux 16:1 for the URAM bank's read
     for (int b = 0; b < pinrec::BANKS; b++) {
         uint32_t row = 0;
         for (int i = 0; i < pinrec::LANES; i++)
-            if (!d.empty[i] && d.slot[i] % pinrec::BANKS == (uint32_t)b) row = d.slot[i] / pinrec::BANKS;
+            if (!d.empty[i] && d.slot_idx[i] % pinrec::BANKS == (uint32_t)b)
+                row = d.slot_idx[i] / pinrec::BANKS;
         bank_pos[b] = pos_URAM[b][row];
     }
+// Fully unrolled, synthesizes to 16 mux 32:1 for the URAM bank's write
     for (int i = 0; i < pinrec::LANES; i++) {
         float value = 0.0f;
         for (int b = 0; b < pinrec::BANKS; b++)
-            if (d.slot[i] % pinrec::BANKS == (uint32_t)b) value = bank_pos[b];
+            if (d.slot_idx[i] % pinrec::BANKS == (uint32_t)b)
+                value = bank_pos[b];
         pin_pos[i] = value + offset_BRAM[i][d.offset_idx[i]];
     }
 }
