@@ -87,7 +87,7 @@
   - The gradient beat loop is 3 DATAFLOW stages (`pin_bbox`/`wa_sums`/`wa_gradient`, bit-identical).
   - 17..96-pin nets (opt-in span groups, hazard-scheduled with pads, 2026-10-02): HPWL bit-exact in
     `hpwl_computer_v2`; gradient path = plan step 3, designed, not started;
-    97..100 dropped by decision. Open: their gradient (L3), plus post-route timing and URAM.
+    97..100 dropped by decision. Also open: post-route timing and URAM.
   → [[_NEW_REPORT_41_record_datapath_20260922.md]], protocol in `vck5000/bring_up/beat_packer/README.md`.
 - All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
 - **v1 scope DECIDED (Mark, 2026-08-28):** phase-1 GP, device-resident, bit-comparable. **No phase 2,
