@@ -147,7 +147,7 @@ its own header. Not three kernels.**
    `hpwl_gradient_computer_v2` inherits it.
    - **Bit-identity:** every gradient and HPWL output is bit-identical to the pre-split code over
      synthetic (3 packer configs), chunked synthetic (capacity 2048 / 768), adaptec1 and newblue2
-     (driver `/tmp/grad_dump.cpp`, 15.7 MB dump). A 1-ulp perturbation is detected, and tier 1's
+     (driver `.claude/2_ARTIFACTS/grad_identity/grad_dump.cpp` + `identity.sh`, 15.7 MB dump). A 1-ulp perturbation is detected, and tier 1's
      tolerance would not catch one.
    - **C-synth (plain):**
 
