@@ -52,6 +52,24 @@ per call.
 *phases* (load / beat loop / fold / drain), which share `pos_URAM` and `grad_URAM`. That still
 holds. This region contains only the beat loop, and the phases around it stay sequential.
 
+## How B and C know when to read the per-net FIFOs
+No stage ever asks "is this FIFO ready?". Each read is decided by flags that travel *inside* the
+beat FIFO, and it is a blocking read, so it stalls until the data exists.
+
+- **Producer:** A writes the bbox FIFO exactly once per large net, on the net's last beat.
+- **Consumer:** B reads it exactly once per large net, on the first beat it receives with
+  `large && first_beat`. A computed those flags (A owns the beat counter and `span_beat_count`)
+  and passed them along with the beat.
+- **Balance:** one write and one read per large net, in stream order, so the FIFO entries pair up
+  with nets automatically. It ends each call empty, and every stage runs exactly `num_beats`
+  iterations.
+- **Ordering:** B can reach a net's first beat before A has finished that net, because A is at
+  most `span` − 1 beats ahead in that net. B then stalls on the read until A pushes. Meanwhile A
+  can keep going only if the A→B beat FIFO has room for the rest of the net, which is where the
+  depth bound comes from.
+- **B → C:** the same pattern with the sums FIFO. B writes on the net's last beat, C reads on the
+  net's first beat, and the flags are forwarded unchanged.
+
 ## Accumulating sums across a net's beats: no feedback arithmetic
 A running sum `S += beat_sum` is a feedback loop through a float adder. An fadd takes several
 cycles, so at II=1 it would raise II; this is the same class of problem as the bbox compare, and
@@ -131,8 +149,11 @@ its own header. Not three kernels.**
 4. **Synthesis and co-sim:** C-synth, co-sim of the hazard spacing and the FIFO depths, then the
    bit-exact HPWL by-product on the real designs.
 
-## Open questions for Mark
-1. Separate headers per stage (recommended), or three functions in one file?
-2. Should step 1, the pure refactor with no new function, land and be verified before any large-net
-   code? (Recommended: it isolates "DATAFLOW broke something" from "large nets broke something".)
-3. Should A's bbox switch to the window/tree form for symmetry with B, or keep the integer key?
+## Decisions (Mark, 2026-10-02)
+1. **Separate headers per stage.**
+2. **Small steps:** step 1, the pure refactor, lands and is verified before any large-net code.
+3. **Padding from the packer is acceptable.** The packer's full contract is now the header of
+   `beat_packer.hpp` (rules R/S/B/L/M/C). This large-net hazard rule is listed there as **L6, not
+   yet guaranteed**.
+4. Open: whether A's bbox becomes the window/tree form or keeps the integer key (explained to Mark
+   2026-10-02).
