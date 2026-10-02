@@ -207,13 +207,15 @@ beat_loop:
         const int degree_idx    = degree - pinrec::MIN_NET_DEGREE;
         const int nets_per_beat = pinrec::LANES / degree;
 
-        // Every beat shifts its degree-16 max/min into the window; only large nets ever read it.
+        // FOR LARGE NETS ONLY: hi and lo values each beat are held in a shift register
         for (int w = pinrec::MAX_SPAN - 1; w > 0; w--) {
             hi_window[w] = hi_window[w - 1];
             lo_window[w] = lo_window[w - 1];
         }
         hi_window[0] = t.max_deg[degree_idx][0];
         lo_window[0] = t.min_deg[degree_idx][0];
+
+        // current hi and low found for the net: output of reduction tree.
         const float net_hi = reduce_window<MaxOp>(hi_window, span);
         const float net_lo = reduce_window<MinOp>(lo_window, span);
         if (large) beat_in_net = last_beat ? 0 : beat_in_net + 1;
@@ -223,8 +225,8 @@ beat_loop:
     net_hpwl_write:   // a small net position is live iff its first lane holds a pin
         for (int k = 0; k < pinrec::MAX_NETS_PER_BEAT; k++) {
             const bool live = k < nets_per_beat && !d.empty[k * degree];
-            if (large) out_beat.v[k] = k == 0 && last_beat ? net_hi - net_lo : 0.0f;
-            else       out_beat.v[k] = live ? t.max_deg[degree_idx][k] - t.min_deg[degree_idx][k] : 0.0f;
+            if (large) out_beat.v[k] = k == 0 && last_beat ? net_hi - net_lo : 0.0f; // on the last beat, the hi and lo have finalized
+            else       out_beat.v[k] = live ? t.max_deg[degree_idx][k] - t.min_deg[degree_idx][k] : 0.0f; // for small nets, each beat has full nets
         }
         out_beats_DDR[beat] = out_beat; // Output write to DDR
     }
