@@ -17,6 +17,10 @@
 // Same math as sw_only computeHpwlPartials_CPU (Partials.cpp) and hpwl_gradient_dhar: exponents
 // shifted by the net's bbox, exp from the host LUT exp(-d/gamma) with linear interpolation.
 //
+// Large nets (17..96 pins, span 2..8 beats) need values from the net's later beats: A sends the
+// net's bbox to B, and B sends the net's sums to C, each on its own stream, once per net. That makes
+// the beat streams' depth a correctness bound (packer rule L8; see gradient_beat_loop).
+//
 // Each on-chip array has exactly one stage that touches it inside the region (pos/offset: pin_bbox,
 // lut: wa_sums, grad: wa_gradient); the phases around the region stay sequential, because they
 // share pos_URAM and grad_URAM. Meow.
@@ -77,11 +81,25 @@ fold_macros:
 }
 
 // The record stream -> scatter-added gradient (and per-net HPWL), against positions already
-// resident in pos_URAM and a grad_URAM the caller has zeroed. Depth 2 is enough today: every stage
-// reads exactly one beat per iteration and no beat waits on a later one. Large nets will need
-// >= MAX_SPAN (_NEW_PLAN_41_large_net_gradient_fifo_20261002.md), proven by a co-sim depth sweep. Meow.
+// resident in pos_URAM and a grad_URAM the caller has zeroed.
+// Deadlock bound: B reads a large net's first beat, then blocks on net_bboxes until A has finished
+// the net's last real beat; likewise C on net_sums. A writes the net's bbox `skew` pipeline states
+// AFTER its beat write (the window tree sits between them), and a stalled pipeline stalls whole, so
+// by the time the bbox write is reached A has pushed `skew` beats of the NEXT net too:
+//     depth >= extent - 1 + skew      (extent <= MAX_NET_EXTENT, packer rule L8)
+// Measured skew at 3.33 ns (csynth 2026-10-02): A 6 states (pin_beats @20, net_bboxes @26), B 7
+// (sum_beats @37, net_sums @44). Co-sim confirms the formula on a net of extent 13: depth 19 passes,
+// 18 deadlocks on sum_beats (cosim/cosim_depth.tcl). Depth 2*MAX_NET_EXTENT leaves 17 states of skew
+// margin at no extra cost: above 16, HLS puts each beat FIFO in 29 BRAM18, the same at 19 and 32.
+// The per-net streams only absorb how many nets a stage runs ahead of the next. Meow.
+#ifndef PL_BEAT_FIFO_DEPTH
+#define PL_BEAT_FIFO_DEPTH (2 * pinrec::MAX_NET_EXTENT)   // override (-D) only for the co-sim depth sweep
+#endif
+constexpr int BEAT_FIFO_DEPTH = PL_BEAT_FIFO_DEPTH;
+
 static void gradient_beat_loop(const pinrec::RecordBeat* records_DDR, int num_beats,
                                const int beat_count_REG[pinrec::NET_DEGREES_PROCESSED],
+                               const int span_count_REG[pinrec::SPAN_GROUPS],
                                const float pos_URAM[pinrec::BANKS][ROWS_PER_BANK],
                                const float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX],
                                const LutPair lut_BRAM[EXP_LOOKUPS][GRAD_LUT_MAX], int lut_size,
@@ -89,26 +107,32 @@ static void gradient_beat_loop(const pinrec::RecordBeat* records_DDR, int num_be
                                float grad_URAM[pinrec::BANKS][ROWS_PER_BANK], int first_fixed_slot,
                                OutBeat* out_beats_DDR, int offset_bits) {
 #pragma HLS DATAFLOW // three stages working simultaneously, joined by streams
-    hls::stream<PinBeat> pin_beats; // stream between Stage A (pin_bbox) and Stage B (wa_sums)
-    hls::stream<SumBeat> sum_beats; // stream between Stage B (wa_sums) and Stage C (wa_gradient)
-#pragma HLS STREAM variable=pin_beats depth=2
-#pragma HLS STREAM variable=sum_beats depth=2
+    hls::stream<PinBeat> pin_beats;  // stream between Stage A (pin_bbox) and Stage B (wa_sums)
+    hls::stream<SumBeat> sum_beats;  // stream between Stage B (wa_sums) and Stage C (wa_gradient)
+    hls::stream<NetBbox> net_bboxes; // A -> B, one per large net
+    hls::stream<NetSum>  net_sums;   // B -> C, one per large net
+#pragma HLS STREAM variable=pin_beats depth=BEAT_FIFO_DEPTH
+#pragma HLS STREAM variable=sum_beats depth=BEAT_FIFO_DEPTH
+#pragma HLS STREAM variable=net_bboxes depth=16
+#pragma HLS STREAM variable=net_sums depth=16
 
     // Stage A: read record beats from DDR, gather positions from pos_URAM, compute each pin's bbox and HPWL, write HPWL to DDR
-    pin_bbox(records_DDR, num_beats, beat_count_REG, pos_URAM, offset_BRAM, out_beats_DDR, offset_bits, pin_beats);
+    pin_bbox(records_DDR, num_beats, beat_count_REG, span_count_REG, pos_URAM, offset_BRAM, out_beats_DDR, offset_bits,
+             pin_beats, net_bboxes);
 
     // Stage B: read each pin's bbox, compute its exp terms, write four sum trees to sum_beats
-    wa_sums(pin_beats, num_beats, lut_BRAM, lut_size, inv_lut_step, sum_beats);
+    wa_sums(pin_beats, net_bboxes, num_beats, lut_BRAM, lut_size, inv_lut_step, sum_beats, net_sums);
 
     // Stage C: read each pin's sum trees, compute its gradient, scatter-add results into grad_URAM
-    wa_gradient(sum_beats, num_beats, inv_gamma, grad_URAM, first_fixed_slot);
+    wa_gradient(sum_beats, net_sums, num_beats, inv_gamma, grad_URAM, first_fixed_slot);
 }
 
 static void hpwl_gradient_computer(
         const pinrec::RecordBeat*  records_DDR,       // [num_beats] static stream, this axis
         int                        num_beats,
         const int*                 beat_count_DDR,    // [NET_DEGREES_PROCESSED]
-        const pinrec::SlotBeat*    pos_DDR,           // [num_slot_beats] slot-major positions, this axis
+        const int*                 span_count_DDR,    // [SPAN_GROUPS] cumulative beats per large-net span
+        const pinrec::SlotBeat*    pos_DDR,          // [num_slot_beats] slot-major positions, this axis
         int                        num_slot_beats,
         const pinrec::MacroPinRef* macro_pins_DDR,    // [num_macro_pins] refresh + fold list, this axis
         int                        num_macro_pins,
@@ -138,6 +162,10 @@ static void hpwl_gradient_computer(
 #pragma HLS ARRAY_PARTITION variable=beat_count_REG complete dim=0
 cache_counts:
     for (int k = 0; k < pinrec::NET_DEGREES_PROCESSED; k++) beat_count_REG[k] = beat_count_DDR[k];
+    int span_count_REG[pinrec::SPAN_GROUPS];
+#pragma HLS ARRAY_PARTITION variable=span_count_REG complete dim=0
+cache_spans:
+    for (int k = 0; k < pinrec::SPAN_GROUPS; k++) span_count_REG[k] = span_count_DDR[k];
 
     const int movable_slot_beats = first_fixed_slot / pinrec::LANES;
     // load_slot_array for positions with the gradient zeroing folded in: grad_URAM is a separate
@@ -162,7 +190,7 @@ load_pos_zero_grad:
     load_offset_table(offset_table_DDR, offset_table_size, offset_BRAM);
     load_exp_lut(exp_lut_DDR, lut_size, lut_BRAM);
 
-    gradient_beat_loop(records_DDR, num_beats, beat_count_REG, pos_URAM, offset_BRAM, lut_BRAM, lut_size,
+    gradient_beat_loop(records_DDR, num_beats, beat_count_REG, span_count_REG, pos_URAM, offset_BRAM, lut_BRAM, lut_size,
                        inv_lut_step, inv_gamma, grad_URAM, first_fixed_slot, out_beats_DDR, offset_bits);
 
     fold_macro_pins(macro_pins_DDR, num_macro_pins, grad_URAM, pos_URAM);

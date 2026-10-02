@@ -1,6 +1,7 @@
 # PLAN #41 — large nets in `hpwl_gradient_computer`: three stages joined by FIFOs (2026-10-02)
 
-*Proposal for Mark, not built. It supersedes the mechanics of L3 in
+*Status 2026-10-02 (evening): **all four build steps done** (see "Build order"). One correction:
+the beat FIFOs need extent − 1 + pipeline skew, not extent (step 4). It supersedes the mechanics of L3 in
 [[_NEW_PLAN_41_large_nets_on_records_20260923.md]] (three passes that re-read a group's chunk
 stream) and keeps L3's exact arithmetic. The stream it consumes already exists and is verified on
 the HPWL path. Protocol: `vck5000/bring_up/beat_packer/README.md`, "Large nets". Status:
@@ -179,8 +180,57 @@ its own header. Not three kernels.**
 3. **Large-net paths:** A's from v2, B's window sums, C's sums pop.
    *Done when:* a tier-1 gradient golden that includes 17..96-pin nets holds today's tolerance
    (rel_rms ~4e-7, tol 1e-5).
+   **DONE 2026-10-02 (evening).**
+   - **Code:**
+     - A carries v2's large-net path and adds `BeatFlags` (large / pad / first / last / span) to
+       `PinBeat`; it pushes `NetBbox` on a net's last real beat.
+     - B pops the bbox on `first`, keeps a 4×8 window of the degree-16 sums (pads excluded), and
+       pushes `NetSum` on `last`.
+     - C pops the sums on `first` and uses them for net position 0.
+     - `reduce_window` masks with `Op::identity()` (−∞ / +∞ / 0); v2 is still bit-exact.
+   - **Packer rule L8:** extent ≤ `MAX_NET_EXTENT` = 16. The measured maximum over the 44 designs
+     is exactly 16 (9 nets on newblue3); every other design is ≤ 7. The packer drops nets over the
+     bound (`large_extent_dropped`) and the checker enforces it. 0 drops on the 44 designs.
+   - **Tier 1:** synthetic with 17..100-pin nets plus hand-built nets (spans 3..8, a split node with
+     pads inside, an 81-pin net of extent 17 that L8 must drop).
+     - Large nets on: rel_rms 3.4e-7 in default / window=3 / hazard=8, LUT budget ok, HPWL
+       bit-exact. A large-nets-off config is kept.
+     - With large nets off, outputs are **bit-identical to HEAD** (identity driver: synthetic ×3,
+       chunked ×2, adaptec1, newblue2).
+     - **7/7 mutants caught** (`large_net_tools/step3_mutants.sh`): B pops on the wrong beat;
+       window ignores span; masked entries take `window[0]`; C uses the beat's own sums; a pad
+       shifts the sums window; B uses the beat's bbox; A drops the EMPTY-lane stand-in.
+   - **Real designs** (random positions):
+     - adaptec1: rel_rms 6.6e-7, max_rel 9.6e-6, HPWL bit-exact.
+     - newblue2: rel_rms 5.7e-7, max_rel 9.3e-5, HPWL bit-exact.
+     - **newblue3: rel_rms 6.6e-7, but max_rel 4.2e-4 > 1e-4.** The cause is one cell, 482164,
+       with 13,936 large-net pins. Its error relative to its own value is 8.6e-6, and a plain
+       float evaluation of the same formula misses it by 3.2e-5 (3.8× worse). So this is float
+       conditioning, not logic. With large nets off it passes (3.6e-5). **Tolerance left
+       unchanged: Mark's call** (`large_net_tools/grad_worst.cpp`).
 4. **Synthesis and co-sim:** C-synth, co-sim of the hazard spacing and the FIFO depths, then the
    bit-exact HPWL by-product on the real designs.
+   **DONE 2026-10-02 (evening), with one correction to the depth bound.**
+   - **C-synth:** II=1 in every stage. Depths: A 21→28, B 35→44, C 40→41. HLS slack estimates:
+     A/B −0.00, C −0.28 → −0.39, top −0.53 (unchanged). DSP 678→707 (the four 8-input sum trees).
+     The chunked top stays at −1.19.
+   - **The bound was wrong: depth ≥ extent − 1 + skew, not ≥ extent.**
+     - A writes `pin_beats` at state 20 but `net_bboxes` at state 26, because the window tree sits
+       between them. B writes `sum_beats` at 37 and `net_sums` at 44.
+     - A stalled pipeline stalls whole, so by the time the per-net write is reached, a stage has
+       already pushed `skew` beats of the next net.
+     - The first co-sim, at depth 16, deadlocked on a net of extent 13 (12 + 6 = 18 needed).
+   - **Co-sim depth sweep** (`cosim/cosim_depth.tcl`, testbench net of extent 13):
+     - depth 32 PASS, and its hazard-1 negative control still FAILs;
+     - depth 19 PASS;
+     - depth 18 DEADLOCK on `sum_beats` / `net_sums`, as predicted (12 + 7 = 19).
+   - **Production depth = 2 × MAX_NET_EXTENT = 32.** Above 16, HLS maps each beat FIFO to
+     29 BRAM18 (58 total, ≈3% of the device). 19 and 32 cost the same, so the extra 17 states of
+     skew margin are free.
+   - **Production top at depth 32, against step 2:** BRAM 160→218, LUT 209.5→220.1 K,
+     FF 253.6→271.7 K, DSP 678→707. Slack is unchanged (−0.53 ns plain, −1.19 ns chunked).
+   - **Real designs:** HPWL by-product bit-exact on adaptec1, newblue2 and newblue3, and on all 36
+     fitting designs through `hpwl_computer_v2`. The gradient numbers are in step 3 above.
 
 ## Decisions (Mark, 2026-10-02)
 1. **Separate headers per stage.**

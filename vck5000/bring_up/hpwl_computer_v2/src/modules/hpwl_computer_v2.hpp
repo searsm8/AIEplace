@@ -69,14 +69,15 @@ static int resolve_span(int beat, const int span_count_REG[pinrec::SPAN_GROUPS])
 // Window form: a large net's per-beat values sit in a shift register of the last MAX_SPAN beats
 // (newest first), and its last beat reduces the newest `span` of them with a balanced tree. The
 // shift has no logic between registers, so no arithmetic is loop-carried and the tree pipelines
-// like the Dhar trees. Older entries take window[0]'s value -- neutral for max and min. Meow.
+// like the Dhar trees. Older entries take Op's identity (-inf for max, +inf for min, 0 for add);
+// window[0] would do for max and min but double-count in a sum. Meow.
 template <typename Op>
 static float reduce_window(const float window[pinrec::MAX_SPAN], int span) {
 #pragma HLS INLINE
     static_assert(pinrec::MAX_SPAN == 8, "reduce_window is a 3-level tree");
     float v[pinrec::MAX_SPAN];
 #pragma HLS ARRAY_PARTITION variable=v complete dim=0
-    for (int w = 0; w < pinrec::MAX_SPAN; w++) v[w] = w < span ? window[w] : window[0];
+    for (int w = 0; w < pinrec::MAX_SPAN; w++) v[w] = w < span ? window[w] : Op::identity();
     const float v_0_1 = Op::apply(v[0], v[1]), v_2_3 = Op::apply(v[2], v[3]);
     const float v_4_5 = Op::apply(v[4], v[5]), v_6_7 = Op::apply(v[6], v[7]);
     return Op::apply(Op::apply(v_0_1, v_2_3), Op::apply(v_4_5, v_6_7));

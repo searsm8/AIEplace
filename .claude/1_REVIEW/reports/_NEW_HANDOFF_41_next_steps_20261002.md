@@ -1,101 +1,62 @@
-# HANDOFF #41 — what to work on next (rewritten end of 2026-10-02)
+# HANDOFF #41 — what to work on next (rewritten evening of 2026-10-02)
 
 Where `hpwl_gradient_computer` (the WA-gradient PL module on the static pin-record stream) stands,
 and the ranked next steps. Background:
 [[_NEW_EXPLAINER_41_hpwl_gradient_computer_20261001.md]] (what the module is),
 [[_NEW_REPORT_41_ddr_bundles_20261001.md]] (DDR / NoC / URAM findings),
 [[_NEW_REPORT_41_record_datapath_20260922.md]] (how it was built and verified),
-[[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]] (**the large-net plan; steps 1–2 done**).
+[[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]] (**the large-net plan: all four steps done;
+the evidence for this handoff is there**).
 
-## State (everything committed; HEAD `7c6ec41`, tree clean)
-- **Large nets (17..96 pins), HPWL path:** done in `hpwl_computer_v2`, bit-exact on all 36
-  fitting designs. The packer emits them opt-in (`Config::large_nets`) as span groups 2..8, at
-  their minimum span: 48 excess beats in 1.58 M, 0 dropped.
-- **Large-net bbox:** **window form** (Mark): a shift register of the last 8 beats' max/min, reduced
-  by a masked tree on a net's last beat. No loop-carried arithmetic.
-- **Step 1 (done):** the gradient beat loop is three DATAFLOW stages, `pin_bbox` → `wa_sums` →
-  `wa_gradient` (one header each). Outputs are bit-identical to the fused loop, II=1 per stage, and
-  the co-sim hazard sweep still gives spacing 4 PASS / 1 FAIL.
-- **Step 2 (done):** the large-net section is hazard-scheduled with **pads**: all-EMPTY beats with
-  lane 0 EMPTY, invisible to net accounting. 4,035 pads over 44 designs; 4,002 are on newblue3,
-  from split nodes.
-- **Packer contract:** fully written in the header of `beat_packer.hpp` (rules R/S/B/L/M/C, each
-  with what verifies it). **Read it before touching the packer or a consumer.**
+## State
+- **Large nets (17..96 pins) are done end to end: HPWL and gradient.** Opt-in via
+  `Config::large_nets`. With it off, every output is bit-identical to the previous HEAD.
+- **Gradient path:**
+  - A (`pin_bbox`) sends a net's bbox to B on `net_bboxes`; B (`wa_sums`) sends the net's sums to C
+    on `net_sums`. Each is pushed on the net's last real beat and popped on its first.
+  - B's sums use the same window-plus-tree form as A's bbox, so no arithmetic is loop-carried.
+    II=1 in every stage.
+- **Verification:**
+  - Tier 1 rel_rms 3.4e-7 with large nets on, in 3 packer configs; 7/7 mutants caught.
+  - RTL co-sim: hazard 4 PASS, hazard 1 FAIL (the negative control), and a depth sweep that pins
+    the FIFO bound (next bullet).
+- **FIFO bound:** the beat FIFOs need depth ≥ extent − 1 + skew, where skew is how many pipeline
+  states after the beat write a stage writes its per-net value (A 6, B 7). Co-sim on a net of
+  extent 13: depth 19 passes, depth 18 deadlocks. Production depth is 2 × `MAX_NET_EXTENT` = 32,
+  which costs 58 BRAM18; 19 and 32 cost the same.
+- **Packer rule L8:** extent ≤ `MAX_NET_EXTENT` = 16. That is the measured maximum (newblue3), so
+  nothing is dropped on the 44 designs. The checker enforces it.
 - **Tooling:**
-  - `.claude/2_ARTIFACTS/grad_identity/` — the bit-identity driver; use it for any refactor.
-  - `.claude/2_ARTIFACTS/large_net_tools/` — the 44-design sweep, design list, drop diagnosis, and
-    mutant scripts.
+  - `.claude/2_ARTIFACTS/grad_identity/` — the bit-identity driver (now passes `span_beat_count`).
+    The reference dump is `/tmp/grad_old.bin`, which does not survive a reboot: rebuild it from a
+    known commit before relying on it.
+  - `.claude/2_ARTIFACTS/large_net_tools/`:
+    - `net_extent.cpp` + `extent_sweep.txt` — extent per design;
+    - `step3_mutants.sh` — the 7 mutants;
+    - `grad_worst.cpp` — the worst nodes and their float-conditioning check;
+    - `sweep.sh` — the 44-design HPWL sweep.
+  - `bring_up/hpwl_gradient_computer/cosim/cosim_depth.tcl` — the FIFO depth sweep
+    (`COSIM_DEPTH`, `COSIM_HAZARDS`).
+
+## Decisions for Mark
+1. **newblue3's real-design gradient fails `max_rel` (4.2e-4 vs 1e-4); rel_rms is fine (6.6e-7).**
+   - The cause is one cell with 13,936 large-net pins. Its error relative to its own value is
+     8.6e-6.
+   - A plain float evaluation of the same formula is 3.8× *worse* on that node, so this is float
+     conditioning, not logic.
+   - Options:
+     - (a) accept it, and document that `max_rel` is normalised to the design's RMS, which a
+       14 K-pin node outgrows;
+     - (b) judge real designs by each node's error relative to its own magnitude;
+     - (c) leave it as is.
+
+   Tier 1 is unaffected. I left the tolerance unchanged.
+2. **Should `large_nets` become the default?** Every consumer handles it now; the exception is
+   chunked designs, which still drop large nets (rule C2).
 
 ## Next steps, ranked
 
-### 1. Step 3 of the plan: large nets in the three gradient stages — designed, NOT started
-Nothing is coded. The design below is worked out; check it against the plan, then build.
-
-**Per stage:**
-- **A, `pin_bbox`:** port `hpwl_computer_v2`'s large-net path:
-  - `large` / `pad` / beat counter, and EMPTY lanes take lane 0's position;
-  - the max/min window, skipped on pads;
-  - the HPWL in `v[0]` on the last real beat.
-
-  Add flags to `PinBeat`: `large`, `pad`, `first` (first real beat of a net), `last`. On a net's
-  last real beat, also push `(max, min)` to a new **bbox stream**.
-- **B, `wa_sums`:**
-  - On `large && first`, pop the bbox stream into two registers. They are only assigned, never
-    computed on, so there is no feedback arithmetic.
-  - Large lanes use those registers; small lanes keep `pb.net_max/min`.
-  - Each beat's four sums are the degree-16 tree outputs `[14][0]`; EMPTY lanes contribute 0
-    (a±=0).
-  - Shift them (pads excluded) into a 4×8 window. On the last real beat, reduce the newest `span`
-    entries and push `(B+, C+, B−, C−)` to a new **sums stream**.
-- **C, `wa_gradient`:** on `large && first`, pop the sums stream into registers, and use them for
-  `k = 0` on large beats. The merge and scatter are unchanged; packer rule L6 covers the hazard.
-
-**Masking — use the identity, not `window[0]`:** generalise `reduce_window<Op>` (in
-`hpwl_computer_v2.hpp`) to fill masked entries with `Op`'s identity: −∞ for max, +∞ for min, 0 for
-add. `window[0]` is right for max/min but wrong for sums. Add `identity()` to `MaxOp`/`MinOp`
-(`hpwl_computer.hpp`) and `AddOp` (`wa_sums.hpp`). v2 must stay bit-exact through that change.
-
-**FIFO depth and deadlock — the open correctness item:**
-- B reads a net's first beat, then blocks on the bbox stream until A finishes the net's last real
-  beat. So `pin_beats` must hold the net's whole **extent**: first to last real beat, pads inside
-  included. The same applies to `sum_beats`.
-- Span ≤ 8, but split-node pads stretch the extent. **Add contract rule L8:** the extent is at most
-  `MAX_NET_EXTENT`. The packer must enforce it (drop or count, as with `MAX_SPAN`) and the checker
-  must check it.
-- **Measure the real maximum extent over the 44 designs first** (newblue3 is the worst), then pick
-  `MAX_NET_EXTENT` and set both stream depths ≥ that.
-- The bbox and sums streams only need to absorb how many nets A runs ahead (≈ depth/2). Give them 16.
-- C simulation cannot deadlock; RTL co-sim can. **Sweep the stream depth in co-sim** and expect a
-  deadlock below the bound. That is the proof the bound is right.
-
-**Plumbing:**
-- `gradient_beat_loop` and `pin_bbox` need `span_count_REG`.
-- `hpwl_gradient_computer`, `hpwl_gradient_computer_top.cpp` and `cosim/cosim_top.cpp` need a
-  `span_count` pointer on `gmem1` (as in `hpwl_computer_v2_top.cpp`).
-- The chunked `hpwl_gradient_computer_v2` passes span counts all equal to `desc.num_beats`, as
-  `hpwl_computer_v3.hpp` does. Chunks carry no large nets.
-
-**Verification:**
-- **Golden:** `test/wa_gradient_golden.hpp` `wa_gradient()` skips nets that are not `in_scope`. Give
-  it the set of encoded large nets (`enc.large_nets`) to include. The `[3]` "touched" sets in
-  `hpwl_gradient_computer_test.cpp` must include them too.
-- **Harness:** run the large-net configs on `SyntheticSpec::max_large_degree = 100` plus the
-  hand-built nets `hpwl_computer_v2_test.cpp` adds (forced extra spans, split node, forced drop).
-  Keep a large-nets-off config.
-- **Tolerances:** the same (rel_rms < 1e-5, max_rel < 1e-4). The HPWL by-product stays bit-exact.
-- **Mutants:**
-  - B pops on the wrong beat;
-  - sums window ignores span, or uses `window[0]` instead of 0;
-  - C uses the beat's own sums instead of the net's;
-  - a pad shifts the sums window.
-- **Bit-identity:** with large nets off, outputs must stay bit-identical to HEAD (identity driver).
-- **Synthesis and co-sim:** C-synth (II=1 per stage, note the FIFO area); co-sim hazard sweep plus
-  depth sweep; then the real-design gradient runs (adaptec1, newblue2, newblue3).
-
-**Known duplication:** `pin_bbox` and `hpwl_computer_v2`'s beat loop will carry the same large-net
-logic. Folding v2 onto `pin_bbox` is a later cleanup; mention it rather than doing it mid-step.
-
-### 2. Check the per-NMU bandwidth (cheap; could change the stream design)
+### 1. Check the per-NMU bandwidth (cheap; could change the stream design)
 - **Why:** the beat loop's `records` stream needs 64 B/cycle = 19.2 GB/s at 300 MHz on one m_axi
   port. My expectation, **not verified**, is that one NoC master unit (NMU) carries about 16 GB/s per
   direction (128-bit NoC channel at ~1 GHz). If so, one port cannot feed the loop at 300 MHz (it
@@ -108,37 +69,42 @@ logic. Folding v2 onto `pin_bbox` is a later cleanup; mention it rather than doi
 - **Done when:** a measured or documented number replaces the "expected ~16 GB/s" line in the
   report's platform note, with a verdict on the records stream.
 
-### 3. Close timing (needs the build server)
+### 2. Close timing (needs the build server)
 - **Status:** post-route 4.335 ns vs 3.33 ns target (about 231 MHz), worst slack −1.0 ns, 20 K
-  failing endpoints, measured on the **fused** loop. Continue
-  [[_NEW_HANDOFF_41_pnr_timing_20260923.md]]; don't restart.
-- **Re-measure first:** the DATAFLOW split moved the HLS-estimated worst path into C's combiner
-  fmul chain (top −0.61 → −0.53 ns; A and B −0.00). A fresh post-route run on the split design
-  comes before any fix.
+  failing endpoints, measured on the **fused** loop, before the DATAFLOW split and large nets.
+  Continue [[_NEW_HANDOFF_41_pnr_timing_20260923.md]]; don't restart.
+- **Re-measure first** on today's design: the HLS-estimated worst path is now C's combiner (stage
+  slack −0.39 ns, top −0.53 ns). A fresh post-route run comes before any fix.
 - **First fix (from the fused run):** the top paths start at one float adder HLS shared between
   `refresh_macro_pins` and `fold_macro_pins`, fanning out to all 64 URAM banks. Unshare it and
   register its output before the bank broadcast. Then group the remaining failing endpoints
   (`path_groups.tcl`).
-- **Watch:** deeper pipelines lengthen the read-add-write. If HLS raises II, raise HAZARD_DISTANCE
-  (8 costs <0.5% bubbles) and re-run the co-sim spacing sweep: co-sim, not tier 1, gates that.
+- **Watch, two interlocks:**
+  - Deeper pipelines lengthen the read-add-write. If HLS raises II, raise `HAZARD_DISTANCE` (8
+    costs <0.5% bubbles) and re-run the co-sim spacing sweep.
+  - Retiming can also grow the beat-write → per-net-write **skew** in A and B. Depth 32 leaves 17
+    states of margin; after any change, re-read the two write states in
+    `*.verbose.sched.rpt` (see Facts).
 - **Build-server rule:** the tunnel needs Mark to run `wsl ssh -fN build`; ask once, launch long
   jobs detached, don't poll.
 
-### 4. Small fix: `hpwl_gradient_computer_v2` loses bursts on its two LUT loads
+### 3. Small fix: `hpwl_gradient_computer_v2` loses bursts on its two LUT loads
 `offset_table` and `exp_lut` (32-bit) share gmem0, which is 1024 bits wide for `ChunkDesc`, so both
 loads have no burst (pipeline depth 75). Give them their own 32-bit bundle, re-run C-synth, check
 the *Inferred Burst Summary* in `csynth.rpt`. Low runtime cost today (small loads), so do it when v2
 is next touched.
 
-### 5. Chunking walkthrough + the resident-loop URAM budget (the Big Fix)
+### 4. Chunking walkthrough + large nets in chunks + the resident-loop URAM budget (the Big Fix)
 - **Why later:** chunking only matters once the resident loop decides what stays on chip.
+- **Large nets are not chunked** (rule C2: `encode_chunked` homes only small nets), so the 8
+  designs over 1 M slots, bigblue4 among them, still drop them. Homing a large net in one chunk
+  needs its ghosts like any small net. The device side is ready: `hpwl_gradient_computer_v2`
+  passes span counts equal to `desc.num_beats` today, which is the only change needed there.
 - **The Big Fix:** in the resident `pl_algo` loop, positions and gradients stay in URAM, so the
   load and drain disappear (≥26 K of ~65 K cycles per axis on adaptec1 today).
 - **Open constraints** (recorded in `vck5000/pl/src/pl_algo/DATAFLOW.md`, section "#41
   record-stream gradient inside the resident loop"):
   - one axis is 256 of 463 URAMs at 1 M slots, so both axes resident at once does not fit;
-  - the 8 of 44 designs over 1 M slots keep per-chunk DDR traffic, and **chunks carry no large
-    nets yet** (`encode_chunked` homes only small nets);
   - overlap belongs between modules via `axis` streams, not DATAFLOW between phases sharing a
     URAM array.
 - **Reading list for the walkthrough:**
@@ -149,11 +115,24 @@ is next touched.
   - Part 2 of [[_NEW_REPORT_41_record_datapath_20260922.md]].
 
 ### Later, optional
+- **Fold `hpwl_computer_v2`'s beat loop onto `pin_bbox`.** They now carry the same large-net logic
+  twice. It is a cleanup, so do it with the bit-identity driver.
 - **newblue3's pads:** pins of one node with identical offsets have identical gradients, so a
-  pin-multiplicity weight would remove most splits, and with them most of newblue3's 4,002 pads
-  (≈3% of its stream). Not worth it yet.
+  pin-multiplicity weight would remove most splits. That would remove most of newblue3's 4,002 pads
+  (≈3% of its stream) and shrink its 16-beat extents. It would also ease decision 1: the 13,936-pin
+  cell is exactly such a node.
 
 ## Facts established (don't re-derive)
+- **A DATAFLOW stage that writes a beat stream and a later per-net stream needs downstream FIFO
+  depth ≥ extent − 1 + skew**, where skew = (per-net write state) − (beat write state) in that
+  stage's pipeline. A stalled pipeline stalls whole, so the in-flight iterations have already
+  written. To find the states:
+  `awk '/^State [0-9]+ </{s=$2} /_ssdm_op_Write.ap_fifo/{print s, $0}' <stage>.verbose.sched.rpt`
+  under `.autopilot/db/`.
+- **An HLS stream deeper than 16 goes to BRAM** (29 BRAM18 for a 2,132-bit beat). At ≤ 16 it was
+  FF/LUT (3,095 per FIFO).
+- **C simulation cannot deadlock, and RTL co-sim can.** XSIM's deadlock detector names the blocked
+  FIFO pair.
 - **A pointer narrower than its m_axi port gets no burst** (HLS 2022.2), and the report still says
   II=1: check the *Inferred Burst Summary* in `csynth.rpt`. Group bundles by width.
 - **`offset=slave`:** the pointer's base address is a register on the AXI-Lite control port, written
@@ -169,7 +148,8 @@ is next touched.
   owned by one stage. Between phases: random-access dependencies, URAM ping-pong would need 512 of
   463, and `pos_URAM` has several writers.
 - **Loop-carried arithmetic breaks II=1; feed-forward depth doesn't.** For a reduction across beats,
-  use a shift-register window plus a tree, never a running accumulator.
+  use a shift-register window plus a tree, never a running accumulator. Masked tree inputs take the
+  operator's identity (`Op::identity()`); `window[0]` is right for max/min but wrong for a sum.
 - **Tier 1's tolerance cannot prove a refactor is exact** (it passes a 1-ulp change). Use the
   bit-identity driver.
 - **`hls::stream` in tier 1** is a `std::deque` stand-in (`test/tier1_stub.hpp`). It has a default
@@ -177,5 +157,5 @@ is next touched.
   `#ifndef PL_TIER1_STUB`.
 - **The test Makefile tracks header dependencies** (since `4fadc25`): touching a module header
   rebuilds exactly the harnesses that include it.
-- **Co-sim needs** `LIBRARY_PATH=/usr/lib/x86_64-linux-gnu` and takes about 13 min for the hazard
-  sweep (synthesis plus spacing 4 and 1).
+- **Co-sim needs** `LIBRARY_PATH=/usr/lib/x86_64-linux-gnu` and takes about 13 min for synthesis plus
+  two co-sims; several depths run fine in parallel on this box (8 cores, ~2 GB each).

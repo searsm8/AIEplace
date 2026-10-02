@@ -1,9 +1,9 @@
 # Tasks
 
-**Active Task (2026-10-02): #41 `hpwl_gradient_computer`, 17–96-pin nets.** Plan steps 1–2 done:
-the DATAFLOW split and the packer's hazard schedule with pads. **Next: step 3**, the large-net
-paths in `pin_bbox` / `wa_sums` / `wa_gradient`. It is designed but not started, and the FIFO-depth
-bound (new rule L8) comes first. Then the NMU bandwidth check, then timing closure.
+**Active Task (2026-10-02): #41 `hpwl_gradient_computer`.** 17–96-pin nets are done end to end
+(HPWL + gradient; tier 1, mutants and RTL co-sim with a FIFO depth sweep). **Two decisions wait on
+Mark:** newblue3's `max_rel` (one 14 K-pin node, float conditioning), and whether large nets become
+the default. **Next:** the NMU bandwidth check, then timing closure (build server).
 → [[_NEW_HANDOFF_41_next_steps_20261002.md]]
 
 Open work, one section per task. **Status lives here; evidence lives in a
@@ -1167,7 +1167,24 @@ code.
 - [ ] **Post-route timing and URAM:** blocked here (no Vivado license for xcvc1902).
       `bring_up/hpwl_gradient_computer/impl_check.tcl` is ready for the build server. HLS estimates
       are 3.0–3.9 ns against the 3.33 ns target.
-- [ ] **Nets of 17..96 pins: HPWL done (2026-10-02), gradient next.** Protocol (Mark, 2026-10-02):
+- [x] **Nets of 17..96 pins: HPWL and gradient both done (2026-10-02).** Gradient (plan steps 3–4,
+      evening):
+      - A sends a net's bbox to B, and B sends the net's sums to C, each on its own stream; B's
+        sums use a window plus a tree. II=1 per stage.
+      - Tier 1: rel_rms 3.4e-7 with large nets on; 7/7 mutants caught. With large nets off,
+        bit-identical to the previous HEAD.
+      - New packer rule **L8**: extent ≤ 16, the measured maximum, so 0 drops.
+      - **The FIFO depth needs extent − 1 + pipeline skew** (A 6 states, B 7). Co-sim deadlocked at
+        the planned depth 16. The sweep shows 19 PASS / 18 DEADLOCK on an extent-13 net, as
+        predicted. Production depth is 32 (58 BRAM18).
+      - **Open (Mark):** newblue3 `max_rel` 4.2e-4 > 1e-4 from one 13,936-pin cell. A plain-float
+        evaluation is 3.8× worse there, so this is conditioning. Tolerance left unchanged.
+
+      → [[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]] steps 3–4
+
+      <details><summary>Before the gradient landed (2026-10-02, afternoon)</summary>
+
+      **Nets of 17..96 pins: HPWL done (2026-10-02), gradient next.** Protocol (Mark, 2026-10-02):
       large nets follow the degree-16 group, one net per beat over `span` consecutive beats,
       grouped by span 2..`MAX_SPAN`=8 (`span_beat_count`). They are opt-in (`Config::large_nets`),
       so the gradient modules' streams are unchanged. Nets of 97..100 pins are dropped (a documented
@@ -1201,6 +1218,9 @@ code.
       (online rescale, about 1.7×) is a deliberate divergence from sw_only.
       → [[_NEW_PLAN_41_large_nets_on_records_20260923.md]]
       </details>
+      </details>
+- [ ] **Large nets in chunked designs** (rule C2): `encode_chunked` homes only small nets, so the 8
+      designs over 1 M slots still drop them. The device side needs only real span counts.
 - [ ] Optional: a min-cut partitioner if bigblue4 / newblue7 ghost cost (13–19%) matters.
 - Slide-deck source for this module (2026-10-01): [[_NEW_EXPLAINER_41_hpwl_gradient_computer_20261001.md]]
 - m_axi bundle experiment (2026-10-01): merging bundles keeps II=1 but loses bursts on every pointer narrower than the port (incl. per-beat `out_beats`) and saves no LUTs; keep bundles grouped by width. DATAFLOW does not fit (URAM ping-pong would need 512/463); setup+drain is ≥40 K cycles vs 51.5 K beat loop on adaptec1, to be removed by the resident iteration. → [[_NEW_REPORT_41_ddr_bundles_20261001.md]]

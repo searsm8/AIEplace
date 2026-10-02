@@ -107,20 +107,7 @@ int main(int argc, char** argv) {
     spec.max_large_degree = packer::IGNORE_NET_DEGREE;   // reach 97..100, which must be left out
     if (!real) {
         nl = fixture::build_synthetic(20260922u, spec);
-        // Lane fragmentation the packer cannot avoid: k cells of 9 pins each need k beats (no two
-        // share one) against a minimum of ceil(9k/16). k=3..8 reach spans 3..8 through the extra-beat
-        // path; k=9 exceeds MAX_SPAN and must be dropped. Meow.
-        for (int k = 3; k <= 9; k++) {
-            std::vector<packer::Pin> net;
-            for (int cell = 0; cell < k; cell++)
-                for (int pin = 0; pin < 9; pin++) net.push_back({100 * k + cell, {0, 0}});
-            nl.nets.push_back(net);
-        }
-        // A node with more pins on one net than a beat has lanes (MMS has such cells and pads):
-        // its pins split into runs over several beats. Meow.
-        std::vector<packer::Pin> heavy(40, packer::Pin{50, {0, 0}});
-        heavy.push_back({51, {0, 0}});
-        nl.nets.push_back(heavy);
+        fixture::add_large_net_cases(nl);
     }
     std::vector<float> node_pos[2] = {fixture::random_positions(nl.movable.size(), 11u),
                                       fixture::random_positions(nl.movable.size(), 12u)};
@@ -178,12 +165,14 @@ int main(int argc, char** argv) {
         for (const auto& entry : pins_per_node) split_nodes += entry.second > pinrec::LANES;
     }
     const bool large_covered = (long)enc.large_nets.size() >= 50 && spans_used == pinrec::SPAN_GROUPS &&
-                               enc.large_extra_span >= 6 && enc.large_dropped >= 1 && split_nodes >= 1 && enc.large_pads >= 1 &&
+                               enc.large_extra_span >= 6 && enc.large_dropped >= 2 && enc.large_extent_dropped >= 1 &&
+                               split_nodes >= 1 && enc.large_pads >= 1 &&
                                over_96 >= 2 && !over_96_encoded &&
                                (long)enc.large_nets.size() + enc.large_dropped == large_in_range;
-    printf("%s [2] large nets: %zu encoded over %ld spans, %ld needing extra beats, %ld dropped (> MAX_SPAN), "
+    printf("%s [2] large nets: %zu encoded over %ld spans, %ld needing extra beats, %ld dropped (%ld > MAX_NET_EXTENT), "
            "%ld of 97..100 pins left out, %ld nodes split over beats, %ld pad beats\n", large_covered ? "ok  " : "FAIL",
-           enc.large_nets.size(), spans_used, enc.large_extra_span, enc.large_dropped, over_96, split_nodes, enc.large_pads);
+           enc.large_nets.size(), spans_used, enc.large_extra_span, enc.large_dropped, enc.large_extent_dropped, over_96,
+           split_nodes, enc.large_pads);
     ok &= large_covered;
 
     printf(ok ? "PASS: hpwl_computer_v2\n" : "FAIL: hpwl_computer_v2\n");

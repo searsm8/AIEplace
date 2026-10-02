@@ -78,8 +78,8 @@ movable nodes.
 make run                               # all 44 manifest designs, one chunk each where they fit
 make run ARGS="--capacity 1048576"     # chunk every design to the on-chip capacity
 ```
-Scope: nets of degree 2..16, plus 17..96 with `Config::large_nets` (opt-in; only
-`hpwl_computer_v2` consumes them so far, and `encode_chunked` does not carry them yet).
+Scope: nets of degree 2..16, plus 17..96 with `Config::large_nets` (opt-in; consumed by
+`hpwl_computer_v2` and `hpwl_gradient_computer`; `encode_chunked` does not carry them yet).
 Nets over 100 pins are masked (XPlace's `ignore_net_degree`). **Nets of 97..100 pins are dropped:
 a deliberate divergence from XPlace and sw_only (Mark, 2026-10-02)**, since 96 = 6 full beats.
 
@@ -117,3 +117,10 @@ small-net section:
 Over all 44 designs there are 4,035 pads, and newblue3 accounts for 4,002 of them: 13% of its
 large-net beats, about 3% of its whole stream, all from about 400 split-node nets. Every other
 design has ≤ 6.
+
+**Extent (contract L8).** A net's extent is the number of positions from its first real beat to its
+last, counting the pads inside it. The gradient's stage FIFOs must hold one extent (plus pipeline
+skew) while a later stage waits for the net's bbox or sums, so the packer drops any net whose
+schedule would exceed `MAX_NET_EXTENT` (16) and counts it in `large_extent_dropped`. The measured
+maximum over the 44 designs is exactly 16 (9 nets on newblue3); every other design is ≤ 7, so
+nothing is dropped.

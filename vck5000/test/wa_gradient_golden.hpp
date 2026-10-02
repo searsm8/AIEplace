@@ -44,13 +44,19 @@ inline double lut_exp_ref(const Lut& lut, float d) {
     return (double)lut.table[idx] * (1.0 - frac) + (double)lut.table[idx + 1] * frac;
 }
 
+// Every in-scope net, plus `large_nets` (indices into nl.nets: the large nets the encoder kept,
+// enc.large_nets). Meow.
 inline std::vector<double> wa_gradient(const packer::Netlist& nl, int axis, const std::vector<float>& node_pos,
-                                       const Lut& lut, bool use_lut) {
+                                       const Lut& lut, bool use_lut, const std::vector<int>& large_nets = {}) {
     const double inv_gamma = 1.0 / GAMMA;
     auto expo = [&](float d) { return use_lut ? lut_exp_ref(lut, d) : std::exp(-(double)d * inv_gamma); };
+    std::vector<char> keep(nl.nets.size(), 0);
+    for (size_t n = 0; n < nl.nets.size(); n++) keep[n] = packer::in_scope(nl.nets[n]);
+    for (int n : large_nets) keep[n] = 1;
     std::vector<double> grad(nl.movable.size(), 0.0);
-    for (const auto& net : nl.nets) {
-        if (!packer::in_scope(net)) continue;
+    for (size_t n = 0; n < nl.nets.size(); n++) {
+        if (!keep[n]) continue;
+        const auto& net = nl.nets[n];
         std::vector<float> p;
         for (const packer::Pin& pin : net) p.push_back(fixture::pin_position(nl, pin, axis, node_pos));
         const float hi = *std::max_element(p.begin(), p.end()), lo = *std::min_element(p.begin(), p.end());

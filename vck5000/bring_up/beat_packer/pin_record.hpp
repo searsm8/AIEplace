@@ -28,6 +28,11 @@ constexpr int      MAX_NETS_PER_BEAT     = LANES / MIN_NET_DEGREE;       // 8
 constexpr int      MAX_LARGE_NET_DEGREE  = 6 * LANES;                     // 96
 constexpr int      MAX_SPAN              = 8;
 constexpr int      SPAN_GROUPS           = MAX_SPAN - 1;                  // spans 2..MAX_SPAN
+// A large net's extent: stream positions from its first real beat to its last, pads inside
+// included (packer rule L8). The gradient's stage FIFOs hold one extent (plus pipeline skew) while
+// a later stage waits on the net's bbox / sums, so this bounds their depth. Measured max over the 44 designs: 16
+// (mms/newblue3, split nodes); every other design <= 7. Meow.
+constexpr int      MAX_NET_EXTENT        = 16;
 constexpr int      BANK_BITS             = 5;
 constexpr int      BANKS                 = 1 << BANK_BITS;                // 32 URAM banks per array
 constexpr uint32_t EMPTY_RECORD          = 0xFFFFFFFFu;

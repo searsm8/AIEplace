@@ -73,6 +73,28 @@ inline packer::Netlist build_synthetic(unsigned seed, const SyntheticSpec& spec 
     return nl;
 }
 
+// Large-net cases a random netlist rarely produces, appended to `nl` (the synthetic one):
+//  - lane fragmentation the packer cannot avoid: k cells of 9 pins each need k beats (no two share
+//    one) against a minimum of ceil(9k/16). k=3..8 reach spans 3..8 through the extra-beat path;
+//    k=9 exceeds MAX_SPAN and must be dropped;
+//  - a node with more pins on one net than a beat has lanes (MMS has such cells and pads): its pins
+//    split into runs over several beats, HAZARD_DISTANCE apart, so the net needs pads inside it;
+//  - the same with 80 pins: 5 runs, extent 17 > MAX_NET_EXTENT, so it must be dropped (rule L8). Meow.
+inline void add_large_net_cases(packer::Netlist& nl) {
+    for (int k = 3; k <= 9; k++) {
+        std::vector<packer::Pin> net;
+        for (int cell = 0; cell < k; cell++)
+            for (int pin = 0; pin < 9; pin++) net.push_back({100 * k + cell, {0, 0}});
+        nl.nets.push_back(net);
+    }
+    std::vector<packer::Pin> heavy(40, packer::Pin{50, {0, 0}});
+    heavy.push_back({51, {0, 0}});
+    nl.nets.push_back(heavy);
+    std::vector<packer::Pin> too_long(80, packer::Pin{60, {0, 0}});
+    too_long.push_back({61, {0, 0}});
+    nl.nets.push_back(too_long);
+}
+
 // Positions indexed by parsed node, per axis.
 inline std::vector<float> random_positions(size_t num_nodes, unsigned seed, float extent = 20000.0f) {
     std::mt19937 rng(seed);

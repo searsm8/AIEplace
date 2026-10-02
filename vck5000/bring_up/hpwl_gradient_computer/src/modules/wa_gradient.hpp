@@ -15,21 +15,31 @@
 
 namespace plalgo {
 
-static void wa_gradient(hls::stream<SumBeat>& sum_beats, int num_beats, float inv_gamma,
+// A large net's beats take the net's sums from stage B (net_sums, popped on its first real beat;
+// blocking, like B's bbox pop) in net position 0 -- every lane of a degree-16 beat is net 0. Meow.
+static void wa_gradient(hls::stream<SumBeat>& sum_beats, hls::stream<NetSum>& net_sums, int num_beats, float inv_gamma,
                         float grad_URAM[pinrec::BANKS][ROWS_PER_BANK], int first_fixed_slot) {
+    NetSum large_sum = {0.0f, 0.0f, 0.0f, 0.0f};   // the current large net's: only assigned, never computed on
 wa_gradient_loop:
     for (int beat = 0; beat < num_beats; beat++) {
 #pragma HLS PIPELINE II=1
 #pragma HLS DEPENDENCE variable=grad_URAM type=inter direction=RAW distance=pinrec::HAZARD_DISTANCE dependent=true
         const SumBeat sb = sum_beats.read();
+        if (sb.flags.first) large_sum = net_sums.read();
+        NetSums s = sb.s;
+#pragma HLS ARRAY_PARTITION variable=s.Bp complete dim=0
+#pragma HLS ARRAY_PARTITION variable=s.Cp complete dim=0
+#pragma HLS ARRAY_PARTITION variable=s.Bm complete dim=0
+#pragma HLS ARRAY_PARTITION variable=s.Cm complete dim=0
+        if (sb.flags.large) { s.Bp[0] = large_sum.Bp; s.Cp[0] = large_sum.Cp; s.Bm[0] = large_sum.Bm; s.Cm[0] = large_sum.Cm; }
 
         // ---- one 1/B^2 per net (not per pin) ----
         float inv_Bp2[pinrec::MAX_NETS_PER_BEAT], inv_Bm2[pinrec::MAX_NETS_PER_BEAT];
 #pragma HLS ARRAY_PARTITION variable=inv_Bp2 complete dim=0
 #pragma HLS ARRAY_PARTITION variable=inv_Bm2 complete dim=0
         for (int k = 0; k < pinrec::MAX_NETS_PER_BEAT; k++) {
-            inv_Bp2[k] = 1.0f / (sb.s.Bp[k] * sb.s.Bp[k]);
-            inv_Bm2[k] = 1.0f / (sb.s.Bm[k] * sb.s.Bm[k]);
+            inv_Bp2[k] = 1.0f / (s.Bp[k] * s.Bp[k]);
+            inv_Bm2[k] = 1.0f / (s.Bm[k] * s.Bm[k]);
         }
 
         // ---- combiners (Fig. 8, eq. 4): each pin's WA partial ----
@@ -37,8 +47,8 @@ wa_gradient_loop:
 #pragma HLS ARRAY_PARTITION variable=g complete dim=0
         for (int i = 0; i < pinrec::LANES; i++) {
             const int k = i / sb.degree;
-            g[i] = ((1.0f + sb.x[i] * inv_gamma) * sb.s.Bp[k] - sb.s.Cp[k] * inv_gamma) * (sb.a_plus[i] * inv_Bp2[k])
-                 - ((1.0f - sb.x[i] * inv_gamma) * sb.s.Bm[k] + sb.s.Cm[k] * inv_gamma) * (sb.a_minus[i] * inv_Bm2[k]);
+            g[i] = ((1.0f + sb.x[i] * inv_gamma) * s.Bp[k] - s.Cp[k] * inv_gamma) * (sb.a_plus[i] * inv_Bp2[k])
+                 - ((1.0f - sb.x[i] * inv_gamma) * s.Bm[k] + s.Cm[k] * inv_gamma) * (sb.a_minus[i] * inv_Bm2[k]);
         }
 
         // ---- merge: a node's repeated pins sit in adjacent lanes with the same slot (packer rule

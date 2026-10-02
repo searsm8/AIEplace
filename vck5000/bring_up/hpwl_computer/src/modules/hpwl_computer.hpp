@@ -4,6 +4,7 @@
 #ifndef PL_TIER1_STUB
 #include <hls_stream.h>
 #endif
+#include <limits>
 
 namespace plalgo {
 
@@ -54,8 +55,15 @@ struct TreeOutputs {
     float min_deg[NET_DEGREES_PROCESSED][MAX_NETS_PER_BEAT];
 };
 
-struct MaxOp { static inline float apply(float a, float b) { return a > b ? a : b; } };
-struct MinOp { static inline float apply(float a, float b) { return a < b ? a : b; } };
+// identity(): the value that leaves apply() unchanged, for masked tree inputs. Meow.
+struct MaxOp {
+    static inline float apply(float a, float b) { return a > b ? a : b; }
+    static inline float identity() { return -std::numeric_limits<float>::infinity(); }
+};
+struct MinOp {
+    static inline float apply(float a, float b) { return a < b ? a : b; }
+    static inline float identity() { return std::numeric_limits<float>::infinity(); }
+};
 
 // Dhar 2019's multi-output tree (Fig. 6/7), genericized over the combining operator: reused with
 // MaxOp/MinOp here for bbox/HPWL, and with an AddOp for the term-sum trees in hpwl_gradient_computer.

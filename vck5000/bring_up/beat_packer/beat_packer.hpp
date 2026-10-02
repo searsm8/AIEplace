@@ -79,6 +79,10 @@
 //      counts them toward a net's span nor shifts them into its window. A pad may sit between
 //      nets or inside one; its position counts in span_beat_count for the group it sits in.
 //                                                                                      [check]
+//  L8  A net's EXTENT -- positions from its first real beat to its last, pads inside included --
+//      is at most MAX_NET_EXTENT: the gradient's stage FIFOs hold one extent while a later stage
+//      waits on the net's bbox / sums, so a longer net would deadlock the device. Nets the
+//      schedule would stretch further are dropped (large_extent_dropped).               [check]
 // Macro-pin list (macro_pin_refs: refresh, then fold)
 //  M1  Every macro pin appears exactly once; MACRO_PIN_SKIP entries are padding.        [check]
 //  M2  No macro recurs within HAZARD_DISTANCE entries (the fold read-modify-write).     [check]
@@ -135,7 +139,7 @@ struct Config {
     int      window        = 4096; // untaken nets the packer / pending beats the scheduler may scan
     int      repair_passes = 50;
     unsigned seed          = 1;
-    bool     large_nets    = false; // emit 17..96-pin nets after the degree-16 group (hpwl_computer_v2 only, for now)
+    bool     large_nets    = false; // emit 17..96-pin nets after the degree-16 group (unchunked designs only, C2)
 };
 
 struct Pin {
@@ -372,6 +376,7 @@ struct Encoded {
     long              large_pads = 0;       // pad beats in the large-net section (contract L7)
     std::vector<int>  large_nets;           // encoded large nets (cfg.large_nets), in stream order
     long              large_dropped = 0;    // large nets not encodable: span > MAX_SPAN, or a node with > LANES pins
+    long              large_extent_dropped = 0;   // of those, extent > MAX_NET_EXTENT (contract L8)
     long              large_extra_span = 0; // large nets whose span exceeds ceil(degree / LANES)
 
     std::vector<long> node_slot;            // per work node, -1 if none
@@ -696,12 +701,13 @@ inline void pack_large_nets(Encoded& enc, const Config& cfg) {
             if (enc.work.movable[node] && position - last_update[node] < cfg.hazard) return false;
         return true;
     };
-    // Emit (or, with commit=false, only count the pads of) one net starting at `position`.
-    auto place_net = [&](int net, std::vector<Fill>& beats, int span, bool commit) {
+    // Emit (or, with commit=false, only count the pads of) one net starting at `position`; `extent`
+    // gets its first-to-last real beat distance (contract L8).
+    auto place_net = [&](int net, std::vector<Fill>& beats, int span, bool commit, long& extent) {
         std::vector<long> saved;
         if (!commit) for (const Fill& f : beats) for (int node : f.nodes) saved.push_back(last_update[node]);
         std::vector<char> done(beats.size(), 0);
-        long position = (long)enc.issue.size(), pads = 0;
+        long position = (long)enc.issue.size(), pads = 0, first_real = -1;
         for (size_t emitted = 0; emitted < beats.size(); position++) {
             int pick = -1;
             for (size_t b = 0; b < beats.size() && pick < 0; b++) if (!done[b] && ready(beats[b], position)) pick = (int)b;
@@ -716,6 +722,8 @@ inline void pack_large_nets(Encoded& enc, const Config& cfg) {
             }
             done[pick] = 1;
             emitted++;
+            if (first_real < 0) first_real = position;
+            extent = position - first_real + 1;
             for (int node : beats[pick].nodes) if (enc.work.movable[node]) last_update[node] = position;
             if (commit) {
                 Beat beat;
@@ -741,15 +749,17 @@ inline void pack_large_nets(Encoded& enc, const Config& cfg) {
         while (!pending.empty()) {
             int pick = 0;
             long fewest = -1;
+            long extent = 0, pick_extent = 0;
             for (int scan = 0; scan < (int)pending.size() && scan < cfg.window; scan++) {
-                const long pads = place_net(group[pending[scan]].first, group[pending[scan]].second, span, false);
-                if (fewest < 0 || pads < fewest) { fewest = pads; pick = scan; }
+                const long pads = place_net(group[pending[scan]].first, group[pending[scan]].second, span, false, extent);
+                if (fewest < 0 || pads < fewest) { fewest = pads; pick = scan; pick_extent = extent; }
                 if (pads == 0) break;
             }
             auto& [net, beats] = group[pending[pick]];
             pending.erase(pending.begin() + pick);
+            if (pick_extent > MAX_NET_EXTENT) { enc.large_dropped++; enc.large_extent_dropped++; continue; }
             enc.large_nets.push_back(net);
-            place_net(net, beats, span, true);
+            place_net(net, beats, span, true, extent);
         }
     }
 }
@@ -1028,9 +1038,11 @@ inline void decode_stream(const Encoded& enc, const Config& cfg, Failures& fail,
         int span = 2;
         for (int count : enc.span_beat_count) if (position >= count) span++;
         std::vector<GeomPin> net;
+        const long first_real = position;
         for (int b = 0; b < span; b++, position++) {
             if (b > 0) skip_pads();
             if (position >= num_positions) { fail("large net cut short by the stream end", position); break; }
+            if (position - first_real + 1 > MAX_NET_EXTENT) fail("large net extent > MAX_NET_EXTENT", position);
             std::vector<uint32_t> net_slots;
             uint64_t banks_used = 0;
             bool trailing = false;

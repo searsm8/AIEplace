@@ -91,6 +91,8 @@ static void hpwl_gradient_computer_v2(
 #pragma HLS ARRAY_PARTITION variable=lut_BRAM complete dim=1
     int beat_count_REG[pinrec::NET_DEGREES_PROCESSED];
 #pragma HLS ARRAY_PARTITION variable=beat_count_REG complete dim=0
+    int span_count_REG[pinrec::SPAN_GROUPS];
+#pragma HLS ARRAY_PARTITION variable=span_count_REG complete dim=0
 
     const bool chunked = num_chunks > 1;
     load_offset_table(offset_table_DDR, offset_table_size, offset_BRAM);
@@ -128,7 +130,9 @@ compute_pass:
         refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);
         import_ghost_values(desc, import_slots_DDR, exchange_DDR, pos_URAM);
         cache_beat_counts(desc, beat_count_REG);
-        gradient_beat_loop(records_DDR + desc.record_beat_offset, desc.num_beats, beat_count_REG, pos_URAM,
+        // Chunks carry no large nets (packer rule C2), so every span group is empty, as in hpwl_computer_v3. Meow.
+        for (int i = 0; i < pinrec::SPAN_GROUPS; i++) span_count_REG[i] = desc.num_beats;
+        gradient_beat_loop(records_DDR + desc.record_beat_offset, desc.num_beats, beat_count_REG, span_count_REG, pos_URAM,
                            offset_BRAM, lut_BRAM, lut_size, inv_lut_step, inv_gamma, grad_URAM,
                            desc.first_fixed_slot, out_beats_DDR + desc.record_beat_offset, offset_bits);
         if (chunked) export_ghost_gradients(desc, import_slots_DDR, grad_URAM, exchange_DDR);
