@@ -45,6 +45,7 @@ constexpr int ROWS_PER_BANK    = SLOT_CAPACITY / pinrec::BANKS;   // 32K
 constexpr int OFFSET_BITS_MAX  = 10;
 constexpr int OFFSET_TABLE_MAX = 1 << OFFSET_BITS_MAX;           // measured need: <= 131 (44 designs)
 
+// Find the current degree by referencing the beat_count table.
 static int resolve_degree(int beat, const int beat_count_REG[pinrec::NET_DEGREES_PROCESSED]) {
 #pragma HLS INLINE
     int degree = pinrec::MIN_NET_DEGREE;
@@ -54,6 +55,7 @@ static int resolve_degree(int beat, const int beat_count_REG[pinrec::NET_DEGREES
     return degree;
 }
 
+// FOR LARGE NETS ONLY: Find the current net's span by referencing the span_count table.
 static int resolve_span(int beat, const int span_count_REG[pinrec::SPAN_GROUPS]) {
 #pragma HLS INLINE
     int span = 2;
@@ -66,6 +68,8 @@ static int resolve_span(int beat, const int span_count_REG[pinrec::SPAN_GROUPS])
 // Integer key with the same order as the float (NaN aside): negatives get their magnitude bits
 // flipped. The large-net running bbox compares keys, because its compare is loop-carried and an
 // fcmp there missed the 3.33 ns clock by 0.25 ns; the conversion itself sits off the carried path. Meow.
+// The trick: Integer compare gives the same order as float compare, but faster.
+// Negative values are bit flipped to preserve order.
 static int32_t float_order_key(float value) {
 #pragma HLS INLINE
     union { float f; uint32_t u; } bits;
@@ -161,9 +165,9 @@ static void gather_pin_positions(const DecodedLanes& d, const float pos_URAM[pin
 
 // The record stream -> per-net HPWL, against positions already resident in pos_URAM. Meow.
 static void hpwl_beat_loop(const pinrec::RecordBeat* records_DDR, int num_beats,
-                           const int beat_count_REG[pinrec::NET_DEGREES_PROCESSED],
-                           const int span_count_REG[pinrec::SPAN_GROUPS],
-                           const float pos_URAM[pinrec::BANKS][ROWS_PER_BANK],
+                           const int beat_count_REG[pinrec::NET_DEGREES_PROCESSED], // cumulative table for how many beats at each degree
+                           const int span_count_REG[pinrec::SPAN_GROUPS],           // cumulative table for how many beats in each large-net span
+                           const float pos_URAM[pinrec::BANKS][ROWS_PER_BANK],      
                            const float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX],
                            OutBeat* out_beats_DDR, int offset_bits) {
     float   net_hi = 0.0f, net_lo = 0.0f;   // running bbox of the large net in flight
@@ -172,15 +176,20 @@ static void hpwl_beat_loop(const pinrec::RecordBeat* records_DDR, int num_beats,
 beat_loop:
     for (int beat = 0; beat < num_beats; beat++) {
 #pragma HLS PIPELINE II=1
-        const bool large      = beat >= beat_count_REG[pinrec::NET_DEGREES_PROCESSED - 1];
+        // Large nets (17..96 pins) begin after beat_count[14] beats have been processed. 
+        // A single large net is spread over *span* number of beats, read in at the same cadence as small nets.
+        // Since each beat can hold 16 pins, a X-pin large net is processed over a span of ceil(X/16) beats (padding sometimes to avoid URAM bank conflicts)
+        const bool large      = beat >= beat_count_REG[pinrec::NET_DEGREES_PROCESSED - 1]; // control signal for the large-net path
         const int  degree     = large ? pinrec::LANES : resolve_degree(beat, beat_count_REG);
-        const bool first_beat = beat_in_net == 0;
-        const bool last_beat  = beat_in_net == resolve_span(beat, span_count_REG) - 1;
+        const bool first_beat = beat_in_net == 0; // true when processing the first beat of a large net, false for subsequent beats.
+        const bool last_beat  = beat_in_net == resolve_span(beat, span_count_REG) - 1; // true when processing the last beat of a large net.
+
         const DecodedLanes d = decode_lanes(records_DDR[beat], offset_bits);
 
         float pin_pos[pinrec::LANES];
 #pragma HLS ARRAY_PARTITION variable=pin_pos complete dim=0
         gather_pin_positions(d, pos_URAM, offset_BRAM, pin_pos);
+
         // A large-net beat's EMPTY lanes trail its pins; lane 0's pin stands in, neutral to max and min.
         for (int i = 1; i < pinrec::LANES; i++)
             if (large && d.empty[i]) pin_pos[i] = pin_pos[0];
@@ -191,13 +200,18 @@ beat_loop:
 
         const int degree_idx    = degree - pinrec::MIN_NET_DEGREE;
         const int nets_per_beat = pinrec::LANES / degree;
+
+        // For large nets, once per beat, update the running bbox of the net being processed. 
         if (large) {   // the loop-carried path: an integer compare-select per beat
             const float   beat_hi = t.max_deg[degree_idx][0], beat_lo = t.min_deg[degree_idx][0];
             const int32_t beat_hi_key = float_order_key(beat_hi), beat_lo_key = float_order_key(beat_lo);
-            if (first_beat || beat_hi_key > net_hi_key) { net_hi = beat_hi; net_hi_key = beat_hi_key; }
-            if (first_beat || beat_lo_key < net_lo_key) { net_lo = beat_lo; net_lo_key = beat_lo_key; }
+            if (first_beat || beat_hi_key > net_hi_key) // integer compare faster than float compare
+                { net_hi = beat_hi; net_hi_key = beat_hi_key; }
+            if (first_beat || beat_lo_key < net_lo_key)
+                { net_lo = beat_lo; net_lo_key = beat_lo_key; }
             beat_in_net = last_beat ? 0 : beat_in_net + 1;
         }
+
         OutBeat out_beat;
 #pragma HLS ARRAY_PARTITION variable=out_beat.v complete dim=0
     net_hpwl_write:   // a small net position is live iff its first lane holds a pin
@@ -206,7 +220,7 @@ beat_loop:
             if (large) out_beat.v[k] = k == 0 && last_beat ? net_hi - net_lo : 0.0f;
             else       out_beat.v[k] = live ? t.max_deg[degree_idx][k] - t.min_deg[degree_idx][k] : 0.0f;
         }
-        out_beats_DDR[beat] = out_beat;
+        out_beats_DDR[beat] = out_beat; // Output write to DDR
     }
 }
 

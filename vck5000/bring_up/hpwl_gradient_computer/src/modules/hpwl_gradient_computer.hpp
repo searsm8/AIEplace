@@ -144,8 +144,11 @@ beat_loop:
         for (int i = 0; i < pinrec::LANES; i++) {
             const float net_max = t.max_deg[degree_idx][segment[i]];
             const float net_min = t.min_deg[degree_idx][segment[i]];
+            // Each lane uses two lut_BRAM copies, one for a+ and one for a-, so the two reads can happen in one cycle.
+            // Therefore, 32 lut_BRAM copies required to service 16 lanes at once.
             a_plus[i]  = d.empty[i] ? 0.0f : lut_exp_pair(lut_BRAM[2 * i],     lut_size, inv_lut_step, net_max - x[i]);
             a_minus[i] = d.empty[i] ? 0.0f : lut_exp_pair(lut_BRAM[2 * i + 1], lut_size, inv_lut_step, x[i] - net_min);
+    
             Bp_terms[i] = a_plus[i];  Cp_terms[i] = a_plus[i] * x[i];
             Bm_terms[i] = a_minus[i]; Cm_terms[i] = a_minus[i] * x[i];
         }
