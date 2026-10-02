@@ -31,9 +31,10 @@ after the 2026-10-01/02 sessions, and the ranked next steps. Background:
   nets over all 7 spans; adaptec1 7,013 and newblue2 11,531 large nets, 0 dropped). 3/3 mutants
   caught. C-synth: II=1, depth 21→23, slack −0.00, LUT +2.4 K. `hpwl_computer_v3` passes empty
   span groups.
+- **Packing at its minimum (same day):** large-net-aware coloring (a soft per-bank cap of
+  ⌈degree/16⌉) plus balanced packing, and nodes with more than 16 pins on a net split across
+  beats. All 44 designs: 48 excess beats in 1.58 M, 0 dropped; 36/36 fitting designs bit-exact.
 - **Open:**
-  - **Extra beats:** bank coloring ignores large nets, so about half take an extra beat (+28% large
-    beats on adaptec1). Adding large nets as soft coloring constraints may recover that.
   - **Chunking:** `encode_chunked` homes only small nets.
   - **Gradient:** L3, below, in `hpwl_gradient_computer`. Its span section needs the
     HAZARD_DISTANCE schedule.

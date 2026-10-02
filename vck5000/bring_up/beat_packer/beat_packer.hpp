@@ -263,10 +263,10 @@ inline Netlist read_def(const std::string& path, const std::string& name) {
 struct Beat {
     int degree;
     std::vector<int> nets;
-    // A large-net beat (degree > LANES) carries the pins of `nodes`, one beat of a `span`-beat net. Meow.
+    // A large-net beat (degree > LANES) carries `pins` (indices into its net), one beat of a `span`-beat net. Meow.
     int  span        = 1;
     bool last_of_net = false;
-    std::vector<int> nodes;
+    std::vector<int> pins;
 };
 
 struct MacroPin {
@@ -382,13 +382,41 @@ inline int slot_class(NodeKind kind) { return kind == FIXED_PIN ? 0 : 1; }   // 
 // Step 1: color slot-owning nodes into banks so each net's distinct nodes use distinct banks.
 // Welsh-Powell order, least-loaded legal bank within the node's class (movable / fixed occupy
 // separate row ranges, so each is balanced on its own), then min-conflicts repair. Nodes on no
-// in-scope net take the least-loaded bank. Meow.
+// in-scope net take the least-loaded bank.
+// With cfg.large_nets, a large net packs into its minimum ceil(degree/LANES) beats only if no bank
+// holds more of its nodes than that, since a beat takes one node per bank. So each large net is a
+// soft per-bank cap: below every small-net constraint, above load balance. Meow.
 inline void assign_banks(Encoded& enc, const Config& cfg) {
     const Netlist& work = enc.work;
     const int num_nodes = (int)work.movable.size();
     std::vector<std::vector<int>> node_nets(num_nodes);
     for (int net : enc.in_scope_nets)
         for (int node : enc.unique_nodes[net]) node_nets[node].push_back(net);
+
+    std::vector<std::vector<int>> node_large(num_nodes);     // large-net index per node
+    std::vector<int> large_cap;
+    std::vector<std::array<int, BANKS>> large_load;          // per large net: its nodes per bank
+    if (cfg.large_nets)
+        for (int net = 0; net < (int)work.nets.size(); net++) {
+            if (!is_large(work.nets[net])) continue;
+            for (int node : enc.unique_nodes[net]) node_large[node].push_back((int)large_cap.size());
+            large_cap.push_back(((int)work.nets[net].size() + LANES - 1) / LANES);
+            large_load.push_back({});
+        }
+    auto over_cap_banks = [&](int node) {   // banks where this node would push a large net over its cap
+        uint64_t full = 0;
+        for (int large : node_large[node])
+            for (int k = 0; k < BANKS; k++)
+                if (large_load[large][k] >= large_cap[large]) full |= 1ull << k;
+        return full;
+    };
+    auto set_bank = [&](int node, int bank) {
+        for (int large : node_large[node]) {
+            if (enc.bank[node] != NO_BANK) large_load[large][enc.bank[node]]--;
+            large_load[large][bank]++;
+        }
+        enc.bank[node] = bank;
+    };
 
     std::vector<int> order;
     std::vector<long> constraint_degree(num_nodes, 0);
@@ -408,25 +436,34 @@ inline void assign_banks(Encoded& enc, const Config& cfg) {
         for (int net : node_nets[node])
             for (int other : enc.unique_nodes[net])
                 if (enc.bank[other] != NO_BANK) forbidden |= 1ull << enc.bank[other];
+        const uint64_t full = over_cap_banks(node);
         int best = -1;
         for (int k = 0; k < BANKS; k++)
-            if (!(forbidden >> k & 1) && (best < 0 || load[k] < load[best])) best = k;
+            if (!(forbidden >> k & 1) && !(full >> k & 1) && (best < 0 || load[k] < load[best])) best = k;
+        if (best < 0)
+            for (int k = 0; k < BANKS; k++)
+                if (!(forbidden >> k & 1) && (best < 0 || load[k] < load[best])) best = k;
         if (best < 0) best = (int)(std::min_element(load.begin(), load.end()) - load.begin());
-        enc.bank[node] = best;
+        set_bank(node, best);
         load[best]++;
     }
 
-    std::vector<int> collisions(BANKS);
+    // Repair cost per bank: small-net collisions first, then large nets pushed over their cap. Meow.
+    std::vector<long> collisions(BANKS);
+    const long SMALL_COLLISION_COST = 1L << 20;
     for (int pass = 0; pass < cfg.repair_passes; pass++) {
         long moved = 0;
         for (int node : order) {
-            if (node_nets[node].empty()) continue;
+            if (node_nets[node].empty() && node_large[node].empty()) continue;
             auto& load = bank_load[slot_class(enc.kind[node])];
+            const int current = enc.bank[node];
             std::fill(collisions.begin(), collisions.end(), 0);
             for (int net : node_nets[node])
                 for (int other : enc.unique_nodes[net])
-                    if (other != node) collisions[enc.bank[other]]++;
-            const int current = enc.bank[node];
+                    if (other != node) collisions[enc.bank[other]] += SMALL_COLLISION_COST;
+            for (int large : node_large[node])
+                for (int k = 0; k < BANKS; k++)
+                    collisions[k] += large_load[large][k] - (k == current) >= large_cap[large];
             if (collisions[current] == 0) continue;
             int best = current;
             for (int k = 0; k < BANKS; k++)
@@ -434,7 +471,7 @@ inline void assign_banks(Encoded& enc, const Config& cfg) {
                     (collisions[k] == collisions[best] && load[k] < load[best])) best = k;
             if (best == current) continue;
             load[current]--; load[best]++;
-            enc.bank[node] = best;
+            set_bank(node, best);
             moved++;
         }
         if (moved == 0) break;
@@ -521,34 +558,46 @@ inline void schedule_beats(Encoded& enc, const Config& cfg) {
 }
 
 // Step 3b (cfg.large_nets): each large net becomes `span` consecutive beats, appended after the
-// small-net stream in ascending span groups. First-fit decreasing over its distinct nodes (a node's
-// pins stay together, as one lane run) into the first beat with lanes left and the node's bank
-// free. No hazard scheduling: only hpwl_computer_v2 consumes these beats, and it writes no
+// small-net stream in ascending span groups. A node's pins on the net form one lane run, split into
+// runs of at most LANES (MMS has cells and fixed pins with up to ~36 pins on one 2-3-node net); runs
+// of one node share a bank, so they land in different beats. Opens the minimum ceil(degree/LANES)
+// beats, then places runs, busiest bank first, into the least-filled beat with lanes left and the
+// run's bank free; a new beat only when none fits. No hazard scheduling: only hpwl_computer_v2 consumes these beats, and it writes no
 // gradient. Banks are colored for the small nets only, so a large net can need extra beats. Meow.
 inline void pack_large_nets(Encoded& enc, const Config& cfg) {
     if (!cfg.large_nets) return;
-    struct Fill { int lanes = 0; uint64_t banks = 0; std::vector<int> nodes; };
+    struct Fill { int lanes = 0; uint64_t banks = 0; std::vector<int> pins; };
     std::vector<std::vector<std::pair<int, std::vector<Fill>>>> by_span(MAX_SPAN + 1);
     for (int net = 0; net < (int)enc.work.nets.size(); net++) {
-        if (!is_large(enc.work.nets[net])) continue;
-        std::map<int, int> pin_count;
-        for (const Pin& pin : enc.work.nets[net]) pin_count[pin.node]++;
-        std::vector<int> nodes = enc.unique_nodes[net];
-        std::stable_sort(nodes.begin(), nodes.end(), [&](int a, int b) { return pin_count[a] > pin_count[b]; });
-        if (pin_count[nodes.front()] > LANES) { enc.large_dropped++; continue; }
-        std::vector<Fill> beats;
-        for (int node : nodes) {
-            const uint64_t bank_bit = 1ull << enc.bank[node];
-            auto home = std::find_if(beats.begin(), beats.end(), [&](const Fill& f) {
-                return f.lanes + pin_count[node] <= LANES && !(f.banks & bank_bit); });
+        const std::vector<Pin>& net_pins = enc.work.nets[net];
+        if (!is_large(net_pins)) continue;
+        std::map<int, std::vector<int>> node_pins;
+        for (int p = 0; p < (int)net_pins.size(); p++) node_pins[net_pins[p].node].push_back(p);
+        std::vector<std::pair<int, std::vector<int>>> runs;   // (bank, pin indices)
+        for (auto& [node, pins] : node_pins)
+            for (size_t first = 0; first < pins.size(); first += LANES)
+                runs.emplace_back(enc.bank[node], std::vector<int>(pins.begin() + first,
+                                                                   pins.begin() + std::min(pins.size(), first + LANES)));
+        std::array<int, BANKS> bank_runs{};
+        for (const auto& run : runs) bank_runs[run.first]++;
+        if (*std::max_element(bank_runs.begin(), bank_runs.end()) > MAX_SPAN) { enc.large_dropped++; continue; }
+        std::stable_sort(runs.begin(), runs.end(), [&](const auto& a, const auto& b) {
+            return std::make_pair(bank_runs[a.first], a.second.size()) > std::make_pair(bank_runs[b.first], b.second.size()); });
+        const int min_span = ((int)net_pins.size() + LANES - 1) / LANES;
+        std::vector<Fill> beats(min_span);
+        for (const auto& [bank, pins] : runs) {
+            const uint64_t bank_bit = 1ull << bank;
+            auto home = beats.end();
+            for (auto f = beats.begin(); f != beats.end(); ++f)
+                if (f->lanes + (int)pins.size() <= LANES && !(f->banks & bank_bit) &&
+                    (home == beats.end() || f->lanes < home->lanes)) home = f;
             if (home == beats.end()) home = beats.insert(beats.end(), Fill());
-            home->lanes += pin_count[node];
+            home->lanes += (int)pins.size();
             home->banks |= bank_bit;
-            home->nodes.push_back(node);
+            home->pins.insert(home->pins.end(), pins.begin(), pins.end());
         }
         const int span = (int)beats.size();
         if (span > MAX_SPAN) { enc.large_dropped++; continue; }
-        const int min_span = ((int)enc.work.nets[net].size() + LANES - 1) / LANES;
         enc.large_extra_span += span > min_span;
         enc.ideal_beats += min_span;
         by_span[span].emplace_back(net, std::move(beats));
@@ -562,7 +611,7 @@ inline void pack_large_nets(Encoded& enc, const Config& cfg) {
                 beat.nets        = {net};
                 beat.span        = span;
                 beat.last_of_net = b == span - 1;
-                beat.nodes       = std::move(beats[b].nodes);
+                beat.pins        = std::move(beats[b].pins);
                 enc.issue.push_back((int)enc.beats.size());
                 enc.issue_degree.push_back(beat.degree);
                 enc.beats.push_back(std::move(beat));
@@ -635,8 +684,7 @@ inline void encode_records(Encoded& enc) {
         if (beat.span > 1) {   // large-net beat: its nodes' pins from lane 0; the net is reported on its last beat
             if (beat.last_of_net) enc.net_at[position * MAX_NETS_PER_BEAT] = beat.nets[0];
             std::vector<Pin> pins;
-            for (const Pin& pin : enc.work.nets[beat.nets[0]])
-                if (std::count(beat.nodes.begin(), beat.nodes.end(), pin.node)) pins.push_back(pin);
+            for (int p : beat.pins) pins.push_back(enc.work.nets[beat.nets[0]][p]);
             std::stable_sort(pins.begin(), pins.end(),
                              [&](const Pin& a, const Pin& b) { return enc.node_slot[a.node] < enc.node_slot[b.node]; });
             for (size_t p = 0; p < pins.size(); p++)
@@ -828,14 +876,14 @@ inline void decode_stream(const Encoded& enc, const Config& cfg, Failures& fail,
         }
     }
     // Large-net section: span from span_beat_count, net boundaries from a beat counter (the
-    // device's rule). Lane 0 always holds a pin, EMPTY lanes only trail, and a node sits in one
-    // beat of its net. No hazard rule: no consumer writes gradients from these beats yet. Meow.
+    // device's rule). Lane 0 always holds a pin, EMPTY lanes only trail, and within a beat a
+    // node's pins are adjacent and banks distinct (a node may recur in a later beat of the net). No hazard rule: no consumer writes gradients from these beats yet. Meow.
     for (long position = small_positions; position < num_positions; ) {
         int span = 2;
         for (int count : enc.span_beat_count) if (position >= count) span++;
         std::vector<GeomPin> net;
-        std::vector<uint32_t> net_slots;
         for (int b = 0; b < span && position < num_positions; b++, position++) {
+            std::vector<uint32_t> net_slots;
             if (enc.records[0][position * LANES] == EMPTY_RECORD) fail("large-net beat with EMPTY lane 0", position);
             uint64_t banks_used = 0;
             bool trailing = false;
@@ -848,7 +896,7 @@ inline void decode_stream(const Encoded& enc, const Config& cfg, Failures& fail,
                 auto it = slot_to_node.find(slot);
                 if (it == slot_to_node.end()) { fail("node_slot maps to no node", position); continue; }
                 if (net_slots.empty() || net_slots.back() != slot) {
-                    if (std::count(net_slots.begin(), net_slots.end(), slot)) fail("large-net node split or not adjacent", position);
+                    if (std::count(net_slots.begin(), net_slots.end(), slot)) fail("repeated node not adjacent", position);
                     if (banks_used >> (slot % BANKS) & 1) fail("bank hit twice in one beat", position);
                     banks_used |= 1ull << (slot % BANKS);
                     net_slots.push_back(slot);

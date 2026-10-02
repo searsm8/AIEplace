@@ -1171,9 +1171,13 @@ code.
       so the gradient modules' streams are unchanged. Nets of 97..100 pins are dropped (a documented
       divergence). `hpwl_computer_v2` handles them with a running bbox carried as an integer order
       key; a carried fcmp cost −0.25 ns. Bit-exact on synthetic (all 7 spans), adaptec1 and
-      newblue2; 0 dropped. C-synth: II=1, depth 23, slack −0.00, +2.4 K LUT. **Open:**
-      - bank coloring ignores large nets, so about half need extra beats (adaptec1: 21.8 K large
-        beats vs 17.1 K minimum);
+      newblue2; 0 dropped. C-synth: II=1, depth 23, slack −0.00, +2.4 K LUT.
+      **Packing at its minimum (2026-10-02, later):**
+      - Coloring treats large nets as a soft per-bank cap; packing is balanced; nodes with more
+        than 16 pins on a net split across beats (these were MMS's only drops).
+      - All 44 designs: 48 excess beats in 1.58 M, 0 dropped; 36/36 fitting designs bit-exact.
+
+      **Open:**
       - large nets are not chunked yet (bigblue4, superblue12);
       - the gradient path is L3 below, still to build.
       → [[_NEW_HANDOFF_41_next_steps_20261002.md]] step 1

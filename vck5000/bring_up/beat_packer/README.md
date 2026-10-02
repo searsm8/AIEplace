@@ -80,12 +80,25 @@ Nets over 100 pins are masked (XPlace's `ignore_net_degree`). **Nets of 97..100 
 a deliberate divergence from XPlace and sw_only (Mark, 2026-10-02)**, since 96 = 6 full beats.
 
 ## Large nets (`Config::large_nets`)
-After the degree-16 group, each large net takes `span` consecutive beats, one net per beat. Its
-pins start at lane 0, EMPTY lanes come only at the end of a beat, and all of a node's pins sit in
-one beat with distinct banks per beat. Nets are grouped by span 2..`MAX_SPAN` (8), and the
-cumulative `span_beat_count[SPAN_GROUPS]` continues `beat_count`, so the device finds a net's last
-beat with a counter. The span is what first-fit bank packing needs, which can exceed
-⌈degree/16⌉: banks are colored for the small nets only, and about half of the large nets take an
-extra beat (adaptec1: 21.8 K beats vs 17.1 K minimum). A net that needs more than `MAX_SPAN` beats
-is dropped and counted in `large_dropped` (0 on adaptec1 and newblue2). No hazard scheduling
-applies, because no consumer writes gradients from these beats yet.
+After the degree-16 group, each large net takes `span` consecutive beats, one net per beat.
+- **Lanes:** a beat's pins start at lane 0 and EMPTY lanes only trail. Within a beat, banks are
+  distinct and a node's pins are adjacent.
+- **Split nodes:** a node with more than 16 pins on the net is split into ≤16-pin runs. Its runs
+  share a bank, so they land in different beats. MMS has cells and pads with up to ~36 pins on a
+  2–3-node net.
+- **Span groups:** nets are grouped by span 2..`MAX_SPAN` (8). The cumulative
+  `span_beat_count[SPAN_GROUPS]` continues `beat_count`, so the device finds a net's last beat
+  with a counter.
+
+Keeping spans at their minimum ⌈degree/16⌉ takes two steps:
+- **Coloring:** large nets are a soft per-bank cap of ⌈degree/16⌉ nodes. They rank below every
+  small-net constraint and above load balance.
+- **Packing:** open the minimum number of beats, then place runs busiest-bank first into the
+  least-filled beat that fits.
+
+Over all 44 designs: **48 excess beats in 1.58 M (0.003%), 0 nets dropped**. Before the cap and
+the balanced packing, about half the nets took an extra beat. The small-net stream is unchanged
+(the coloring is bit-identical with the flag off).
+
+A net needing more than `MAX_SPAN` beats is dropped and counted in `large_dropped`. No hazard
+scheduling applies, because no consumer writes gradients from these beats yet.
