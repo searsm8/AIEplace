@@ -88,13 +88,19 @@ static void gradient_beat_loop(const pinrec::RecordBeat* records_DDR, int num_be
                                float inv_lut_step, float inv_gamma,
                                float grad_URAM[pinrec::BANKS][ROWS_PER_BANK], int first_fixed_slot,
                                OutBeat* out_beats_DDR, int offset_bits) {
-#pragma HLS DATAFLOW
-    hls::stream<PinBeat> pin_beats;
-    hls::stream<SumBeat> sum_beats;
+#pragma HLS DATAFLOW // three stages working simultaneously, joined by streams
+    hls::stream<PinBeat> pin_beats; // stream between Stage A (pin_bbox) and Stage B (wa_sums)
+    hls::stream<SumBeat> sum_beats; // stream between Stage B (wa_sums) and Stage C (wa_gradient)
 #pragma HLS STREAM variable=pin_beats depth=2
 #pragma HLS STREAM variable=sum_beats depth=2
+
+    // Stage A: read record beats from DDR, gather positions from pos_URAM, compute each pin's bbox and HPWL, write HPWL to DDR
     pin_bbox(records_DDR, num_beats, beat_count_REG, pos_URAM, offset_BRAM, out_beats_DDR, offset_bits, pin_beats);
+
+    // Stage B: read each pin's bbox, compute its exp terms, write four sum trees to sum_beats
     wa_sums(pin_beats, num_beats, lut_BRAM, lut_size, inv_lut_step, sum_beats);
+
+    // Stage C: read each pin's sum trees, compute its gradient, scatter-add results into grad_URAM
     wa_gradient(sum_beats, num_beats, inv_gamma, grad_URAM, first_fixed_slot);
 }
 
