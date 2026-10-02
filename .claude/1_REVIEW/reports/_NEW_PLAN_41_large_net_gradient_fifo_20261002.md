@@ -142,6 +142,28 @@ its own header. Not three kernels.**
 1. **Split the existing small-net beat loop into A/B/C** with no large nets.
    *Done when:* tier 1 gives output bit-identical to today (same arithmetic), every stage is II=1
    in C-synth, and the co-sim hazard sweep still passes at spacing 4.
+   **DONE 2026-10-02.** `pin_bbox.hpp` / `wa_sums.hpp` / `wa_gradient.hpp`, plus
+   `gradient_beat_loop` as the DATAFLOW region, with the same signature, so the chunked
+   `hpwl_gradient_computer_v2` inherits it.
+   - **Bit-identity:** every gradient and HPWL output is bit-identical to the pre-split code over
+     synthetic (3 packer configs), chunked synthetic (capacity 2048 / 768), adaptec1 and newblue2
+     (driver `/tmp/grad_dump.cpp`, 15.7 MB dump). A 1-ulp perturbation is detected, and tier 1's
+     tolerance would not catch one.
+   - **C-synth (plain):**
+
+     | | II | depth | slack |
+     |---|---|---|---|
+     | before (fused) | 1 | 84 | −0.61 ns |
+     | A | 1 | 21 | −0.00 ns |
+     | B | 1 | 35 | −0.00 ns |
+     | C | 1 | 40 | −0.28 ns |
+     | top | | | −0.53 ns |
+
+     The combiner's fmul chain is now the worst path. Cost: LUT +11.8 K, FF +7.5 K, DSP +3,
+     mostly the two depth-2 streams.
+   - **C-synth (chunked):** II=1 in every stage, top slack −1.46 → −1.19 ns.
+   - **RTL co-sim:** spacing 4 PASS; spacing 1 passes C sim and FAILS RTL (rel_rms 48), as
+     before. No deadlock.
 2. **Packer:** hazard-schedule the large-net section, with padding beats, and add the checker
    rule. Report pads per design over the 44-design manifest.
 3. **Large-net paths:** A's from v2, B's window sums, C's sums pop.

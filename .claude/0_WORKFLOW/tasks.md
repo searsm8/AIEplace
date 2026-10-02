@@ -1181,9 +1181,12 @@ code.
 
       **Open:**
       - large nets are not chunked yet (bigblue4, superblue12);
-      - the gradient path: **plan written 2026-10-02**, awaiting Mark's answers. It replaces L3's
-        re-streaming with three DATAFLOW stages (bbox / sums / combine+scatter) joined by
-        ≤8-beat FIFOs: II=1, no 3× pass. → [[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]]
+      - the gradient path: plan approved 2026-10-02 (Mark), replacing L3's re-streaming with
+        three DATAFLOW stages joined by ≤8-beat FIFOs. **Step 1 DONE:** the small-net loop is split
+        into `pin_bbox` / `wa_sums` / `wa_gradient`. Bit-identical outputs, II=1 per stage, co-sim
+        spacing 4 PASS / 1 FAIL as before.
+        **Next:** step 2, packer hazard schedule plus padding beats for the large-net section (rule
+        L6). → [[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]]
       → [[_NEW_HANDOFF_41_next_steps_20261002.md]] step 1
       <details><summary>Before 2026-10-02</summary>
 

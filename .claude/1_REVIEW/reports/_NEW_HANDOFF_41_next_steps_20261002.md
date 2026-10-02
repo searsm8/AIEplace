@@ -123,7 +123,8 @@ is next touched.
   967 RAMB36.
 - **URAM banks:** each URAM is 4 K × 72 bits, two ports. A 1 M-slot array is 128 URAMs: 32 banks × 4
   cascaded URAMs, two floats per word (measured count; the packing is inferred).
-- **DATAFLOW does not fit** the module's phases: random-access dependencies, URAM ping-pong would
+- **DATAFLOW does not fit** *between* the module's phases (it does fit *inside* the beat loop:
+  `pin_bbox` → `wa_sums` → `wa_gradient` since 2026-10-02, each array owned by one stage): random-access dependencies, URAM ping-pong would
   need 512 of 463, and `pos_URAM` has several writers.
 - **`vck5000/test/Makefile` (before the fix)** did not rebuild a harness on a header edit: a stale
   `make test` PASS is possible. Force a rebuild (delete `test/build/<harness>`) if in doubt.
