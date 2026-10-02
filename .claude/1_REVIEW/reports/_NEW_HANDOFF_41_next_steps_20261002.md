@@ -36,8 +36,9 @@ after the 2026-10-01/02 sessions, and the ranked next steps. Background:
   beats. All 44 designs: 48 excess beats in 1.58 M, 0 dropped; 36/36 fitting designs bit-exact.
 - **Open:**
   - **Chunking:** `encode_chunked` homes only small nets.
-  - **Gradient:** L3, below, in `hpwl_gradient_computer`. Its span section needs the
-    HAZARD_DISTANCE schedule.
+  - **Gradient:** plan [[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]] replaces L3's three
+    passes with three DATAFLOW stages joined by FIFOs. It needs the HAZARD_DISTANCE schedule
+    (with padding beats) on the span section.
 
 *Original framing, kept:* **Decide how nets of 17–100 pins are handled (Mark's call, blocks the engine design)**
 - **Why first:** the biggest correctness gap. Those nets are dropped today: 20–29% of ISPD2005 pins,

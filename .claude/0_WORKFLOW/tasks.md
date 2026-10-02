@@ -1179,7 +1179,9 @@ code.
 
       **Open:**
       - large nets are not chunked yet (bigblue4, superblue12);
-      - the gradient path is L3 below, still to build.
+      - the gradient path: **plan written 2026-10-02**, awaiting Mark's answers. It replaces L3's
+        re-streaming with three DATAFLOW stages (bbox / sums / combine+scatter) joined by
+        ≤8-beat FIFOs: II=1, no 3× pass. → [[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]]
       → [[_NEW_HANDOFF_41_next_steps_20261002.md]] step 1
       <details><summary>Before 2026-10-02</summary>
 
