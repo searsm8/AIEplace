@@ -61,7 +61,8 @@ drain_slots:
 // path, measured 2026-09-22). In memory it is a read-add-write, and the host orders the list so a
 // macro recurs only every HAZARD_DISTANCE entries (schedule_macro_pins) -- the same contract as the
 // scatter-add. FIRST starts the sum; LAST writes it into grad. The caller passes pos_URAM as
-// acc_URAM: positions are dead once the beat loop is done. Meow.
+// acc_URAM: positions are dead once the beat loop is done. The add keeps its default 1-cycle
+// latency: it sits inside the read-add-write that HAZARD_DISTANCE covers. Meow.
 static void fold_macro_pins(const pinrec::MacroPinRef* macro_pins_DDR, int num_macro_pins,
                             float grad_URAM[pinrec::BANKS][ROWS_PER_BANK],
                             float acc_URAM[pinrec::BANKS][ROWS_PER_BANK]) {

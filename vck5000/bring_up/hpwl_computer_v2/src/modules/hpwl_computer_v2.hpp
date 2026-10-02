@@ -107,7 +107,13 @@ refresh_macros:   // reads macro slots, writes macro-pin slots: disjoint, so no 
         const pinrec::MacroPinRef ref = macro_pins_DDR[e];
         if (ref.pin_slot == pinrec::MACRO_PIN_SKIP) continue;   // fold-schedule padding
         const float macro_pos = pos_URAM[ref.macro_slot % pinrec::BANKS][ref.macro_slot / pinrec::BANKS];
-        pos_URAM[ref.pin_slot % pinrec::BANKS][ref.pin_slot / pinrec::BANKS] = macro_pos + ref.offset;
+        const float pin_pos = macro_pos + ref.offset;
+        // A binding unlike fold_macro_pins' keeps HLS from sharing one adder between the two loops:
+        // shared, its output fed every bank of pos, grad and acc, the worst routed paths of
+        // 2026-09-23. The extra stage is free here (no carried dependence) and gives Vivado a
+        // register to replicate toward the banks. Meow.
+#pragma HLS BIND_OP variable=pin_pos op=fadd impl=primitivedsp latency=2
+        pos_URAM[ref.pin_slot % pinrec::BANKS][ref.pin_slot / pinrec::BANKS] = pin_pos;
     }
 }
 
