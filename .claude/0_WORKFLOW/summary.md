@@ -88,7 +88,10 @@
   - 17..96-pin nets, **on by default** (2026-10-02): HPWL and gradient done, chunked designs too
     (external slots double on bigblue4 / newblue7). Per-net bbox/sums travel A→B→C on side streams;
     RTL co-sim proves the FIFO bound, depth ≥ extent − 1 + skew (32). 97..100 dropped by decision.
-    Open: MMS `max_rel` (Mark's call), post-route timing, URAM. → [[_NEW_REPORT_41_large_nets_in_chunks_20261002.md]]
+    Open: MMS `max_rel` (Mark's call). → [[_NEW_REPORT_41_large_nets_in_chunks_20261002.md]]
+  - Post-route (2026-10-03, `a31e950`, macro adders unshared): gradient 3.453 ns (WNS −0.12,
+    1.5 K failing endpoints), chunked v2 3.955 ns (WNS −0.63); 256 URAM. Target 3.33; remaining
+    paths are route-bound URAM address/enable fanout, spread across stages. → [[_NEW_HANDOFF_41_next_steps_20261002.md]] §2
   → [[_NEW_REPORT_41_record_datapath_20260922.md]], protocol in `vck5000/bring_up/beat_packer/README.md`.
 - All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
 - **v1 scope DECIDED (Mark, 2026-08-28):** phase-1 GP, device-resident, bit-comparable. **No phase 2,
@@ -160,9 +163,12 @@
   every scored run (`detail_placement.py:374`, unconditional in `run_lg`), so it earns nothing at
   scoring time — but it runs *inside* phase 2 and conditions the GP result, so deleting it is not
   free. `macro_legalization = true|false` A/B over MMS decides it. See tasks.md #38.
-- **#42 — does a better chunk partitioner pay off end to end (opened 2026-10-02)?** The current one is
-  a BFS cut (not min-cut); external slots are 5–40% on the 8 chunked designs (large nets doubled them). Measure host
-  start-up and the per-iteration mailbox + fold cycles first; close it if that share is small.
+- **#42 — mailbox, not partition, is the chunked bottleneck (2026-10-02). Waiting on Mark: which
+  widening option.** The 1-float mailbox is 49–85% of a chunked gradient eval: its send/collect are
+  not bursts (4.26 cycles/entry, fitted to two co-sims). Widened 16/beat it is 2.4–12%; prototype
+  bit-identical (tier 1), II=1 (tier 2), but ~128 K LUT for four loops. bigblue4 end to end:
+  86.7 → 48.9 s (burst fix) → 28.7 s (widened). The `build_chunks` O(n²) erase is fixed: start-up
+  70 → 15 s. The partition only matters via K=4→3 (−7..14%). → [[_NEW_REPORT_42_mailbox_widening_20261002.md]]
 - **#41 — keep in mind for the resident loop (2026-10-01):** standalone, loading positions and
   draining gradients is >=26 K cycles vs a 51.5 K-cycle beat loop per axis (adaptec1); the resident
   loop must keep both in URAM (256 of 463 URAMs per axis). Chunked designs (8/44) keep per-chunk DDR

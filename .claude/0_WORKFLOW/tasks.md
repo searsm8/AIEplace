@@ -1,9 +1,10 @@
 # Tasks
 
-**Active Task (2026-10-02): #41 `hpwl_gradient_computer`.** 17–96-pin nets are done end to end
-(HPWL + gradient; tier 1, mutants and RTL co-sim with a FIFO depth sweep). **Two decisions wait on
-Mark:** newblue3's `max_rel` (one 14 K-pin node, float conditioning), and whether large nets become
-the default. **Next:** the NMU bandwidth check, then timing closure (build server).
+**Active Task (2026-10-02): #41 `hpwl_gradient_computer`.** 17–96-pin nets are done end to end,
+**chunked designs included, and on by default** (Mark, 2026-10-02). **One decision waits on Mark:**
+the MMS gradient `max_rel` (newblue3, now also mms/bigblue4 and newblue7; float conditioning on
+nodes with thousands of large-net pins). **Next:** the NMU bandwidth check, then timing closure
+(build server). Large nets doubled the external slots on bigblue4 / newblue7, so #42 matters more.
 → [[_NEW_HANDOFF_41_next_steps_20261002.md]]
 
 Open work, one section per task. **Status lives here; evidence lives in a
@@ -1179,6 +1180,8 @@ code.
         predicted. Production depth is 32 (58 BRAM18).
       - **Open (Mark):** newblue3 `max_rel` 4.2e-4 > 1e-4 from one 13,936-pin cell. A plain-float
         evaluation is 3.8× worse there, so this is conditioning. Tolerance left unchanged.
+        2026-10-02: now measurable chunked, mms/bigblue4 (1.2–1.6e-4) and mms/newblue7 (1.5e-4,
+        axis 0) fail the same way. Identical in one chunk and in four, so not chunking.
 
       → [[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]] steps 3–4
 
@@ -1219,9 +1222,17 @@ code.
       → [[_NEW_PLAN_41_large_nets_on_records_20260923.md]]
       </details>
       </details>
-- [ ] **Large nets in chunked designs** (rule C2): `encode_chunked` homes only small nets, so the 8
-      designs over 1 M slots still drop them. The device side needs only real span counts.
-- [ ] Optional: a min-cut partitioner if bigblue4 / newblue7 ghost cost (13–19%) matters.
+- [x] **Large nets in chunked designs + `large_nets` on by default (2026-10-02, Mark).** A large net
+      is homed by majority vote like a small one (rule C2); per-chunk degree + span counts moved
+      out of `ChunkDesc` into a `group_counts` table on a 32-bit bundle (`ChunkDesc` 896 → 416 bits).
+      All checks pass: tier 1, 5/5 mutants, 44/44 designs at 1 M slots with 0 large nets dropped,
+      chunked HPWL bit-exact on bigblue4 / superblue12 / newblue7, C-synth II=1 with bursts, RTL
+      co-sim PASS (10 chunks). **Cost:** external slots roughly double on the biggest designs
+      (bigblue4 19% → 40%, K 3 → 4; newblue7 13% → 27%, K 3 → 4) → #42.
+      mms/bigblue4 and newblue7 fail gradient `max_rel` (≤1.6e-4 vs 1e-4) identically in one chunk
+      and in four, so it is the newblue3 conditioning question, not chunking.
+      → [[_NEW_REPORT_41_large_nets_in_chunks_20261002.md]]
+- (The old "optional min-cut partitioner" line is now #42.)
 - Slide-deck source for this module (2026-10-01): [[_NEW_EXPLAINER_41_hpwl_gradient_computer_20261001.md]]
 - m_axi bundle experiment (2026-10-01): merging bundles keeps II=1 but loses bursts on every pointer narrower than the port (incl. per-beat `out_beats`) and saves no LUTs; keep bundles grouped by width. DATAFLOW does not fit (URAM ping-pong would need 512/463); setup+drain is ≥40 K cycles vs 51.5 K beat loop on adaptec1, to be removed by the resident iteration. → [[_NEW_REPORT_41_ddr_bundles_20261001.md]]
 - [x] **Gradient zeroing fused into the position load (2026-10-01, Mark).** Inline loop
@@ -1232,10 +1243,104 @@ code.
 - [ ] **Big Fix, for the resident loop:** positions and gradients stay in URAM, so load and drain
       disappear. Open: URAM budget (256 of 463 per axis, both axes do not fit) and chunked designs
       (8/44 keep per-chunk DDR traffic). Recorded in `pl/src/pl_algo/DATAFLOW.md`.
-- [ ] **`hpwl_gradient_computer_v2` loses bursts on `offset_table` / `exp_lut`** (pre-existing): they
-      share gmem0, which is 1024 bits wide for `ChunkDesc`, so both loads are non-burst (depth 75).
-      Small loads, so low cost; give them their own 32-bit bundle when v2 is next touched. Its
-      clock estimate (3.895 ns, slack −1.46) is also pre-existing.
+- [x] **`hpwl_gradient_computer_v2` bursts on `offset_table` / `exp_lut` — FIXED 2026-10-02.** They
+      (and the new `group_counts`) have their own 32-bit bundle, pinned with `max_widen_bitwidth=32`
+      (without it HLS widened the bundle to 64 for `group_counts`, killing the other two bursts).
+      All three loads burst. (Top slack read −1.19 ns, but with another session's uncommitted
+      adder un-sharing in the tree, so not attributable to this fix.)
+- [x] **Chunking vocabulary renamed (2026-10-02, Mark).** ghost → **external** slot; exchange buffer
+      → **mailbox**, region → **inbox**, block → **parcel** (`ExchangeBlockRef` → `ParcelRef`);
+      producer → **owner**; `import_slots` → `external_slots`, `export_slots` → `shared_slots` (named
+      for *whose* slots: each list carries positions one way and gradients the other); passes and
+      functions are now send / receive / return / collect. Across both chunked modules, the packer,
+      `pin_record.hpp`, tests, co-sim. Pure rename: `make test` PASS; RTL co-sim PASS (8 chunks, 769 external).
+- [ ] **Per-phase cycle numbers for the chunked modules (Mark wants them, 2026-10-02):** send /
+      load / receive / beat loop / return / drain / fold, per chunk, on a chunked design. The
+      receive / return / collect loops move one float per cycle (not a 16-float beat). Mark deferred
+      widening them until that is the obvious bottleneck. Feeds #42.
+      **#42 (2026-10-02) answers this per design and per axis** (`make profile` in beat_packer: a
+      per-phase model fitted to two v2 RTL co-sims; per chunk is not printed). It also found that
+      `send_parcel`'s mailbox write and `collect_parcel`'s mailbox read are not bursts (~4.3
+      cycles/entry): fix by skipping padding segments in the outer loop. Widening is now the
+      obvious bottleneck → [[_NEW_REPORT_42_mailbox_widening_20261002.md]]
+
+## #42 — Partition quality for chunked designs, judged on end-to-end host runtime (opened 2026-10-02)
+
+**Question (Mark):** how much would a better partitioner buy? Judge it on **end-to-end runtime**,
+including the one-time start-up cost of all host preprocessing, not on device cycles alone.
+
+**Current partitioner** (`build_chunks`, `beat_packer.hpp`): a breadth-first locality order
+(`locality_order`), cut into K equal contiguous runs; each net is homed by majority vote. It is
+not min-cut. Result, with large nets homed (default since 2026-10-02): external slots are 5–40%
+of movable nodes on the 8 of 44 designs that need chunks (K=2–4); bigblue4 40% and newblue7 27%,
+up from 19% / 13% small-only, each needing one more chunk. `locality_order` ignores large nets:
+including them is the first, cheapest thing to try.
+(`.claude/2_ARTIFACTS/large_nets_in_chunks/sweep_*.txt`) **XPlace has no equivalent** (GPU, no chunking; `grep -rni partition
+~/phd/Xplace/src` is empty), so this choice is ours.
+
+**What a better partition buys:** fewer external slots, so less mailbox traffic (send / receive /
+return / collect, each one float per cycle), less fold work, and possibly fewer chunks. It applies
+to those 8 designs only.
+**What it costs:** host time only. The netlist never changes during placement, so the partition is
+computed once per design.
+
+**State (2026-10-02): plan steps 1-4 done, falsifier FAILS, widening prototyped. Waiting on Mark: which
+widening option (LUT cost).** → [[_NEW_REPORT_42_mailbox_widening_20261002.md]]
+- **The mailbox is 49-85% of a chunked gradient eval** on today's v2. That is worse than estimated,
+  because the 1-float send write and collect read are NOT bursts (4.26 cycles/entry, fitted to two
+  RTL co-sims; a floor, since real DDR latency is higher). Widened to 16 entries/beat it is 2.4-12.2%,
+  at 99.3-99.8% lane use. bigblue4 end to end (start-up + 1000 x 2 axes at 300 MHz, no density):
+  86.7 s now, 48.9 s with the bursts fixed, 28.7 s widened.
+- **Widening prototype** (`bring_up/mailbox_widened/`): tier 1 `mailbox_widened_test` is bit-identical
+  to the 1-float loops (in `make test`, 5 mutants caught); tier 2 gives II=1 on all four loops. The cost
+  is ~32 K LUT per loop, ~128 K for four (~14% of VC1902). Options A-D in the report: A = burst fix
+  only, ~0 LUT, belongs to #41's v2; C = reuse the beat loop's own gather/scatter.
+- **Host start-up:** one O(n^2) `erase` in `build_chunks` parcel ordering was 57 of bigblue4's 70 s.
+  FIXED (deque, output bit-identical): 69.9 -> 15.0 s. Unchunked start-up is now mostly parse (55-70%).
+- **Partition after widening:** it matters only on the K=4 designs, and mostly through K. A
+  capacity-respecting K=3 cut would save ~7% (bigblue4) to ~14% (newblue7) end to end; the BFS cut
+  misses K=3 by 3.9 K / 33 K slots. A balanced or capacity-aware cut, not a min-cut library.
+- **Next:** Mark picks a widening option (A-D). Then (a) integrate it into v2 (with #41's owner)
+  and re-run the medium co-sim (scratch recipe in the report); (b) optionally, a capacity-aware cut
+  for K=3 on bigblue4/newblue7.
+- Tool: `cd vck5000/bring_up/beat_packer && make profile` (start-up per stage + per-phase cycles +
+  ledger, all 44 designs). Data: `.claude/2_ARTIFACTS/chunk_profile_42/`. Nothing committed yet:
+  the new files build on #41's uncommitted edits.
+
+<details><summary>Superseded: back-of-envelope and plan (2026-10-02, before measuring)</summary>
+
+**Back-of-envelope (2026-10-02) says the falsifier below already FAILS:** every mailbox loop is
+II=1 at one float per cycle, and each external slot crosses it 4× (send / receive / return /
+collect). bigblue4 per axis: beat loop ≈ 8.9 M pins / 16 ≈ 0.56 M cycles, mailbox ≈ 4 × 868 K ≈
+3.5 M, chunk reload/drain ≈ 1 M. And host start-up is not small: `encode_chunked` is 68 s on
+bigblue4 (K=3 fully encoded, fails, K=4 starts over; parcel ordering has an O(n²) `erase`), vs
+≈ 17 s of gradient device time for 1000 iterations at 300 MHz. **Mark (2026-10-02): explore
+widening the mailbox loops** (16 floats/beat) — it attacks the same 4E term partition-independently.
+
+**Plan (Mark-approved 2026-10-02; 300 MHz, 1000 iterations, record negative slack):**
+1. Host start-up broken down per stage (parse, resolve, locality_order, each build_chunks attempt,
+   device arrays), chunked + a few unchunked designs.
+2. Per-phase cycle model from descriptor trip counts (II=1 loops), checked against v2 RTL co-sim.
+3. End-to-end ledger per design: start-up + 1000 × 2 axes × gradient cycles / 300 MHz.
+4. Widening: model it (bank-distinct groups of 16 on the URAM side), then prototype it.
+5. Partition (FM refinement / better K choice) only if it still matters after (4).
+
+**Falsifier / close condition:** if mailbox + fold cycles are a small share of a chunked
+iteration (well under 10%), partition quality cannot matter. Then close #42 and keep the BFS cut.
+</details>
+
+**Next (Mark, 2026-10-05): partitioning deep dive.** The baseline is the current BFS cut; candidates
+are FM and others. Explanation given in chat first; the deep dive starts after Mark picks.
+
+## #43 — Native host parser, no Limbo dependency (opened 2026-10-05, TABLED)
+
+**Why (Mark):** long term, a native parser instead of the prebuilt Limbo libs in
+`host/src/common/lib/`. Host start-up also counts in the end-to-end runtime (#42).
+**Constraint (Mark):** design for a NEW circuit every run, as an academic paper must. Caching parsed
+or encoded arrays across runs is not an answer.
+**Not yet measured:** #42's "parse" times (55–70% of unchunked start-up) are the beat_packer
+prototype reader (`read_bookshelf` / `read_def`), not the real host parser. Step 1 is to time the
+real `host/src/common` parse on the 44 designs next to the device-time estimate.
 
 ---
 

@@ -1279,7 +1279,9 @@ inline bool build_chunks(Chunked& ch, const std::vector<int>& order, int num_chu
         std::deque<long> recent;   // last hazard-1 emitted owner slots, -1 for padding
         auto emit = [&](long slot) { recent.push_back(slot); if ((int)recent.size() >= cfg.hazard) recent.pop_front(); };
         for (int k = 0; k < num_chunks; k++) {
-            std::vector<int> remaining = parcel[j][k];
+            // A deque: the pick is always within the first `hazard` entries, so erase is O(1). As a
+            // vector it was O(n^2) -- 57 s of bigblue4's 70 s start-up (#42). Meow.
+            std::deque<int> remaining(parcel[j][k].begin(), parcel[j][k].end());
             std::sort(remaining.begin(), remaining.end(), [&](int a, int b) {
                 return owner_enc.node_slot[local_in[j][a]] < owner_enc.node_slot[local_in[j][b]]; });
             std::vector<int> ordered;

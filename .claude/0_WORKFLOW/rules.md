@@ -34,6 +34,10 @@ If a rule stops being true, flag it for deletion and tell Mark — a stale rule 
   **Once there:** the server has no GitHub creds, so never push from it — commit on the server, then
   from the laptop `git fetch build:AIEplace <branch>`, rebase onto `origin/<branch>`, and push. I own
   this push/pull sync.
+- **Never put file text inside `wsl -e bash -c "…"`.** Git Bash expands the double-quoted string
+  first: backticks run as commands and vanish from the text, and `$VAR` expands to empty, even inside
+  a quoted heredoc. Write or modify files with the Write/Edit tools; if a script is needed, Write it
+  to a file and run the file. (Promoted from noteToSelf 2026-10-02: hit 2026-09-22 ×5, 10-02 ×2, 10-02 ×4.)
 
 ## Verification — a module isn't done until it's verified
 - **Every PL module is verified offline against a golden before it goes near the device.**

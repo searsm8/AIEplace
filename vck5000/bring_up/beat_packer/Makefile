@@ -20,7 +20,14 @@ beat_packer: beat_packer.cpp beat_packer.hpp pin_record.hpp
 run: beat_packer
 	./beat_packer $(ARGS) $(DESIGNS)
 
-clean:
-	rm -f beat_packer
+# #42: host start-up per stage + per-phase device cycle model, chunked at the real capacity.
+chunk_profile: chunk_profile.cpp beat_packer.hpp pin_record.hpp ../mailbox_widened/mailbox_layout.hpp
+	g++ -std=c++17 -O2 -Wall -I. -I../mailbox_widened -o $@ $<
 
-.PHONY: run clean
+profile: chunk_profile
+	./chunk_profile $(ARGS) $(DESIGNS)
+
+clean:
+	rm -f beat_packer chunk_profile
+
+.PHONY: run profile clean
