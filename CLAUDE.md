@@ -73,28 +73,25 @@ If something does need amending, an annotation is better than hard edits.
 4. Place new reports in `.claude/1_REVIEW/reports`. These files should be text only, since it is git tracked.
 Large artifacts such as images or gifs should be placed in `.claude/2_ARTIFACTS` which is not git tracked (create if needed).
 
-5. Maintain an "Active Task" line at the top of the file. Check it at the beginning of conversations, and update at the end of conversations. If there is no current Active Task and no obvious one to attach, ask Mark.
+5. Maintain an "Active Task" line at the top. Check it when chat begins, and update after writing a handoff or report. If you close out a task, clear the Active Task. If there is no current Active Task and no obvious one to attach, ask Mark.
 
-## A handoff IS a report-in-progress (policy, 2026-08-31)
+## A handoff IS a report-in-progress
 There is no separate, persistent class of handoff document. A handoff exists only **between
 sessions** — it is the running draft of a report while the work is still open. When the work
 finishes, that same file **becomes the report**: rename `HANDOFF_...` → `REPORT_...` in place, in
-`.claude/1_REVIEW/reports/`. Do not accumulate a graveyard of stale handoffs — the old pile in
-`.claude/1_REVIEW/handoffs/` was deleted on 2026-08-31 (git history holds it) and the directory is
-gone. Consequences:
+`.claude/1_REVIEW/reports/`. 
+
 - **Write a handoff only when a session ends mid-task** and the next session needs the draft.
   Name it `[_NEW_]HANDOFF_<#n>_<desc>_<YYYYMMDD>.md`, in `reports/` (not a separate `handoffs/`).
 - **When the task closes, convert it:** `git mv` the file to `REPORT_...` and finish the writeup.
-  One document, two lifecycle stages — never two files for the same work.
-- `HANDOFF` stays in the `<TYPE>` list below only as this transient draft stage.
 
 ## 📄 Naming what you hand Mark — the filename carries the metadata
-Work here is asynchronous and multi-session, so filenames are an efficient channel to communicate across different coding sessions, and to me when I am reviewing files.
+Work here is asynchronous and multi-session, so filenames are an efficient channel to communicate across different coding sessions, and when Mark reviews files.
 
 When naming new files:
 1) If Mark requested a report or other specific file, or you think he should read it, include the tag `_NEW_`.
   **Only Mark clears this prefix to signal that he's finished reviewing it.**
-  The leading underscore is load-bearing: it sorts the unread set to the top of a listing in File Explorer, VS Code and PowerShell.
+  The leading underscore is important: it sorts the unread set to the top of a listing in File Explorer, VS Code and PowerShell.
 
 2)  `<TYPE>` — one of `REPORT`, `HANDOFF`, `PLAN`, `EXPLAINER`. Deliberately small; if none fits,
   default to `REPORT`. `HANDOFF` is the transient draft stage of a `REPORT` (see the policy above),

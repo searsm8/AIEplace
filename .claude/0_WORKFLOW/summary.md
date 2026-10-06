@@ -184,6 +184,9 @@
 - **#43 — native parser (CLOSED 2026-10-06; history.md).** `DesignReader.cpp` replaced Limbo (all 44
   parse 5.3× faster). ⚠️ Touching `DesignReader.cpp` or a `DesignSink` (`DataBase`, beat_packer's
   `native_netlist.hpp`) → run `make test-parser` AND `make -C bring_up/beat_packer check-reader`.
+- **#44 — host control vs PL control (opened 2026-10-05, Mark).** XPlace runs its schedule on the
+  CPU and pays only ~3–4 scalar readbacks per iteration. Build both arms (resident `MODE_PLACE` vs
+  per-iteration launch + host schedule) and A/B on real HW. Step 1: time the bare XRT round trip.
 - **#21 — repo restructure** (host to top level, one host binary). Proposal only, nothing started.
   **Merge `origin/geert` before anything else** — one `.gitignore` conflict today, 25 hand-moved
   files after.

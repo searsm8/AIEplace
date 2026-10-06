@@ -1354,42 +1354,52 @@ iteration (well under 10%), partition quality cannot matter. Then close #42 and 
 - Next options: a contracted-hypergraph multilevel (coarse levels are slow because they score the
   flat netlist); Mt-KaHyPar for a parallel-runtime reference (needs Mark's OK to install).
 
+## #44 — Control loop on the host vs on the PL: build both, measure which is faster (opened 2026-10-05, Mark)
+
+**Why (Mark):** learn from XPlace rather than assume the PL is the right home for the control
+logic. XPlace keeps **all** data on the GPU (one upload, `database.py:463`) but runs the γ/λ
+schedule, best-solution bookkeeping and stop test in **Python on the CPU**. The cost per GP iteration
+is ~3–4 **scalar** readbacks (each one stalls the host until the GPU drains), not a bulk transfer:
+HPWL + overflow `.item()` in `ParamScheduler.push` (`param_scheduler.py:20`), a `weighted_weight > 0.5`
+gate (`:285`), plus one per backtrack try (`nesterov_optimizer.py:108`, up to 10). (Upstream count.
+Our local `PRECOND_TRACE` instrumentation in that file adds 2 more.) #20 step 6 instead moved the
+schedule onto the PL (`param_scheduler.hpp`, `bb_reduce.hpp`, `resident_place`) without measuring
+that alternative.
+
+**The two arms.** Same datapath and same device-resident matrices in both. The ~76 MB/iter
+host-DMA finding (Improvements, ex-#6) still applies, so neither arm moves positions or gradients
+per iteration.
+- **A — resident (PL control):** `MODE_PLACE` / `resident_place` as composed in #20 step 6. One
+  kernel launch for N iterations; the host only sees the final result.
+- **B — host control (XPlace pattern):** one kernel launch per iteration. The kernel returns HPWL,
+  overflow, the BB norms and κ through a few scalar registers; the host runs the γ/λ schedule and
+  convergence test (as `host/src/pl_algo/src/Driver.cpp` does today) and writes back λ, γ and the step.
+  It uses fewer PL resources (no `param_scheduler`/`SchedState`) and the policy stays editable
+  without a rebuild.
+
+**What decides it:** per-iteration time is `t_datapath + t_control`. Arm B pays an XRT
+launch + wait round trip per iteration; arm A pays the PL area and latency of the control modules
+(and they compete for the URAM that #41's resident loop needs). If the round trip is small next to
+`t_datapath`, B costs almost nothing and is simpler. (No per-iteration `t_datapath` on real HW yet;
+#40/#41 timing closure gates that.)
+**Measure on real hardware** (build server). sw_emu timing means nothing here.
+
+**Steps.**
+1. Measure the bare XRT round-trip cost on the VCK5000: launch, wait, read a few scalars, with an
+   empty kernel. This alone may decide the question before either arm is finished.
+2. Arm B: per-iteration `MODE` with a scalar-out/scalar-in ABI. Same trajectory as A, bit-exact
+   (both run the same schedule, so `sched_verify` + the #20 trace are the golden).
+3. A/B on ≥3 designs (a small ISPD2005, a chunked design, an MMS one): wall-clock per iteration,
+   end-to-end time, PL resources. Report → `.claude/1_REVIEW/reports/`.
+
+**Falsifier:** if step 1's round trip is ≥10% of `t_datapath` on the smallest design, arm A
+wins outright and B is shelved. Not started.
+
 ---
 
 # Improvements
 
 Algorithmic ideas beyond faithfulness cleanup — hypotheses, not yet scoped.
-
-- [ ] **Upstream the two XPlace `--use_precond False` fixes as a PR or issue** (opened 2026-08-18).
-      Both are already committed locally on `~/phd/Xplace` branch `local-fixes`; this item is only
-      about whether to send them to `github.com/cuhk-eda/Xplace`.
-      **The bug:** `--use_precond False` is a documented flag that cannot run at all, breaking two
-      independent ways. (1) `apply_precond()` (`calculator.py:5`) returns the preconditioned
-      gradient on the normal path but falls off the end returning `None` when `use_precond` is
-      false; its only caller assigns that to `grad` (`calculator.py:89`) and hands it to the
-      optimizer. (2) `update_precond_weight()` returned early, but `self.weighted_weight` is
-      **never initialised in `__init__`** — it appears there only as a *string* in the
-      `self.metrics` list — while `step()` reads it unconditionally at `param_scheduler.py:284`
-      to gate the every-3rd-iteration throttle.
-      **Why it would be a good PR:** tiny, self-contained, a documented flag that is completely
-      broken, and trivial for a maintainer to verify.
-      ⚠️ **Three things to settle before sending, all real:**
-      - **It is verified STATICALLY, not by running.** Nobody has executed XPlace with
-        `--use_precond False` and captured the two tracebacks. That is the first thing a maintainer
-        will ask for, and it is the one piece of evidence missing.
-      - **Fix (2) is a judgement call, not mechanical.** The minimal fix is
-        `self.weighted_weight = 0.0` in `__init__`, keeping the early return; ours computes it
-        unconditionally, which *changes throttle behaviour* under the flag. Our argument is that
-        `weighted_weight` is a **schedule** quantity and `use_precond` properly gates
-        `apply_precond()`, where the division actually happens — defensible, but a maintainer may
-        prefer the minimal form. **File as an issue showing both**, rather than a PR that assumes
-        ours is the wanted one.
-      - **Repo activity is unknown** — last upstream commit is "update download link". Worth
-        checking issue/PR response times before spending effort.
-      **Why we care beyond good citizenship:** we run XPlace as our reference, and fix (2) sits on
-      the path that computes `weighted_weight` = our `precond_kappa` (see the naming rule in
-      `CLAUDE.md`). If upstream ever adopts the minimal form instead, our `--use_precond False`
-      diagnostic runs quietly stop being comparable to theirs.
 
 - [ ] **Operator-level optimizations, ported from XPlace** (was **#6**, opened 2026-07-29, demoted
       here 2026-08-17 by the sw_only freeze). XPlace gets ~2× over DREAMPlace almost entirely from

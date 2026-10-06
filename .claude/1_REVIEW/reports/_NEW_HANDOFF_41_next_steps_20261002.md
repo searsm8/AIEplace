@@ -75,16 +75,40 @@ the evidence for this handoff is there**).
   Continue [[_NEW_HANDOFF_41_pnr_timing_20260923.md]]; don't restart.
 - **Re-measure first** on today's design: the HLS-estimated worst path is now C's combiner (stage
   slack −0.39 ns, top −0.53 ns). A fresh post-route run comes before any fix.
-  **Staged, NOT run (2026-10-02):** launched, then killed during export at Mark's request because
-  another session was still editing the sources. To relaunch, re-copy the sources (the copy in
-  `~/aieplace_pnr_20261002/vck5000/bring_up/hpwl_gradient_computer/` on the build server is stale)
-  and run its `run_pnr.sh` detached (Vitis 2024.2, as on Sep 23). `pnr.done` holds the exit code;
-  the result is in `synth_check_prj/sol1/impl/report/verilog/*export.rpt`. The Sep 23 run took about
-  1.5 h.
-- **First fix (from the fused run):** the top paths start at one float adder HLS shared between
-  `refresh_macro_pins` and `fold_macro_pins`, fanning out to all 64 URAM banks. Unshare it and
-  register its output before the bank broadcast. Then group the remaining failing endpoints
-  (`path_groups.tcl`).
+  (Superseded: we skipped the fix-free re-measure, since Sep 23 had already identified the top path.)
+- **RESULT (post-route 2026-10-03, Vitis 2024.2, `a31e950`):**
+
+  | module | post-route | WNS | TNS | failing endpoints | LUT | FF | DSP | BRAM | URAM |
+  |---|---|---|---|---|---|---|---|---|---|
+  | hpwl_gradient_computer | **3.453 ns** (≈290 MHz), was 4.335 | −0.123 | −79.6 (was −7,109) | 1,499 (was 20,309) | 120 K | 149 K | 628 | 368 | 256 |
+  | hpwl_gradient_computer_v2 | **3.955 ns** (≈253 MHz), was 4.615 | −0.625 | −2,601 | 11,345 | 137 K | 170 K | 628 | 401 | 256 |
+
+  - The adder broadcast is gone from the top paths. What fails now is spread evenly across stages,
+    all within a few ps of the WNS. Non-chunked failing paths: wa_gradient 492, fold 411, wa_sums 348,
+    m_axi 141, pin_bbox 92. 28% of paths start or end at a URAM.
+  - **Non-chunked worst path:** fold's bank address → `grad_URAM_27` ADDR_A. That is 4 LUT levels,
+    86% routing, and −0.24 ns clock skew: address decode fanned out to 32 banks, not the adder.
+  - **v2 worst path:** send_parcel → `pos_URAM_31` EN_A, 89% routing. v2 has more logic and is
+    route-bound everywhere; `path_groups.txt` stops at 2,000 paths, so its per-stage counts are a
+    sample.
+  - Files: `path_groups.txt` and `synth_check_prj/sol1/impl/verilog/report/*_timing_paths_routed.rpt`
+    in each run directory.
+- **First fix — DONE in `a31e950`.** The shared adder
+  (`grp_fu_1939`) is unshared: `refresh`'s add binds `primitivedsp latency=2`, and a different
+  binding cannot share. C-synth 2022.2: refresh and fold each own an adder, both II=1, and tier 1
+  passes. In v2, refresh×2 share one adder, and fold_macros2 shares one with `collect_parcel`; both
+  pairs write the same arrays, so neither adds fanout.
+  - Runs: `~/aieplace_pnr_20261002/vck5000/bring_up/{hpwl_gradient_computer,hpwl_gradient_computer_v2}/`
+    on the build server. Vitis 2024.2 with `config_export -vivado_phys_opt all`; `run_pnr.sh` then
+    runs `path_groups.tcl` (→ `path_groups.txt`). `pnr.done` holds the exit code; the report is
+    `synth_check_prj/sol1/impl/report/verilog/*export.rpt`.
+  - **Predicted fold still on top. Outcome:** fold is still among the worst paths, but on its bank
+    address, not on the adder output. Pre-run reasoning: Sep 23's worst paths start at `grp_fu_1939_p1_reg`, the adder's
+    *input* register: at latency 1 the DSP add has no output register, so add + 64-bank broadcast
+    share a cycle. fold keeps latency 1 (its add is inside the HAZARD_DISTANCE read-add-write).
+    Next lever: fold at latency 2, if the C-synth II stays 1, then re-run the co-sim spacing sweep.
+  - Sep 23's v2 result, never recorded in its handoff: 4.615 ns post-route, 256 URAM, not met.
+  - v2's C-synth estimate is 3.617 ns, with the critical path in `wa_gradient`'s scatter-add (URAM load + fadd).
 - **Watch, two interlocks:**
   - Deeper pipelines lengthen the read-add-write. If HLS raises II, raise `HAZARD_DISTANCE` (8
     costs <0.5% bubbles) and re-run the co-sim spacing sweep.
