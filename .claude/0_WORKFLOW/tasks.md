@@ -1,6 +1,6 @@
 # Tasks
 
-**Active Task (2026-10-06): #45 step 1 — the `pl/` + `host/sw_flat/` skeleton.** All decisions are
+**Active Task (2026-10-06): #45 step 2 — `hpwl_gradient_CU` in `pl/` (step 1 skeleton done).** All decisions are
 in (D1–D7, second round); see the plan. Working in small snippets that Mark reviews as they land.
 → [[_NEW_PLAN_45_integration_20261006.md]]
 
@@ -755,8 +755,12 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
       closed; D6 v1 scope, control on the CPU (#44 arm B); D7 `origin/geert` stays separate. **No
       caching** of encoded designs. Netless movable nodes measured: 0 on 29/44 designs, max 0.58%
       (mgc_superblue14); they and the fillers form a density-only slot tail.
-- [ ] Step 1: skeleton. **← now**
-- [ ] Steps 2–9 (`hpwl_gradient_CU` → `FlatSink` → whole-design slot layout → `sw_flat` →
+- [x] **Step 1: skeleton (2026-10-06).** `pl/` (README, Makefile, `src/format/pin_record.hpp` copied
+      from beat_packer @ 41f2193, `test/` runner over one `HARNESSES` list) and `host/sw_flat/README.md`.
+      `pin_record_test`: 13 checks pass; 4/4 header mutants make `make -C pl test` exit non-zero
+      (`.claude/2_ARTIFACTS/scratch_45/pl_runner_mutants.sh`).
+- [ ] Step 2: `hpwl_gradient_CU`. **← now**
+- [ ] Steps 3–9 (`FlatSink` → whole-design slot layout → `sw_flat` →
       density path in slot order → compose → hardware → retire `/vck5000`), each with its
       verification, in the plan.
 - Carried in: #41's timing / NMU check / URAM-resident loop; #42's widening choice.
