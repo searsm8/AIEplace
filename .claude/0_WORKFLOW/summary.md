@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-08-28. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-10-06. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 > **Soft cap — one in, one out.** Current state only, ~2 screens. To add a line, remove one:
 > superseded snapshots & dated "Closed" narration → [[journal.md]]; finished task sections → [[history.md]].
 > If it's done and no longer live context, it isn't "where things stand" — evict it.
@@ -8,10 +8,10 @@
 - **sw_only** — CPU golden reference; goal is to match XPlace. **FROZEN 2026-08-17 (Mark's call).**
   Parity reached; no further algorithm/behaviour changes without an explicit decision. Cleanup,
   tooling, docs and tests are NOT frozen. `make test-regress` bit-identical is now the contract.
-- **pl_algo** — move the whole placement iteration onto the PL. **The active thread**, starting at
-  #20 step 1 (restore `dumpScheduleTrace()`; `sched_verify` currently validates a 07-18 golden and
-  always will). Why freezing came first: pl_algo's algorithm is pinned to the 2026-07-14 sw_only,
-  so every further sw_only change was another port.
+- **pl_algo** — move the whole placement iteration onto the PL. **The active thread**, now as
+  **#45**: integration restarts in a new top-level `/AIEplace/pl`, slot order everywhere; the
+  `vck5000/` tree becomes read-only legacy until it is deleted. Why freezing came first: pl_algo's
+  algorithm is pinned to sw_only, so every further sw_only change was another port.
 
 ## Where sw_only stands (frozen — this is the final state, not a waypoint)
 - 🏆 **GOLDEN (ISPD) — median 1.0096, mean 1.0115, over ALL 28 ISPD designs**, legal-vs-legal,
@@ -75,24 +75,20 @@
     legal solutions by 2.6% on the 11 unfenced designs and 12.5% on the fenced 9.
   → [[_NEW_REPORT_26_fence_regions_20260811.md]]
 
-## Where pl_algo stands — THE ACTIVE THREAD as of 2026-08-28
-- **#41 WA gradient on a static pin-record stream (2026-09-22/23, bring_up).** DDR carries only
-  32-bit records (`node_slot | offset_idx`, 16 per beat); positions and gradients live in 32-bank
-  URAM. All random access is on chip, and the host precomputes a bank-conflict-free,
-  hazard-spaced packing.
-  - Four modules: `hpwl_computer_v2` and `hpwl_gradient_computer`, plus chunked `_v3` / `_v2` for
-    designs over 1 M slots.
-  - Verification: tier-1 exact (HPWL bit-exact, gradient ~4e-7), and C-synthesis II=1 on every loop.
-  - All 44 designs encode; 8 need chunks.
-  - The gradient beat loop is 3 DATAFLOW stages (`pin_bbox`/`wa_sums`/`wa_gradient`, bit-identical).
-  - 17..96-pin nets, **on by default** (2026-10-02): HPWL and gradient done, chunked designs too
-    (external slots double on bigblue4 / newblue7). Per-net bbox/sums travel A→B→C on side streams;
-    RTL co-sim proves the FIFO bound, depth ≥ extent − 1 + skew (32). 97..100 dropped by decision.
-    Open: MMS `max_rel` (Mark's call). → [[_NEW_REPORT_41_large_nets_in_chunks_20261002.md]]
-  - Post-route (2026-10-03, `a31e950`, macro adders unshared): gradient 3.453 ns (WNS −0.12,
-    1.5 K failing endpoints), chunked v2 3.955 ns (WNS −0.63); 256 URAM. Target 3.33; remaining
-    paths are route-bound URAM address/enable fanout, spread across stages. → [[_NEW_HANDOFF_41_next_steps_20261002.md]] §2
-  → [[_NEW_REPORT_41_record_datapath_20260922.md]], protocol in `vck5000/bring_up/beat_packer/README.md`.
+## Where pl_algo stands — THE ACTIVE THREAD as of 2026-10-06
+- **#45 — integration in `/AIEplace/pl` (ACTIVE, opened 2026-10-06).** The native parser (#43),
+  FM partitioning (#42) and the chunked record-stream gradient (#41) each verify alone; none feeds a
+  placer. **Mark's decisions:** slot order (beat_packer format) for every per-node array; one parse
+  feeds both the software route and the PL; one chunk-capable `hpwl_gradient_CU` (from
+  `hpwl_gradient_computer_v2`; `hpwl_computer*` retired); FM and bare cut both kept behind
+  `partition_fm_passes`; start fresh in `/AIEplace/pl` and delete `/vck5000` once moved; timing after
+  integration. Gradient `max_rel` bound relaxed to 1e-3 (rel_rms 1e-5 unchanged) — done.
+  **Waiting on Mark:** D1 mailbox option (A now / C later recommended), D2 `_CU` vs the naming rule.
+  → [[_NEW_PLAN_45_integration_20261006.md]]
+- **Building blocks it starts from (#41/#42, closed 2026-10-06; history.md):** the chunked gradient
+  is tier-1 exact (rel_rms ~4e-7), II=1, co-sim PASS, post-route 3.955 ns (unchunked 3.453) vs 3.33;
+  one axis needs 256 of 463 URAM. The 1-float mailbox is 49–85% of a chunked eval (A: burst fix,
+  free; B–D: widen, 0–128 K LUT). FM 1 pass: 0.38× externals, −32% end to end unwidened, +8% widened.
 - All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
 - **v1 scope DECIDED (Mark, 2026-08-28):** phase-1 GP, device-resident, bit-comparable. **No phase 2,
   no backtracking** (deferred until needed). **pl_algo pins to the frozen sw_only HEAD.** (Third §10
@@ -163,31 +159,19 @@
   every scored run (`detail_placement.py:374`, unconditional in `run_lg`), so it earns nothing at
   scoring time — but it runs *inside* phase 2 and conditions the GP result, so deleting it is not
   free. `macro_legalization = true|false` A/B over MMS decides it. See tasks.md #38.
-- **#42 — mailbox, not partition, is the chunked bottleneck (2026-10-02). Waiting on Mark: which
-  widening option.** The 1-float mailbox is 49–85% of a chunked gradient eval: its send/collect are
-  not bursts (4.26 cycles/entry, fitted to two co-sims). Widened 16/beat it is 2.4–12%; prototype
-  bit-identical (tier 1), II=1 (tier 2), but ~128 K LUT for four loops. bigblue4 end to end:
-  86.7 → 48.9 s (burst fix) → 28.7 s (widened). The `build_chunks` O(n²) erase is fixed: start-up
-  70 → 15 s. → [[_NEW_REPORT_42_mailbox_widening_20261002.md]]
-  **Partitioning (2026-10-05):** FM 1 pass gives 0.38× externals in 1–8 s and fits K_min on 8/8 (the
-  baseline misses it on 3/8). End to end: −32% with the 1-float mailbox, neutral once widened.
-  Multilevel (0.062×) and KaHyPar (0.026×) are too slow to pay off. **FM 1 pass has been
-  `encode_chunked`'s default since 2026-10-06** (`Config::partition_fm_passes`; the bare cut is the
-  fallback at each K). → [[_NEW_REPORT_42_partitioning_20261005.md]]
-  `make test` now runs every harness in `HARNESSES` (21). It had silently skipped two.
-- **#41 — keep in mind for the resident loop (2026-10-01):** standalone, loading positions and
-  draining gradients is >=26 K cycles vs a 51.5 K-cycle beat loop per axis (adaptec1); the resident
-  loop must keep both in URAM (256 of 463 URAMs per axis). Chunked designs (8/44) keep per-chunk DDR
-  traffic. m_axi bundles are grouped by width. → DATAFLOW.md, [[_NEW_REPORT_41_ddr_bundles_20261001.md]]
 
 ## Also open
+- **#46 — sw_only masks nets above 96 pins, not 100 (Mark, 2026-10-06).** Matches the PL record
+  stream; a new deliberate divergence from XPlace. Config-only (`ignore_net_degree`), but it needs a
+  re-score of both suites for a new golden. Not started.
 - **#43 — native parser (CLOSED 2026-10-06; history.md).** `DesignReader.cpp` replaced Limbo (all 44
   parse 5.3× faster). ⚠️ Touching `DesignReader.cpp` or a `DesignSink` (`DataBase`, beat_packer's
   `native_netlist.hpp`) → run `make test-parser` AND `make -C bring_up/beat_packer check-reader`.
 - **#44 — host control vs PL control (opened 2026-10-05, Mark).** XPlace runs its schedule on the
   CPU and pays only ~3–4 scalar readbacks per iteration. Build both arms (resident `MODE_PLACE` vs
   per-iteration launch + host schedule) and A/B on real HW. Step 1: time the bare XRT round trip.
-- **#21 — repo restructure** (host to top level, one host binary). Proposal only, nothing started.
-  **Merge `origin/geert` before anything else** — one `.gitignore` conflict today, 25 hand-moved
-  files after.
+- **#21 — repo restructure.** Change A (host to top level) landed 2026-09-09 (`05b35bd`); #45 does
+  the rest (`pl/` at top level, `vck5000/` retired). **`origin/geert` is still NOT merged** (12
+  commits ahead, checked 2026-10-06); his `host/src/v2/` is a second from-scratch LEF/DEF host, which
+  matters to #45's "one parse".
 

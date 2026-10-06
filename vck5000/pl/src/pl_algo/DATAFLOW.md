@@ -1,5 +1,12 @@
 # pl_algo data flow
 
+> ⚠️ **Becoming legacy (2026-10-06, #45).** Integration restarts in a new top-level `/AIEplace/pl`
+> with **slot order** (beat_packer's `node_slot`) for every per-node array, and the chunk-capable
+> record-stream gradient `hpwl_gradient_CU` (from `bring_up/hpwl_gradient_computer_v2`) replacing
+> `hpwl_gradient.hpp` + `MODE_REFRESH_PINS`. Modules here are copied over one at a time; after a
+> copy, fix bugs in `pl/` only. Until `pl/` has its own DATAFLOW.md, this file stays authoritative
+> for the modules not yet moved. → `.claude/1_REVIEW/reports/_NEW_PLAN_45_integration_20261006.md`
+
 > **Block diagrams** now live in `.claude/2_ARTIFACTS/diagrams/`:
 > [[DIAGRAM_pl_overview.md]] (the whole PL region, simplified), [[DIAGRAM_iteration.md]]
 > (the per-iteration loop) and [[DIAGRAM_density.md]] (the density branch expanded).

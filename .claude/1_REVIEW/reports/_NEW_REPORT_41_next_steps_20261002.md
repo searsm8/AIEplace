@@ -1,4 +1,9 @@
-# HANDOFF #41 — what to work on next (rewritten evening of 2026-10-02)
+# REPORT #41 — where the gradient computer was left, and what came next (rewritten evening of 2026-10-02)
+
+> **Closed 2026-10-06; converted from HANDOFF.** Decision 1 below is resolved: the structural
+> `max_rel` bound is now 1e-3 (rel_rms stays 1e-5; newblue3 / mms/bigblue4 / newblue7 pass). Steps
+> still open — the NMU check (§1) and timing (§2, after integration) — carry into #45
+> ([[_NEW_PLAN_45_integration_20261006.md]]), where `hpwl_gradient_computer_v2` becomes `hpwl_gradient_CU`.
 
 Where `hpwl_gradient_computer` (the WA-gradient PL module on the static pin-record stream) stands,
 and the ranked next steps. Background:
@@ -72,7 +77,7 @@ the evidence for this handoff is there**).
 ### 2. Close timing (needs the build server)
 - **Status:** post-route 4.335 ns vs 3.33 ns target (about 231 MHz), worst slack −1.0 ns, 20 K
   failing endpoints, measured on the **fused** loop, before the DATAFLOW split and large nets.
-  Continue [[_NEW_HANDOFF_41_pnr_timing_20260923.md]]; don't restart.
+  Continue [[_NEW_REPORT_41_pnr_timing_20260923.md]]; don't restart.
 - **Re-measure first** on today's design: the HLS-estimated worst path is now C's combiner (stage
   slack −0.39 ns, top −0.53 ns). A fresh post-route run comes before any fix.
   (Superseded: we skipped the fix-free re-measure, since Sep 23 had already identified the top path.)

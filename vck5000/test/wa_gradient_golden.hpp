@@ -93,7 +93,10 @@ inline Err compare(const packer::Netlist& nl, const std::vector<float>& got, con
 }
 
 // Tolerances, as hpwl_dhar_test [1] (module vs same-LUT double golden) and [2] (vs true exp).
-constexpr double STRUCT_RMS_TOL = 1e-5, STRUCT_MAX_TOL = 1e-4;
+// STRUCT_MAX_TOL is 1e-3, not 1e-4 (Mark, 2026-10-06): max_rel is normalised to the design's RMS,
+// and a node carrying ~14 K large-net pins (newblue3, mms/bigblue4, newblue7) outgrows it through
+// float conditioning alone (plain float is 3.8x worse there). rel_rms stays the tight bound. Meow.
+constexpr double STRUCT_RMS_TOL = 1e-5, STRUCT_MAX_TOL = 1e-3;
 constexpr double LUT_RMS_TOL    = 1e-4, LUT_MAX_TOL    = 1e-3;
 
 inline float span(const packer::Netlist& nl, int net, int axis, const std::vector<float>& node_pos) {

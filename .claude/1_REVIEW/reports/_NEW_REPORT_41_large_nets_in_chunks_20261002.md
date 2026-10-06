@@ -4,7 +4,7 @@
 and `Config::large_nets` is on by default. The plan (approved by Mark 2026-10-02, including both
 default choices and the default flip) is kept below the results. Context:
 [[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]] (large nets in the unchunked modules),
-[[_NEW_HANDOFF_41_next_steps_20261002.md]] step 4. Data: `.claude/2_ARTIFACTS/large_nets_in_chunks/`.
+[[_NEW_REPORT_41_next_steps_20261002.md]] step 4. Data: `.claude/2_ARTIFACTS/large_nets_in_chunks/`.
 
 ## Results
 

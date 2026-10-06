@@ -176,6 +176,10 @@ touch one, check here first.
   recorded in #35 but not taken.
 
 ## pl_algo current state
+**Moving (2026-10-06, #45):** integration restarts in a new top-level `/AIEplace/pl`, slot order
+everywhere; `vck5000/` becomes read-only legacy as pieces are copied over, then is deleted. See
+`.claude/1_REVIEW/reports/_NEW_PLAN_45_integration_20261006.md`. Until `pl/` has its own DATAFLOW.md:
+
 **`vck5000/pl/src/pl_algo/DATAFLOW.md` is the single authoritative source** — read it before
 touching pl_algo, and update it (not this section) when the state changes. `README.md` next to it
 is the orientation/entry point. Only the stable summary lives here:

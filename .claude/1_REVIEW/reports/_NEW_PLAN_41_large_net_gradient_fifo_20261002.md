@@ -5,7 +5,7 @@ the beat FIFOs need extent − 1 + pipeline skew, not extent (step 4). It supers
 [[_NEW_PLAN_41_large_nets_on_records_20260923.md]] (three passes that re-read a group's chunk
 stream) and keeps L3's exact arithmetic. The stream it consumes already exists and is verified on
 the HPWL path. Protocol: `vck5000/bring_up/beat_packer/README.md`, "Large nets". Status:
-[[_NEW_HANDOFF_41_next_steps_20261002.md]] step 1.*
+[[_NEW_REPORT_41_next_steps_20261002.md]] step 1.*
 
 ## The problem
 In today's fused `gradient_beat_loop`, every value a pin needs is ready in the same beat: the

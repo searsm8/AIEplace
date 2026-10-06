@@ -7,7 +7,7 @@ a headline, the bullets for the slide, and a suggested visual. Numbers are the l
 Code: `vck5000/bring_up/hpwl_gradient_computer/src/hpwl_gradient_computer_top.cpp` (kernel top) →
 `src/modules/hpwl_gradient_computer.hpp` (the module). Evidence:
 [[_NEW_REPORT_41_record_datapath_20260922.md]], [[_NEW_REPORT_41_beat_packer_20260922.md]],
-[[_NEW_HANDOFF_41_pnr_timing_20260923.md]].
+[[_NEW_REPORT_41_pnr_timing_20260923.md]].
 
 ---
 
