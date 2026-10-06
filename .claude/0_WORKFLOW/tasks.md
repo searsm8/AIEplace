@@ -759,7 +759,20 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
       from beat_packer @ 41f2193, `test/` runner over one `HARNESSES` list) and `host/sw_flat/README.md`.
       `pin_record_test`: 13 checks pass; 4/4 header mutants make `make -C pl test` exit non-zero
       (`.claude/2_ARTIFACTS/scratch_45/pl_runner_mutants.sh`).
-- [ ] Step 2: `hpwl_gradient_CU`. **← now**
+- [ ] **Step 2: `hpwl_gradient_CU`. ← now.** Done 2026-10-06:
+      - **2a restructure** (`8e94220`): 8 bring_up headers → `pl/src/modules/hpwl_gradient_CU.hpp` +
+        `hpwl_gradient/` (7 files); all 44 definitions character-identical, legacy vs new outputs
+        byte-identical on 5 designs (synthetic 6/38/1 chunks, adaptec1, mms/newblue3,
+        mgc_superblue12, mms/bigblue4). Packer → `host/sw_flat/packer/`; `IGNORE_NET_DEGREE` = 96.
+      - **2b C-synth**: identical to legacy at HEAD (3.617 ns est., LUT 265,076, every loop II=1).
+      - **2c mailbox burst fix (option A)**: padding segments skipped in the outer loop.
+        `send_parcel` / `collect_parcel` mailbox accesses now burst (depth 144 → 7 / 6), II=1,
+        3.617 ns, LUT +49. Byte-identical outputs; 2/2 mutants caught. RTL co-sim
+        (`pl/synth/hpwl_gradient_CU/cosim`, capacity 160): hazard 4 PASS with 3 same-slot pairs
+        straddling skipped padding; hazard 1 negative control FAILS in RTL (passes in C).
+        ⚠️ The legacy co-sim's capacity 256 has **no** padding, so that path was never co-simulated before.
+      - Remaining: tier-1 real-design sweep over all 44; `make -C pl test`'s capacity-768 padding
+        coverage is 1 entry (load-bearing: it alone catches one mutant) — strengthen it.
 - [ ] Steps 3–9 (`FlatSink` → whole-design slot layout → `sw_flat` →
       density path in slot order → compose → hardware → retire `/vck5000`), each with its
       verification, in the plan.

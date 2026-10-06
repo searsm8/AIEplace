@@ -12,8 +12,14 @@
 
 namespace plalgo {
 
+// Padding segments (ParcelRef offset -1) are skipped here, in the outer loop, never entry by entry:
+// a real segment holds no padding (packer contract C3, check_chunked), so the inner loop's mailbox
+// access is unconditional and HLS bursts it. Behind a per-entry `if (slot < 0)` it was single
+// requests, ~4.3 cycles each (#42 option A). Meow.
+static bool is_padding(const pinrec::ParcelRef& parcel) { return parcel.offset < 0; }
+
 // Owner side: this chunk's positions that other chunks hold as external, segment by segment.
-// Padding entries (slot -1, only there to space the gradient return) write nothing. Meow.
+// Padding segments (only there to space the gradient collect) send nothing. Meow.
 static void send_external_positions(const pinrec::ChunkDesc& desc,
                                     const pinrec::ParcelRef* parcels_DDR, const int32_t* shared_slots_DDR,
                                     const float src_URAM[pinrec::BANKS][ROWS_PER_BANK], float* mailbox_DDR) {
@@ -21,12 +27,13 @@ static void send_external_positions(const pinrec::ChunkDesc& desc,
 send_parcels:
     for (int k = 0; k < desc.num_parcels; k++) {
         const pinrec::ParcelRef parcel = parcels_DDR[desc.parcel_offset + k];
-    send_parcel:
-        for (int i = 0; i < parcel.count; i++) {
+        if (!is_padding(parcel)) {
+        send_parcel:
+            for (int i = 0; i < parcel.count; i++) {
 #pragma HLS PIPELINE II=1
-            const int32_t slot = shared_slots_DDR[entry + i];
-            if (slot < 0) continue;
-            mailbox_DDR[parcel.offset + i] = src_URAM[slot % pinrec::BANKS][slot / pinrec::BANKS];
+                const int32_t slot = shared_slots_DDR[entry + i];
+                mailbox_DDR[parcel.offset + i] = src_URAM[slot % pinrec::BANKS][slot / pinrec::BANKS];
+            }
         }
         entry += parcel.count;
     }
@@ -55,9 +62,10 @@ return_gradients:
     }
 }
 
-// Owner side, reversed: add every consumer's gradient for this chunk's shared nodes. The
-// host keeps a slot HAZARD_DISTANCE entries apart across the whole sequence, inserting padding
-// entries (slot -1, skipped) where a parcel boundary would bring one closer. Meow.
+// Owner side, reversed: add every consumer's gradient for this chunk's shared nodes. The host keeps
+// a slot HAZARD_DISTANCE entries apart within a segment; across segments the spacing comes from
+// the pipeline draining between two invocations of collect_parcel (no rewind), which is why
+// skipping a padding segment is safe -- RTL co-sim with a negative control is what checks that. Meow.
 static void collect_external_gradients(const pinrec::ChunkDesc& desc,
                                        const pinrec::ParcelRef* parcels_DDR, const int32_t* shared_slots_DDR,
                                        const float* mailbox_DDR, float grad_URAM[pinrec::BANKS][ROWS_PER_BANK]) {
@@ -65,13 +73,14 @@ static void collect_external_gradients(const pinrec::ChunkDesc& desc,
 collect_parcels:
     for (int k = 0; k < desc.num_parcels; k++) {
         const pinrec::ParcelRef parcel = parcels_DDR[desc.parcel_offset + k];
-    collect_parcel:
-        for (int i = 0; i < parcel.count; i++) {
+        if (!is_padding(parcel)) {
+        collect_parcel:
+            for (int i = 0; i < parcel.count; i++) {
 #pragma HLS PIPELINE II=1
 #pragma HLS DEPENDENCE variable=grad_URAM type=inter direction=RAW distance=pinrec::HAZARD_DISTANCE dependent=true
-            const int32_t slot = shared_slots_DDR[entry + i];
-            if (slot < 0) continue;
-            grad_URAM[slot % pinrec::BANKS][slot / pinrec::BANKS] += mailbox_DDR[parcel.offset + i];
+                const int32_t slot = shared_slots_DDR[entry + i];
+                grad_URAM[slot % pinrec::BANKS][slot / pinrec::BANKS] += mailbox_DDR[parcel.offset + i];
+            }
         }
         entry += parcel.count;
     }

@@ -1,0 +1,4 @@
+synth_check_prj/
+*.log
+*.jou
+cosim_prj*/
