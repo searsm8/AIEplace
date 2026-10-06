@@ -17,6 +17,42 @@ status. **Never rewrite an entry; annotate.** The retraction trail is the point.
 
 ---
 
+## 2026-10-06 — evicted from summary.md: legacy pl_algo (#20) bullets; #20 and #40 closed as superseded by #45
+
+> - All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
+> - **#20 — compose Stage 5 (the resident loop = v1) LAST, after tier-1 coverage.** Progress
+>   2026-08-28: **step 1 DONE** — `dumpScheduleTrace()` restored in sw_only (config-gated, `make
+>   test-regress` bit-identical = proven no-op), fixture regenerated from the frozen HEAD (adaptec1,
+>   652 iters), so `sched_verify` now validates CURRENT sw_only and feeds **κ** (not the pre-#19 dff
+>   hack); the escalating `precond_coef` ladder is exercised. **step 2 core DONE** (schedule +
+>   convergence bit-exact); its divergence-conjunct / phase-relative / jolt items need a diverging or
+>   mixed-size fixture. **step 3 DONE** — the `formats.hpp` wall is broken (`b4130e6`: HLS includes
+>   guarded behind `#ifndef PL_TIER1_STUB`, no-op for the real build; `tier1_stub.hpp` supplies a
+>   `std::deque` `hls::stream`), unblocking all four modules. `make test` = **12 harnesses, 11 of ~14
+>   real modules** (`6cdcc8d` node_footprint/density_bin/force_gather/metrics/iteration_update; `4c0546b`
+>   spectral). **step 4 geometry pair DONE** (`d095a9f`): `node_footprint` drops the in-die shift and
+>   `iteration_update` clamps to the √2-expanded box — one coupled contract matching sw_only
+>   `computeNodeFootprint`/`enforceDieBoundaries`, `bin_w=die/GRID` so no new ABI scalar.
+>   **Step 4 CLOSED for v1** (2026-08-29): the movable-macro weight override (#11b) is TABLED —
+>   latent on every std-cell design (num_movable_macros==0) and needs the same host→PL kind flag as
+>   fillers, so it's folded into step 5; `node_footprint_test` [4] is the tripwire.
+>   **Next: sw_emu trajectory A/B** for the geometry change (tier-1 proves the formulation, not the
+>   end-to-end match), then step 5 (fillers + macro weight), then step 6 (compose the resident loop =
+>   v1, LAST). → [[_NEW_HANDOFF_20_pl_algo_stage3_20260828.md]]
+> - **`hpwl_gradient` de-gathered (P1b+P2, 2026-08-28, `21adad6`/`ed25f1a`) — the main win of the #20
+>   step 3b optimization thread.** `NodePin` now carries the ABSOLUTE pin position (`{x,y}`, replacing
+>   per-node `{off_x,off_y}`); a new `refresh_pin_pos` module folds `v_k` in once per iteration
+>   (`MODE_REFRESH_PINS`, II=1). All three random `node_pos` gathers left the HPWL datapath (and
+>   `metrics::hpwl_sweep`'s went too) — burst log confirms `gmem0` no longer appears in the HPWL path;
+>   `sweep_bbox` pipeline depth **146 → 73**. LUT +2.4%, BRAM/DSP/timing unchanged, tier-1 bit-identical.
+>   ⚠️ **Not yet load-bearing on device**: `Driver.cpp`'s `eval_gradients` does not yet issue
+>   `MODE_REFRESH_PINS` before `MODE_HPWL_GRAD`/`MODE_METRICS` — until it does, an on-device run
+>   silently evaluates the gradient at stale pin positions. Small fix, do it before any sw_emu run of
+>   the HPWL path. → [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]]
+> - `top.cpp` is still a mode-switch bring-up scaffold; the host owns the γ/λ schedule, one
+>   round-trip per iteration.
+> - `make host HOST=pl_algo` needs one `make clean HOST=pl_algo` first (stale `.d`, not a source break).
+
 ## 2026-10-06 — evicted from summary.md: #41 and #42 status bullets (both closed; records in history.md), to make room for #45
 
 > - **#41 WA gradient on a static pin-record stream (2026-09-22/23, bring_up).** DDR carries only

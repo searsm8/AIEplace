@@ -16,6 +16,10 @@ removed — it had been sitting in both files since 2026-07-30).
 
 **Compacted 2026-08-07:** the full pre-compaction text of the still-OPEN tasks (#1, #3, #6, #7, #9, #10, #11, #14, #15, #17, #19, #20, #21, #22, #23, Parked, Improvements) - first section below.
 
+**Closed 2026-10-06 (superseded by #45, Mark):** **#40** — `hpwl_gradient_dhar` failed on real hardware from timing (WNS −0.71 ns, 22% of endpoints, 85% route delay in the fully unrolled 16-lane `net_loop`), not logic. Its successor line — `hpwl_gradient_dhar_v2` → `hpwl_computer` (II=1, 2026-09-22) → #41's record-stream `hpwl_gradient_computer` — replaced it; the partial-unroll restructure was never needed. #45 carries the gradient forward as `hpwl_gradient_CU`.
+
+**Closed 2026-10-06 (superseded by #45, Mark):** **#20** — pl_algo Stage 5, the resident loop in `vck5000/pl`. Done before closing: `dumpScheduleTrace()` restored and `sched_verify` fed from the frozen sw_only (step 1); schedule + convergence bit-exact (step 2 core); the `formats.hpp` wall broken so all modules are tier-1-covered (step 3); the `node_footprint` / `iteration_update` geometry pair (step 4); `hpwl_gradient` de-gathered (P1b+P2). Not done: the sw_emu geometry A/B, step 5 (fillers + movable-macro weight) and step 6 (compose the loop). Those, re-planned in slot order with control on the CPU (#44 arm B), are #45 steps 4-7; the verified modules and `sched_verify` are #45's starting material. → [[_NEW_PLAN_45_integration_20261006.md]]
+
 **Closed 2026-10-06:** **#42** — partition quality for chunked designs, judged end to end. The mailbox, not the partition, was the bottleneck (49–85% of a chunked gradient eval; its send/collect were not bursts). Widening prototyped (bit-identical, II=1, ~128 K LUT); `build_chunks` O(n²) erase fixed (start-up 70 → 15 s). FM 1 pass: 0.38× externals, fits K_min on 8/8, −32% end to end with the 1-float mailbox, +8% once widened; it is `encode_chunked`'s default, and both partitioners stay behind `partition_fm_passes` (Mark). Multilevel / KaHyPar too slow to pay. The widening choice (options A–D) carried into **#45** (D1). → [[_NEW_REPORT_42_mailbox_widening_20261002.md]], [[_NEW_REPORT_42_partitioning_20261005.md]]
 
 **Closed 2026-10-06:** **#41** — `hpwl_gradient_computer`: the WA gradient on a static 32-bit pin-record stream (`node_slot | offset_idx`, 16 lanes/beat), positions and gradients in 32-bank URAM, all random access on chip; chunked `hpwl_gradient_computer_v2` for the 8/44 designs over 1 M slots (external slots through a DDR mailbox). Nets of 2..96 pins, large nets on by default, 97..100 dropped (→ #46). Tier-1 rel_rms ~4e-7; `max_rel` bound relaxed 1e-4 → 1e-3 (Mark, 2026-10-06; newblue3 4.2e-4 is float conditioning on a 14 K-pin node). II=1 everywhere, RTL co-sim PASS (hazard 4, FIFO depth ≥ extent − 1 + skew). Post-route 3.453 ns / chunked 3.955 ns vs 3.33 — deferred until integration. Open items (timing, NMU bandwidth, URAM-resident loop) carried into **#45**, where the chunked module becomes `hpwl_gradient_CU`. → [[_NEW_REPORT_41_record_datapath_20260922.md]], [[_NEW_REPORT_41_large_nets_in_chunks_20261002.md]], [[_NEW_REPORT_41_next_steps_20261002.md]]
@@ -81,6 +85,405 @@ did not fix are now **#29** (the XPlace reference belongs in the placer, masked-
 site-width-correct) and **#30** (LG+DP inside `dse.py`).
 
 ---
+
+## #20 — pl_algo Stage 5: wire the full device design (opened 2026-08-06, CLOSED 2026-10-06 — superseded by #45)
+
+→ [[_NEW_REPORT_pl_algo_stage5_assessment_20260806.md]] (UNREAD). `DATAFLOW.md` stays authoritative
+for the dataflow itself; this item is the work plan.
+
+**The problem is not "compose the resident loop".** pl_algo's algorithm is pinned to the
+**2026-07-14** sw_only, 20 commits + #19 ago. Composing Stage 5 on top hardens a three-week-old
+algorithm. `Placer::dumpScheduleTrace()` — the only producer of `sched_verify`'s golden — was deleted
+from sw_only as dead code on 2026-07-28, and its consumer lives in another variant and names it by
+*filename*, so **nothing in the build could see the coupling**. `make test`'s green `sched_verify`
+validates the device scheduler against sw_only as of 2026-07-18 and will keep passing forever.
+**Tier-1 covers 3 modules of 17.**
+
+Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
+
+- [x] **1. Restore `dumpScheduleTrace()` in sw_only — DONE 2026-08-28.** Config-gated
+      (`output.dump_schedule_trace`, default false), hooked at the end of `performIteration` after
+      `updateSchedule()`; emits 21 columns (the original 16 + `precond_kappa`, `phase`,
+      `phase_iteration`, `stop_reason`, `backtrack_steps`). `computeLipschitzEstimate` now records
+      its two BB norms into members so the dump can emit them (verbatim capture, no behaviour change).
+      `make test-regress` **bit-identical** before/after on both designs (proven no-op). Fixture
+      regenerated: adaptec1 grid 512 / td 1.0 / seed 42, **converges 652 iters**, replacing the
+      2026-07-18 trace; `config_used.toml` committed (config is TOML now, `.config.json` deleted).
+- [~] **2. Re-verify `param_scheduler` against the new trace — CORE DONE 2026-08-28.** `sched_verify`
+      now feeds **κ** (`precond_kappa` column), not the dff hack. Schedule scalars verify
+      **bit-exact** (inv_gamma/alpha/coeff/lambda all 0.0), convergence fires exactly at 652.
+      **Escalating `precond_coef` (the "escalating dff_coef" item) handled and now EXERCISED
+      (pc 1→256):** κ[i] is produced by `precond_coef[i-1]` (at an x2 boundary the row logs the new
+      pc but its κ reflects the old one), so the c-derivation groups by the *producing* pc and the
+      closed-form check uses a per-regime c; every plateau holds to ~1.1% and c scales cleanly with
+      pc. The old fixture pinned pc=1.0 and never tested this. **Still open (need other fixtures, not
+      adaptec1):** the `overflow rising` conjunct on the coarse divergence test (needs a *diverging*
+      trace — adaptec1 converges), phase-relative counters (needs a *mixed-size/phase-2* trace —
+      adaptec1 is phase-1 only), and jolt params read from config vs hardcoded (a param_scheduler
+      cleanup). → [[REPORT_pl_algo_stage5_assessment_20260806.md]]
+- [x] **3. Tier-1 harnesses for the uncovered modules — DONE 2026-08-28.** All the step-3 modules
+      are covered; `make test` runs **11 harnesses**, coverage 10 of ~14 real modules. Each is vs an
+      independent double golden per the `bb_reduce` template.
+      - `hpwl_gradient` (`hpwl_grad_test.cpp`, 6 assertions + mutation table), `bb_reduce`
+        (`bb_reduce_test.cpp`) — done earlier this session.
+      - **The `formats.hpp` wall (the "decide once" blocker) is gone (`b4130e6`).** formats.hpp
+        guards its HLS transport includes + `axis_t`/`beat_t` behind `#ifndef PL_TIER1_STUB`
+        (no-op for the real HLS build; byte-identical preprocessed output). `test/tier1_stub.hpp`
+        sets the macro and supplies a `std::deque`-backed `hls::stream<T>` — the only HLS surface a
+        module signature exposes. This unblocked all four remaining modules at once (option (a)).
+      - `node_footprint` (`node_footprint_test.cpp`): independent double spec golden + area/on-grid/
+        macro-passthrough invariants, all four in-die-shift edges driven.
+      - `density_bin` (`density_bin_model.cpp`, upgraded): now calls the **real** `density_bin()` and
+        the **real** `node_footprint` — its stale hand-copies deleted (the duplication the wall
+        forced). Naive full-grid golden, bit-exact. Cap is the shared `capFixedDensity` spec
+        (`min(rho,td)`, #36/#35).
+      - `force_gather` (`force_gather_test.cpp`): gather vs double reference (1.7e-6) + adjoint/area
+        conservation with field==1 (7.4e-5).
+      - `metrics` (`metrics_test.cpp`): HPWL CSR reduce (6e-9) + overflow_sum (2e-8) + masked-net
+        invariance.
+      - `iteration_update` + `memory_writer` (`iteration_update_test.cpp`): full combine+precond+BB+
+        momentum+clamp chain for u and streamed v (2.5e-8/4.3e-8), four-edge clamp exact, writer
+        bit-exact, coeff==0 warm-up v==u.
+      → [[_NEW_HANDOFF_20_pl_algo_stage3_20260828.md]] carried the plan; this closes its "NEXT
+      SESSION STARTS HERE" (the wall + the four modules).
+- [ ] **3b. `hpwl_gradient` optimization — proposed, not implemented.** With coverage in place,
+      the module was profiled against the last real `TARGET=hw` csynth. It is **gather-bound, not
+      compute-bound**, at ~1% of the VC1902: three truly-random `num_pins` `node_pos` gathers per
+      iteration (one of them in `metrics::hpwl_sweep`, which recomputes a bbox `sweep_bbox`
+      already has), `sweep_bbox` II=2 / `sweep_sums` II=3, and pin streams running the 512-bit
+      bus at 128 bits. Seven ranked proposals with costs and per-proposal verification —
+      including Mark's absolute-position `NodePin` contract (**verdict: yes, and better than the
+      24-byte variant**) — in [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]]. Suggested order
+      **P5a → P1b → P1 → P2 → P3 → P4 → P5b → P6**, then spatial replication. P1b's prerequisite
+      HPWL assertion **landed 2026-08-28 as `[6]`** (`aa007a7`); it reduces the `bb_DDR` boxes
+      phase 1 already writes and matches the double golden exactly, and two mutations (perturbed
+      `maxy`, dropped last-net flush) are caught by `[6]` alone.
+      **P5a implemented 2026-08-28** (per-port `num_read_outstanding` / `max_read_burst_length` on
+      the HPWL bundles in `top.cpp`, each tuned to the pattern the burst log shows). Its proposed
+      second half — `sp=` bank tags — **was withdrawn: this platform has ONE memory controller**
+      (`platforminfo` reports only `BRAM` and `MC_NOC0`), so there are no banks to spread across
+      and the absence of `sp=` tags in the build is correct, not an oversight. ⚠️ **P5a's speedup
+      is UNVERIFIED and cannot be verified here** — C-synthesis shows cost, not latency, and the
+      experiment needs Geert's card. It is the cheapest test that can *falsify* the gather-bound
+      diagnosis, so run it before building P1/P2 on top of that diagnosis.
+      **P1b implemented 2026-08-28** (`21adad6`): `hpwl_gradient` emits HPWL from a separate
+      `hpwl_reduce` over `num_nets` (II 8, 221k cycles) — **not** an accumulator inside
+      `sweep_bbox`, which was built first and cost II 2→7. `metrics::hpwl_sweep` has the same
+      double-accumulator pathology (II≈7 over `num_pins`), so this is ~30× cheaper than the pass
+      it replaces. Cost: LUT +2.4%, BRAM 0, timing unchanged. ⚠️ **New precondition — `bb_DDR`
+      must be zeroed before first use** (`host_interface.hpp` NetBBox; both `Driver.cpp` sites do
+      it). Host switched off `hostHPWL` 2026-09-09 (see the P2 follow-through item below; that also
+      fixed a stale-position regression). Still TODO: delete `metrics::hpwl_sweep` — left in place on
+      purpose, `metrics` is the only thing `runMetrics()` covers.
+      ⚠️ **`pl/Makefile` did not track header dependencies until `21adad6`** — a module-header
+      edit left the stale `.xo` and `make` said "Nothing to be done". Two measurements in this
+      session were silently stale. Any pre-2026-08-28 synthesis claim that followed a
+      header-only edit is unverified.
+      **P1 (fuse phases 1+2) INVESTIGATED AND BLOCKED 2026-08-28 — do not just retry it.** Two
+      measured blockers: (a) adaptec1's unmasked nets have **median degree 2** (53.3% are
+      degree-2, mean 4.28), so the no-stream version's per-net inner drain loop pays pipeline
+      fill/drain on a 166-deep datapath and comes out ~4.4M cycles against phase 2's current
+      2.8M — slower than what it replaces; (b) the `hls::stream` DATAFLOW version puts
+      `hls_stream.h` into the module, which compiles under g++ only with `-I$XILINX_HLS/include`
+      (breaks the tier-1 no-Vitis contract) **and** the csim stream is unbounded, so the harness
+      could not detect the undersized-FIFO/deadlock risk that is P1's whole danger.
+      **Recommendation: skip to P2** — it delivers P1's gather saving without a FIFO, without a
+      new buffer, and fixes phases 1+2 *and* `metrics` at once.
+      **P2 LANDED 2026-08-28 (`ed25f1a`) — the main win of this thread.** `NodePin` now carries
+      the ABSOLUTE pin position (`{x,y}` replacing `{off_x,off_y}`), with the static offsets in a
+      new upload-once `PinOffset[]` and a new `modules/refresh_pin_pos.hpp` folding v_k in once
+      per iteration (`MODE_REFRESH_PINS`, II=1). **All three random `node_pos` gathers left
+      `hpwl_gradient`, and `metrics::hpwl_sweep`'s went too.** Burst log after: `sweep_bbox`,
+      `sweep_sums`, `seg_reduce`, `metrics` all burst; **gmem0 no longer appears in the HPWL
+      path**. `sweep_bbox` depth **146 → 73** (DDR latency out of the pipeline); IIs unchanged;
+      LUT +2.4%, BRAM/DSP/timing unchanged. Tier-1 output **bit-identical** before/after.
+      Note the proposal's "NodePin stays 16 B so it is free" was half right — the offsets still
+      need a device home (24 B/pin either way); the win is the hot/cold split.
+- [x] **↪ pl_algo — finish P2: the host issues `MODE_REFRESH_PINS` — DONE (verified 2026-09-09).**
+      `Driver.cpp` `eval_gradients` runs `MODE_REFRESH_PINS` (with `r.wait()`) immediately before
+      `MODE_HPWL_GRAD` (Driver.cpp ~1048-1052), so the device pin arrays carry `v_k` before any
+      sweep reads them.
+- [x] **↪ pl_algo — switch the host off `hostHPWL` (P1b follow-through) + FIX a stale-HPWL
+      regression — DONE 2026-09-09.** The `--place` loop now takes HPWL from `MODE_HPWL_GRAD`'s
+      by-product (`dct_out[0]`, captured in `eval_gradients` before the field passes reuse `b_dout`),
+      deleting a full CPU pass over all pins per iteration. **This also fixed a real bug:** `ed25f1a`
+      (P2) rewrote `hostHPWL` to read `r.x` from the *host* `pins` array, which P2 refreshes only on
+      the device (`MODE_REFRESH_PINS`) — so since 2026-08-28 the loop computed HPWL at the **initial**
+      positions every iteration and fed that stale value into `updateDensityWeight` (Driver.cpp:1209),
+      corrupting the λ trend, not just the log. `hostHPWL` deleted from `Placement.hpp` (was its only
+      caller). Verified offline: pl_algo host builds with XRT; `make test` green, assertion `[6]`
+      proves the by-product == double golden at rel 2.1e-08. ⚠️ **Not yet run end-to-end** — the
+      before/after λ-schedule + HPWL-history change needs a `sw_emu` `run-place` A/B (built xclbin).
+      Next lever after that is **P3 (II fixes)** — re-read the P1b lesson first: HLS cannot see a
+      rotating array index, partial accumulators need STATIC indices via unrolling.
+      → [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]]
+- [x] **4. Close the datapath divergences** under that coverage — CLOSED for v1 scope 2026-08-29
+      (geometry pair done; macro-weight deferred to step 5). **Geometry pair DONE 2026-08-29
+      (`d095a9f`):** `node_footprint.hpp` no longer does the in-die shift #11a deleted (centered box,
+      matches `computeNodeFootprint`), and `iteration_update.hpp` now clamps to the √2-**expanded** box
+      `[0.5(cw−w), die−0.5(cw+w)]` matching `enforceDieBoundaries` (Step.cpp:131) — these are one
+      contract (the expanded clamp is what makes the unshifted footprint legal), so they landed
+      together. `bin_w` derives from `die/GRID`, no new top() scalar. `force_gather`/`density_bin` are
+      faithful as a consequence (edge cells now CLIP like `computeNodeOverlaps`, not shift). Verified:
+      `node_footprint_test` [3]→CENTERING, `iteration_update_test` NEW [5] on-grid coupling (0
+      off-grid), `IterVerify.cpp` host golden updated; `make test` 12 harnesses green. ⚠️ **C-synth +
+      sw_emu trajectory A/B vs sw_only still needed** to confirm the end-to-end match (tier-1 only
+      proves the module math is now faithful to sw_only's formulation).
+      **Movable-macro weight override (#11b) — TABLED for v1 (decision 2026-08-29, Mark).** sw_only
+      sets weight = target_density for a movable macro when td < 1 (Grid.cpp:31; is_mov_macro rule =
+      Setup.cpp:106 tagMovableMacros). It is a **no-op on every design pl_algo runs** (std-cell,
+      num_movable_macros == 0 → override never fires) and only bites MMS, which needs phase 2 +
+      fillers v1 lacks. It also needs the **same host→PL per-node "kind" flag that fillers need**, so
+      it is **bundled into step 5**, not built alone as dead code. `node_footprint_test` [4] is the
+      tripwire (pins the current no-override contract: macro weight == 1.0) — see its header for the
+      exact split when the flag lands. So **step 4 is CLOSED for v1 scope** (geometry done; macro
+      weight deferred to step 5).
+- [~] **5. Fillers — MODEL + PACKER DONE 2026-08-29 (tier-1 + host pack-check); device run pending.**
+      **Kind flag = NESTED INDEX RANGES (Mark's call), not a per-node field.** The movable prefix is
+      `std [0,first_macro) | macro [first_macro,first_filler) | filler [first_filler,M)`; a per-node
+      consumer classifies by index (`host_interface.hpp` `classifyNode` → `{is_std_cell,
+      is_movable_macro, is_filler, is_fixed}`, exactly one true). "Real movable" (overflow map) is the
+      prefix `[0,first_filler)`; "all movable" (force map) is `[0,M)` — the ideal nesting.
+      Landed: `DesignHeader` gains `first_macro`/`first_filler`; `node_footprint` takes
+      `(is_movable_macro, target_density)` and applies the **#11b override** (`weight=td`, Grid.cpp:31);
+      `density_bin`/`force_gather` derive `is_macro` per node and stay adjoints (shared helper);
+      **`tagMovableMacros` ported** into the pl_algo host (`Packer.cpp`), `db.addFillers()` called in
+      `--place` (adopts effective td), packer buckets the four ranges + seeds filler positions
+      uniform-random (deterministic seed, **not** matched to sw_only's `rand()` stream — documented).
+      Verified: `make test` 12/12 (node_footprint [4] override split, force_gather [3] override,
+      density_bin bit-exact w/ 100 movable macros); new host `--pack-check` mode PASS on
+      **adaptec1 (filler=160067 = XPlace-exact), mms/adaptec5 (76 macros, 1.51M fillers, all in-die,
+      HPWL rel=0)**. ⚠️ **Two things NOT done (deferred to step 6 / MMS):** (a) the movable-only
+      overflow map — `density_bin` currently emits ONE filler-inclusive force map, so `--place`
+      overflow reads filler-inclusive until step 6 adds the `[0,first_filler)` scatter; (b) the macro
+      override is **latent on every design pl_algo runs today** (ISPD std-cell → no macros; bookshelf
+      MMS → td defaults to 1.0 in `--place`, so `td<1` never fires) — implemented+tier-1-tested, ready
+      for MMS+phase-2. Device `--place` run with fillers is tier-3 (Vitis/Geert's card). Initial
+      placement parity (sw_only centre-clusters movable; pl_algo uses parsed positions) is a separate
+      step-6 A/B concern. → [[_NEW_HANDOFF_20_pl_algo_stage3_20260828.md]] (step-5 section to append).
+- [~] **6. Compose the resident loop — STRUCTURAL DRAFT DONE 2026-08-29 ("structure first", Mark).**
+      `top.cpp` now reads like the DATAFLOW diagram: three functions — `density_gradient` (bin_scatter
+      → AIE-FFT field solve → force_gather, mirroring the proven Driver.cpp:547-556 sequence),
+      `resident_iteration` (refresh → hpwl_grad + density → bb_reduce → metrics → param_scheduler →
+      iteration_update, on-chip `SchedState`, no host round-trip), and `resident_place` (the loop),
+      driven by a new `MODE_PLACE` with a dedicated resident ABI (gmem14-27 + 8 scalars). **Verified
+      to the extent possible here:** `g++ -fsyntax-only -I$XILINX_HLS/include` clean (both `!PL_ONLY`
+      and `PL_ONLY`) — a real check that every module signature + the wiring is consistent — and tier-1
+      stays 12/12. **NOT done (the next gates):** (a) **tier-2 C-synth** (`vitis_hls`) — syntax ≠
+      C-synth; (b) **tier-3 sw_emu** trajectory A/B vs sw_only; (c) **host co-design** — `Driver.cpp`
+      needs a `runResidentPlacement()` to bind the 14 resident buffers + 8 scalars for `MODE_PLACE`,
+      AND dummy bindings for those args in the bring-up modes (XRT requires every kernel arg set, so
+      the bring-up sw_emu modes error until then — the Driver still *compiles*, `xrt::kernel` is
+      variadic); (d) the **movable-only overflow map** `[0,first_filler)` (deferred: `metrics` reduces
+      the filler-inclusive force map — "2nd map next"); (e) the **best-position snapshot** (hook marked
+      in `resident_iteration`) — ⚠️ **it must snapshot the LOOKAHEAD `v_k`, not committed `u`** (parity
+      note below). Phase-2 re-entrancy left out per the v1 decision (leave room, don't build).
+
+⚠️ **sw_only parity note — u vs v (added 2026-08-17, from #32/7a).** sw_only now does what XPlace
+does: **best-solution tracking snapshots the lookahead `v_k` (`probe_pos`) and measures HPWL there
+too**, so HPWL, overflow and the stored solution all describe one position. XPlace has only one
+position variable — `p` IS `v_k` (`nesterov_optimizer.py:71`) — and `evaluator_fn` measures both
+metrics at it (`run_placement_nesterov.py:142-145`). Three consequences for pl_algo, all in step 6:
+- the resident loop's **snapshot** writes `v_k`;
+- its **HPWL metric** (`metrics.hpp`) must evaluate at `v_k`, not at the committed position — sw_only
+  threads this as the new `at_probe` argument on `computeTotalWirelength`/`computeWirelength_HPWL`;
+- a **restore** writes BOTH position fields, because sw_only's `syncProbeToCommitted()` is gone —
+  folded into `restoreBestPlacement()`, which now restores the whole pair (u == v afterwards, which
+  is the state XPlace is permanently in).
+pl_algo's density deposit is already at the probe (`node_footprint.hpp`), so the deposit side needs
+no change — it is the snapshot and the HPWL metric that would otherwise inherit the old split.
+This is exactly the class of divergence that `sched_verify` cannot catch (it checks the schedule,
+not the geometry), so it needs a step-3 harness or it will not be noticed.
+
+**Decisions (Mark, 2026-08-28)** — report §10's first two open questions are now settled:
+- **v1 = phase-1 GP, device-resident, bit-comparable. NO phase 2, NO backtracking.** Both are
+  deferred until a measured need appears ("worry about them later, if we need to"). This relaxes
+  step 6: phase-2 re-entrancy is no longer a v1 requirement (leave room for it, don't build it).
+  The no-backtracking call also makes P1b's by-product HPWL unconditionally safe (Report #20 P1b's
+  "take HPWL from the accepted trial" caveat only bit if backtracking existed).
+- **pl_algo pins to up-to-date sw_only** (the frozen golden HEAD). The freeze makes this cheap and
+  it is what makes `sched_verify` meaningful again — restore `dumpScheduleTrace()` against it (step 1).
+
+**Still open** (report §10, third question): pin sw_only to grid 1024 for the A/B, or build pl_algo
+per-design with `-DPL_GRID`?
+
+**2026-09-04 (Path B / tier-3 sw_emu, mid-task):** the degenerate resident trajectory found
+2026-09-03 is root-caused to the α seed alone (a real BB trial-step estimate is ~88,700x larger than
+the crude `init_step_seed*site_width` fallback; the density-weight scale anomaly is a red herring,
+self-normalizing). A host-side fix (`Driver.cpp::runResidentPlacement`, mirrors `runPlacement`'s
+`estimate_initial_step`) is implemented and syntax-clean but **blocked, unverified**: the bring-up-
+mode dispatch it needs stalls indefinitely (40-60+ min, zero output, not grid-size-dependent) at
+this design's real scale (31k movable / 29k nets) in sw_emu, for reasons not yet diagnosed (no
+ptrace access this session to get a backtrace). → [[_NEW_HANDOFF_20_pl_only_resident_bringup_20260903.md]] §8.
+
+**2026-09-09 (bring-up ladder landed on real silicon; the sw_emu dispatch stall was sidestepped,
+not fixed in sw_emu).** Rather than keep fighting the 2026-09-04 sw_emu dispatch stall, bring-up
+moved to **real hardware** via a ladder of standalone PL-only harnesses, now committed at
+**`vck5000/bring_up/`** (`709a116`): `add1_pl` (load/run) → `fft_pl` (DCT/IDCT/IDXST) →
+`field_solve_pl` (2D field solve) → `hpwl_pl` (WA HPWL gradient) → `iteration_pl` (the full
+gradient-and-step). `iteration_pl` runs one complete Nesterov step — both gradient sources combined
+into a position update — on the VCK5000 and verifies `u_{k+1}`/`v_{k+1}` against a from-scratch double
+golden (per its README; `rel_rms < 3e-2`, bounded by `hpwl_CU`'s exp-LUT). Each harness `-I`-includes
+the real `modules/`, not copies. Also landed `dct_fft_aie` (AIE FFT) carrying the **bring-up dispatch
+fix** (Mark-confirmed): the graph/kernel path was throwing `open_graph_handle: Operation not
+supported`; the fix **enumerates devices** (probe each card on a multi-card node and use the first
+that accepts the xclbin, not `device(0)`) and creates the graph/kernel through an **`xrt::hw_context`**
+instead of the legacy `device+uuid` constructors (`+ -luuid` on the host link). This work was built on
+the build server and was untracked/stashed there — see `rules.md` "Build server" for how that box is
+reached and why nothing pushed from it directly.
+⚠️ This is **not** the device-resident Stage-5 loop (step 6): no on-chip schedule, convergence test, or
+looping — `iteration_pl` is a single host-driven step. The 2026-09-04 `runResidentPlacement` sw_emu
+stall above is therefore **still open for the resident loop**; what changed is that the datapath is now
+proven on silicon one step at a time, so the resident loop composes hardware-verified blocks.
+
+## #40 — `hpwl_gradient_dhar`: real-hardware failure is a TIMING CLOSURE bug, not a logic/readback bug (opened 2026-09-10, CLOSED 2026-10-06 — superseded by #45)
+
+↪ pl_algo bring-up. One of the `vck5000/bring_up/` standalone hardware harnesses (#20's 2026-09-09
+ladder: `add1_pl`→`fft_pl`→`field_solve_pl`→`hpwl_pl`→`iteration_pl`). `hpwl_gradient_dhar` is a
+separate fast-adder-tree HPWL-gradient kernel.
+
+**ROOT-CAUSED 2026-09-10: the design does not meet timing on real silicon.** Read the routed
+(post-place-and-route) `v++` timing report from the `hw` build already sitting on the build server
+(`_x/reports/link/imp/impl_1_..._timing_summary_routed.rpt`) — never rebuilt, the report already
+existed from the run that failed. `WNS = -0.710 ns`, `TNS = -11,741.808 ns`, **43,859 / 196,028
+endpoints (22%) fail setup** on the kernel's own 300 MHz clock (`clkwiz_aclk_kernel_00_clk_out1`).
+`v++` shipped the xclbin anyway — the default flow warns on unmet timing but doesn't block bitstream
+generation, so nothing upstream would have caught this short of reading the report.
+
+**Every one of the 10 worst violated paths lands inside `grp_hpwl_gradient_dhar_Pipeline_net_loop_fu_336`**
+— the `net_loop:` pipeline region in `hpwl_gradient_dhar.hpp`, the fully-unrolled 16-lane
+term-gen/adder-tree/combiner block. The worst path is **85% route delay, 15% logic** (only 5 logic
+levels) — a congestion signature, not a too-deep datapath. Destination register names
+(`lut_BRAM_load_127_reg`, `ce_reg_replica_15`) point at the cause: `term_gen` calls `hpwl_lut_exp`
+4×/lane × 16 lanes (fully `UNROLL`ed) = 64 concurrent on-chip LUT reads per cycle, and a BRAM/LUTRAM
+only has 1-2 read ports, so HLS replicated the LUT cache (and its control fan-out) many times over to
+feed all 64 readers at once — long-distance routing to reach the replicas within one cycle. Kernel
+resource utilization is only **6.36% LUT / 3.99% REG** of the reconfigurable region, so this is
+*local* fan-out congestion, not a capacity problem.
+
+**Functionality is verified correct — tier-1 (`make test`, pure g++) passes at ~1e-6, unchanged.**
+This is a classic FPGA physical-design problem (too much parallel logic crammed into one pipeline
+stage), not a bug in the math, the DDR readback, or the host/device transfer path.
+
+⚠️ **hw_emu would not have caught this and is not worth running for this bug** — it is cycle-accurate
+to the HLS-*scheduled* RTL, not to post-place-and-route timing, so it almost certainly passes. Chasing
+it would burn a build cycle to learn nothing.
+
+<details><summary>Superseded 2026-09-10: original working hypothesis (DDR-bank/host readback), written
+before the timing report was read — kept for the record, now refuted</summary>
+
+> **Tier-1 offline (`make test`, pure g++) PASSES** — same kernel, same golden, ~1e-6. **Real-hardware
+> run FAILS**: `bo_grad` (the per-node gradient array, `krnl.group_id(6)`) comes back wrong by orders
+> of magnitude (rel_rms ~18, max_rel ~296), while `bo_hpwl` (the single scalar at `group_id(7)`) is
+> correct to rel=2e-8 — same order as the tier-1 run. HPWL being right means net/pin/LUT loading and
+> the segmented-reduction passes that feed *both* outputs are executing correctly, which localizes the
+> bug to the grad-specific readback path (`bo_pin_grad`/`bo_grad`, group_id(5)/(6)) rather than the
+> kernel math itself (already proven correct offline).
+>
+> **Working hypothesis, not yet confirmed:** a DDR-bank/connectivity or host/device size-mismatch
+> issue specific to real hardware (untested in tier-1 C-sim and presumably `sw_emu`) — not a
+> timing/precision bug, the magnitude is too large for that.
+>
+> Refuted by the routed timing report: HPWL reads correct not because its path is clean but because
+> (apparently) enough of its narrower accumulation path avoided the 22%-failing region, while the
+> wide `net_loop` combinational block did not. No DDR-bank/size-mismatch evidence was ever found —
+> the real cause was sitting in a report that already existed and had not been read.
+
+</details>
+
+**2026-09-11: three pragma-level experiments tried against the LUT/port-contention diagnosis above
+— one confirmed net-negative, two confirmed no-ops.** All verified via a real `v++ -c` C-synthesis
+re-run on the build server (not guessed), and the design's own compile log/guidance report read
+directly rather than just the packaged summary:
+
+- **`lut_BRAM` cyclic-partitioned (factor=16)** — DID what it targeted: `BRAM_18K` 14→0, the 64
+  concurrent reads moved onto 16 LUTRAM banks (confirmed in the csynth resource report). **But a
+  full P&R rebuild then FAILED to route at all** — 1126 unrouted signals, 771 illegal node overlaps,
+  worse than the pre-fix "routes but misses timing" baseline. The +42% LUT cost (69k→98k) landed as
+  LUTRAM in the *same* SLICEM fabric the surrounding `fmul`/`fmadd`/`faddfsub` DSP-adjacent logic
+  already needed, worsening local congestion rather than fixing it — confirmed by the P&R log's
+  top-10 congested-node list, which is dominated by that floating-point logic, not `lut_BRAM` itself.
+  **REVERTED** (`hpwl_gradient_dhar.hpp`, at `lut_BRAM`'s declaration — the revert note is load-bearing,
+  don't reapply without also cutting `net_loop`'s parallelism first).
+- **`load_net` UNROLL→PIPELINE II=1** — no effect whatsoever; identical `Final II=16, Depth=411,
+  Fmax=349.47MHz` and identical `gmem1` port-conflict warning, both before and after. Root cause:
+  Vitis HLS automatically flattens/re-unrolls loops nested inside an already-`PIPELINE`d outer loop
+  (`net_loop` itself), overriding the inner loop's own pragma. Left in place (harmless, doesn't hurt),
+  but does not fix `gmem1`'s contention — that needs real restructuring (see below), not a pragma.
+- **`hpwl_total` split into 8 named lane accumulators + `switch(n&7)`** (mirroring
+  `hpwl_gradient.hpp`'s `HPWL_LANES` trick) — the underlying carried-dependence warning did NOT
+  disappear, it just moved to `hpwl_part6`. The sibling's actual trick is a **statically-unrolled**
+  outer-stride loop (`hpwl_part[k]` for compile-time-constant `k`, 8 *textually distinct*
+  statements) — HLS's dependence checker doesn't reason about `n&7`'s modular arithmetic to prove
+  a runtime `switch` never revisits the same lane on consecutive iterations, so it stayed
+  conservative. Kept as-is (cheap, harmless), but not a validated fix.
+
+**The real pattern across all three: `net_loop` fully unrolls 16 lanes of the ENTIRE
+term-gen→adder-tree→combine chain (dozens of parallel float multiply/FMA/add DSP units) into ONE
+HLS pipeline region, and that is simply too dense to legally route regardless of which piece you
+relocate.** Fixing the LUT reads didn't help because the LUT was never the only over-subscribed
+resource; it just moved the pain. **Next step: reduce `net_loop`'s parallelism WIDTH, not relocate
+its resource usage** — partially unroll `term_gen`/the adder trees/`combine` (e.g. 4 or 8 lanes per
+wave instead of 16), trading more cycles/net for materially less floating-point hardware
+co-resident in one place. Not yet attempted.
+
+- [ ] Design and implement the partial-unroll restructure (lane width TBD — start at 8, halving the
+      per-cycle DSP/LUT count, and measure via C-synthesis before committing to a P&R run).
+- [ ] Validate via the cheap loop first: tier-1 (`make test`, seconds) → C-synthesis-only `v++ -c`
+      resource/II numbers (~15 min) → only THEN spend a full P&R run (~4 hrs) once the numbers look
+      genuinely better. Do not go straight to P&R on a guess again — the 2026-09-11 `lut_BRAM`
+      experiment cost a full P&R cycle to learn it regressed.
+- [ ] `gmem1`/`gmem3` (`load_net`'s DDR-port contention, forcing `Final II=16` independent of
+      everything else) still needs its own fix — likely duplicating `net_pins_DDR`/`pin_to_npin_DDR`
+      across multiple `m_axi` bundles, or genuinely decoupling `load_net` into its own pipelined
+      region separate from `net_loop` (mirroring how `hpwl_gradient.hpp` splits load/compute into
+      distinct phases instead of fusing them per-net). Not yet scoped in detail.
+
+**2026-09-18: the 16-pin cap itself is a quality bug — measured, not Dhar's "slight improvement".**
+`ignore_net_degree=16` vs the frozen golden (100), 28 ISPD designs, post-DP legal-vs-legal: **28/28
+worse, mean +12.44%** (ISPD2005 +30.6%, up to +51% bigblue4; ISPD2015 +5.2%). 17–100-pin nets hold
+20–27% of ISPD2005 pins. Run `vck5000/results/DSE_20260918_124001/`. **Fix = exact chunking** (same WA
+math in ⌈d/16⌉ blocks, net-level B/C sums accumulated across blocks): +6–9% blocks on ISPD2005, no
+quality experiment needed, and it is the SAME restructure as the lane-narrowing above — do together.
+- [ ] Fold arbitrary-degree support (chunked, ≤100 pins) into the partial-unroll restructure; switch
+      `hpwl_dhar_test` to the uncapped golden and add 17/32/33/100-pin nets. Drop phase Z after.
+→ [[_NEW_REPORT_40_net_degree_cap16_20260918.md]] (measurement) ·
+[[_NEW_PLAN_40_dhar_large_net_chunking_20260918.md]] (design; NOT yet built, Mark 2026-09-18)
+
+→ [[_NEW_HANDOFF_40_hpwl_gradient_dhar_hw_grad_bug_20260910.md]]
+
+**2026-09-18: v1 is being REBUILT, not patched** — a new `bring_up/hpwl_gradient_dhar_v2/` (one axis per
+call, structure-of-arrays data, loop structure ready for chunking; Mark places the pragmas and reviews
+10–20-line chunks). The checklist items above are superseded by its lessons list and its D1–D9
+design questions. → [[_NEW_HANDOFF_40_dhar_v2_rewrite_20260918.md]]
+
+**2026-09-21: v2's bbox/HPWL milestone hit II=1 on `compute`, II=8 on `input_controller`** — the
+remaining II=8 is `pin_x`'s single `m_axi` port serving 8 simultaneous reads/net, a DDR-bandwidth-
+shape problem, not a logic one. Spawned a new module, **`hpwl_computer`**
+(`bring_up/hpwl_computer/`): `LANES=16` (matches the 512-bit beat exactly), nets bucketed by degree
+and packed `nets_per_beat = floor(16/degree)` to a beat (Dhar Method 1), so one beat/cycle feeds
+compute directly — no separate beat-parsing controller needed (one was designed, then abandoned
+once the padded/grouped layout made it unnecessary). Compute reuses **Dhar's Fig. 6/7 multi-output
+tree + selector unchanged, with comparators in place of adders** (max/min are
+associative/commutative exactly like sum, so the structure carries over).
+
+**2026-09-22: `hpwl_computer` DONE — built, tier-1-verified, C-synthesizes at II=1.**
+`resolve_beat` (beat-granularity degree resolution) → `dhar_tree<MaxOp>`/`dhar_tree<MinOp>` (the
+34-output tree, now a template over the combining operator, ready for an `AddOp` instantiation in
+#41) → `select_lane_hpwl` (the 16 per-lane muxes) → packed into one `OutBeat` per input beat.
+Tier-1: bit-exact over 279 real nets (independent golden at every stage). C-synthesis journey
+measured step by step (not guessed): `PIPELINE II=1` on `beat_loop` was first **rejected outright**
+(a variable-trip-count subloop can't be unrolled) → fixed-width guarded loop → pipelines but II=12
+(`TreeOutputs` arrays not partitioned) → `ARRAY_PARTITION` → II=8 (bottleneck moves to `lane_hpwl`)
+→ `ARRAY_PARTITION` again → II=8 unchanged (bottleneck moves to scalar DDR writes, up to 8/beat on
+one port) → **pack all real values into one wide `OutBeat`, one write/beat → II=1.** This last fix
+is the output-side mirror of the module's own reason for existing (wide beats beat narrow
+multi-request I/O) — same lesson, symmetric top to bottom. Output is beat-aligned (not tightly
+packed), and total output DDR traffic is bounded at exactly 50% of input traffic regardless of
+degree mix (`OutBeat` is half `InBeat`'s width, one of each per beat).
+→ [[REPORT_40_hpwl_computer_20260921.md]] (full build + synthesis table) ·
+[[DIAGRAM_hpwl_computer.md]] (`.claude/2_ARTIFACTS/diagrams/`). **Unblocks #41.**
+
 
 ## #41 — `hpwl_gradient_computer`: extend `hpwl_computer` to the full WA gradient (opened 2026-09-21, CLOSED 2026-10-06)
 

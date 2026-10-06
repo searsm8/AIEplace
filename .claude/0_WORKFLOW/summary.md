@@ -83,55 +83,26 @@
   `hpwl_gradient_computer_v2`; `hpwl_computer*` retired); FM and bare cut both kept behind
   `partition_fm_passes`; start fresh in `/AIEplace/pl` and delete `/vck5000` once moved; timing after
   integration. Gradient `max_rel` bound relaxed to 1e-3 (rel_rms 1e-5 unchanged) — done.
-  **Waiting on Mark:** D1 mailbox option (A now / C later recommended), D2 `_CU` vs the naming rule.
-  → [[_NEW_PLAN_45_integration_20261006.md]]
+  **Second round (same day):** mailbox option A now, C later, B fallback; module suffix `_CU` (rule
+  amended in `CLAUDE.md`); all software in `host/sw_flat/`, built new with sw_only's high-level
+  structure (likely the final host); control on the CPU, a few scalars per iteration (#44 arm B);
+  **no caching** — every run treats the design as unseen; netless nodes + fillers go in a
+  density-only slot tail; #20 / #40 closed as superseded; `origin/geert` stays separate.
+  **Now:** step 1, the skeleton. → [[_NEW_PLAN_45_integration_20261006.md]]
 - **Building blocks it starts from (#41/#42, closed 2026-10-06; history.md):** the chunked gradient
   is tier-1 exact (rel_rms ~4e-7), II=1, co-sim PASS, post-route 3.955 ns (unchunked 3.453) vs 3.33;
   one axis needs 256 of 463 URAM. The 1-float mailbox is 49–85% of a chunked eval (A: burst fix,
   free; B–D: widen, 0–128 K LUT). FM 1 pass: 0.38× externals, −32% end to end unwidened, +8% widened.
-- All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
-- **v1 scope DECIDED (Mark, 2026-08-28):** phase-1 GP, device-resident, bit-comparable. **No phase 2,
-  no backtracking** (deferred until needed). **pl_algo pins to the frozen sw_only HEAD.** (Third §10
+- **v1 scope DECIDED (Mark, 2026-08-28; control placement 2026-10-06):** phase-1 GP, data
+  device-resident, control on the CPU (#44 arm B). **No phase 2, no backtracking** (deferred until needed). **pl_algo pins to the frozen sw_only HEAD.** (Third §10
   question — grid-1024 A/B vs per-design `-DPL_GRID` — still open.)
 - Items re-filed here from the sw_only list on 2026-08-17 (marked **↪ pl_algo** in tasks.md):
   **#15** entirely (net-local frames — PL precision, expects no sw_only HPWL movement), **#23**'s
   initial-step mirror, **#19**'s live pre-#19 dff gate in `host/src/pl_algo/`, and **#6c** operator
   skipping (now an *Improvements* bullet, but wanted during step 6, not after).
-- **#20 — compose Stage 5 (the resident loop = v1) LAST, after tier-1 coverage.** Progress
-  2026-08-28: **step 1 DONE** — `dumpScheduleTrace()` restored in sw_only (config-gated, `make
-  test-regress` bit-identical = proven no-op), fixture regenerated from the frozen HEAD (adaptec1,
-  652 iters), so `sched_verify` now validates CURRENT sw_only and feeds **κ** (not the pre-#19 dff
-  hack); the escalating `precond_coef` ladder is exercised. **step 2 core DONE** (schedule +
-  convergence bit-exact); its divergence-conjunct / phase-relative / jolt items need a diverging or
-  mixed-size fixture. **step 3 DONE** — the `formats.hpp` wall is broken (`b4130e6`: HLS includes
-  guarded behind `#ifndef PL_TIER1_STUB`, no-op for the real build; `tier1_stub.hpp` supplies a
-  `std::deque` `hls::stream`), unblocking all four modules. `make test` = **12 harnesses, 11 of ~14
-  real modules** (`6cdcc8d` node_footprint/density_bin/force_gather/metrics/iteration_update; `4c0546b`
-  spectral). **step 4 geometry pair DONE** (`d095a9f`): `node_footprint` drops the in-die shift and
-  `iteration_update` clamps to the √2-expanded box — one coupled contract matching sw_only
-  `computeNodeFootprint`/`enforceDieBoundaries`, `bin_w=die/GRID` so no new ABI scalar.
-  **Step 4 CLOSED for v1** (2026-08-29): the movable-macro weight override (#11b) is TABLED —
-  latent on every std-cell design (num_movable_macros==0) and needs the same host→PL kind flag as
-  fillers, so it's folded into step 5; `node_footprint_test` [4] is the tripwire.
-  **Next: sw_emu trajectory A/B** for the geometry change (tier-1 proves the formulation, not the
-  end-to-end match), then step 5 (fillers + macro weight), then step 6 (compose the resident loop =
-  v1, LAST). → [[_NEW_HANDOFF_20_pl_algo_stage3_20260828.md]]
-- **`hpwl_gradient` de-gathered (P1b+P2, 2026-08-28, `21adad6`/`ed25f1a`) — the main win of the #20
-  step 3b optimization thread.** `NodePin` now carries the ABSOLUTE pin position (`{x,y}`, replacing
-  per-node `{off_x,off_y}`); a new `refresh_pin_pos` module folds `v_k` in once per iteration
-  (`MODE_REFRESH_PINS`, II=1). All three random `node_pos` gathers left the HPWL datapath (and
-  `metrics::hpwl_sweep`'s went too) — burst log confirms `gmem0` no longer appears in the HPWL path;
-  `sweep_bbox` pipeline depth **146 → 73**. LUT +2.4%, BRAM/DSP/timing unchanged, tier-1 bit-identical.
-  ⚠️ **Not yet load-bearing on device**: `Driver.cpp`'s `eval_gradients` does not yet issue
-  `MODE_REFRESH_PINS` before `MODE_HPWL_GRAD`/`MODE_METRICS` — until it does, an on-device run
-  silently evaluates the gradient at stale pin positions. Small fix, do it before any sw_emu run of
-  the HPWL path. → [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]]
-- `top.cpp` is still a mode-switch bring-up scaffold; the host owns the γ/λ schedule, one
-  round-trip per iteration.
-- `make host HOST=pl_algo` needs one `make clean HOST=pl_algo` first (stale `.d`, not a source break).
 - ⚠️ **pl_algo inherits sw_only's u-vs-v decision (settled by #32, closed 2026-08-17): track on `v`.**
   HPWL, overflow and the stored solution all describe the lookahead `v_k`, not the committed `u` —
-  flagged in tasks.md #20 step 6, with the specific trap that `sched_verify` checks the schedule,
+  flagged in #20 step 6 (history.md; now #45 step 7), with the specific trap that `sched_verify` checks the schedule,
   not the geometry, so it cannot catch a wrong choice there.
 
 ## Open

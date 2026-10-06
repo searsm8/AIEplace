@@ -351,14 +351,17 @@ function.** The κ bug sat under a doc-block that said it was computing `weighte
 next line assigned something else. Prefer to make the claim checkable (see *A test asserts*) over
 asserting it in prose.
 
-### Naming a PL module (`pl/src/pl_algo/src/modules/*.hpp`)
-**Each module file should contain one major function that matches the filename, and the name
-should express what is being computed (i.e. the primary output) — not an implementation detail
-like "CU" (compute unit).** `hpwl_gradient.hpp`'s top-level function is `hpwl_gradient`, not
-`hpwl_CU`; `density_bin.hpp`'s is `density_bin`. Helper functions in the same file (LUT lookups,
-per-node inner loops) don't need to match — only the one function `top.cpp` calls. This is what
-makes `grep -rn "<module>" vck5000/pl` and the module-name-in-a-comment convention above actually
-round-trip, and it's what a reader scanning `modules/` for "what computes X" can rely on.
+### Naming a PL module (`pl/src/modules/*.hpp`)
+**Each module file contains one major function that matches the filename: `<primary output>_CU`.**
+The stem says what is computed (the primary output); the `_CU` suffix says it is the compute unit
+`top.cpp` calls. `hpwl_gradient_CU.hpp`'s top-level function is `hpwl_gradient_CU` — "a compute
+unit whose output is the HPWL gradient". (Amended 2026-10-06, Mark: this replaces the old "no CU"
+rule and the `_computer` suffix. The stem is still the output, never an implementation detail:
+`hpwl_CU` would be wrong because the output is the *gradient*.) Helper functions in the same file
+(LUT lookups, per-node inner loops) don't need to match — only the one function `top.cpp` calls.
+This is what makes `grep -rn "<module>" pl` and the module-name-in-a-comment convention above
+round-trip, and it's what a reader scanning `modules/` for "what computes X" can rely on. Legacy
+modules under `vck5000/` keep their old names until they move.
 
 ## Keeping `.claude/0_WORKFLOW/tasks.md` true
 tasks.md is the **source of truth for project state** — `summary.md` points at it and every
