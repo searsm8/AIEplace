@@ -168,7 +168,11 @@
   not bursts (4.26 cycles/entry, fitted to two co-sims). Widened 16/beat it is 2.4–12%; prototype
   bit-identical (tier 1), II=1 (tier 2), but ~128 K LUT for four loops. bigblue4 end to end:
   86.7 → 48.9 s (burst fix) → 28.7 s (widened). The `build_chunks` O(n²) erase is fixed: start-up
-  70 → 15 s. The partition only matters via K=4→3 (−7..14%). → [[_NEW_REPORT_42_mailbox_widening_20261002.md]]
+  70 → 15 s. → [[_NEW_REPORT_42_mailbox_widening_20261002.md]]
+  **Partitioning (2026-10-05):** FM 1 pass gives 0.38× externals in 1–8 s and fits K_min on 8/8 (the
+  baseline misses it on 3/8). End to end: −32% with the 1-float mailbox, neutral once widened.
+  Multilevel (0.062×) and KaHyPar (0.026×) are too slow to pay off. Recommended default: FM 1 pass
+  (Mark's call). → [[_NEW_REPORT_42_partitioning_20261005.md]]
 - **#41 — keep in mind for the resident loop (2026-10-01):** standalone, loading positions and
   draining gradients is >=26 K cycles vs a 51.5 K-cycle beat loop per axis (adaptec1); the resident
   loop must keep both in URAM (256 of 463 URAMs per axis). Chunked designs (8/44) keep per-chunk DDR

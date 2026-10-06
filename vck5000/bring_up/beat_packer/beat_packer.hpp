@@ -1191,13 +1191,21 @@ inline std::vector<int> locality_order(const Encoded& g) {
     return order;
 }
 
-inline bool build_chunks(Chunked& ch, const std::vector<int>& order, int num_chunks, const Config& cfg) {
+// The baseline partition: K equal contiguous runs of the locality order. Meow.
+inline std::vector<int> order_owner(const Encoded& g, const std::vector<int>& order, int num_chunks) {
+    std::vector<int> owner(g.kind.size(), -1);
+    const long per_chunk = ((long)order.size() + num_chunks - 1) / num_chunks;
+    for (size_t i = 0; i < order.size(); i++) owner[order[i]] = std::min<long>((long)i / per_chunk, num_chunks - 1);
+    return owner;
+}
+
+// Builds every chunk from a given owner per movable work node (-1 for fixed), any partitioner's
+// (#42). A macro's pins are forced to the macro's chunk. False if a chunk does not fit. Meow.
+inline bool build_chunks_from_owner(Chunked& ch, std::vector<int> owner, int num_chunks, const Config& cfg) {
     const Encoded& g = ch.global;
     const int num_nodes = (int)g.kind.size();
     ch.num_chunks = num_chunks;
-    ch.owner.assign(num_nodes, -1);
-    const long per_chunk = ((long)order.size() + num_chunks - 1) / num_chunks;
-    for (size_t i = 0; i < order.size(); i++) ch.owner[order[i]] = std::min<long>((long)i / per_chunk, num_chunks - 1);
+    ch.owner = std::move(owner);
     for (const MacroPin& mp : g.macro_pins) ch.owner[mp.pin_node] = ch.owner[mp.macro_node];   // same unit
 
     std::vector<int> homed_nets = g.in_scope_nets;   // small nets first, so a chunk's local net ids follow suit
@@ -1327,6 +1335,10 @@ inline bool build_chunks(Chunked& ch, const std::vector<int>& order, int num_chu
         }
     ch.mailbox_size = offset;
     return true;
+}
+
+inline bool build_chunks(Chunked& ch, const std::vector<int>& order, int num_chunks, const Config& cfg) {
+    return build_chunks_from_owner(ch, order_owner(ch.global, order, num_chunks), num_chunks, cfg);
 }
 
 inline Chunked encode_chunked(const Netlist& nl, const Config& cfg, long capacity) {
