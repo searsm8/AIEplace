@@ -2,11 +2,40 @@
 // stream (#41), verify each by decoding it back, and report packing, bit and URAM figures.
 // See README.md for the protocol. Meow.
 
-#include "beat_packer.hpp"
+#include "native_netlist.hpp"
 
 #include <chrono>
 
 using namespace packer;
+
+// --check-reader: the Netlist from the host reader (native_netlist.hpp) must equal the legacy
+// stream reader's in every field the encoder reads. "" if equal, else the first difference. Meow.
+static std::string netlist_difference(const Netlist& legacy, const Netlist& native) {
+    if (legacy.name != native.name) return "name";
+    if (legacy.movable != native.movable) return "movable flags";
+    if (legacy.is_macro != native.is_macro) return "macro flags";
+    for (int axis = 0; axis < 2; axis++) {
+        const auto& a = legacy.offset_value[axis];
+        const auto& b = native.offset_value[axis];
+        if (a.size() != b.size() || std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) != 0)
+            return "offset table, axis " + std::to_string(axis);
+    }
+    if (legacy.nets.size() != native.nets.size()) return "net count";
+    for (size_t n = 0; n < legacy.nets.size(); n++) {
+        if (legacy.nets[n].size() != native.nets[n].size()) return "net " + std::to_string(n) + " degree";
+        for (size_t p = 0; p < legacy.nets[n].size(); p++) {
+            const Pin& a = legacy.nets[n][p];
+            const Pin& b = native.nets[n][p];
+            if (a.node != b.node || a.offset_key[0] != b.offset_key[0] || a.offset_key[1] != b.offset_key[1])
+                return "net " + std::to_string(n) + " pin " + std::to_string(p);
+        }
+    }
+    return "";
+}
+
+static double seconds_since(std::chrono::steady_clock::time_point start) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
 
 static void report(const Netlist& nl, const Encoded& enc, double seconds, int failures) {
     long movable = 0, pins_in_scope = 0, pins_17_100 = 0, pins_all = 0, bubbles = 0, kind_count[5] = {};
@@ -51,13 +80,16 @@ static void usage() {
         "usage: beat_packer [--hazard H] [--window W] [--seed S] [--repair N] [--capacity SLOTS] [--small-only]\n"
         "                   (--bookshelf DIR NAME | --def FILE NAME)...\n"
         "  --capacity: chunk every design to at most SLOTS slots per chunk and report the external slots\n"
-        "  --small-only: drop 17..96-pin nets (Config::large_nets = false; they are encoded by default)\n");
+        "  --small-only: drop 17..96-pin nets (Config::large_nets = false; they are encoded by default)\n"
+        "  --check-reader: only read each design with both readers (host vs legacy) and require identical\n"
+        "                  Netlists; exit 1 on any difference\n");
     exit(2);
 }
 
 int main(int argc, char** argv) {
     Config cfg;
     long capacity = 0;
+    bool check_reader = false;
     std::vector<std::pair<std::string, std::string>> designs;   // (path, name)
     std::vector<char> is_def;
     for (int i = 1; i < argc; i++) {
@@ -69,12 +101,34 @@ int main(int argc, char** argv) {
         else if (arg == "--repair") cfg.repair_passes = std::stoi(next());
         else if (arg == "--capacity") capacity = std::stol(next());
         else if (arg == "--small-only") cfg.large_nets = false;
+        else if (arg == "--check-reader") check_reader = true;
         else if (arg == "--bookshelf" || arg == "--def") {
             std::string path = next(), name = next();
             designs.emplace_back(path, name); is_def.push_back(arg == "--def");
         } else usage();
     }
     if (designs.empty()) usage();
+
+    if (check_reader) {
+        printf("%-22s %8s %9s %8s %8s %6s\n", "design", "nodes", "nets", "legacy", "native", "");
+        int differing = 0;
+        for (size_t d = 0; d < designs.size(); d++) {
+            auto start = std::chrono::steady_clock::now();
+            const Netlist legacy = is_def[d] ? read_def(designs[d].first, designs[d].second)
+                                             : read_bookshelf(designs[d].first, designs[d].second);
+            const double legacy_s = seconds_since(start);
+            start = std::chrono::steady_clock::now();
+            const Netlist native = is_def[d] ? read_def_native(designs[d].first, designs[d].second)
+                                             : read_bookshelf_native(designs[d].first, designs[d].second);
+            const double native_s = seconds_since(start);
+            const std::string difference = netlist_difference(legacy, native);
+            differing += !difference.empty();
+            printf("%-22s %8zu %9zu %7.2fs %7.2fs %s\n", legacy.name.c_str(), legacy.movable.size(), legacy.nets.size(),
+                   legacy_s, native_s, difference.empty() ? "identical" : ("DIFFER: " + difference).c_str());
+            fflush(stdout);
+        }
+        return differing ? 1 : 0;
+    }
 
     if (capacity > 0) {
         printf("chunked: capacity=%ld slots/chunk, hazard=%d   ext%% = external slots / movable nodes\n", capacity, cfg.hazard);
@@ -83,8 +137,8 @@ int main(int argc, char** argv) {
         int total_failures = 0;
         for (size_t d = 0; d < designs.size(); d++) {
             const auto start = std::chrono::steady_clock::now();
-            const Netlist nl = is_def[d] ? read_def(designs[d].first, designs[d].second)
-                                         : read_bookshelf(designs[d].first, designs[d].second);
+            const Netlist nl = is_def[d] ? read_def_native(designs[d].first, designs[d].second)
+                                         : read_bookshelf_native(designs[d].first, designs[d].second);
             const Chunked ch = encode_chunked(nl, cfg, capacity);
             const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             const int failures = check_chunked(nl, ch, cfg);
@@ -102,8 +156,8 @@ int main(int argc, char** argv) {
     int total_failures = 0;
     for (size_t d = 0; d < designs.size(); d++) {
         const auto start = std::chrono::steady_clock::now();
-        const Netlist nl = is_def[d] ? read_def(designs[d].first, designs[d].second)
-                                     : read_bookshelf(designs[d].first, designs[d].second);
+        const Netlist nl = is_def[d] ? read_def_native(designs[d].first, designs[d].second)
+                                     : read_bookshelf_native(designs[d].first, designs[d].second);
         const Encoded enc = encode_netlist(nl, cfg);
         const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         const int failures = check(nl, enc, cfg);

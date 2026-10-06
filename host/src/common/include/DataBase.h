@@ -19,7 +19,7 @@
 
 AIEPLACE_NAMESPACE_BEGIN
 
-class DataBase
+class DataBase : public DesignSink
 {
 private:
     // Member Data, prefixed with "m_"
@@ -210,34 +210,34 @@ public:
 
     /// parser callback functions for reading input, fired in file order by DesignReader.cpp
     ///==== LEF Callbacks ====
-    void lef_site_cbk(const LefSite& s);
-    void lef_macrobegin_cbk(const string& n);
-    void lef_macro_cbk(const LefMacro& m);
-    void lef_pin_cbk(const LefPin& p);
+    void lef_site_cbk(const LefSite& s) override;
+    void lef_macrobegin_cbk(const string& n) override;
+    void lef_macro_cbk(const LefMacro& m) override;
+    void lef_pin_cbk(const LefPin& p) override;
 
     ///==== DEF Callbacks ====
-    void set_def_unit(int u);
-    void set_def_design(const string& d);
-    void set_def_diearea(int xl, int yl, int xh, int yh);
-    void add_def_components(const std::vector<DefComponent>& components);
-    void add_def_pin(const DefPin& p);
-    void add_def_nets(const std::vector<DefNet>& nets);
-    void resize_def_region(int);
-    void resize_def_group(int);
+    void set_def_unit(int u) override;
+    void set_def_design(const string& d) override;
+    void set_def_diearea(int xl, int yl, int xh, int yh) override;
+    void add_def_components(const std::vector<DefComponent>& components) override;
+    void add_def_pin(const DefPin& p) override;
+    void add_def_nets(const std::vector<DefNet>& nets) override;
+    void resize_def_region(int) override;
+    void resize_def_group(int) override;
 
     // BOOKSHELF callbacks
     /// @brief add .nodes entries (cells and terminals)
-    void add_bookshelf_nodes(const std::vector<BookshelfNode>&);
+    void add_bookshelf_nodes(const std::vector<BookshelfNode>&) override;
     /// @brief add net
-    void add_bookshelf_nets(const std::vector<BookshelfNet>&);
+    void add_bookshelf_nets(const std::vector<BookshelfNet>&) override;
     /// @brief add row
-    void add_bookshelf_row(const BookshelfRow&);
+    void add_bookshelf_row(const BookshelfRow&) override;
     /// @brief set node position
-    void set_bookshelf_node_positions(const std::vector<BookshelfPlacement>&);
+    void set_bookshelf_node_positions(const std::vector<BookshelfPlacement>&) override;
     /// @brief set design name
-    void set_bookshelf_design(const string&);
+    void set_bookshelf_design(const string&) override;
     /// @brief a callback when a bookshelf file reaches to the end
-    void bookshelf_end();
+    void bookshelf_end() override;
 
     // Print functions
     // const functions guarantee that this object won't be modified by the function

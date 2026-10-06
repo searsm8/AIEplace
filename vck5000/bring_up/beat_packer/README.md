@@ -11,6 +11,7 @@ Parts 1–2) and [[_NEW_REPORT_41_record_datapath_20260922.md]] (the device modu
 | `pin_record.hpp` | **the protocol**: constants, record encode/decode, the DDR beat structs, the macro-pin and chunk descriptors. HLS-safe and shared by host and device, so neither can drift. |
 | `beat_packer.hpp` | host library: parse → encode → position image / macro-pin list / chunked device arrays → decode checker |
 | `beat_packer.cpp` | CLI over the library: encode the manifest, verify each design by decoding it, report |
+| `native_netlist.hpp` | `read_bookshelf_native` / `read_def_native`: the same `Netlist`, read by the host's own design reader (#43). What the CLI tools use |
 
 Consumers: `bring_up/hpwl_computer_v2`, `hpwl_gradient_computer`, `hpwl_computer_v3` and
 `hpwl_gradient_computer_v2`, with tier-1 harnesses `vck5000/test/hpwl_*computer*_test.cpp`.
@@ -81,10 +82,24 @@ Data: `.claude/2_ARTIFACTS/large_nets_in_chunks/sweep_{before_small_only,after_l
 - The device harnesses compare against goldens computed from the parsed netlist directly:
   bit-exact per-net HPWL, and the double-precision WA gradient.
 
+## Reading designs: two readers, held equal
+The CLI tools (`beat_packer`, `chunk_profile`, `partition_study`, `large_net_stats`) read designs
+through `native_netlist.hpp`, i.e. the host's `host/src/common/src/DesignReader.cpp` (#43), and link
+its objects (see the Makefile). The stream readers `read_bookshelf` / `read_def` in
+`beat_packer.hpp` stay, because the tier-1 harnesses and the HLS co-simulation testbenches build
+`beat_packer.hpp` alone and cannot link the host sources.
+
+The two must give the same `Netlist` — node order, fixed and macro flags, every pin's node and
+offset key, the offset tables bit for bit, the kept nets — and `make check-reader` requires it on
+every design (44/44 identical, 2026-10-06; read time 69.8 s → 18.6 s over the 44). Since the
+legacy readers were written independently of the host reader (and of Limbo), that is also a
+second check on the host reader. Run it after changing either reader.
+
 ## Run
 ```bash
 make run                               # all 44 manifest designs, one chunk each where they fit
 make run ARGS="--capacity 1048576"     # chunk every design to the on-chip capacity
+make check-reader                      # host reader vs legacy reader, every design
 ```
 Scope: nets of degree 2..16, plus 17..96 with `Config::large_nets` (**on by default since
 2026-10-02**; `--small-only` turns it off). Every consumer carries them, chunked designs included:

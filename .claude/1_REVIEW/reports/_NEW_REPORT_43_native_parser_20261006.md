@@ -125,15 +125,27 @@ error with file and line — never a silent skip of data `DataBase` consumes. Kn
 four, Limbo would also have quit, via the same silent `exit(0)`.) gzip-compressed inputs, which
 Limbo's Bookshelf reader accepted, are not supported; none of our inputs are compressed.
 
-## Decisions for Mark
+## Decisions (Mark, 2026-10-06)
 
-1. **Drop the Limbo submodule entirely, or keep it as the test reference?** Kept for now
-   (`--with-limbo`, `make test-parser`). Dropping it removes the last trace of the dependency, but
-   the 86-input gate goes with it and any later reader change could only be checked by
-   `test-regress`'s 3 designs. I'd keep it until the reader stops changing.
-2. **Reuse in #42's start-up.** The beat_packer prototype has its own `read_bookshelf`/`read_def`
-   (#42's "parse" times). Pointing it at `DesignReader` would make #42's start-up numbers describe
-   the real parser.
+1. **Limbo stays as the test reference** until we are confident it is not needed
+   (`--with-limbo`, `make test-parser`).
+2. **beat_packer reads with `DesignReader` — done, see below.**
+
+## Addendum (2026-10-06): beat_packer on the host reader — a second, independent check
+
+`DesignReader` now feeds an abstract `DesignSink` (`ParseRecords.h`) rather than `DataBase`
+directly; `DataBase` is one sink (unchanged behaviour: `make test-parser` 86/86, `test-regress`
+bit-identical, `make test` passes), and `vck5000/bring_up/beat_packer/native_netlist.hpp` is
+another, which builds beat_packer's `Netlist` with the legacy reader's exact conventions (file-order
+node ids, height-mode macro rule, COVER = fixed, IO pins on first use, LEF offsets in microns).
+`beat_packer`, `chunk_profile`, `partition_study` and `large_net_stats` now read through it.
+
+`make check-reader` builds the `Netlist` both ways and compares every field the encoder reads:
+**44/44 identical**, offset tables bit for bit. The legacy stream readers were written separately
+from `DesignReader` and from Limbo, so this is an independent second check on the host reader. Read
+time over the 44: **69.8 s → 18.6 s (3.7×)**; newblue7 9.95 → 1.99 s, bigblue4 8.32 → 1.73 s. The
+legacy readers stay in `beat_packer.hpp`, because the tier-1 harnesses and HLS co-sim testbenches
+build that header alone and cannot link the host sources.
 
 ## Reproduce
 

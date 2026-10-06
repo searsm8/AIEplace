@@ -10,7 +10,7 @@
 //
 // A model, not a measurement of hardware. Density / field-solve time is not included. Meow.
 
-#include "beat_packer.hpp"
+#include "native_netlist.hpp"
 #include "cycle_model.hpp"
 
 #include <chrono>
@@ -63,8 +63,8 @@ int main(int argc, char** argv) {
 
     for (size_t d = 0; d < designs.size(); d++) {
         auto t = std::chrono::steady_clock::now();
-        const Netlist nl = is_def[d] ? read_def(designs[d].first, designs[d].second)
-                                     : read_bookshelf(designs[d].first, designs[d].second);
+        const Netlist nl = is_def[d] ? read_def_native(designs[d].first, designs[d].second)
+                                     : read_bookshelf_native(designs[d].first, designs[d].second);
         const double parse_s = seconds_since(t);
 
         Chunked ch;

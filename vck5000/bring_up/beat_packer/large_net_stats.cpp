@@ -10,7 +10,7 @@
 // `drain` is the gradient beat-loop depth from C-synthesis (84). This is a model, not a measurement
 // of hardware; it exists to decide whether the proposal is worth building. Meow.
 
-#include "beat_packer.hpp"
+#include "native_netlist.hpp"
 
 #include <chrono>
 
@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i + 2 < argc + 1; ) {
         std::string kind = argv[i], path = argv[i + 1], name = argv[i + 2];
         i += 3;
-        const Netlist nl = kind == "--def" ? read_def(path, name) : read_bookshelf(path, name);
+        const Netlist nl = kind == "--def" ? read_def_native(path, name) : read_bookshelf_native(path, name);
         const Encoded enc = encode_netlist(nl, Config());
         long large_nets = 0, large_pins = 0, all_pins = 0, chunks = 0;
         for (size_t n = 0; n < nl.nets.size(); n++) {

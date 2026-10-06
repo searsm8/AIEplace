@@ -8,7 +8,7 @@
  * that the #43 equivalence harness (vck5000/test/parser) can demand field-for-field identity.
  */
 #include "DesignReader.h"
-#include "DataBase.h"
+#include "Logger.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
@@ -292,7 +292,7 @@ char* blockEnd(char* block, char* file_end, IsCut is_cut)
 
 // Read [begin, end) in blocks, each cut into chunks at lines satisfying is_cut; the chunks of a
 // block are tokenised in parallel by read_chunk(chunk_start, chunk), then deliver(chunks) gets
-// them in file order -- so the records reach DataBase exactly as a sequential read would send
+// them in file order -- so the records reach the sink exactly as a sequential read would send
 // them. A Chunk carries its own `error`, logged here rather than from a worker thread. Meow.
 template <typename Chunk, typename IsCut, typename ReadChunk, typename Deliver>
 bool readInBlocks(char* begin, char* end, IsCut is_cut, ReadChunk read_chunk, Deliver deliver)
@@ -317,7 +317,7 @@ bool anyLine(const char*) { return true; }
 
 // ================================== LEF ==================================
 
-bool readLefSite(Cursor& cur, string_view name, DataBase& db)
+bool readLefSite(Cursor& cur, string_view name, DesignSink& db)
 {
     LefSite site;
     for (string_view w = cur.word(); ; w = cur.word()) {
@@ -357,7 +357,7 @@ bool readLefPort(Cursor& cur, LefPin& pin, bool record_rect)
     }
 }
 
-bool readLefPin(Cursor& cur, string_view name, DataBase& db)
+bool readLefPin(Cursor& cur, string_view name, DesignSink& db)
 {
     LefPin pin;
     pin.name = string(name);
@@ -390,7 +390,7 @@ bool skipBareEndBlock(Cursor& cur, string_view what)
 
 // `size` carries over from the previous MACRO in the file: Si2's lefiMacro::clear() does not
 // reset it, so a MACRO without SIZE reports the last one's. Meow.
-bool readLefMacro(Cursor& cur, string_view name, DataBase& db, LefMacro& size)
+bool readLefMacro(Cursor& cur, string_view name, DesignSink& db, LefMacro& size)
 {
     db.lef_macrobegin_cbk(string(name));
     LefMacro macro;
@@ -493,7 +493,7 @@ struct DefComponentChunk {
     string error;
 };
 
-bool readDefComponents(Cursor& cur, FileImage& text, const fs::path& path, DataBase& db)
+bool readDefComponents(Cursor& cur, FileImage& text, const fs::path& path, DesignSink& db)
 {
     int count;
     if (!readDefCount(cur, count)) return false;
@@ -545,7 +545,7 @@ bool readDefComponents(Cursor& cur, FileImage& text, const fs::path& path, DataB
     return readDefSection<DefComponentChunk>(cur, text, "COMPONENTS", read_chunk, deliver);
 }
 
-bool readDefPins(Cursor& cur, DataBase& db)
+bool readDefPins(Cursor& cur, DesignSink& db)
 {
     int count;
     if (!readDefCount(cur, count)) return false;
@@ -598,7 +598,7 @@ struct DefNetChunk {
     string error;
 };
 
-bool readDefNets(Cursor& cur, FileImage& text, const fs::path& path, DataBase& db)
+bool readDefNets(Cursor& cur, FileImage& text, const fs::path& path, DesignSink& db)
 {
     int count;
     if (!readDefCount(cur, count)) return false;
@@ -615,7 +615,7 @@ bool readDefNets(Cursor& cur, FileImage& text, const fs::path& path, DataBase& d
                         if (close.empty()) return in.fail("unclosed connection in NET " + string(name));
                     chunk.pins.emplace_back(instance, pin_name);
                 } else if (item == "+") {
-                    // Routing and properties: nothing DataBase keeps, and they end the connections. Meow.
+                    // Routing and properties: not passed to the sink, and they end the connections. Meow.
                     if (!in.skipStatement()) return false;
                     break;
                 } else {
@@ -639,7 +639,7 @@ bool readDefNets(Cursor& cur, FileImage& text, const fs::path& path, DataBase& d
     return readDefSection<DefNetChunk>(cur, text, "NETS", read_chunk, deliver);
 }
 
-// Sections whose contents DataBase does not use: skipped to their `END <name>`. Meow.
+// Sections no sink is given: skipped to their `END <name>`. Meow.
 bool isSkippedDefSection(string_view w)
 {
     static const string_view SECTIONS[] = {"VIAS", "STYLES", "NONDEFAULTRULES", "PINPROPERTIES", "BLOCKAGES",
@@ -701,7 +701,7 @@ bool readNodeChunk(const FileImage& text, const fs::path& path, const char* star
 }
 
 // Every .nodes line stands alone, so any line is a cut. Meow.
-bool readNodes(const fs::path& path, DataBase& db)
+bool readNodes(const fs::path& path, DesignSink& db)
 {
     FileImage text;
     if (!text.load(path)) return false;
@@ -767,7 +767,7 @@ bool isNetDegreeLine(const char* line)
 
 // A NetDegree line is a safe cut because a net ends only where the next begins: Limbo emits a
 // net with however many pin lines followed it, and the declared degree only reserves. Meow.
-bool readNets(const fs::path& path, DataBase& db)
+bool readNets(const fs::path& path, DesignSink& db)
 {
     FileImage text;
     if (!text.load(path)) return false;
@@ -830,7 +830,7 @@ bool readPlChunk(const FileImage& text, const fs::path& path, const char* start,
 }
 
 // Every .pl line stands alone, so any line is a cut. Meow.
-bool readPl(const fs::path& path, DataBase& db)
+bool readPl(const fs::path& path, DesignSink& db)
 {
     FileImage text;
     if (!text.load(path)) return false;
@@ -849,7 +849,7 @@ bool readPl(const fs::path& path, DataBase& db)
         });
 }
 
-bool readScl(const fs::path& path, DataBase& db)
+bool readScl(const fs::path& path, DesignSink& db)
 {
     FileImage text;
     if (!text.load(path)) return false;
@@ -896,7 +896,7 @@ bool readScl(const fs::path& path, DataBase& db)
 }
 
 // A .wts with any entry is rejected: Limbo's base callback for net weights calls exit(0). Meow.
-bool readWts(const fs::path& path, DataBase&)
+bool readWts(const fs::path& path, DesignSink&)
 {
     FileImage text;
     if (!text.load(path)) return false;
@@ -906,9 +906,23 @@ bool readWts(const fs::path& path, DataBase&)
     return !cur.line(words) || cur.fail("net weights are not supported");
 }
 
+// Limbo's visit order, by suffix; a suffix outside it is an error rather than a guess. Meow.
+constexpr string_view BOOKSHELF_SUFFIXES[] = {".scl", ".nodes", ".nets", ".wts", ".pl"};
+using BookshelfReader = bool (*)(const fs::path&, DesignSink&);
+constexpr BookshelfReader BOOKSHELF_READERS[] = {readScl, readNodes, readNets, readWts, readPl};
+
+// Index into BOOKSHELF_SUFFIXES / BOOKSHELF_READERS, or -1. Meow.
+int bookshelfKind(const fs::path& file)
+{
+    string suffix = file.extension().string();
+    for (size_t i = 0; i < std::size(BOOKSHELF_SUFFIXES); i++)
+        if (iequals(BOOKSHELF_SUFFIXES[i], suffix)) return (int)i;
+    return -1;
+}
+
 } // namespace
 
-bool readLefFile(const fs::path& lef_file, DataBase& db)
+bool readLefFile(const fs::path& lef_file, DesignSink& db)
 {
     FileImage text;
     if (!text.load(lef_file)) return false;
@@ -939,7 +953,7 @@ bool readLefFile(const fs::path& lef_file, DataBase& db)
     return true;  // END LIBRARY is optional from LEF 5.6
 }
 
-bool readDefFile(const fs::path& def_file, DataBase& db)
+bool readDefFile(const fs::path& def_file, DesignSink& db)
 {
     FileImage text;
     if (!text.load(def_file)) return false;
@@ -992,7 +1006,7 @@ bool readDefFile(const fs::path& def_file, DataBase& db)
     }
 }
 
-bool readBookshelfAux(const fs::path& aux_file, DataBase& db)
+bool readBookshelfAux(const fs::path& aux_file, DesignSink& db)
 {
     FileImage text;
     if (!text.load(aux_file)) return false;
@@ -1003,23 +1017,25 @@ bool readBookshelfAux(const fs::path& aux_file, DataBase& db)
         return cur.fail("expected '<design> : <files>'");
     db.set_bookshelf_design(string(words[0]));
 
-    // Limbo's visit order, by suffix; a suffix outside it is an error rather than a guess. Meow.
-    static const string_view ORDER[] = {".scl", ".nodes", ".nets", ".wts", ".pl"};
-    using Reader = bool (*)(const fs::path&, DataBase&);
-    static const Reader READERS[] = {readScl, readNodes, readNets, readWts, readPl};
     std::vector<std::pair<int, fs::path>> files;
     for (size_t i = 2; i < words.size(); i++) {
         fs::path file = aux_file.parent_path() / string(words[i]);
-        string suffix = file.extension().string();
-        auto at = std::find_if(std::begin(ORDER), std::end(ORDER), [&](string_view s) { return iequals(s, suffix); });
-        if (at == std::end(ORDER)) return cur.fail("unsupported bookshelf file '" + string(words[i]) + "'");
-        files.emplace_back((int)(at - std::begin(ORDER)), file);
+        int kind = bookshelfKind(file);
+        if (kind < 0) return cur.fail("unsupported bookshelf file '" + string(words[i]) + "'");
+        files.emplace_back(kind, file);
     }
     std::stable_sort(files.begin(), files.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
     for (const auto& [kind, file] : files)
-        if (!READERS[kind](file, db)) return false;
+        if (!BOOKSHELF_READERS[kind](file, db)) return false;
     db.bookshelf_end();
     return true;
+}
+
+bool readBookshelfFile(const fs::path& file, DesignSink& sink)
+{
+    int kind = bookshelfKind(file);
+    if (kind < 0) { Logger::log_error("unsupported bookshelf file " + file.string()); return false; }
+    return BOOKSHELF_READERS[kind](file, sink);
 }
 
 AIEPLACE_NAMESPACE_END

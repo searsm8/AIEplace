@@ -90,4 +90,31 @@ struct BookshelfRow {
     int height = 0, site_num = 0, site_width = 0, site_spacing = 0;
 };
 
+/// What a reader feeds, in file order. DataBase is the host's sink; another consumer (beat_packer's
+/// netlist builder) overrides only what it needs -- every callback defaults to ignoring its input.
+/// The batched callbacks get records in file order, once per block of the file. Meow.
+class DesignSink
+{
+public:
+    virtual ~DesignSink() = default;
+    virtual void lef_site_cbk(const LefSite&) {}
+    virtual void lef_macrobegin_cbk(const string&) {}
+    virtual void lef_macro_cbk(const LefMacro&) {}
+    virtual void lef_pin_cbk(const LefPin&) {}
+    virtual void set_def_unit(int) {}
+    virtual void set_def_design(const string&) {}
+    virtual void set_def_diearea(int, int, int, int) {}
+    virtual void add_def_components(const std::vector<DefComponent>&) {}
+    virtual void add_def_pin(const DefPin&) {}
+    virtual void add_def_nets(const std::vector<DefNet>&) {}
+    virtual void resize_def_region(int) {}
+    virtual void resize_def_group(int) {}
+    virtual void add_bookshelf_nodes(const std::vector<BookshelfNode>&) {}
+    virtual void add_bookshelf_nets(const std::vector<BookshelfNet>&) {}
+    virtual void add_bookshelf_row(const BookshelfRow&) {}
+    virtual void set_bookshelf_node_positions(const std::vector<BookshelfPlacement>&) {}
+    virtual void set_bookshelf_design(const string&) {}
+    virtual void bookshelf_end() {}
+};
+
 AIEPLACE_NAMESPACE_END

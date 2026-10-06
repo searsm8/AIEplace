@@ -16,6 +16,8 @@ removed — it had been sitting in both files since 2026-07-30).
 
 **Compacted 2026-08-07:** the full pre-compaction text of the still-OPEN tasks (#1, #3, #6, #7, #9, #10, #11, #14, #15, #17, #19, #20, #21, #22, #23, Parked, Improvements) - first section below.
 
+**Closed 2026-10-06:** **#43** — native LEF/DEF/Bookshelf reader (`host/src/common/src/DesignReader.cpp`) replaces Limbo in the host: byte-identical parsed state on 86 inputs (`make test-parser`), all 44 designs parse 115.5 → 21.9 s (5.3×), and the host drops Limbo/Boost/zlib and the old string ABI. beat_packer's tools read through it too (`make check-reader`: 44/44 identical `Netlist`s, 3.7× faster). Limbo kept as the test-only reference (Mark). → [[_NEW_REPORT_43_native_parser_20261006.md]]
+
 **Closed 2026-08-27:** **#39** — position-dump **format v2**: the channels that make a placement GIF a diagnostic rather than a movie. **Started by checking the premise, and half of it was already built** — `default_config.toml` described the dump as "positions only", but the static record already carried x/y/w/h and a **six**-way kind byte, `names_gen<N>.txt` already gave stable cross-frame IDs (#14, 08-17), the manifest already indexed frame → iteration, `generate_viz.py` already burned HPWL/overflow/α/λ into every frame, and `BkSteps` (rejected backtracking trials) was already column 6 of `iterations.dat`. That stale comment is now corrected. **Four channels were genuinely missing** and landed, each its own file per generation, in lockstep with the frame stream: `u4 net_degree` on the static record; `probe_gen<N>.bin` (Nesterov **v_k**, where HPWL/overflow/best-solution are all actually measured — #32); `density_gen<N>.bin` (+ opt-in `field_gen<N>.bin`) read from the solver's OWN `Bin::total_overlap`/`eField`, box-averaged by an integer factor to ≤256×256; and `forces_gen<N>.bin`, the per-node wirelength/density gradient split + preconditioner. The force split is captured **inside `combineGradients()` and nowhere else** — `g -= electro` is destructive, so that one expression is the only point in the run where the two terms exist separately; both are stored as gradient contributions so `wl + den == next.probe_grad` is an exact checkable invariant. Three frames per run (`legalized`, `reseeded`, `best_solution`) sit where the map or the gradients describe a *different* placement, so their records are zero-filled and flagged in a new per-frame `frame_valid` bitmask rather than omitted — omitting would break the lockstep that makes frame index a seek key. **Bit-identical with every channel ON**, which is the claim that mattered and is stronger than `make test-regress` alone (the frozen configs dump nothing): `mgc_fft_a` (126 frames, all 5 channels) and `mms/adaptec1` (131 frames, **3 generations**, grid 512→256 box-average) both reproduce their committed `iterations.dat` row-for-row and their `.def` sha256 exactly. New tracked **`tools/check_viz_dump.py`** asserts stream lockstep from the reader's side plus four structural invariants that catch a misaligned record (fillers have net degree 0; fillers have zero wirelength gradient; precond ≥ 1.0; density mass constant within a generation) and the `frame_valid` table exactly — **negative-tested**: a 4-byte truncation and a one-float stride shift both exit 1. `generate_viz.py` gains `--underlay density`, `--color-by force|precond`, `--positions probe`, and now builds the static dtype **from the manifest**, so one reader opens both v1 and v2. One defect found by looking at the output: the channel label was appended to a caption line already ~99 chars on MMS and ran off the canvas, clipping `color=force=stale` to `color=force` — captioning a stale frame as measured, the exact failure the label exists to prevent; it now takes its own header line. **Disk is the live constraint**: forces are 20 B/node/frame and dominate, so the 14-design suite at cadence 5 is **32.2 GB all-channels vs 9.6 GB with `dump_forces = false`**, against 40 GB free — each run now prints its own MB/frame at startup. Instrumentation, not behaviour, so within the freeze. → [[_NEW_REPORT_39_dump_v2_channels_20260827.md]]
 
 **Closed 2026-08-26:** **#30** — legalization + detailed placement folded into `dse.py`, and the standing scoring pipeline collapsed onto it. All four items done: LG+DP runs in `dse.py` by default (`--gp-only` opts out) via a new per-design `lgdp.py::legalize`; DP columns land in the same `dse_results.csv`; the full-suite cross-check reproduced the committed tier1+tier2 numbers **exactly** to 4 decimals (`DSE_20260814_133037`); and the final item — **collapse the two suite runners** — landed here. The two "last bits" the task flagged were already in `dse.py`/`lgdp.py` (smallest-first ordering `dse.py:176`; the MMS `--mixed_size` arm `lgdp.py:93`), so this was verification + deletion, not new code. Tier-3/MMS was spot-checked first (`DSE_20260826_110926`, mms/adaptec1·newblue1·bigblue1 through the full GP+LG+DP path: all `bookshelf`/`done`, DP ratios 0.9835 / 1.0242 / 1.0036 vs `_XPLACE_MMS_FINAL` — frame-correct and consistent with the +0.2…+3.6% MMS reference). Then the seven-script pipeline was retired (`gen_suite_configs.py`, `run_suite.sh`, `run_lgdp44.sh`, `run_lgdp_suite.sh`, `gen_lgdp_inputs.py`, `analyze_full44.py`, `analyze_lgdp_suite.py`), recorded in `tools/README.md`'s *Removed 2026-08-26* with what each folded into. Kept: `def_patch_placement.py`/`def_to_bookshelf_pl.py` (called by `lgdp.py`), `run_xplace_ref*.sh` (populate the reference dicts by hand). One judgment call: `analyze_fence_cost.py` (#26, closed) is **not** deleted but marked **dormant** — its input generator `run_lgdp44.sh` is gone, so it now needs hand-built TSVs (or a re-derivation from `dse_results.csv`) to run.
@@ -75,6 +77,36 @@ did not fix are now **#29** (the XPlace reference belongs in the placer, masked-
 site-width-correct) and **#30** (LG+DP inside `dse.py`).
 
 ---
+
+## #43 — Native host parser, no Limbo dependency (opened 2026-10-05, CLOSED 2026-10-06)
+
+**Landed:** `host/src/common/src/DesignReader.cpp` reads LEF/DEF/Bookshelf; the host links no
+Limbo, Boost, zlib, and builds with the default string ABI (pl_algo's XRT ABI exception is gone).
+**Same output, proven:** `make test-parser` — a dump of every parsed `DataBase` field is
+byte-identical to Limbo's on 86 inputs (44 manifest + 20 legal + 20 `ispd2015_fix` DEFs + 2 edge
+cases); 2/2 mutants caught; `make test-regress-slow` bit-identical. **Faster on every design:** all 44
+115.5 s → 21.9 s (5.3×, 8 threads), 34.9 s on 1 thread; newblue7 13.1 → 2.3 s. Bounded by
+`DataBase`'s own allocation/linking now, not the reader. Found: the old host silently `exit(0)`ed
+(nothing placed) on any LEF with a `NONDEFAULTRULE` — a Limbo default callback.
+**beat_packer on the host reader (2026-10-06, Mark):** the reader feeds a `DesignSink`; beat_packer's
+`native_netlist.hpp` is a second sink, used by `beat_packer`/`chunk_profile`/`partition_study`/
+`large_net_stats`. `make check-reader` (bring_up/beat_packer): 44/44 `Netlist`s identical to the
+legacy stream readers' — an independent second check — and reads 69.8 → 18.6 s. The legacy readers
+stay for the header-only tier-1 harnesses and HLS testbenches.
+**Constraint kept (Mark):** a new circuit every run — no caching across runs; this is all parse.
+**Decided (Mark, 2026-10-06):** Limbo stays as the test-only reference until we are confident it is
+not needed (`bootstrap_third_party.sh --with-limbo`).
+→ [[_NEW_REPORT_43_native_parser_20261006.md]], `vck5000/test/parser/README.md`
+<details><summary>Original entry (2026-10-05)</summary>
+
+**Why (Mark):** long term, a native parser instead of the prebuilt Limbo libs in
+`host/src/common/lib/`. Host start-up also counts in the end-to-end runtime (#42).
+**Constraint (Mark):** design for a NEW circuit every run, as an academic paper must. Caching parsed
+or encoded arrays across runs is not an answer.
+**Not yet measured:** #42's "parse" times (55–70% of unchunked start-up) are the beat_packer
+prototype reader (`read_bookshelf` / `read_def`), not the real host parser. Step 1 is to time the
+real `host/src/common` parse on the 44 designs next to the device-time estimate.
+</details>
 
 ## #39 — Position dump v2: mechanism channels (opened+CLOSED 2026-08-27)
 
