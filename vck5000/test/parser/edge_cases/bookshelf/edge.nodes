@@ -1,0 +1,19 @@
+UCLA nodes 1.0
+# Hand-written edge cases for the #43 parser gate: valid for both Limbo and DesignReader.
+# Created	:	2026-10-06
+
+NumNodes : 		12
+NumTerminals :  	3
+o0	8	12
+o1	13	12
+o2	8	12	movable
+o3	5	12 # a trailing comment
+	o4	200	120
+o5	8	12
+o6	1	1	terminal
+o7	40	36	TERMINAL
+
+o8	3	12
+o9	0	0	terminal
+o10	8	12
+o11	13	12

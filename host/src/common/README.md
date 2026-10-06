@@ -29,8 +29,8 @@ caught it. One such divergence had already gone live — see "What the merge exp
 The design files used to be read by the Limbo parsers (five checked-in `.a` under `common/lib/`,
 later a submodule). Since TODO #43 they are read by `DesignReader.cpp`, which reproduces exactly
 what `DataBase` used to receive from Limbo — quirks included, each marked in the source. That is
-checked, not assumed: `vck5000/test/parser/compare_parsers.sh` parses all 44 benchmarks plus 40
-extra DEFs both ways and requires a canonical dump of every parsed field to be byte-identical.
+checked, not assumed: `vck5000/test/parser/compare_parsers.sh` parses all 44 benchmarks, 40
+extra DEFs and 2 hand-written edge cases both ways and requires a canonical dump of every parsed field to be byte-identical.
 **Run it after any change to `DesignReader.cpp` or `DataBase`'s callbacks** (it needs
 `bootstrap_third_party.sh --with-limbo`); `make test-regress` alone exercises only 3 designs.
 

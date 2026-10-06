@@ -32,7 +32,7 @@ help:
 	@echo -e '\tmake test:\t Tier-1 offline verification suite. Seconds, pure g++, no Vitis/XRT needed.'
 	@echo -e '\tmake test-regress:\t sw_only regression vs committed baselines (~12 s).'
 	@echo -e '\tmake test-regress-slow:\t ...plus the mixed-size phase-2 design (~3 min).'
-	@echo -e '\tmake test-parser:\t native design reader vs Limbo on 84 inputs (~15 min, needs --with-limbo).'
+	@echo -e '\tmake test-parser:\t native design reader vs Limbo on 86 inputs (~15 min, needs --with-limbo).'
 	@echo ""
 
 .PHONY: all xclbin xsa aie pl host

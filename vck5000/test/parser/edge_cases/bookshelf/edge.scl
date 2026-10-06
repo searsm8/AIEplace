@@ -1,0 +1,25 @@
+UCLA scl 1.0
+# Hand-written edge cases for the #43 parser gate: valid for both Limbo and DesignReader.
+
+NumRows : 3
+
+CoreRow Horizontal
+  Coordinate    :   12
+  Height        :   12
+  Sitewidth     :    1
+  Sitespacing   :    1
+  Siteorient    :    1
+  Sitesymmetry  :    1
+  SubrowOrigin  :    10	NumSites  :  500
+End
+CoreRow Horizontal
+  Coordinate    :   24
+  Height        :   12
+  Sitewidth     :    2
+  Siteorient    :    N
+  Sitesymmetry  :    Y
+  SubrowOrigin  :    6	NumSites  :  260
+End
+corerow horizontal
+  coordinate : 36 height : 12 sitewidth : 1 sitespacing : 2 subroworigin : 4 numsites : 100
+end

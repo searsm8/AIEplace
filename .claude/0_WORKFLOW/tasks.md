@@ -1349,13 +1349,13 @@ iteration (well under 10%), partition quality cannot matter. Then close #42 and 
 **Landed:** `host/src/common/src/DesignReader.cpp` reads LEF/DEF/Bookshelf; the host links no
 Limbo, Boost, zlib, and builds with the default string ABI (pl_algo's XRT ABI exception is gone).
 **Same output, proven:** `make test-parser` — a dump of every parsed `DataBase` field is
-byte-identical to Limbo's on 84 inputs (44 manifest + 20 legal + 20 `ispd2015_fix` DEFs); 2/2
+byte-identical to Limbo's on 86 inputs (44 manifest + 20 legal + 20 `ispd2015_fix` DEFs + 2 edge cases); 2/2
 mutants caught; `make test-regress-slow` bit-identical. **Faster on every design:** all 44
 115.5 s → 21.9 s (5.3×, 8 threads), 34.9 s on 1 thread; newblue7 13.1 → 2.3 s. Bounded by
 `DataBase`'s own allocation/linking now, not the reader. Found: the old host silently `exit(0)`ed
 (nothing placed) on any LEF with a `NONDEFAULTRULE` — a Limbo default callback.
 **Constraint kept (Mark):** a new circuit every run — no caching across runs; this is all parse.
-**Waits on Mark:** (1) drop the Limbo submodule (loses the 84-input gate) or keep it test-only
+**Waits on Mark:** (1) drop the Limbo submodule (loses the 86-input gate) or keep it test-only
 (current; `bootstrap_third_party.sh --with-limbo`); (2) point #42's beat_packer prototype reader at
 `DesignReader` so its start-up numbers describe the real parser.
 → [[_NEW_REPORT_43_native_parser_20261006.md]], `vck5000/test/parser/README.md`

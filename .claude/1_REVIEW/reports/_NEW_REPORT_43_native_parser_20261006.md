@@ -5,7 +5,8 @@ output as Limbo, and match or beat its parse time; fewer dependencies is a by-pr
 
 ## TL;DR
 
-- **Same output, proven, not assumed.** On 84 inputs (all 44 manifest designs + 40 extra DEFs),
+- **Same output, proven, not assumed.** On 86 inputs (all 44 manifest designs + 40 extra DEFs + 2
+  hand-written edge cases),
   a canonical dump of every field the parse sets in `DataBase` is **byte-identical** to what the
   same `DataBase` held when Limbo did the reading (floats compared as `%a`, i.e. bit-for-bit).
   `make test-regress-slow` is bit-identical on all 3 designs; `make test` passes.
@@ -53,15 +54,25 @@ requires the dumps to be identical.
 | contest legal DEFs (`after_legalized.ntup.fix.def`, all cells PLACED) | 20 | | identical |
 | XPlace `ispd2015_fix` DEFs + LEFs (a different writer) | 20 | | identical\* |
 
+| hand-written edge cases (`test/parser/edge_cases/`) | 2 | | identical |
+
 \* only after the bridge overrides `lef_nondefault_cbk` — without it Limbo `exit(0)`s mid-parse
 (above).
+
+The edge cases cover syntax and Limbo quirks no benchmark happens to use, each checked in the dump
+to actually reach `DataBase`: a DEF component with no placement inheriting the previous one's
+location (Si2 never clears it), and likewise a LEF MACRO without SIZE inheriting the previous
+macro's size — the one quirk the edge cases *found* (fixed in the reader, 2026-10-06); COVER pins
+(location, no status); a pin's first of several LAYERs; `+ SYNTHESIZED`; routed nets; quoted `;`;
+a 4-point DIEAREA (Si2 keeps the first two points, so the die is degenerate — reproduced); 9-word
+`.nets` pins; `FIXED_NI` (not fixed); lower-case keywords; a node placed twice (last wins).
 
 **The gate fails when it should.** A mutant giving `UNPLACED` DEF components (0,0) instead of
 (−1,−1) changed 32,281 lines on mgc_fft_1; one nudging `.nets` offsets by 1e-6 changed 41,071 on
 mms/adaptec1. (A 1-ULP *double* nudge was correctly invisible: `DataBase` stores offsets as
 float, so the parsed design really is unchanged.)
 
-The gate was re-run after every optimisation below, each time 84/84.
+The gate was re-run after every optimisation below, each time all inputs identical.
 
 ## Speed
 
@@ -118,7 +129,7 @@ Limbo's Bookshelf reader accepted, are not supported; none of our inputs are com
 
 1. **Drop the Limbo submodule entirely, or keep it as the test reference?** Kept for now
    (`--with-limbo`, `make test-parser`). Dropping it removes the last trace of the dependency, but
-   the 84-input gate goes with it and any later reader change could only be checked by
+   the 86-input gate goes with it and any later reader change could only be checked by
    `test-regress`'s 3 designs. I'd keep it until the reader stops changing.
 2. **Reuse in #42's start-up.** The beat_packer prototype has its own `read_bookshelf`/`read_def`
    (#42's "parse" times). Pointing it at `DesignReader` would make #42's start-up numbers describe
@@ -128,6 +139,6 @@ Limbo's Bookshelf reader accepted, are not supported; none of our inputs are com
 
 ```
 cd vck5000 && make test-regress-slow       # sw_only bit-identical (3/3)
-cd vck5000 && make test-parser             # 84 inputs, needs bootstrap --with-limbo
+cd vck5000 && make test-parser             # 86 inputs, needs bootstrap --with-limbo
 cd vck5000/test/parser && REPEATS=3 bash run_bench.sh ./build/parse_bench
 ```

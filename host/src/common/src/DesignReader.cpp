@@ -388,15 +388,20 @@ bool skipBareEndBlock(Cursor& cur, string_view what)
     return cur.fail(string(what) + " has no END");
 }
 
-bool readLefMacro(Cursor& cur, string_view name, DataBase& db)
+// `size` carries over from the previous MACRO in the file: Si2's lefiMacro::clear() does not
+// reset it, so a MACRO without SIZE reports the last one's. Meow.
+bool readLefMacro(Cursor& cur, string_view name, DataBase& db, LefMacro& size)
 {
     db.lef_macrobegin_cbk(string(name));
     LefMacro macro;
+    macro.size_x = size.size_x;
+    macro.size_y = size.size_y;
     for (string_view w = cur.word(); ; w = cur.word()) {
         if (w.empty()) return cur.fail("MACRO " + string(name) + " has no END");
         if (w == "END") {
             if (cur.word() != name) return cur.fail("MACRO " + string(name) + " closed by the wrong END");
             db.lef_macro_cbk(macro);
+            size = macro;
             return true;
         }
         if (w == "PIN") {
@@ -908,6 +913,7 @@ bool readLefFile(const fs::path& lef_file, DataBase& db)
     FileImage text;
     if (!text.load(lef_file)) return false;
     Cursor cur(text, lef_file);
+    LefMacro last_size;   // see readLefMacro. Meow.
     for (string_view w = cur.word(); !w.empty(); w = cur.word()) {
         if (w == "END") {
             string_view what = cur.word();
@@ -915,7 +921,7 @@ bool readLefFile(const fs::path& lef_file, DataBase& db)
             return cur.fail("unexpected 'END " + string(what) + "'");
         }
         if (w == "MACRO") {
-            if (!readLefMacro(cur, cur.word(), db)) return false;
+            if (!readLefMacro(cur, cur.word(), db, last_size)) return false;
         } else if (w == "SITE") {
             if (!readLefSite(cur, cur.word(), db)) return false;
         } else if (w == "LAYER" || w == "VIA" || w == "VIARULE" || w == "NONDEFAULTRULE" || w == "ARRAY") {

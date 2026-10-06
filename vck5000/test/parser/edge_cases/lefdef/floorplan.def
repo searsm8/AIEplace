@@ -1,0 +1,131 @@
+# Hand-written edge cases for the #43 parser gate: valid for both Limbo and DesignReader.
+# Each section is short, but the native reader still cuts it into many parallel chunks, so
+# chunk boundaries fall between these entries. Meow.
+VERSION 5.8 ;
+NAMESCASESENSITIVE ON ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN edge ;
+UNITS DISTANCE MICRONS 2000 ;
+
+PROPERTYDEFINITIONS
+  COMPONENT note STRING ;
+  NET note STRING ;
+  DESIGN banner STRING "has ; a semicolon" ;
+END PROPERTYDEFINITIONS
+
+DIEAREA ( 0 0 ) ( 0 200000 ) ( 300000 200000 ) ( 300000 0 ) ;
+
+ROW core_ROW_0 core 0 0 N DO 1500 BY 1 STEP 200 0 ;
+ROW core_ROW_1 core 0 4000 FS DO 1500 BY 1 STEP 200 0 ;
+TRACKS X 100 DO 1500 STEP 200 LAYER metal1 ;
+GCELLGRID X 0 DO 10 STEP 30000 ;
+
+VIAS 1 ;
+   - via12_x
+      + RECT metal1 ( -100 -100 ) ( 100 100 )
+      + RECT metal2 ( -100 -100 ) ( 100 100 ) ;
+END VIAS
+
+NONDEFAULTRULES 1 ;
+   - wide2
+      + LAYER metal1 WIDTH 400 SPACING 400 ;
+END NONDEFAULTRULES
+
+REGIONS 2 ;
+   - r0 ( 1000 1000 ) ( 5000 5000 ) + TYPE FENCE ;
+   - r1 ( 6000 1000 ) ( 9000 5000 ) ( 10000 1000 ) ( 12000 5000 ) + TYPE GUIDE ;
+END REGIONS
+
+COMPONENTS 16 ;
+   - c0 inv
+      + PLACED ( 1000 2000 ) N ;
+   - c1 inv
+      + SOURCE DIST
+      + FIXED ( 3000 4000 ) FS ;
+   - c2 inv ;
+   - c3 inv
+      + UNPLACED ;
+   - c4 inv ;
+   - c5 inv + PLACED ( 5000 6000 ) S + WEIGHT 3 ;
+   - c6 inv
+      + PROPERTY note "a ; b"
+      + COVER ( 7000 8000 ) N ;
+   - c7 inv + REGION r0 ;
+   - c8 ram
+      + PLACED ( 20000 20000 ) N ;
+   - c9 ram
+      + FIXED ( 100000 100000 ) FN ;
+   - c10 iopad
+      + PLACED ( 0 190000 ) N ;
+   - c11 filler1
+      + PLACED ( 400 0 ) N ;
+   - c12 nosize
+      + PLACED ( 600 0 ) N ;
+   - c13 inv + HALO 10 10 10 10 ;
+   - c14 inv
+      + FIXED ( -200 -400 ) N ;
+   - c15 inv ;
+END COMPONENTS
+
+PINS 6 ;
+   - in0 + NET n0
+      + DIRECTION INPUT
+      + USE SIGNAL
+      + LAYER metal1 ( -50 0 ) ( 50 100 )
+      + PLACED ( 0 1000 ) E ;
+   - in1 + NET n1 + DIRECTION INPUT + LAYER metal2 ( 0 0 ) ( 100 100 ) + FIXED ( 0 2000 ) N ;
+   - out0 + NET n2
+      + DIRECTION OUTPUT
+      + LAYER metal1 ( 0 0 ) ( 10 20 )
+      + LAYER metal2 ( 0 0 ) ( 30 40 )
+      + COVER ( 300000 1000 ) W ;
+   - out1 + NET n3
+      + DIRECTION OUTPUT
+      + LAYER metal1 SPACING 100 ( 0 0 ) ( 60 60 ) ;
+   - io0 + NET n4 + SPECIAL
+      + DIRECTION INOUT
+      + LAYER metal2 ( -10 -10 ) ( 10 10 )
+      + PLACED ( 150000 0 ) N ;
+   - fb0 + NET n5
+      + DIRECTION FEEDTHRU
+      + LAYER metal1 ( 0 0 ) ( 5 5 )
+      + PLACED ( 150000 200000 ) S ;
+END PINS
+
+BLOCKAGES 2 ;
+   - LAYER metal1
+     RECT ( 0 0 ) ( 1000 1000 ) ;
+   - PLACEMENT
+     RECT ( 2000 2000 ) ( 3000 3000 ) ;
+END BLOCKAGES
+
+SPECIALNETS 1 ;
+   - vdd ( * vdd )
+      + ROUTED metal1 200 + SHAPE STRIPE ( 0 2000 ) ( 300000 * )
+      + USE POWER ;
+END SPECIALNETS
+
+NETS 9 ;
+   - n0 ( PIN in0 ) ( c0 a ) ;
+   - n1 ( PIN in1 ) ( c1 a ) ( c2 a )
+      ( c3 a ) ( c4 a ) ;
+   - n2 ( c0 o ) ( PIN out0 ) ( c8 d[0] ) + USE SIGNAL ;
+   - n3 ( c8 q[0] ) ( c9 d[0] + SYNTHESIZED ) ( PIN out1 )
+      + ROUTED metal1 ( 1000 2000 ) ( 20000 * ) via12_x
+        NEW metal2 ( 20000 2000 ) ( * 20000 ) ;
+   - n4 ( PIN io0 ) ( c10 p ) ( c5 o ) ( c6 a ) ( c7 a ) ( c13 a ) ;
+   - n5 ( PIN fb0 ) ( c11 x ) ( c12 y ) ( c14 nogeom ) ( c15 vdd ) ;
+   - n6 ( c5 a ) ( c9 q[0] )
+      + NONDEFAULTRULE wide2
+      + PROPERTY note "x ; y" ;
+   - n7 ;
+   - n8 ( c1 o ) ( c2 o ) ( c3 o ) ( c4 o ) ( c13 o ) ( c14 a ) ( c15 a ) ( c0 a ) ;
+END NETS
+
+GROUPS 1 ;
+   - g0 c7 c13
+      + REGION r0 ;
+END GROUPS
+
+END DESIGN

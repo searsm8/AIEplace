@@ -3,8 +3,8 @@
 # with Limbo, dump every parse-derived DataBase field, and require the two dumps byte-identical.
 # Exits non-zero if any design differs or fails to parse.
 #
-#   bash compare_parsers.sh                    # the 44 designs in tools/benchmarks.py, plus the
-#                                              # extra DEFs make_extra_dirs.sh sets up
+#   bash compare_parsers.sh                    # the 44 designs in tools/benchmarks.py, the
+#                                              # extra DEFs make_extra_dirs.sh sets up, and edge_cases/
 #   bash compare_parsers.sh <dir> [<dir> ...]  # specific design directories
 #
 # JOBS designs run at once (default 4; each holds two parsed designs' dumps, up to ~2 GB RSS per
@@ -22,6 +22,7 @@ else
     mapfile -t DIRS < <(cd "$REPO/vck5000/tools" && python3 -c \
         'import benchmarks; print("\n".join(sorted(benchmarks.BENCHMARKS)))' | sed "s|^|$REPO/host/benchmarks/|")
     mapfile -t -O "${#DIRS[@]}" DIRS < <(bash "$HERE/make_extra_dirs.sh")
+    DIRS+=("$HERE/edge_cases/lefdef" "$HERE/edge_cases/bookshelf")
 fi
 
 compare_one() {

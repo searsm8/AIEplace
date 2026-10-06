@@ -12,7 +12,7 @@ cd vck5000 && make test-parser                             # ~15 min, exit 0 = a
 ```
 
 Run it after any change to `DesignReader.cpp` or to `DataBase`'s parse callbacks.
-`make test-regress` exercises only 3 designs end to end; this covers 84 inputs field by field.
+`make test-regress` exercises only 3 designs end to end; this covers 86 inputs field by field.
 
 ## What it compares
 
@@ -21,6 +21,7 @@ Run it after any change to `DesignReader.cpp` or to `DataBase`'s parse callbacks
 | `tools/benchmarks.py` | 44 | every design we run: ISPD2005 + MMS (Bookshelf), ISPD2015 (LEF/DEF) |
 | `build/extra/legal_*` | 20 | the contest's legalized `after_legalized.ntup.fix.def`: every cell `PLACED`, so the PLACED→FIXED class rule is exercised |
 | `build/extra/fix_*` | 20 | XPlace's regenerated `ispd2015_fix` DEFs and LEFs — a different writer's output |
+| `edge_cases/{lefdef,bookshelf}` | 2 | hand-written: the syntax and Limbo quirks no benchmark uses (a DEF component with no placement inheriting the previous one's location, a MACRO without SIZE inheriting the previous one's, COVER pins, several LAYERs, `+ SYNTHESIZED`, routing, quoted `;`, 9-word `.nets` pins, `-0`, `FIXED_NI`, lower-case keywords, a node placed twice). Small, but still cut into many parallel chunks |
 
 `make_extra_dirs.sh` builds the last two as symlink farms, since `DataBase` only reads a DEF
 named `floorplan.def`.
