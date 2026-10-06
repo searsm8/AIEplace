@@ -26,7 +26,8 @@ constexpr int      MAX_NETS_PER_BEAT     = LANES / MIN_NET_DEGREE;       // 8
 // Large nets (LANES+1..MAX_LARGE_NET_DEGREE pins) follow the degree-16 group, one net per beat over
 // `span` consecutive beats, grouped by span (2..MAX_SPAN) so the device finds a net's last beat
 // with a counter. The span is what bank packing needs, which can exceed ceil(degree/LANES); nets
-// needing more than MAX_SPAN beats, and nets of 97..100 pins, are dropped on the host. Meow.
+// needing more than MAX_SPAN beats are dropped on the host; nets over 96 pins are masked at read
+// time (the host's IGNORE_NET_DEGREE, #46). Meow.
 constexpr int      MAX_LARGE_NET_DEGREE  = 6 * LANES;                     // 96
 constexpr int      MAX_SPAN              = 8;
 constexpr int      SPAN_GROUPS           = MAX_SPAN - 1;                  // spans 2..MAX_SPAN
