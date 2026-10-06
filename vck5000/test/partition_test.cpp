@@ -12,7 +12,10 @@
 //                   equals a fresh init, build_chunks_from_owner agrees and fits
 //   [4] MULTILEVEL  the same, and every macro pin is in its macro's chunk
 //   [5] COVERAGE    macros and large nets exist; K >= 3; FM and multilevel both strictly beat the
-//                   baseline's externals (else [3]/[4] could pass vacuously) Meow.
+//                   baseline's externals (else [3]/[4] could pass vacuously)
+//   [6] DEFAULT     encode_chunked with the default Config IS one FM pass on the baseline cut at the K
+//                   it chose (same owners, same externals); that K is no larger than the bare cut's and
+//                   the externals are strictly fewer (here FM fits K=4 where the bare cut needs 5) Meow.
 
 #include "record_design.hpp"
 #include "partition.hpp"
@@ -56,7 +59,9 @@ int main() {
     spec.cells = 3000; spec.macros = 6; spec.fixed = 40; spec.nets = 2600;
     const Netlist nl = fixture::build_synthetic(20261005u, spec);
     const long capacity = 3000;
-    const Chunked base = encode_chunked(nl, cfg, capacity);
+    Config bare_cfg = cfg;
+    bare_cfg.partition_fm_passes = 0;   // the bare BFS cut, the reference everything is measured against
+    const Chunked base = encode_chunked(nl, bare_cfg, capacity);
     const int K = base.num_chunks;
     const PartitionGraph G = make_partition_graph(base.global, cfg);
     const Units U = level0_units(G);
@@ -135,6 +140,24 @@ int main() {
     printf("%s [5] coverage: %zu macro pins, %ld large nets, K=%d, baseline %ld > FM %ld, multilevel %ld\n", coverage ? "ok  " : "FAIL",
            base.global.macro_pins.size(), large, K, base_externals, fm.externals, ml.externals);
     expect(coverage, "[5] coverage");
+
+    // [6]
+    const Chunked chosen = encode_chunked(nl, cfg, capacity);
+    const int chosen_k = chosen.num_chunks;
+    PartitionState one_pass;
+    one_pass.init(G, chosen_k, order_owner(base.global, locality_order(base.global), chosen_k));
+    FmOptions one_opt;
+    one_opt.capacity = chosen.fm_target;   // the target encode_chunked settled on (it tightens after a rounding miss)
+    one_opt.max_passes = 1;
+    fm_refine(one_pass, U, one_opt);
+    const bool default_ok = cfg.partition_fm_passes == 1 && chosen.fits && chosen.fm_target > 0 && chosen_k <= K &&
+                            chosen.owner == one_pass.owner && chosen.externals == one_pass.externals &&
+                            chosen.externals < base.externals;
+    printf("%s [6] default encode_chunked == 1 FM pass on the baseline: K=%d, externals %ld (bare cut K=%d, %ld); "
+           "target %ld, re-run %ld externals, owners %s\n",
+           default_ok ? "ok  " : "FAIL", chosen_k, chosen.externals, K, base.externals, chosen.fm_target, one_pass.externals,
+           chosen.owner == one_pass.owner ? "equal" : "differ");
+    expect(default_ok, "[6] default");
 
     printf("%s\n", failures ? "FAIL" : "PASS");
     return failures ? 1 : 0;

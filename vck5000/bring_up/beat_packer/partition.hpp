@@ -1,12 +1,18 @@
+// beat_packer.hpp includes this file part-way down (encode_chunked uses it), so its include comes
+// BEFORE the guard: whichever header a user includes first, these definitions land after
+// build_chunks_from_owner and before encode_chunked. Meow.
+#include "beat_packer.hpp"
+
 #ifndef PARTITION_HPP
 #define PARTITION_HPP
 
 // partition.hpp -- chunk partitioners for encode_chunked (#42). Each returns an owner per work node
 // for build_chunks_from_owner; the four candidates:
-//   0  baseline     locality_order + K equal contiguous runs (what encode_chunked does)
+//   0  baseline     locality_order + K equal contiguous runs (encode_chunked's starting cut)
 //   1  improved     BFS over every homed net (large ones too) from a pseudo-peripheral unit, cut where
 //                   the chunks' exact slot loads balance instead of at equal node counts
-//   2  FM           k-way Fiduccia-Mattheyses refinement of a starting partition
+//   2  FM           k-way Fiduccia-Mattheyses refinement of a starting partition (encode_chunked runs
+//                   Config::partition_fm_passes = 1 of it on the baseline: the default since 2026-10-06)
 //   3  multilevel   heavy-edge coarsening, an improved-style cut of the coarsest level, FM at every level
 //
 // The objective is EXACT, not a proxy: PartitionState tracks build_chunks' own rules -- a net is
@@ -15,8 +21,6 @@
 // Chunked::externals and `load[k]` equals chunk k's slot-node count (before bank-row rounding).
 // tier 1: test/partition_test.cpp. Meow.
 
-#include "beat_packer.hpp"
-
 #include <chrono>
 #include <climits>
 #include <queue>
@@ -24,7 +28,7 @@
 
 namespace packer {
 
-constexpr int PARTITION_MAX_K = 16;
+constexpr int PARTITION_MAX_K = 64;   // encode_chunked's own limit. Meow.
 
 // The work netlist as build_chunks sees it, in CSR form. Meow.
 struct PartitionGraph {
@@ -86,7 +90,7 @@ inline Units level0_units(const PartitionGraph& G) {
     return U;
 }
 
-struct MoveDelta { long externals = 0; long load[PARTITION_MAX_K] = {}; };
+struct MoveDelta { long externals = 0; long load[PARTITION_MAX_K]; };   // evaluate() zeroes only load[0..K). Meow.
 
 // The exact build_chunks model for one owner vector, with O(local) move evaluation. Meow.
 struct PartitionState {
@@ -145,6 +149,7 @@ struct PartitionState {
     // Effect of moving unit u to chunk b; applies it when `apply`. Meow.
     MoveDelta evaluate(const Units& U, int u, int b, bool apply) {
         MoveDelta d;
+        std::fill(d.load, d.load + K, 0L);
         const int a = owner[U.node[U.ptr[u]]];
         if (a == b) return d;
         auto touch = [&](int v) { if (!node_touched[v]) { node_touched[v] = 1; touched_nodes.push_back(v); } };
@@ -259,7 +264,7 @@ inline std::vector<int> balanced_cut(const PartitionGraph& G, const Units& U, co
     std::vector<long> cut(K + 1);
     for (int k = 0; k <= K; k++) cut[k] = total * k / K;
     auto snap = [&](long position) {
-        position = std::clamp(position, 0L, total);
+        position = std::min(std::max(position, 0L), total);
         while (position > 0 && position < total && U.of_node[order[position]] == U.of_node[order[position - 1]]) position--;
         return position;
     };
@@ -280,7 +285,7 @@ inline std::vector<int> balanced_cut(const PartitionGraph& G, const Units& U, co
         const double damping = 0.5 / (1 + it / 8);
         std::vector<long> next = cut;
         for (int k = 1; k < K; k++) next[k] = cut[k] - (long)(damping * (s.load[k - 1] - s.load[k]));
-        for (int k = 1; k < K; k++) next[k] = std::clamp(next[k], next[k - 1] + 1, total - (K - k));
+        for (int k = 1; k < K; k++) next[k] = std::min(std::max(next[k], next[k - 1] + 1), total - (K - k));
         cut = next;
     }
     return owners_of(best_cut);
@@ -342,6 +347,13 @@ inline FmStats fm_refine(PartitionState& s, const Units& U, const FmOptions& opt
     FmStats st;
     const PartitionGraph& G = *s.G;
     const int num_units = U.size();
+    // A unit moves as one, from its first node's chunk: a split unit would corrupt the counts. Meow.
+    for (int u = 0; u < num_units; u++)
+        for (int i = U.ptr[u] + 1; i < U.ptr[u + 1]; i++)
+            if (s.owner[U.node[i]] != s.owner[U.node[U.ptr[u]]]) {
+                fprintf(stderr, "fm_refine: unit %d is split across chunks (node %d)\n", u, U.node[i]);
+                exit(2);
+            }
     std::vector<int> stamp(num_units, 0), seen(num_units, -1);
     std::vector<char> locked(num_units, 0);
     for (int pass = 0; pass < opt.max_passes; pass++) {
@@ -352,8 +364,8 @@ inline FmStats fm_refine(PartitionState& s, const Units& U, const FmOptions& opt
         std::priority_queue<std::tuple<long, int, int, int>> heap;   // key, -unit, target, stamp
         for (int u = 0; u < num_units; u++) {
             if (opt.boundary_only && start_over == 0 && !on_cut(s, U, u)) continue;
-            const auto [key, b] = best_target(s, U, u, opt, st);
-            if (b >= 0) heap.emplace(key, -u, b, ++stamp[u]);
+            const std::pair<long, int> best = best_target(s, U, u, opt, st);
+            if (best.second >= 0) heap.emplace(best.first, -u, best.second, ++stamp[u]);
         }
         std::vector<std::pair<int, int>> moves;   // unit, from
         long best_over = start_over, best_externals = start_externals;
@@ -361,12 +373,14 @@ inline FmStats fm_refine(PartitionState& s, const Units& U, const FmOptions& opt
         const size_t stall = std::max<size_t>(500, (size_t)(opt.stall_fraction * num_units));
         int visit = 0;
         while (!heap.empty() && since_best < stall) {
-            const auto [key, neg_u, b_popped, popped_stamp] = heap.top(); heap.pop();
-            const int u = -neg_u;
+            const long key = std::get<0>(heap.top());
+            const int u = -std::get<1>(heap.top()), popped_stamp = std::get<3>(heap.top());
+            heap.pop();
             if (locked[u] || popped_stamp != stamp[u]) continue;
-            const auto [now_key, b] = best_target(s, U, u, opt, st);
+            const std::pair<long, int> now = best_target(s, U, u, opt, st);
+            const int b = now.second;
             if (b < 0) continue;
-            if (now_key < key) { heap.emplace(now_key, -u, b, ++stamp[u]); continue; }
+            if (now.first < key) { heap.emplace(now.first, -u, b, ++stamp[u]); continue; }
             const int from = s.owner[U.node[U.ptr[u]]];
             s.evaluate(U, u, b, true);
             locked[u] = 1;
@@ -386,9 +400,9 @@ inline FmStats fm_refine(PartitionState& s, const Units& U, const FmOptions& opt
                         const int w = U.of_node[G.net_node[p]];
                         if (w < 0 || locked[w] || seen[w] == visit) continue;
                         seen[w] = visit;
-                        const auto [wkey, wb] = best_target(s, U, w, opt, st);
+                        const std::pair<long, int> wbest = best_target(s, U, w, opt, st);
                         ++stamp[w];
-                        if (wb >= 0) heap.emplace(wkey, -w, wb, stamp[w]);
+                        if (wbest.second >= 0) heap.emplace(wbest.first, -w, wbest.second, stamp[w]);
                     }
                 }
         }

@@ -1329,8 +1329,18 @@ widening the mailbox loops** (16 floats/beat) — it attacks the same 4E term pa
 iteration (well under 10%), partition quality cannot matter. Then close #42 and keep the BFS cut.
 </details>
 
+**Partitioning deep dive (2026-10-05) — done. FM 1 pass is `encode_chunked`'s default since
+2026-10-06 (Mark).** → [[_NEW_REPORT_42_partitioning_20261005.md]] (see its addendum)
+- 2026-10-06: wired via `Config::partition_fm_passes = 1`; the bare cut is still tried at every K,
+  and the result never needs more chunks. A split-macro bug in `order_owner` corrupted FM's start
+  state (synthetic design only; the 8 real designs gave identical results) and is fixed. `make test`
+  had been skipping `mailbox_widened_test` and `partition_test`; it now runs all 21 harnesses.
+  FM 2 passes: 0.32× externals, +1.3 s; marginal, so 1 pass stays.
+<details><summary>Superseded headline (2026-10-05)</summary>
+
 **Partitioning deep dive (2026-10-05) — done; waiting on Mark to pick a default.**
-→ [[_NEW_REPORT_42_partitioning_20261005.md]]
+</details>
+
 - Candidates 0-3 are native and exact: `partition.hpp`'s objective IS `build_chunks`' external count
   (tier 1 `partition_test`, 5/5 mutants). KaHyPar 1.3.6 is the oracle. 8 chunked designs, timed one
   process at a time.
@@ -1339,8 +1349,8 @@ iteration (well under 10%), partition quality cannot matter. Then close #42 and 
 - End to end: with the 1-float mailbox, FM 1 pass gives −32% (pays off after 95-260 iterations).
   With the widened mailbox it is neutral at 1000 iterations (break-even 1.8-3.3 K). Multilevel
   (16-105 s) and KaHyPar (63-724 s) never pay off at 1000 iterations.
-- **Recommendation: FM, 1 pass, from the baseline cut, as `encode_chunked`'s default.** It changes
-  every chunked design's arrays, so it is Mark's call and #41's owner should know. Not wired yet.
+- **Recommendation: FM, 1 pass, from the baseline cut, as `encode_chunked`'s default.** Done
+  2026-10-06. It changes every chunked design's device arrays; #41's owner should know.
 - Next options: a contracted-hypergraph multilevel (coarse levels are slow because they score the
   flat netlist); Mt-KaHyPar for a parallel-runtime reference (needs Mark's OK to install).
 

@@ -141,6 +141,7 @@ struct Config {
     int      repair_passes = 50;
     unsigned seed          = 1;
     bool     large_nets    = true;  // emit 17..96-pin nets after the degree-16 group (default since 2026-10-02, Mark)
+    int      partition_fm_passes = 1;   // encode_chunked: FM passes on the BFS cut; 0 = the bare cut (#42, Mark 2026-10-06). Meow.
 };
 
 struct Pin {
@@ -1154,6 +1155,7 @@ struct Chunked {
     long externals = 0;
     long large_dropped = 0;                  // summed over chunks (see Encoded::large_dropped)
     bool fits = false;
+    long fm_target = 0;                      // encode_chunked: FM's slot target for this partition, 0 = the bare cut
 };
 
 // Locality order over movable nodes: breadth-first over in-scope nets, a macro and its pins as one
@@ -1191,11 +1193,14 @@ inline std::vector<int> locality_order(const Encoded& g) {
     return order;
 }
 
-// The baseline partition: K equal contiguous runs of the locality order. Meow.
+// The baseline partition: K equal contiguous runs of the locality order. A run boundary can fall
+// between a macro and its pins; the pins follow the macro here, as build_chunks_from_owner would,
+// because FM moves a macro with its pins as one unit and needs the unit whole from the start. Meow.
 inline std::vector<int> order_owner(const Encoded& g, const std::vector<int>& order, int num_chunks) {
     std::vector<int> owner(g.kind.size(), -1);
     const long per_chunk = ((long)order.size() + num_chunks - 1) / num_chunks;
     for (size_t i = 0; i < order.size(); i++) owner[order[i]] = std::min<long>((long)i / per_chunk, num_chunks - 1);
+    for (const MacroPin& mp : g.macro_pins) owner[mp.pin_node] = owner[mp.macro_node];
     return owner;
 }
 
@@ -1341,6 +1346,19 @@ inline bool build_chunks(Chunked& ch, const std::vector<int>& order, int num_chu
     return build_chunks_from_owner(ch, order_owner(ch.global, order, num_chunks), num_chunks, cfg);
 }
 
+} // namespace packer
+
+#include "partition.hpp"   // the default partitioner; it builds on everything above. Meow.
+
+namespace packer {
+
+// The smallest K that builds. Partition: the BFS cut refined by cfg.partition_fm_passes of k-way FM
+// (#42: 1 pass gives 0.38x the external slots for 1-8 s on the 8 chunked designs, and reaches the
+// minimum K where the bare cut cannot). FM's model counts slot nodes but not bank-row rounding (a
+// chunk rounds up to its busiest bank, measured 23-60 slots), so FM aims at a target below capacity;
+// a build that fails on rounding tightens the target by the measured overshoot, which carries to the
+// next K. Safety net: once FM fits the model but not the builder at two K, it is dropped for this
+// design. Each K also tries the bare cut, so the result never needs more chunks than it would. Meow.
 inline Chunked encode_chunked(const Netlist& nl, const Config& cfg, long capacity) {
     Chunked ch;
     ch.capacity = capacity;
@@ -1348,8 +1366,40 @@ inline Chunked encode_chunked(const Netlist& nl, const Config& cfg, long capacit
     const std::vector<int> order = locality_order(ch.global);
     long slot_owners = 0;
     for (size_t node = 0; node < ch.global.kind.size(); node++) slot_owners += needs_slot(ch.global.kind[node]);
-    for (int num_chunks = std::max<long>(1, (slot_owners + capacity - 1) / capacity); num_chunks <= 64; num_chunks++)
+    PartitionGraph graph;
+    Units units;
+    long target = capacity - capacity / 200;
+    int model_misses = 0;   // K at which FM fit the model but not the builder
+    long fm_from_k = 0;     // FM still over capacity at K: its total load says no K below this can fit
+    for (int num_chunks = std::max<long>(1, (slot_owners + capacity - 1) / capacity); num_chunks <= 64; num_chunks++) {
+        if (num_chunks > 1 && cfg.partition_fm_passes > 0 && model_misses < 2 && num_chunks >= fm_from_k) {
+            bool model_fit = false;
+            if (graph.num_nodes == 0) { graph = make_partition_graph(ch.global, cfg); units = level0_units(graph); }
+            for (int attempt = 0; attempt < 3; attempt++) {
+                PartitionState state;
+                state.init(graph, num_chunks, order_owner(ch.global, order, num_chunks));
+                FmOptions opt;
+                opt.capacity = target;
+                opt.max_passes = cfg.partition_fm_passes;
+                fm_refine(state, units, opt);
+                if (overflow_of(state.load, target) > 0) {   // FM cannot fit even the model at this K
+                    long total_load = 0;
+                    for (long l : state.load) total_load += l;
+                    fm_from_k = std::max<long>(num_chunks + 1, (total_load + target - 1) / target);
+                    break;
+                }
+                model_fit = true;
+                if (build_chunks_from_owner(ch, state.owner, num_chunks, cfg)) { ch.fits = true; ch.fm_target = target; return ch; }
+                long overshoot = 0;   // slots the builder needed beyond the model's count, worst built chunk
+                for (int k = 0; k < num_chunks; k++)
+                    if (ch.chunks[k].enc.num_slots > 0) overshoot = std::max(overshoot, ch.chunks[k].enc.num_slots - state.load[k]);
+                if (overshoot <= 0) break;   // not a rounding failure (e.g. coloring)
+                target -= overshoot;
+            }
+            model_misses += model_fit;
+        }
         if (build_chunks(ch, order, num_chunks, cfg)) { ch.fits = true; return ch; }
+    }
     return ch;
 }
 

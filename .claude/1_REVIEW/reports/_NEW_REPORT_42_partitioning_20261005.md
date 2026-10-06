@@ -164,6 +164,56 @@ What this changes:
   change (it would add `make_partition_graph` + `fm_refine` after `order_owner`), but it changes every
   chunked design's device arrays — Mark's call, and #41's owner should know.
 
+## Addendum 2026-10-06 — FM 1 pass is the default; fixes found on the way
+**FM 2 and 3 passes** (8 chunked designs, native reader, one process at a time, `fixed/`):
+
+| FM passes | externals vs baseline | fits K_min | mean partition s | end-to-end vs baseline, 1-float | widened |
+|---|---|---|---|---|---|
+| **1** | **0.382** | 8/8 | **3.3** | 0.661 | **1.080** |
+| 2 | 0.318 | 8/8 | 4.6 | **0.649** | 1.148 |
+| 3 | 0.300 | 8/8 | 5.7 | 0.662 | 1.210 |
+| 8 | 0.285 | 8/8 | 10.7 | 0.761 | 1.475 |
+
+- **Pass 2 is the last one worth anything:** −17% externals for +1.3 s. It edges 1 pass on the 1-float
+  mailbox (0.649 vs 0.661) and loses on the widened one. Pass 3 is worse than 2 on both.
+- **The 5.3× faster host parser (#43) makes partition time matter more.** Parse used to hide part of
+  it. With the widened mailbox, FM 1 pass is now 1.08× the baseline end to end (it was 1.007×).
+- **Decision (Mark):** FM 1 pass is `encode_chunked`'s default (`Config::partition_fm_passes = 1`).
+
+**Wiring.** `encode_chunked` takes the bare BFS cut at each K, runs FM on it, and keeps the smallest
+K that builds. Each K also tries the bare cut, so the result never needs more chunks than before.
+FM's model counts slot nodes but not bank-row rounding (23–60 slots, measured). So FM aims below
+capacity, and a build that misses tightens the target by the measured overshoot.
+`Chunked::fm_target` records the target used, which makes the result reproducible. `partition.hpp`
+is included from `beat_packer.hpp`, so it is now C++14-clean (HLS testbenches).
+
+**Bug found and fixed: split macros.** `order_owner` cut the BFS order at fixed positions. A cut could
+fall between a macro and its pins; `build_chunks_from_owner` silently re-joins them, but FM started
+from the split owners. FM moves a macro with its pins as one unit, from its first node's chunk, so
+a split unit corrupted FM's counts: the model drifted from a fresh count, and the builder's
+re-joining changed the partition after FM. Found by tier 1 [6] (2,947 model externals vs 3,021 from
+the builder).
+- **Fix:** `order_owner` keeps macro pins with their macro, the builder's own rule, so bare-cut
+  results are unchanged. `fm_refine` now exits on a split unit, and a mutant that reverts the fix is
+  caught.
+- **Impact on this study: none.** All 8 designs give identical FM results before and after; no
+  cut landed inside a macro on these. Only the synthetic test design was hit.
+- **A misdiagnosis it caused:** before the fix, I blamed the bank-row rounding for a 260-slot
+  overshoot. After the fix it is 23 slots, and FM works at capacity 768 too (K=18 where the bare cut
+  needs 36). The minimum-capacity guard I had added on that basis is removed.
+
+**Bug found and fixed: `make test` skipped two harnesses.** The `test:` target kept its own copy of
+the harness list. `mailbox_widened_test` and `partition_test` were in `HARNESSES` but were never run,
+and the suite still printed PASS. Both had been run and passing directly when written, but
+"in `make test`" in this report and the widening report was not true until now. The target now
+iterates over `HARNESSES` (21 harnesses run, all pass).
+
+**Test adjustments for the new default:**
+- `partition_test` builds its reference with `partition_fm_passes = 0`. New check [6]: the default is
+  exactly one FM pass on the bare cut, at the K and target it chose.
+- `hpwl_gradient_computer_v2_test`'s capacity-768 case pins the bare cut. Its check [5] exists to
+  exercise collect-sequence padding, and FM's 18 larger chunks need none.
+
 ## Files
 - New: `bring_up/beat_packer/partition.hpp`, `partition_study.cpp`, `cycle_model.hpp` (moved out of
   `chunk_profile.cpp`), `kahypar_partition.py`; `test/partition_test.cpp` (+ `test/Makefile`).

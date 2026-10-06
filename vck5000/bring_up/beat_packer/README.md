@@ -56,8 +56,11 @@ short version.
 
 ## Chunking (designs larger than one on-chip slot space)
 `encode_chunked(nl, cfg, capacity)` splits the design into K chunks:
-- Every movable node is **owned** by one chunk (a macro together with its pins). Chunks are cut
-  from a breadth-first locality order.
+- Every movable node is **owned** by one chunk (a macro together with its pins). The partition is
+  K equal runs of a breadth-first locality order, refined by **one pass of k-way FM**
+  (`partition.hpp`, `Config::partition_fm_passes`, default since 2026-10-06). On the 8 chunked designs
+  FM leaves ~0.38× the external slots, takes 1-8 s, and reaches the smallest K the capacity allows.
+  `partition_fm_passes = 0` gives the bare cut. Study: [[_NEW_REPORT_42_partitioning_20261005.md]].
 - Every net is **homed** in the chunk owning most of its nodes.
 - A homed net's nodes owned by other chunks become **external** slots there, and fixed pins are
   copied (they never move, so they are not external).

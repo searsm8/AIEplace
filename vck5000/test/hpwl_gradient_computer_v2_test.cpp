@@ -62,8 +62,9 @@ static DeviceAxis run_axis(const packer::Chunked& ch, size_t num_parsed, int axi
 }
 
 static bool run_config(const char* label, const packer::Netlist& nl, long capacity, const std::vector<float> node_pos[2],
-                       const golden::Lut& lut, bool check_lut_budget, packer::Chunked* keep = nullptr) {
-    const packer::Config cfg;
+                       const golden::Lut& lut, bool check_lut_budget, packer::Chunked* keep = nullptr, int fm_passes = 1) {
+    packer::Config cfg;
+    cfg.partition_fm_passes = fm_passes;
     packer::Chunked ch = packer::encode_chunked(nl, cfg, capacity);
     if (packer::check_chunked(nl, ch, cfg)) { printf("FAIL [%s] chunked packer check\n", label); return false; }
     for (const auto& c : ch.chunks)
@@ -129,7 +130,9 @@ int main(int argc, char** argv) {
     bool ok = true;
     packer::Chunked ch, tight;
     ok &= run_config("capacity=2048", nl, 2048, node_pos, lut, true, &ch);
-    ok &= run_config("capacity=768", nl, 768, node_pos, lut, false, &tight);
+    // The bare cut here: FM packs this design into 18 chunks instead of 36, whose parcels need no
+    // padding, and [5] exists to exercise the padding path. Meow.
+    ok &= run_config("capacity=768", nl, 768, node_pos, lut, false, &tight, 0);
     ok &= run_config("capacity=1M", nl, SLOT_CAPACITY, node_pos, lut, false);
 
     // Small chunks put a node's external entries near parcel boundaries, so the owner's

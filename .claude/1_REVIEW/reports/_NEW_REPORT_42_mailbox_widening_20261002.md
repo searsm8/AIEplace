@@ -104,7 +104,9 @@ Every pick lies within the first `hazard` entries, so a `std::deque` gives the s
 - **`src/modules/mailbox_widened.hpp`** (HLS) holds `send_wide`, `receive_wide`, `return_wide` and
   `collect_wide`. Each loop reads one lane-list beat plus one mailbox beat per cycle; the URAM side
   is bank-major, the same idiom as `gather_pin_positions` and the `wa_gradient` scatter-add.
-- **Tier 1:** `test/mailbox_widened_test.cpp` (in `make test`) compares against the 1-float loops on
+- **Tier 1:** `test/mailbox_widened_test.cpp` (in `make test` — *annotation 2026-10-06: it was in
+  `HARNESSES` but the `test:` target's own list skipped it until that day; it was run directly and
+  passed. See [[_NEW_REPORT_42_partitioning_20261005.md]] addendum.*) compares against the 1-float loops on
   the same `Chunked` design. Positions and gradients are **bit-identical** (memcmp, NaN external
   slots included): collect adds each slot's contributions in the same parcel order, so the float
   sums do not even reorder. Mutants:

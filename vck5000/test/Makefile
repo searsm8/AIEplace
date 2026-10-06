@@ -79,9 +79,12 @@ $(BUILD)/hpwl_dhar_test_asan: hpwl_dhar_test.cpp $(BUILD)/hpwl_dhar_test_asan.d
 	@mkdir -p $(BUILD)
 	$(CXX) $(ASAN_FLAGS) $(DEPFLAGS) $(INCLUDES) $< -o $@
 
+# Runs every harness in HARNESSES. It used to keep its own copy of the list, and two harnesses
+# added only to HARNESSES (mailbox_widened_test, partition_test) were built but never run, while
+# `make test` printed PASS (found 2026-10-06, #42). Meow.
 test: $(BINS)
 	@fail=0; \
-	for h in density_model density_bin_model node_footprint_test force_gather_test metrics_test iteration_update_test spectral_test fft_pl_test field_solve_test hpwl_grad_test hpwl_dhar_test hpwl_dhar_v2_test hpwl_computer_test hpwl_computer_v2_test hpwl_gradient_computer_test hpwl_computer_v3_test hpwl_gradient_computer_v2_test bb_reduce_test; do \
+	for h in $(filter-out sched_verify,$(HARNESSES)); do \
 		printf '\n=== %s ===\n' "$$h"; \
 		$(BUILD)/$$h || fail=1; \
 	done; \
