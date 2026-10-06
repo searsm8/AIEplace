@@ -179,6 +179,11 @@
   traffic. m_axi bundles are grouped by width. → DATAFLOW.md, [[_NEW_REPORT_41_ddr_bundles_20261001.md]]
 
 ## Also open
+- **#43 — native parser, DONE 2026-10-06.** `host/src/common/src/DesignReader.cpp` replaces Limbo;
+  `make test-parser` proves byte-identical parsed state on 84 inputs; all 44 parse 115.5 → 21.9 s.
+  Host now links no Limbo/Boost/zlib, default string ABI. Waits on Mark: keep Limbo test-only or
+  drop it. ⚠️ Touching `DesignReader.cpp` or `DataBase`'s parse callbacks → run `make test-parser`.
+  → [[_NEW_REPORT_43_native_parser_20261006.md]]
 - **#21 — repo restructure** (host to top level, one host binary). Proposal only, nothing started.
   **Merge `origin/geert` before anything else** — one `.gitignore` conflict today, 25 hand-moved
   files after.

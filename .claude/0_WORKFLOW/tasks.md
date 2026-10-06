@@ -1344,7 +1344,22 @@ iteration (well under 10%), partition quality cannot matter. Then close #42 and 
 - Next options: a contracted-hypergraph multilevel (coarse levels are slow because they score the
   flat netlist); Mt-KaHyPar for a parallel-runtime reference (needs Mark's OK to install).
 
-## #43 — Native host parser, no Limbo dependency (opened 2026-10-05, TABLED)
+## #43 — Native host parser, no Limbo dependency (opened 2026-10-05; DONE 2026-10-06, 2 decisions wait on Mark)
+
+**Landed:** `host/src/common/src/DesignReader.cpp` reads LEF/DEF/Bookshelf; the host links no
+Limbo, Boost, zlib, and builds with the default string ABI (pl_algo's XRT ABI exception is gone).
+**Same output, proven:** `make test-parser` — a dump of every parsed `DataBase` field is
+byte-identical to Limbo's on 84 inputs (44 manifest + 20 legal + 20 `ispd2015_fix` DEFs); 2/2
+mutants caught; `make test-regress-slow` bit-identical. **Faster on every design:** all 44
+115.5 s → 21.9 s (5.3×, 8 threads), 34.9 s on 1 thread; newblue7 13.1 → 2.3 s. Bounded by
+`DataBase`'s own allocation/linking now, not the reader. Found: the old host silently `exit(0)`ed
+(nothing placed) on any LEF with a `NONDEFAULTRULE` — a Limbo default callback.
+**Constraint kept (Mark):** a new circuit every run — no caching across runs; this is all parse.
+**Waits on Mark:** (1) drop the Limbo submodule (loses the 84-input gate) or keep it test-only
+(current; `bootstrap_third_party.sh --with-limbo`); (2) point #42's beat_packer prototype reader at
+`DesignReader` so its start-up numbers describe the real parser.
+→ [[_NEW_REPORT_43_native_parser_20261006.md]], `vck5000/test/parser/README.md`
+<details><summary>Original entry (2026-10-05)</summary>
 
 **Why (Mark):** long term, a native parser instead of the prebuilt Limbo libs in
 `host/src/common/lib/`. Host start-up also counts in the end-to-end runtime (#42).
@@ -1353,6 +1368,7 @@ or encoded arrays across runs is not an answer.
 **Not yet measured:** #42's "parse" times (55–70% of unchunked start-up) are the beat_packer
 prototype reader (`read_bookshelf` / `read_def`), not the real host parser. Step 1 is to time the
 real `host/src/common` parse on the 44 designs next to the device-time estimate.
+</details>
 
 ---
 

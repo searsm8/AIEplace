@@ -33,7 +33,7 @@ make host HOST=sw_only
 
 | | |
 |---|---|
-| **DataBase** (`DataBase.h/.cpp`) | The parsed design — macros, components, IO pads, nets — read from LEF/DEF or Bookshelf via the Limbo parsers. Also generates filler cells. |
+| **DataBase** (`DataBase.h/.cpp`) | The parsed design — macros, components, IO pads, nets — read from LEF/DEF or Bookshelf by `common/src/DesignReader.cpp`. Also generates filler cells. |
 | **Grid** (`Grid.h/.cpp`) | The die partitioned into `bins_per_row × bins_per_col` bins. Scatters cell area into bins (ρ), holds per-bin `a_uv` and E-field, computes the overflow metric. `computeNodeFootprint` here is the single definition of density footprint geometry. |
 | **Node** (abstract) → **Component**, **IOPad** | A placeable object. Holds `current`/`next` iteration state (`node_pos` u, `probe_pos` v, `probe_grad` ∇f(v)), net memberships, and bin overlaps. `Node::step()` is the Nesterov update. |
 | **Net** (`Net.h/.cpp`) | A net and its pins; HPWL computation. |

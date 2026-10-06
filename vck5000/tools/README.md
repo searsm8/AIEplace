@@ -90,7 +90,7 @@ never just one.
 
 | file | status | what |
 |---|---|---|
-| `bootstrap_third_party.sh` | **live** | builds Limbo for a fresh clone. Called by the Makefile. |
+| `bootstrap_third_party.sh` | **live** | fetches tabulate for a fresh clone; `--with-limbo` also builds Limbo, for the parser harness (`test/parser`) only. |
 | `prune_run_artifacts.sh` | **live** | reclaims disk from `results/` sweep dirs. Dry run by default; `--go` to delete. |
 
 ## Dormant

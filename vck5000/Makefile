@@ -32,6 +32,7 @@ help:
 	@echo -e '\tmake test:\t Tier-1 offline verification suite. Seconds, pure g++, no Vitis/XRT needed.'
 	@echo -e '\tmake test-regress:\t sw_only regression vs committed baselines (~12 s).'
 	@echo -e '\tmake test-regress-slow:\t ...plus the mixed-size phase-2 design (~3 min).'
+	@echo -e '\tmake test-parser:\t native design reader vs Limbo on 84 inputs (~15 min, needs --with-limbo).'
 	@echo ""
 
 .PHONY: all xclbin xsa aie pl host
@@ -161,6 +162,18 @@ test-regress:
 test-regress-slow:
 	$(MAKE) host HOST=sw_only
 	$(REGRESS) --slow
+
+# =============================================================================
+#  make test-parser -- the native design reader vs Limbo (TODO #43, test/parser/README.md)
+# =============================================================================
+# Parses all 44 benchmarks plus 40 extra DEFs with both readers and requires the dump of every
+# parsed DataBase field to be byte-identical. ~15 min, and needs Limbo built
+# (tools/bootstrap_third_party.sh --with-limbo). Run it after any change to
+# host/src/common/src/DesignReader.cpp or DataBase's parse callbacks. Meow.
+.PHONY: test-parser
+test-parser:
+	$(MAKE) -C $(TEST_DIR)/parser
+	bash $(TEST_DIR)/parser/compare_parsers.sh
 
 # =============================================================================
 #  pl_algo module verifies: build + run one bring-up mode under emulation.

@@ -14,7 +14,9 @@ caught it. One such divergence had already gone live — see "What the merge exp
 
 | | |
 |---|---|
-| `DataBase.h/.cpp` | The parsed design — macros, components, IO pads, nets — read from LEF/DEF or Bookshelf via the Limbo parsers. Also generates filler cells and writes DEF. |
+| `DataBase.h/.cpp` | The parsed design — macros, components, IO pads, nets — read from LEF/DEF or Bookshelf. Also generates filler cells and writes DEF. |
+| `DesignReader.h/.cpp` | The LEF / DEF / Bookshelf readers (TODO #43). Each fires `DataBase`'s callbacks in file order with the plain records in `ParseRecords.h`. |
+| `NameIndex.h` | The flat name → node table `DataBase` resolves net pins through during the parse. |
 | `Grid.h/.cpp` | The die partitioned into `bins_per_row × bins_per_col` bins. `computeNodeFootprint` is the single definition of density footprint geometry (the PL mirrors it in `pl/src/pl_algo/src/modules/node_footprint.hpp`). |
 | `Node.h` → `Component.h`, `IOPad.h` | A placeable object and its per-iteration state. `MacroClass.h` is the cell type it points at. |
 | `Net.h/.cpp` | A net (hyperedge), its pins, and HPWL. |
@@ -22,9 +24,19 @@ caught it. One such divergence had already gone live — see "What the merge exp
 | `Logger.h/.cpp` | Static logger with an ordered severity scale, `tabulate` tables, `TIME_FUNCTION()` scope profiling. |
 | `Common.h/.cpp` | Project-wide includes/aliases, the `XY`/`Position`/`Gradient` value types, the `g_deterministic` reduction policy and `OrderedReduce`. |
 
-The Limbo parser libraries this links against are **not here**. They used to be five checked-in
-`.a` under `common/lib/`; Limbo is a git submodule now, built by
-`vck5000/tools/bootstrap_third_party.sh` — see `host/README.md`.
+## The reader, and what it must match
+
+The design files used to be read by the Limbo parsers (five checked-in `.a` under `common/lib/`,
+later a submodule). Since TODO #43 they are read by `DesignReader.cpp`, which reproduces exactly
+what `DataBase` used to receive from Limbo — quirks included, each marked in the source. That is
+checked, not assumed: `vck5000/test/parser/compare_parsers.sh` parses all 44 benchmarks plus 40
+extra DEFs both ways and requires a canonical dump of every parsed field to be byte-identical.
+**Run it after any change to `DesignReader.cpp` or `DataBase`'s callbacks** (it needs
+`bootstrap_third_party.sh --with-limbo`); `make test-regress` alone exercises only 3 designs.
+
+The reader covers the subset of each format our benchmarks use. Anything outside it — a DEF
+`+ PORT` pin, a Bookshelf `terminal_NI`, `.shapes`/`.route` files, non-empty `.wts` net weights —
+is a logged error with a file and line, never a silent skip.
 
 ## How it is built
 

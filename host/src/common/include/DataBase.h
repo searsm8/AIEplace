@@ -13,21 +13,13 @@
 #include "Net.h"
 #include "Bin.h"
 #include "Logger.h"
-#include <functional>
+#include "ParseRecords.h"
+#include "NameIndex.h"
 #include <sstream>
-
-#include <limbo/parsers/lef/adapt/LefDriver.h>             // LEF parser
-#include <limbo/parsers/def/adapt/DefDriver.h>             // DEF parser
-#include <limbo/parsers/verilog/bison/VerilogDriver.h>     // verilog parser
-#include <limbo/parsers/bookshelf/bison/BookshelfDriver.h> // bookshelf parser
-#include <limbo/parsers/gdsii/stream/GdsWriter.h>          // GDSII writer
 
 AIEPLACE_NAMESPACE_BEGIN
 
-class DataBase :
-    public DefParser::DefDataBase,
-    public LefParser::LefDataBase,
-    public BookshelfParser::BookshelfDataBase
+class DataBase
 {
 private:
     // Member Data, prefixed with "m_"
@@ -59,6 +51,21 @@ private:
     // vector keeps the order, and halves the number of parallel regions per iteration.
     vector<Node *> mv_movable_nodes;
     int m_filler_start_index = 0;  // index in mv_movable_nodes where the fillers begin
+
+    // Parse-time name -> component index, so a net pin costs one hash probe instead of two
+    // string-compare walks of mm_components (most of the parse time on the large designs). Holds
+    // exactly mm_components' entries (first insert wins in both). Emptied when readInput()
+    // returns. Meow.
+    NameIndex<Component> m_component_index;
+    void addComponent(Component* comp_p);
+
+    // mm_components / mm_nets entries made during the parse, queued in arrival order and put in
+    // by flushParseInserts() in ONE sorted pass: millions of random-order tree descents were the
+    // largest single cost left in the parse. The maps end up exactly as repeated emplace would
+    // leave them (first value under a name wins). Nothing reads either map mid-parse. Meow.
+    std::vector<Component*> mv_pending_components;
+    std::vector<Net*> mv_pending_nets;
+    void flushParseInserts();
 
     OrderedReduce m_ordered_reduce; // scratch for computeTotalWirelength (see Common.h)
 
@@ -102,8 +109,18 @@ private:
     void computeNetDegreeTotal();
     void computeAreaBreakdown();
 
-    // Runs parse_fn with stdout redirected to /dev/null, then restores the original stdout fd.
-    static bool runParserSilenced(std::function<bool()> parse_fn);
+protected:
+    // Lets a subclass construct without reading, then call readInput() from its own constructor,
+    // once its overrides of the parse*File hooks below are live. Only the #43 parser-equivalence
+    // harness does this (it substitutes Limbo). Meow.
+    struct DeferRead {};
+    DataBase(fs::path input_dir, DeferRead) : m_input_dir(input_dir) {}
+    void readInput();
+
+    // Parse one file into this DataBase via the callbacks below (DesignReader.cpp). Meow.
+    virtual bool parseLefFile(const fs::path& lef_file);
+    virtual bool parseDefFile(const fs::path& def_file);
+    virtual bool parseBookshelfAux(const fs::path& aux_file);
 
 public:
     /// Default Constructor
@@ -147,6 +164,10 @@ public:
     float getRowHeight() { return m_row_height; } // 0 when the input supplied none
     float getSiteWidth() { return m_site_width; } // 0 when the input supplied none
     Position getDieShift() { return m_die_shift; } // add back to convert internal -> benchmark frame
+    const string& getDesignName() const { return m_design_name; }
+    int getUnitsPerMicron() const { return m_units_per_micron; }
+    int getNumDefRegions() const { return m_num_def_regions; }
+    int getNumDefGroups() const { return m_num_def_groups; }
 
     // Parse functions
     std::vector<fs::path> findExtensions(fs::path, string);
@@ -187,92 +208,36 @@ public:
     float getTotalOverflow();
 
 
-    /// parser callback functions for reading input
+    /// parser callback functions for reading input, fired in file order by DesignReader.cpp
     ///==== LEF Callbacks ====
-    virtual void lef_version_cbk(std::string const &v);
-    virtual void lef_version_cbk(double v);
-    virtual void lef_casesensitive_cbk(int v);
-    virtual void lef_dividerchar_cbk(std::string const &);
-    virtual void lef_units_cbk(LefParser::lefiUnits const &v);
-    virtual void lef_manufacturing_cbk(double);
-    virtual void lef_useminspacing_cbk(LefParser::lefiUseMinSpacing const &);
-    virtual void lef_clearancemeasure_cbk(std::string const &);
-    virtual void lef_busbitchars_cbk(std::string const &);
-    virtual void lef_layer_cbk(LefParser::lefiLayer const &);
-    virtual void lef_via_cbk(LefParser::lefiVia const &);
-    virtual void lef_viarule_cbk(LefParser::lefiViaRule const &);
-    virtual void lef_spacing_cbk(LefParser::lefiSpacing const &);
-    virtual void lef_site_cbk(LefParser::lefiSite const &s);
-    virtual void lef_macrobegin_cbk(std::string const &n);
-    virtual void lef_macro_cbk(LefParser::lefiMacro const &m);
-    virtual void lef_pin_cbk(LefParser::lefiPin const &p);
-    virtual void lef_obstruction_cbk(LefParser::lefiObstruction const &o);
-    virtual void lef_prop_cbk(LefParser::lefiProp const &);
-    virtual void lef_maxstackvia_cbk(LefParser::lefiMaxStackVia const &);
+    void lef_site_cbk(const LefSite& s);
+    void lef_macrobegin_cbk(const string& n);
+    void lef_macro_cbk(const LefMacro& m);
+    void lef_pin_cbk(const LefPin& p);
 
     ///==== DEF Callbacks ====
-    virtual void set_def_busbitchars(std::string const &);
-    virtual void set_def_dividerchar(std::string const &);
-    virtual void set_def_version(std::string const &v);
-    virtual void set_def_unit(int u);
-    virtual void set_def_design(std::string const &d);
-    virtual void set_def_diearea(int xl, int yl, int xh, int yh);
-    virtual void add_def_row(DefParser::Row const &r);
-    virtual void resize_def_component(int s);
-    virtual void add_def_component(DefParser::Component const &c);
-    virtual void resize_def_pin(int s);
-    virtual void add_def_pin(DefParser::Pin const &p);
-    virtual void resize_def_net(int s);
-    virtual void add_def_net(DefParser::Net const &n);
-    virtual void resize_def_blockage(int);
-    virtual void add_def_placement_blockage(std::vector<std::vector<int>> const &);
-    virtual void resize_def_region(int);
-    virtual void add_def_region(DefParser::Region const &r);
-    virtual void resize_def_group(int);
-    virtual void add_def_group(DefParser::Group const &g);
-    virtual void end_def_design();
+    void set_def_unit(int u);
+    void set_def_design(const string& d);
+    void set_def_diearea(int xl, int yl, int xh, int yh);
+    void add_def_components(const std::vector<DefComponent>& components);
+    void add_def_pin(const DefPin& p);
+    void add_def_nets(const std::vector<DefNet>& nets);
+    void resize_def_region(int);
+    void resize_def_group(int);
 
     // BOOKSHELF callbacks
-    /// @brief set number of terminals 
-    virtual void resize_bookshelf_node_terminals(int, int);
-    /// @brief set number of nets 
-    virtual void resize_bookshelf_net(int);
-    /// @brief set number of pins 
-    virtual void resize_bookshelf_pin(int);
-    /// @brief set number of rows 
-    virtual void resize_bookshelf_row(int);
-    /// @brief set number of shapes 
-    //virtual void resize_bookshelf_shapes(int);
-    /// @brief set number of NI terminals with layers 
-    //virtual void resize_bookshelf_niterminal_layers(int);
-    /// @brief set number of blockage nodes with layers 
-    //virtual void resize_bookshelf_blockage_layers(int);
-    /// @brief add terminal 
-    virtual void add_bookshelf_terminal(string&, int, int);
-    /// @brief add terminal_NI
-    //virtual void add_bookshelf_terminal_NI(string&, int, int);
-    /// @brief add node 
-    virtual void add_bookshelf_node(string&, int, int, bool);
-    /// @brief add net 
-    virtual void add_bookshelf_net(BookshelfParser::Net const&);
-    /// @brief add row 
-    virtual void add_bookshelf_row(BookshelfParser::Row const&);
-    /// @brief set node position 
-    virtual void set_bookshelf_node_position(string const&, double, double, string const&, string const&, bool);
-    /// @brief set net weight 
-    //virtual void set_bookshelf_net_weight(string const& name, double w);
-    /// @brief set node shapes 
-    //virtual void set_bookshelf_shape(NodeShape const&); 
-    /// @brief set routing information 
-    //virtual void set_bookshelf_route_info(RouteInfo const&);
-    /// @brief set NI terminal with layers 
-    //virtual void add_bookshelf_niterminal_layer(string const&, string const&);
-    /// @brief set blockages with layers 
-    //virtual void add_bookshelf_blockage_layers(string const&, vector<string> const&);
-    /// @brief set design name 
-    virtual void set_bookshelf_design(string&);
-    /// @brief a callback when a bookshelf file reaches to the end 
-    virtual void bookshelf_end();
+    /// @brief add .nodes entries (cells and terminals)
+    void add_bookshelf_nodes(const std::vector<BookshelfNode>&);
+    /// @brief add net
+    void add_bookshelf_nets(const std::vector<BookshelfNet>&);
+    /// @brief add row
+    void add_bookshelf_row(const BookshelfRow&);
+    /// @brief set node position
+    void set_bookshelf_node_positions(const std::vector<BookshelfPlacement>&);
+    /// @brief set design name
+    void set_bookshelf_design(const string&);
+    /// @brief a callback when a bookshelf file reaches to the end
+    void bookshelf_end();
 
     // Print functions
     // const functions guarantee that this object won't be modified by the function

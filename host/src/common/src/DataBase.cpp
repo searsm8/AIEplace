@@ -1,10 +1,11 @@
 
 #include "DataBase.h"
+#include "DesignReader.h"
 #include "Logger.h"
 #include <algorithm>
+#include <charconv>
 #include <cmath>
-#include <cstdio>
-#include <unistd.h>
+#include <cstring>
 
 AIEPLACE_NAMESPACE_BEGIN
 
@@ -12,12 +13,18 @@ using namespace tabulate; // table types, scoped to this .cpp (not leaked via Lo
 
 DataBase::DataBase(fs::path input_dir)
     : m_input_dir(input_dir) {
+    readInput();
+}
+
+void DataBase::readInput() {
     TIME_BLOCK("DataBase read input");
     Logger::log_detail("Reading design from directory: " + m_input_dir.string());
     m_max_x = 0;
     m_max_y = 0;
 
     readDesignFiles();
+    flushParseInserts();
+    m_component_index.clear();
     readPlacementConstraints();
     computeNetDegreeTotal();
     computeAreaBreakdown();
@@ -172,21 +179,98 @@ std::vector<fs::path> DataBase::findExtensions(fs::path dir_path, string extensi
     return matches;
 }
 
-// Runs parse_fn with stdout redirected to /dev/null, then restores the ORIGINAL stdout.
-// (The old code restored to a hardcoded "/dev/tty", which blocks under a headless
-//  launch — e.g. dse.py sweeps — when the controlling terminal buffer fills.)
-bool DataBase::runParserSilenced(std::function<bool()> parse_fn)
+void DataBase::addComponent(Component* comp_p)
 {
-    fflush(stdout);
-    int saved_stdout = dup(STDOUT_FILENO);
-    if (!freopen("/dev/null", "w", stdout)) { /* non-fatal: stdout stays as-is, parser noise is not */ }
-    bool success = parse_fn();
-    fflush(stdout);
-    dup2(saved_stdout, STDOUT_FILENO);
-    close(saved_stdout);
-    clearerr(stdout);
-    return success;
+    // The index holds exactly what mm_components will (the first component under each name),
+    // so it alone decides whether this one is queued. Meow.
+    if (m_component_index.insert(comp_p))
+        mv_pending_components.push_back(comp_p);
 }
+
+namespace {
+// "macro_<width>_<height>", the name a Bookshelf node's MacroClass goes by -- built with
+// to_chars, since std::to_string's vsnprintf was 3.5% of a large Bookshelf parse. Meow.
+string bookshelfMacroName(int width, int height)
+{
+    char buf[40] = "macro_";
+    char* end = std::to_chars(buf + 6, buf + sizeof buf, width).ptr;
+    *end++ = '_';
+    end = std::to_chars(end, buf + sizeof buf, height).ptr;
+    return string(buf, end);
+}
+
+// target.emplace(name_of(v), v) for every queued v, in order -- but sorted first so each insert
+// lands at the end of the tree (O(1) with the hint); emplace_hint, like emplace, keeps the value
+// already under an equal name, and the arrival number keeps equal names in arrival order, so the
+// first one wins exactly as before. The sort moves 24-byte keys, not strings: the first 16 name
+// bytes, big-endian and zero-padded, order exactly as std::string's byte compare does (DEF names
+// like "h3a/o99999" tie on 8), and the full names are only compared when those tie. Meow.
+template <typename V, typename NameOf>
+void insertSorted(map<string, V>& target, std::vector<V>& pending, NameOf name_of)
+{
+    struct Keyed { uint64_t high, low; uint32_t arrival; };
+    auto prefix = [](std::string_view name, size_t from) {
+        uint64_t bytes = 0;
+        for (size_t b = from; b < from + 8; b++)
+            bytes = (bytes << 8) | (b < name.size() ? (unsigned char)name[b] : 0);
+        return bytes;
+    };
+    std::vector<Keyed> keyed(pending.size());
+    for (size_t i = 0; i < pending.size(); i++) {
+        std::string_view name = name_of(pending[i]);
+        keyed[i] = {prefix(name, 0), prefix(name, 8), (uint32_t)i};
+    }
+    std::sort(keyed.begin(), keyed.end(), [&](const Keyed& a, const Keyed& b) {
+        if (a.high != b.high) return a.high < b.high;
+        if (a.low != b.low) return a.low < b.low;
+        int order = name_of(pending[a.arrival]).compare(name_of(pending[b.arrival]));
+        return order != 0 ? order < 0 : a.arrival < b.arrival;
+    });
+    for (const Keyed& k : keyed)
+        target.emplace_hint(target.end(), string(name_of(pending[k.arrival])), pending[k.arrival]);
+    pending = {};
+}
+
+// Node::addNet for the parse. A cell's net list would grow 1 -> 2 -> 4 by reallocation (8% of a
+// large parse); a cell sits on ~4 nets, so start it at 4. Only the capacity differs. Meow.
+void addParsedNet(Node* node_p, Net* net_p)
+{
+    std::vector<Net*>& nets = node_p->getNets();
+    if (nets.capacity() == 0) nets.reserve(4);
+    node_p->addNet(net_p);
+}
+
+} // namespace
+
+void DataBase::flushParseInserts()
+{
+    // Two independent maps, so two threads: neither result depends on the other. Meow.
+    #pragma omp parallel sections
+    {
+        #pragma omp section
+        insertSorted(mm_components, mv_pending_components, [](Component* c) { return std::string_view(c->getName()); });
+        #pragma omp section
+        insertSorted(mm_nets, mv_pending_nets, [](Net* n) { return std::string_view(n->m_name); });
+    }
+}
+
+namespace {
+// index.find for `count` names at once, with each lookup's cache misses issued before any is
+// waited on (NameIndex::prefetch): a net's pins are resolved in about the time of one. Meow.
+template <typename NameOf>
+void findAll(const NameIndex<Component>& index, size_t count, NameOf name_of, Component** found)
+{
+    static thread_local std::vector<uint64_t> hashes;
+    hashes.resize(count);
+    for (size_t i = 0; i < count; i++) { hashes[i] = NameIndex<Component>::hashOf(name_of(i)); index.prefetch(hashes[i]); }
+    for (size_t i = 0; i < count; i++) index.prefetchObject(hashes[i]);
+    for (size_t i = 0; i < count; i++) found[i] = index.find(name_of(i), hashes[i]);
+}
+} // namespace
+
+bool DataBase::parseLefFile(const fs::path& lef_file) { return readLefFile(lef_file, *this); }
+bool DataBase::parseDefFile(const fs::path& def_file) { return readDefFile(def_file, *this); }
+bool DataBase::parseBookshelfAux(const fs::path& aux_file) { return readBookshelfAux(aux_file, *this); }
 
 bool DataBase::readLEF()
 {
@@ -200,7 +284,7 @@ bool DataBase::readLEF()
     bool success = true;
     for(fs::path file : lef_files)
     {
-        success = runParserSilenced([&]() { return LefParser::read(*this, file.string()); });
+        success = parseLefFile(file);
 
         if (success) {
             Logger::log_detail(".lef file parsing successful: " + file.string());
@@ -238,7 +322,7 @@ bool DataBase::readDEF()
     }
 
     Logger::log_detail("Begin parsing .DEF design...");
-    bool success = runParserSilenced([&]() { return DefParser::read(*this, def_file); });
+    bool success = parseDefFile(def_file);
 
     if (success) {
         if (m_num_def_regions > 0 || m_num_def_groups > 0) {
@@ -280,7 +364,7 @@ bool DataBase::readBookshelf()
     }
 
     Logger::log_detail("Begin parsing bookshelf design...");
-    bool success = runParserSilenced([&]() { return BookshelfParser::read(*this, aux_files[0]); });
+    bool success = parseBookshelfAux(aux_files[0]);
 
     if (success) {
         Logger::log_detail("Bookshelf parsing successful!");
@@ -528,78 +612,48 @@ float DataBase::computeTotalComponentArea()
 }
 
 
-    //  ======== LEF Callbacks ======== 
-        void DataBase::lef_version_cbk(std::string const& v) {}
-        void DataBase::lef_version_cbk(double v) {}
-        void DataBase::lef_casesensitive_cbk(int v) {}
-        void DataBase::lef_dividerchar_cbk(std::string const& ) {}
-        void DataBase::lef_units_cbk(LefParser::lefiUnits const& v) {}
-        void DataBase::lef_manufacturing_cbk(double ) {}
-        void DataBase::lef_useminspacing_cbk(LefParser::lefiUseMinSpacing const&) {}
-        void DataBase::lef_clearancemeasure_cbk(std::string const&) {}
-        void DataBase::lef_busbitchars_cbk(std::string const& ) {}
-        void DataBase::lef_layer_cbk(LefParser::lefiLayer const& ) {}
-        void DataBase::lef_via_cbk(LefParser::lefiVia const& ) {}
-        void DataBase::lef_viarule_cbk(LefParser::lefiViaRule const& ) {}
-        void DataBase::lef_spacing_cbk(LefParser::lefiSpacing const& ) {}
+    //  ======== LEF Callbacks ========
         /// @brief record the standard-cell row height and site width. A DEF ROW carries only an
         /// origin, so for LEF/DEF input both have to come from the CORE SITE it instantiates.
         /// Recorded in microns; readDesignFiles scales them to DBU with the macro sizes.
-        void DataBase::lef_site_cbk(LefParser::lefiSite const& s) {
-            if (!s.hasSize()) return;
-            bool is_core = s.hasClass() && std::string(s.siteClass()) == "CORE";
-            if (is_core || m_row_height == 0.0f) m_row_height = s.sizeY();
-            if (is_core || m_site_width == 0.0f) m_site_width = s.sizeX();
+        void DataBase::lef_site_cbk(const LefSite& s) {
+            if (!s.has_size) return;
+            bool is_core = s.has_class && s.site_class == "CORE";
+            if (is_core || m_row_height == 0.0f) m_row_height = s.size_y;
+            if (is_core || m_site_width == 0.0f) m_site_width = s.size_x;
         }
-        void DataBase::lef_macrobegin_cbk(std::string const& n) {
+        void DataBase::lef_macrobegin_cbk(const string& n) {
             // Create macro early so lef_pin_cbk (which fires before lef_macro_cbk) can add pin offsets
             MacroClass* new_macro = new MacroClass(n);
             mm_macros.emplace(std::make_pair(n, new_macro));
             m_current_lef_macro = new_macro;
         }
-        void DataBase::lef_macro_cbk(LefParser::lefiMacro const& m) {
+        void DataBase::lef_macro_cbk(const LefMacro& m) {
             // Finalize macro size (pins have already been added by lef_pin_cbk)
-            m_current_lef_macro->setSize(m.sizeX(), m.sizeY());
+            m_current_lef_macro->setSize(m.size_x, m.size_y);
             // Record LEF CLASS so add_def_component can apply XPlace's PLACED->fixed rule.
-            if (m.hasClass()) m_current_lef_macro->setClass(m.macroClass());
+            if (m.has_class) m_current_lef_macro->setClass(m.macro_class);
 
             m_current_lef_macro = nullptr;
         }
 
         // Called for each PIN within the current MACRO block.
-        // Extracts pin offset as center of first RECT in first port.
-        void DataBase::lef_pin_cbk(LefParser::lefiPin const& p) {
+        // Pin offset = center of the first RECT in the first port. Meow.
+        void DataBase::lef_pin_cbk(const LefPin& p) {
             if (!m_current_lef_macro) return;
 
             // Skip power/ground pins — they don't appear in signal nets
-            if (p.hasUse()) {
-                string use = p.use();
-                if (use == "POWER" || use == "GROUND") return;
-            }
+            if (p.use == "POWER" || p.use == "GROUND") return;
 
-            // Find the center of the first RECT in the first port
-            if (p.numPorts() < 1) return;
-            LefParser::lefiGeometries* geom = p.port(0);
-            for (int gi = 0; gi < geom->numItems(); gi++) {
-                if ((int)geom->itemType(gi) == (int)LefParser::lefiGeomRectE) {
-                    LefParser::lefiGeomRect* rect = geom->getRect(gi);
-                    float cx = (float)(rect->xl + rect->xh) / 2.0f;
-                    float cy = (float)(rect->yl + rect->yh) / 2.0f;
-                    m_current_lef_macro->addPinOffset(p.name(), Position(cx, cy));
-                    break; // use first RECT only
-                }
-            }
+            if (!p.has_rect) return;
+            float cx = (float)(p.rect_xl + p.rect_xh) / 2.0f;
+            float cy = (float)(p.rect_yl + p.rect_yh) / 2.0f;
+            m_current_lef_macro->addPinOffset(p.name, Position(cx, cy));
         }
-        void DataBase::lef_obstruction_cbk(LefParser::lefiObstruction const& o) {}
-        void DataBase::lef_prop_cbk(LefParser::lefiProp const&) {}
-        void DataBase::lef_maxstackvia_cbk(LefParser::lefiMaxStackVia const&) {}
 
-        ///==== DEF Callbacks === {}
-        void DataBase::set_def_busbitchars(std::string const&) {}
-        void DataBase::set_def_dividerchar(std::string const&) {}
-        void DataBase::set_def_version(std::string const& v) {}
+        ///==== DEF Callbacks ===
         void DataBase::set_def_unit(int u) { m_units_per_micron = u; }
-        void DataBase::set_def_design(std::string const& d) { m_design_name = d; }
+        void DataBase::set_def_design(const string& d) { m_design_name = d; }
 
         void DataBase::set_def_diearea(int xl, int yl, int xh, int yh)
         {
@@ -607,75 +661,101 @@ float DataBase::computeTotalComponentArea()
                              Position((position_type)xh, (position_type)yh));
         }
 
-        void DataBase::add_def_row(DefParser::Row const& r) {}
-        void DataBase::resize_def_component(int s) {}
-
-        void DataBase::add_def_component(DefParser::Component const& c) 
-        // Create a new component (Node) and add it to the database
+        // Create the components (Nodes), in file order. Building each one only reads mm_macros, so
+        // that runs in parallel; what has to happen in order -- registering each name, and the
+        // null entry mm_macros[] leaves for a macro the LEF never defined -- runs after. Meow.
+        void DataBase::add_def_components(const std::vector<DefComponent>& components)
         {
-            Component* new_comp_p = new Component(c.comp_name);
-            MacroClass* macro = mm_macros[c.macro_name];
+          std::vector<Component*> created(components.size());
+          #pragma omp parallel for schedule(dynamic, 1024) if(components.size() >= 4096)
+          for (long i = 0; i < (long)components.size(); i++) {
+            const DefComponent& c = components[i];
+            Component* new_comp_p = new Component(string(c.name));
+            auto found = mm_macros.find(string(c.macro_name));
+            MacroClass* macro = found == mm_macros.end() ? nullptr : found->second;
             new_comp_p->setMacroClass(macro);
             // XPlace-faithful status (file_lefdef_db.cpp:1565-1595): a PLACED cell is movable only if
             // its LEF CLASS is CORE or BLOCK; PLACED non-CORE/BLOCK cells (VIA/feedthrough/fill) are
             // pre-placed and treated as FIXED. UNPLACED/FIXED pass through unchanged.
-            string status = c.status;
+            string status(c.status);
             if (status == "PLACED" && macro) {
                 const string& cls = macro->getClass();
                 if (cls != "CORE" && cls != "BLOCK") status = "FIXED";
             }
             new_comp_p->setPlacementStatus(status);
-            new_comp_p->setNodePos(Position((float)c.origin[0], (float)c.origin[1]));
+            new_comp_p->setNodePos(Position((float)c.x, (float)c.y));
             // TODO: assert component is created correctly
-            mm_components.emplace(std::make_pair(new_comp_p->getName(), new_comp_p));
+            created[i] = new_comp_p;
+          }
+          for (size_t i = 0; i < components.size(); i++) {
+            if (!created[i]->getMacro()) mm_macros.emplace(string(components[i].macro_name), nullptr);
+            addComponent(created[i]);
+          }
         }
 
-        void DataBase::resize_def_pin(int s) {}
-
-        void DataBase::add_def_pin(DefParser::Pin const& p) {
-            IOPad* new_iopad_p = new IOPad(p.pin_name);
-            std::vector<int> bb = p.vBbox.front();
-            new_iopad_p->setBoundingBox(bb[0], bb[1], bb[2], bb[3]);
+        void DataBase::add_def_pin(const DefPin& p) {
+            IOPad* new_iopad_p = new IOPad(p.name);
+            new_iopad_p->setBoundingBox(p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3]);
             new_iopad_p->setPlacementStatus(p.status);
-            new_iopad_p->setNodePos(Position((float)p.origin[0], (float)p.origin[1]));
-            new_iopad_p->setDirection(p.direct); // primary input or output
+            new_iopad_p->setNodePos(Position((float)p.x, (float)p.y));
+            new_iopad_p->setDirection(p.direction); // primary input or output
 
             mm_iopads.emplace(std::make_pair(new_iopad_p->getName(), new_iopad_p));
         }
 
-        void DataBase::resize_def_net(int s) {}
-
-        void DataBase::add_def_net(DefParser::Net const& def_net) 
-        // Create a new net, add it to the database
+        // Create the nets, in file order. Each component pin's node and pin offset only read the
+        // index and the macros, so they are worked out first, in parallel; the nets are then
+        // built one at a time exactly as one call per net would. Meow.
+        void DataBase::add_def_nets(const std::vector<DefNet>& nets)
         {
-            Net* new_net_p = new Net(def_net.net_name);
-            for (auto net_pin : def_net.vNetPin)
+          std::vector<size_t> first_pin(nets.size() + 1, 0);
+          for (size_t i = 0; i < nets.size(); i++) first_pin[i + 1] = first_pin[i] + nets[i].num_pins;
+          std::vector<Component*> net_components(first_pin.back());
+          std::vector<Position> pin_offsets(first_pin.back(), Position(0, 0));
+          #pragma omp parallel for schedule(dynamic, 256) if(nets.size() >= 4096)
+          for (long i = 0; i < (long)nets.size(); i++) {
+            const DefNet& def_net = nets[i];
+            Component** components = &net_components[first_pin[i]];
+            findAll(m_component_index, def_net.num_pins, [&](size_t k) { return def_net.pins[k].first; }, components);
+            for (size_t pin_i = 0; pin_i < def_net.num_pins; pin_i++) {
+                if (def_net.pins[pin_i].first == "PIN" || !components[pin_i]) continue;
+                // Look up pin offset from the component's macro (LEF microns → DEF dbu)
+                Position& pin_offset = pin_offsets[first_pin[i] + pin_i];
+                MacroClass* macro = components[pin_i]->getMacro();
+                string pin_name(def_net.pins[pin_i].second);
+                if (macro && macro->hasPinOffset(pin_name)) {
+                    pin_offset = macro->getPinOffset(pin_name);
+                    float scale = (float)m_units_per_micron;
+                    pin_offset.x *= scale;
+                    pin_offset.y *= scale;
+                }
+            }
+          }
+
+          for (size_t net_i = 0; net_i < nets.size(); net_i++) {
+            const DefNet& def_net = nets[net_i];
+            Net* new_net_p = new Net(string(def_net.name));
+            new_net_p->mv_nodes.reserve(def_net.num_pins);
+            new_net_p->mv_pins.reserve(def_net.num_pins);
+            for (size_t pin_i = 0; pin_i < def_net.num_pins; pin_i++)
             {
+                const DefNetPin& net_pin = def_net.pins[pin_i];
                 if (net_pin.first == "PIN")
                 {
-                    IOPad* iopad_p = mm_iopads[net_pin.second];
+                    IOPad* iopad_p = mm_iopads[string(net_pin.second)];
                     assert(iopad_p != NULL && "PIN name points to nullptr while reading .DEF\n");
                     new_net_p->addNode(iopad_p);
                     iopad_p->addNet(new_net_p);
                 }
                 else // it is a component
                 {
-                    Component* comp_p = mm_components[net_pin.first];
+                    Component* comp_p = net_components[first_pin[net_i] + pin_i];
                     assert(comp_p != NULL && "COMPONENT name points to nullptr while reading .DEF\n");
-                    // Look up pin offset from the component's macro (LEF microns → DEF dbu)
-                    Position pin_offset(0, 0);
-                    MacroClass* macro = comp_p->getMacro();
-                    if (macro && macro->hasPinOffset(net_pin.second)) {
-                        pin_offset = macro->getPinOffset(net_pin.second);
-                        float scale = (float)m_units_per_micron;
-                        pin_offset.x *= scale;
-                        pin_offset.y *= scale;
-                    }
-                    new_net_p->addNode(comp_p, pin_offset, net_pin.second);
-                    comp_p->addNet(new_net_p);
+                    new_net_p->addNode(comp_p, pin_offsets[first_pin[net_i] + pin_i], string(net_pin.second));
+                    addParsedNet(comp_p, new_net_p);
                 }
             }
-            mm_nets.emplace(std::make_pair(new_net_p->getName(), new_net_p));
+            mv_pending_nets.push_back(new_net_p);   // -> mm_nets, see flushParseInserts. Meow.
             mv_nets.push_back(new_net_p);
 
             int degree = new_net_p->getDegree();
@@ -683,10 +763,9 @@ float DataBase::computeTotalComponentArea()
                 mmv_nets_by_degree.emplace(std::make_pair(degree, std::vector<Net*>()));
             }
             mmv_nets_by_degree[degree].push_back(new_net_p); //emplace_back(new_net) might work more effienctly
+          }
         }
 
-        void DataBase::resize_def_blockage(int) {}
-        void DataBase::add_def_placement_blockage(std::vector<std::vector<int> > const&) {}
         // Fence regions (DEF REGIONS + GROUPS) are DISCARDED, not implemented. The 9 ISPD2015
         // designs that carry them are placed unconstrained, and on those our placement puts
         // 59-94% of the constrained cells outside their fence (vck5000/tools/fence_check.py).
@@ -694,100 +773,93 @@ float DataBase::computeTotalComponentArea()
         // `ispd2015_fix` data strips it -- so a comparison against XPlace stays fair, but the
         // result is NOT a legal ISPD2015 solution. Counted here so the run log says which
         // designs it happened on (TODO #26).
+        // The warning itself is emitted by readDEF(), once the whole file is read. Meow.
         void DataBase::resize_def_region(int n) { m_num_def_regions = n; }
-        void DataBase::add_def_region(DefParser::Region const& r) {}
         void DataBase::resize_def_group(int n) { m_num_def_groups = n; }
-        void DataBase::add_def_group(DefParser::Group const& g) {}
-        // The warning itself is emitted by readDEF(), NOT here: every callback runs inside
-        // runParserSilenced(), which redirects stdout for the duration of the parse and would
-        // swallow it.
-        void DataBase::end_def_design() {}
-        
+
 
     // *******************************************************************************
         // BOOKSHELF callbacks
-        /// @brief set number of terminals 
-        void DataBase::resize_bookshelf_node_terminals(int NumNodes, int NumTerminals) {
-        }
-        /// @brief set number of nets 
-        void DataBase::resize_bookshelf_net(int NumNets) {
-        }
-        /// @brief set number of pins 
-        void DataBase::resize_bookshelf_pin(int NumPins) {
-        }
-        /// @brief set number of rows 
-        void DataBase::resize_bookshelf_row(int NumRows) {
-        }
-        /// @brief set number of shapes 
-        //void DataBase::resize_bookshelf_shapes(int) {}
-        /// @brief set number of NI terminals with layers 
-        //void DataBase::resize_bookshelf_niterminal_layers(int) {}
-        /// @brief set number of blockage nodes with layers 
-        //void DataBase::resize_bookshelf_blockage_layers(int) {}
-
-        /// @brief add terminal (fixed macro or IO pad) as a Component with FIXED status
-        void DataBase::add_bookshelf_terminal(string& name, int width, int height) {
-            Component* comp_p = new Component(name);
-            string macro_name = "macro_" + std::to_string(width) + "_" + std::to_string(height);
-            MacroClass* macro_p = mm_macros[macro_name];
-            if(macro_p == NULL) {
-                macro_p = new MacroClass(macro_name, width, height);
-                mm_macros[macro_name] = macro_p;
+        /// @brief add .nodes entries: cells, and terminals (fixed macros or IO pads) as FIXED Components. Meow.
+        // Each node's MacroClass is resolved first, in file order, so MacroClasses are made exactly
+        // as before; the components are then built in parallel and registered in order. Meow.
+        void DataBase::add_bookshelf_nodes(const std::vector<BookshelfNode>& nodes) {
+            std::vector<MacroClass*> macros(nodes.size());
+            std::unordered_map<uint64_t, MacroClass*> by_size;   // (width, height) -> its MacroClass. Meow.
+            for (size_t i = 0; i < nodes.size(); i++) {
+                uint64_t key = ((uint64_t)(uint32_t)nodes[i].width << 32) | (uint32_t)nodes[i].height;
+                auto [it, first_seen] = by_size.emplace(key, nullptr);
+                if (first_seen) {
+                    // for Bookshelf format, no macro classes are defined by the design
+                    // So we create macros named "macro_width_height"
+                    string macro_name = bookshelfMacroName(nodes[i].width, nodes[i].height);
+                    MacroClass* macro_p = mm_macros[macro_name];
+                    if(macro_p == NULL) {
+                        macro_p = new MacroClass(macro_name, nodes[i].width, nodes[i].height);
+                        mm_macros[macro_name] = macro_p;
+                    }
+                    it->second = macro_p;
+                }
+                macros[i] = it->second;
             }
-            comp_p->setMacroClass(macro_p);
-            comp_p->setPlacementStatus(PlacementStatus::FIXED);
-            comp_p->setNodePos(Position(0, 0));
-            mm_components.emplace(std::make_pair(name, comp_p));
-        }
-
-        /// @brief add terminal_NI
-        //void DataBase::add_bookshelf_terminal_NI(string&, int, int) {}
-        /// @brief add node 
-        void DataBase::add_bookshelf_node(string& name, int width, int height, bool notsurewhatthisboolisfor) {
-            Component* new_comp_p = new Component(name);
-            // for Bookshelf format, no macro classes are defined by the design
-            // So we create macros named "macro_width_height"
-            string macro_name = "macro_" + std::to_string(width) + "_" + std::to_string(height);
-            MacroClass* macro_p = mm_macros[macro_name];
-            if(macro_p == NULL) {
-                macro_p = new MacroClass(macro_name, width, height);
-                //mm_macros.emplace(std::make_pair(macro_name, macro_p));
-                mm_macros[macro_name] = macro_p;
+            std::vector<Component*> created(nodes.size());
+            #pragma omp parallel for schedule(dynamic, 1024) if(nodes.size() >= 4096)
+            for (long i = 0; i < (long)nodes.size(); i++) {
+                Component* comp_p = new Component(string(nodes[i].name));
+                comp_p->setMacroClass(macros[i]);
+                // a terminal is a fixed macro or IO pad, kept as a FIXED Component. Meow.
+                comp_p->setPlacementStatus(nodes[i].terminal ? PlacementStatus::FIXED : PlacementStatus::UNPLACED);
+                comp_p->setNodePos(Position(0, 0)); // default position (0, 0)
+                created[i] = comp_p;
             }
-            new_comp_p->setMacroClass(macro_p);
-            new_comp_p->setPlacementStatus(PlacementStatus::UNPLACED);
-            new_comp_p->setNodePos(Position(0, 0)); // default position (0, 0)
-            mm_components.emplace(std::make_pair(new_comp_p->getName(), new_comp_p));
+            for (Component* comp_p : created) addComponent(comp_p);
         }
         /// @brief add net 
-        void DataBase::add_bookshelf_net(BookshelfParser::Net const& bookshelf_net) { 
-            Net* new_net_p = new Net(bookshelf_net.net_name);
-                //cout << "Add net: " << bookshelf_net.net_name << endl;
-            for (BookshelfParser::NetPin net_pin : bookshelf_net.vNetPin)
+        // Every pin's node is looked up first, in parallel -- the lookups only read the index --
+        // and the nets are then built one at a time in file order, exactly as one call per net
+        // would. Meow.
+        void DataBase::add_bookshelf_nets(const std::vector<BookshelfNet>& nets) {
+          std::vector<size_t> first_pin(nets.size() + 1, 0);
+          for (size_t i = 0; i < nets.size(); i++) first_pin[i + 1] = first_pin[i] + nets[i].num_pins;
+          std::vector<Component*> net_components(first_pin.back());
+          #pragma omp parallel for schedule(dynamic, 256) if(nets.size() >= 4096)   // a lone net: no thread wake-up. Meow.
+          for (long i = 0; i < (long)nets.size(); i++)
+              findAll(m_component_index, nets[i].num_pins, [&](size_t k) { return nets[i].pins[k].node_name; },
+                      &net_components[first_pin[i]]);
+
+          for (size_t net_i = 0; net_i < nets.size(); net_i++) {
+            const BookshelfNet& bookshelf_net = nets[net_i];
+            Component* const* components = &net_components[first_pin[net_i]];
+            Net* new_net_p = new Net(string(bookshelf_net.name));
+            new_net_p->mv_nodes.reserve(bookshelf_net.num_pins);
+            new_net_p->mv_pins.reserve(bookshelf_net.num_pins);
+            for (size_t pin_i = 0; pin_i < bookshelf_net.num_pins; pin_i++)
             {
-                //cout << "\tNetPin: " << net_pin.node_name << endl;
-                if(mm_iopads.count(net_pin.node_name) > 0) {
-                    IOPad* iopad_p = mm_iopads[net_pin.node_name];
+                const BookshelfNetPin& net_pin = bookshelf_net.pins[pin_i];
+                Component* comp_p = components[pin_i];
+                // Bookshelf never has IO pads (terminals are components), so the map is empty; the
+                // test keeps the old precedence without building a string per pin to probe it. Meow.
+                if(!mm_iopads.empty() && mm_iopads.count(string(net_pin.node_name)) > 0) {
+                    IOPad* iopad_p = mm_iopads[string(net_pin.node_name)];
                     new_net_p->addNode(iopad_p);
                     iopad_p->addNet(new_net_p);
-                } else if(mm_components.count(net_pin.node_name)){ // it's a component
-                    Component* comp_p = mm_components[net_pin.node_name];
+                } else if(comp_p){ // it's a component
                     // Bookshelf pin offsets are relative to the cell CENTER; sw_only node_pos is the
                     // lower-left corner, so shift by half-size to make the stored offset LL-relative
                     // (the NetPin.offset convention shared with the LEF/DEF path). Offsets and sizes
                     // are already in the same units here (no micron→dbu scaling for bookshelf).
                     Position pin_offset(0, 0);
-                    pin_offset.x = comp_p->getXsize() / 2.0f + (float)net_pin.offset[0];
-                    pin_offset.y = comp_p->getYsize() / 2.0f + (float)net_pin.offset[1];
-                    new_net_p->addNode(comp_p, pin_offset, net_pin.pin_name);
-                    comp_p->addNet(new_net_p);
+                    pin_offset.x = comp_p->getXsize() / 2.0f + (float)net_pin.offset_x;
+                    pin_offset.y = comp_p->getYsize() / 2.0f + (float)net_pin.offset_y;
+                    new_net_p->addNode(comp_p, pin_offset, string(net_pin.pin_name));
+                    addParsedNet(comp_p, new_net_p);
                 } else {
                     Logger::log_error("Node was not found while parsing bookshelf nets.");
                     exit(7);
                 }
             }
 
-            mm_nets.emplace(std::make_pair(new_net_p->getName(), new_net_p));
+            mv_pending_nets.push_back(new_net_p);   // -> mm_nets, see flushParseInserts. Meow.
             mv_nets.push_back(new_net_p);
             
             // Add net to degree map for easy access
@@ -796,17 +868,17 @@ float DataBase::computeTotalComponentArea()
                 mmv_nets_by_degree.emplace(std::make_pair(degree, std::vector<Net*>()));
             }
             mmv_nets_by_degree[degree].push_back(new_net_p);
-
+          }
          }
 
         /// @brief add row — accumulate the .scl core-row bounding box (the die comes from
         /// the rows, not the terminal coordinates). A row spans [SubrowOrigin, +NumSites*
         /// SiteSpacing] in x and [Coordinate, +Height] in y.
-        void DataBase::add_bookshelf_row(BookshelfParser::Row const& row) {
+        void DataBase::add_bookshelf_row(const BookshelfRow& row) {
             long spacing = row.site_spacing > 0 ? row.site_spacing : row.site_width;
-            long x0 = row.origin[0];
+            long x0 = row.origin_x;
             long x1 = x0 + (long)row.site_num * spacing;
-            long y0 = row.origin[1];
+            long y0 = row.origin_y;
             long y1 = y0 + row.height;
             if (m_row_count == 0) {
                 m_row_xmin = x0; m_row_xmax = x1;
@@ -822,38 +894,41 @@ float DataBase::computeTotalComponentArea()
             m_row_count++;
         }
         /// @brief set node position — all bookshelf nodes (terminals + cells) are now Components
-        void DataBase::set_bookshelf_node_position(string const& name, double x, double y, string const& orientation, string const& placement_status, bool notsurewhatfor) {
-            Component* comp_p = mm_components[name];
+        /// Lookups first, in parallel; then applied in file order, so a node placed twice keeps
+        /// its last placement exactly as before. Meow.
+        void DataBase::set_bookshelf_node_positions(const std::vector<BookshelfPlacement>& placements) {
+          constexpr long LOOKUP_BATCH = 64;
+          std::vector<Component*> components(placements.size());
+          #pragma omp parallel for schedule(dynamic, 64) if(placements.size() >= 4096)
+          for (long first = 0; first < (long)placements.size(); first += LOOKUP_BATCH)
+              findAll(m_component_index, std::min(LOOKUP_BATCH, (long)placements.size() - first),
+                      [&](size_t k) { return placements[first + k].name; }, &components[first]);
+
+          for (size_t i = 0; i < placements.size(); i++) {
+            const BookshelfPlacement& placement = placements[i];
+            double x = placement.x, y = placement.y;
+            Component* comp_p = components[i];
             assert(comp_p != NULL && "invalid component name!");
             comp_p->setNodePos(Position(x, y));
-            comp_p->setOrientation(orientation);
-            if(placement_status == "FIXED") {
+            comp_p->setOrientation(string(placement.orient));
+            if(placement.status == "FIXED") {
                 comp_p->setPlacementStatus(PlacementStatus::FIXED);
                 // Bookshelf format doesn't explicitly give die area,
                 // so we infer it from the outermost fixed terminal coordinates
                 if(x > m_max_x) m_max_x = x;
                 if(y > m_max_y) m_max_y = y;
             }
+          }
         }
-        /// @brief set net weight 
-        //void DataBase::set_bookshelf_net_weight(string const& name, double w) {}
-        /// @brief set node shapes 
-        //void DataBase::set_bookshelf_shape(NodeShape const&) {}
-        /// @brief set routing information 
-        //void DataBase::set_bookshelf_route_info(RouteInfo const&) {}
-        /// @brief set NI terminal with layers 
-        //void DataBase::add_bookshelf_niterminal_layer(string const&, string const&) {}
-        /// @brief set blockages with layers 
-        //void DataBase::add_bookshelf_blockage_layers(string const&, vector<string> const&) {}
-
-        /// @brief set design name 
-        void DataBase::set_bookshelf_design(string& s) { 
+        /// @brief set design name
+        void DataBase::set_bookshelf_design(const string& s) {
             m_design_name = s;
             Logger::log_detail("Bookshelf design: " + s);
         }
 
         /// @brief a callback when a bookshelf file reaches to the end 
         void DataBase::bookshelf_end() {
+            flushParseInserts();   // the die shift below walks mm_components. Meow.
             if (m_row_count > 0) {
                 // Die = core-row bounding box (matches XPlace). Shift all node coords so the
                 // die lower-left becomes the origin — the grid/solver assume die LL = (0,0),

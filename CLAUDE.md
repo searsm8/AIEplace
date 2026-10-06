@@ -132,8 +132,8 @@ AIEplace ports the ePlace analytical placement algorithm onto the AMD Versal VCK
   iteration runs on the PL; the AIE does only the FFT and the HPWL gradient graph.
 
 **`vck5000/host/src/common/` is NOT a variant** — it is the parser + data model (DataBase, Grid,
-Node/Component/IOPad, Net, Bin, Logger, Common) that both host variants build into themselves,
-plus the prebuilt Limbo parser libs in `common/lib/`. Landed 2026-08-04 (TODO #9) to end the
+Node/Component/IOPad, Net, Bin, Logger, Common) and the LEF/DEF/Bookshelf reader (DesignReader;
+no Limbo since 2026-10-05, TODO #43) that both host variants build into themselves. Landed 2026-08-04 (TODO #9) to end the
 silent fork between the two hosts. Fix a parser or geometry bug **there**, once. Nothing in
 `common/` may include `AIEplace.h`, `Visualizer.h`, or anything from `pl/`; see its README.
 

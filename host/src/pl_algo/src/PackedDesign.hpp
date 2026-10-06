@@ -2,12 +2,11 @@
 #define PL_ALGO_PACKED_DESIGN_HPP
 
 // PackedDesign.hpp -- host staging of the v0 host->PL buffers (see
-// host_interface.hpp). Deliberately parser-free (no DataBase / Limbo): it holds
-// only POD records in std::vectors, so it can be shared by the parser-side
-// packer (old GLIBCXX ABI, for Limbo) and the XRT driver (new ABI, for libxrt)
-// without dragging the heavy parser headers or an ABI conflict across that line.
-// std::vector layout is ABI-stable across _GLIBCXX_USE_CXX11_ABI, so passing a
-// PackedDesign between the two is safe; only std::string would not be.
+// host_interface.hpp). Deliberately parser-free (no DataBase): it holds only POD
+// records in std::vectors, so the XRT driver can take it without dragging the
+// parser headers along. (It once also kept an ABI line: the parser side was
+// built with the old GLIBCXX ABI for Limbo and the driver with the new one for
+// libxrt. Limbo is gone (TODO #43), so the whole host now uses the new ABI.)
 
 #include "host_interface.hpp"
 #include <vector>

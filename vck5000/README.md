@@ -31,5 +31,5 @@ You can build the different parts of the application these commands:
     * For now, we use commit #415d0b2 to make it work!
     * Ideally, Vitis_Libraries could be added as a submodule once compatibility issues are solved.
 
-* The Limbo library used to parse LEF and DEF files, but building this is a bit tricky (Boost is a pain!)
-    * This should also be made into a submodule.
+* LEF/DEF/Bookshelf are read by the host's own reader (`host/src/common/src/DesignReader.cpp`, TODO #43).
+    * The Limbo library that used to do it is now only the reference that reader is tested against (`vck5000/test/parser`).

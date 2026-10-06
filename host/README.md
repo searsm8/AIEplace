@@ -25,32 +25,49 @@ git clone --recurse-submodules <url>
 
 ### Why the bootstrap step exists
 
-Two dependencies are **git submodules**, not copies of someone else's source checked in here:
+The host's one third-party dependency is a **git submodule**, not a copy of someone else's source
+checked in here:
 
-| submodule | upstream | pinned at |
-|---|---|---|
-| `third_party/Limbo` | [limbo018/Limbo](https://github.com/limbo018/Limbo) — LEF/DEF/bookshelf parsers | tag `3.5.2` (`81b64433`) |
-| `third_party/tabulate` | [p-ranav/tabulate](https://github.com/p-ranav/tabulate) — header-only tables, used by `Logger` | `3a58301` |
+| submodule | upstream | pinned at | needed by |
+|---|---|---|---|
+| `third_party/tabulate` | [p-ranav/tabulate](https://github.com/p-ranav/tabulate) — header-only tables, used by `Logger` | `3a58301` | the host |
+| `third_party/Limbo` | [limbo018/Limbo](https://github.com/limbo018/Limbo) — LEF/DEF/bookshelf parsers | tag `3.5.2` (`81b64433`) | **only** `vck5000/test/parser` |
 
-(A third, `vck5000/aie/lib/Vitis_Libraries`, is only needed for AIE builds and is **gigabytes** —
-the bootstrap script deliberately does *not* initialize it. Do that by hand when you need it:
-`git submodule update --init vck5000/aie/lib/Vitis_Libraries`.)
+The design files are read by the host's own reader, `src/common/src/DesignReader.cpp` (TODO #43).
+Limbo stays only as the reference that reader is checked against — see *Limbo* below.
+
+(A third submodule, `vck5000/aie/lib/Vitis_Libraries`, is only needed for AIE builds and is
+**gigabytes** — the bootstrap script deliberately does *not* initialize it. Do that by hand when
+you need it: `git submodule update --init vck5000/aie/lib/Vitis_Libraries`.)
 
 A submodule is a pointer, not a copy: this repo stores only the URL (in `.gitmodules`) and one
-commit id. A plain `git clone` therefore leaves both directories **empty**, and the build fails
-on missing `limbo/parsers/...` and `tabulate/table.hpp` headers until you populate them. That is
-the bootstrap script's first step:
+commit id. A plain `git clone` therefore leaves the directory **empty**, and the build fails on a
+missing `tabulate/table.hpp` until you populate it. That is all the bootstrap script does by
+default:
 
 ```
-git submodule update --init third_party/Limbo third_party/tabulate
+git submodule update --init third_party/tabulate
 ```
 
-Note it names them rather than using `--recursive`, which would also drag in the multi-gigabyte
-Vitis_Libraries.
+Note it names the submodule rather than using `--recursive`, which would also drag in the
+multi-gigabyte Vitis_Libraries. tabulate is header-only, so there is nothing to compile.
 
-Limbo also has to be **compiled** (tabulate is header-only, so cloning it is enough) — it is a source library, and no prebuilt `.a` is stored in
-this repo (there used to be 22 MB of them in three duplicate places). The build is deliberately
-**out of tree**:
+The host is built with the default (C++11) `std::string` ABI. It used to need
+`-D_GLIBCXX_USE_CXX11_ABI=0` everywhere — and a per-file exception for pl_algo's XRT driver,
+since libxrt uses the new ABI — only because Limbo's archives were built with the old one.
+
+## Limbo — only for the parser equivalence harness
+
+`vck5000/test/parser` parses every benchmark with both the native reader and Limbo, and requires a
+canonical dump of the parsed `DataBase` to be byte-identical (see its README). That needs Limbo
+built:
+
+```
+bash vck5000/tools/bootstrap_third_party.sh --with-limbo
+```
+
+Limbo is a source library, and no prebuilt `.a` is stored in this repo (there used to be 22 MB of
+them in three duplicate places). The build is deliberately **out of tree**:
 
 | | |
 |---|---|
@@ -58,7 +75,7 @@ this repo (there used to be 22 MB of them in three duplicate places). The build 
 | `third_party/limbo_build/` | CMake objects (gitignored) |
 | `third_party/limbo_install/` | the collected `.a` (gitignored) |
 
-so the submodule can never show a spurious diff and `git status` stays quiet. The host takes
+so the submodule can never show a spurious diff and `git status` stays quiet. The harness takes
 headers from the checkout (`-I third_party/Limbo`) and libraries from the install dir
 (`-L third_party/limbo_install/lib`).
 
@@ -77,10 +94,13 @@ Two flags there are load-bearing:
 
 - **`-DBoost_NO_BOOST_CMAKE=ON`** — see the Boost section below.
 - **the ABI** — Limbo's CMake defaults `CMAKE_CXX_ABI` to `0`, i.e. `-D_GLIBCXX_USE_CXX11_ABI=0`,
-  which is why every host TU is compiled with that same define. Do not override it on either
-  side independently, or the link fails on `std::__cxx11::basic_string` symbols.
+  which is why the harness's Limbo binary (`parse_bench_limbo`) and every object in it are
+  compiled with that same define. Do not override it on either side independently, or the link
+  fails on `std::__cxx11::basic_string` symbols.
 
-## Boost — read this before debugging a Boost problem
+### Boost — read this before debugging a Boost problem
+
+Boost reaches this project only through Limbo, so this matters only for `--with-limbo`.
 
 **This box has two Boost installations and they do not agree.** Established 2026-08-05:
 
@@ -89,9 +109,9 @@ Two flags there are load-bearing:
 | `/usr/include` | **1.71** (apt) | complete: headers + every `libboost_*.so` |
 | `/usr/local/include` | **1.80** (built from source) | headers complete, but only *some* `.so` — `iostreams`, `serialization`, `system`, `thread`, `test`. **No `graph`, no `regex`.** |
 
-gcc searches `/usr/local/include` **before** `/usr/include`, so every `#include <boost/...>` in
-this project resolves to **1.80**, and no `-I` can change that (gcc de-duplicates `-I` against
-its own system directories). Two consequences:
+gcc searches `/usr/local/include` **before** `/usr/include`, so every `#include <boost/...>`
+resolves to **1.80**, and no `-I` can change that (gcc de-duplicates `-I` against its own system
+directories). Two consequences:
 
 - `-DBoost_NO_BOOST_CMAKE=ON` is required when configuring Limbo. Without it CMake's *config*
   mode finds `/usr/local/lib/cmake/Boost-1.80.0/BoostConfig.cmake`, which advertises 1.80, then
@@ -101,24 +121,19 @@ its own system directories). Two consequences:
   `boost_graph`/`boost_regex` to the **1.71** `.so` in `/usr/lib/x86_64-linux-gnu`. Compiling
   against 1.80 headers and linking 1.71 libraries is a genuine ABI bug.
 
-**Why that bug does not currently bite us**, and how it is kept that way: Boost is *header-only*
-across everything AIEplace links. The four Limbo archives we use (`lefparseradapt`,
-`defparseradapt`, `bookshelfparser`, `gzstream`) have **zero** undefined `boost::` symbols and
-the host binary links no `libboost` at all — the mismatch is confined to Limbo targets we never
-build. `bootstrap_third_party.sh` **asserts all three of those conditions on every run**: host
-Boost version, Limbo's configured Boost version, and the zero-compiled-Boost-symbols property.
-If it ever complains, the fix is a decision about this machine — either complete the 1.80 install
+**Why that bug does not bite**: the four Limbo archives the harness links (`lefparseradapt`,
+`defparseradapt`, `bookshelfparser`, `gzstream`) have **zero** undefined `boost::` symbols — the
+mismatch is confined to Limbo targets we never build. `bootstrap_third_party.sh --with-limbo`
+**asserts that on every run**, along with the host's and Limbo's Boost versions agreeing. If it
+ever complains, the fix is a decision about this machine — either complete the 1.80 install
 (`graph`, `regex`) or remove it so the complete 1.71 wins — not a flag in this repo.
-
-There used to be a `-I$HOME/local/boost_1_82_0/` in `src/sw_only/makeflags.mk`. That directory
-does not exist; the flag did nothing and implied a third version. It is gone.
 
 ### Updating Limbo later
 
 ```
 cd third_party/Limbo && git fetch && git checkout <new-tag>
 cd - && git add third_party/Limbo      # records the new commit id in AIEplace
-bash vck5000/tools/bootstrap_third_party.sh --clean
+bash vck5000/tools/bootstrap_third_party.sh --with-limbo --clean
 ```
 
 The `git add` is the part people miss: the superproject tracks *which commit* the submodule is

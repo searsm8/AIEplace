@@ -2,7 +2,13 @@
 # bootstrap_third_party.sh -- fetch and build the third-party dependencies a fresh clone needs.
 #
 # Run ONCE after cloning, before the first `make host`:
-#     bash vck5000/tools/bootstrap_third_party.sh
+#     bash vck5000/tools/bootstrap_third_party.sh                 # tabulate: all the host needs
+#     bash vck5000/tools/bootstrap_third_party.sh --with-limbo    # + Limbo, for test/parser only
+#
+# Since TODO #43 the host parses with its own reader (host/src/common/src/DesignReader.cpp) and
+# links no Limbo. Limbo is built only on request, for the parser equivalence harness in
+# vck5000/test/parser, which checks the native reader against it. Everything below about Limbo
+# applies only to --with-limbo.
 #
 # What it does, and why:
 #   Limbo (the LEF/DEF/bookshelf parser library) is a git SUBMODULE, not a copy of someone
@@ -13,11 +19,11 @@
 #   The build is deliberately OUT OF TREE -- third_party/limbo_build (objects) and
 #   third_party/limbo_install (the collected .a) -- so the submodule checkout itself stays
 #   byte-for-byte pristine and can never show a spurious diff. Both directories are gitignored
-#   by the superproject. The host takes HEADERS from the submodule source tree
+#   by the superproject. The harness takes HEADERS from the submodule source tree
 #   (-I third_party/Limbo) and LIBS from the install dir (-L third_party/limbo_install/lib).
 #
 # Re-running is safe: the submodule sync is idempotent and the Limbo build is incremental.
-# Pass --clean to force a full Limbo rebuild.
+# Pass --clean (with --with-limbo) to force a full Limbo rebuild.
 set -euo pipefail
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -26,7 +32,11 @@ BUILD_DIR="$REPO_ROOT/third_party/limbo_build"
 INSTALL_DIR="$REPO_ROOT/third_party/limbo_install"
 JOBS=${JOBS:-$(nproc)}
 CLEAN=0
-[[ ${1:-} == "--clean" ]] && CLEAN=1
+WITH_LIMBO=0
+for arg in "$@"; do
+    [[ $arg == "--clean" ]] && CLEAN=1
+    [[ $arg == "--with-limbo" ]] && WITH_LIMBO=1
+done
 
 echo "== repo: $REPO_ROOT"
 
@@ -34,11 +44,23 @@ echo "== repo: $REPO_ROOT"
 # Named explicitly, NOT `--init --recursive`: vck5000/aie/lib/Vitis_Libraries is also a
 # submodule and is gigabytes. It is only needed for AIE builds -- init it by hand when you
 # need it (`git submodule update --init vck5000/aie/lib/Vitis_Libraries`).
-echo "== git submodule update --init (Limbo, tabulate)"
-git -C "$REPO_ROOT" submodule update --init third_party/Limbo third_party/tabulate
+echo "== git submodule update --init (tabulate)"
+git -C "$REPO_ROOT" submodule update --init third_party/tabulate
+if [[ ! -f "$REPO_ROOT/third_party/tabulate/include/tabulate/table.hpp" ]]; then
+    echo "ERROR: third_party/tabulate is still empty after the update." >&2
+    exit 1
+fi
+if [[ $WITH_LIMBO == 0 ]]; then
+    echo "== OK. Now:  cd vck5000 && make host HOST=sw_only"
+    echo "   (Limbo skipped -- the host does not use it. --with-limbo builds it for vck5000/test/parser.)"
+    exit 0
+fi
+
+echo "== git submodule update --init (Limbo)"
+git -C "$REPO_ROOT" submodule update --init third_party/Limbo
 git -C "$REPO_ROOT" submodule status third_party/Limbo third_party/tabulate
 
-for probe_path in "$LIMBO_DIR/CMakeLists.txt" "$REPO_ROOT/third_party/tabulate/include/tabulate/table.hpp"; do
+for probe_path in "$LIMBO_DIR/CMakeLists.txt"; do
     if [[ ! -f "$probe_path" ]]; then
         echo "ERROR: missing $probe_path -- a submodule is still empty after the update." >&2
         exit 1
@@ -53,8 +75,8 @@ done
 # forces the classic FindBoost module, which finds the real headers under /usr/include.
 #
 # CMAKE_CXX_ABI defaults to 0 in Limbo's own CMakeLists, i.e. -D_GLIBCXX_USE_CXX11_ABI=0 --
-# the same old ABI the host is compiled with. Do not override it, or the host will fail to
-# link with undefined std::__cxx11::basic_string symbols.
+# the ABI the parser harness (test/parser, parse_bench_limbo) is compiled with. Do not override
+# it, or that build will fail to link with undefined std::basic_string symbols.
 if [[ $CLEAN == 1 ]]; then
     echo "== --clean: removing previous Limbo build output"
     rm -rf "$BUILD_DIR" "$INSTALL_DIR"
@@ -157,4 +179,4 @@ echo
 echo "== OK. Limbo libs installed to third_party/limbo_install/lib:"
 ls -1 "$INSTALL_DIR/lib" | sed 's/^/     /' | head -30
 echo
-echo "Now:  cd vck5000 && make host HOST=sw_only"
+echo "Now:  cd vck5000/test/parser && make && bash compare_parsers.sh"
