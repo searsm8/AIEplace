@@ -17,6 +17,49 @@ status. **Never rewrite an entry; annotate.** The retraction trail is the point.
 
 ---
 
+## 2026-10-07 — `hpwl_CU`: per-net HPWL DDR stream replaced by an int64 fixed-point total (#45)
+
+**Why.** `hpwl_CU` wrote one `OutBeat` (8 per-net HPWLs) to DDR per record beat, a write stream as
+long as the read stream, carried over from `hpwl_computer_v2` bring-up. Nothing consumes per-net HPWL:
+XPlace's `param_scheduler.py` uses only the total, for μ (`delta_hpwl`, l. 306–310) and the
+best-metric / rollback comparisons (l. 423–452). Mark: send the total to the (future) iteration
+control unit, not DDR.
+
+**Representation.** The total feeds μ, a control path, so `rules.md` wants it bit-exact. Float or
+double sums are order-dependent (chunking and partial sums change the result), and float fadd latency
+breaks II=1 without rotating partial sums. Chosen: **int64, 2⁻²⁴ units** (`pinrec::HPWL_FRAC_BITS`,
+`hpwl_to_fixed` in `pl/src/format/pin_record.hpp`). Integer add is associative, so the result is exact
+in any order, and a 64-bit add fits in one cycle. Range 2³⁹ per axis; truncation ≤ 2⁻²⁴ per net (only
+for spans < 1). Per-net values stay float (`max − min`, which the golden reproduces bit-exactly).
+
+**Plumbing.** `hpwl_CU` → `gradient_beat_loop` (per chunk) → `hpwl_gradient_CU` sums chunks →
+`hpwl_total_fixed` (s_axilite on the kernel top). The `out_beats` m_axi port (gmem7) and `OutBeat`
+are gone. Each axis is a separate call; the control unit adds x + y.
+
+**Verification.**
+- Tier 1 `hpwl_gradient_CU_test` [4] now asserts the device total == `golden::hpwl_total_fixed`
+  (bit-exact), plus a bound on the golden's quantization vs the exact double sum. Identical totals at
+  1, 6 and 44 chunks. Mutation (drop large nets from the device sum) → FAIL on every config.
+- The cosim bench asserts the total too, but **RTL co-sim has not been re-run** on these changes.
+- Lost: per-net localization of an HPWL mismatch. Per-lane bboxes are still covered indirectly by
+  the gradient check [1].
+
+**Cost, and the DSP removal.** The first version (`0d034cf`) converted with
+`(int64_t)(h * 2^24)`. That's one fmul per net, i.e. 8 DSPs per beat. `22ab76b` replaces it with
+an exponent shift: mantissa (with hidden bit restored) `<< (e − 150 + 24)`, a 64-bit barrel shift.
+`pin_record_test` [5] proves it equals the truncated multiply on **every** float in [0, 2³⁹)
+(~1.4e9, exhaustive, a few seconds).
+
+| kernel csynth (3.33 ns, xcvc1902) | DSP | LUT | FF |
+|---|---|---|---|
+| HEAD `11c00b8` (per-net DDR stream) | 709 | 265.1k | 298.8k |
+| fixed point via fmul (`0d034cf`) | 717 | 270.3k | 298.4k |
+| fixed point via shift (`22ab76b`) | **709** | **266.6k** | **297.8k** |
+
+Net: +0 DSP, +1.5k LUT (0.2 % of device), −1.0k FF, minus one DDR write stream. All 24 pipelined
+loops II=1; `hpwl_CU_loop` depth 28 → 34. My up-front estimate (~2–3k LUT, fixed) undercounted the
+first version by ~2×, because of the fmuls and float→int64 conversions.
+
 ## 2026-10-06 — evicted from summary.md: legacy pl_algo (#20) bullets; #20 and #40 closed as superseded by #45
 
 > - All datapath modules written, HLS C-synthesis clean, each verified against the sw_only golden.
