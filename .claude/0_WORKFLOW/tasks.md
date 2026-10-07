@@ -1,7 +1,7 @@
 # Tasks
 
-**Active Task (2026-10-06): #45 step 2 — `hpwl_gradient_CU` in `pl/` (step 1 skeleton done).** All decisions are
-in (D1–D7, second round); see the plan. Working in small snippets that Mark reviews as they land.
+**Active Task (2026-10-07): #45 step 4 — whole-design slot layout (steps 1–3 done).** All decisions
+are in (D1–D7, second round); see the plan. Step 3 report: [[_NEW_REPORT_45_flat_sink_20261007.md]].
 → [[_NEW_PLAN_45_integration_20261006.md]]
 
 Open work, one section per task. **Status lives here; evidence lives in a
@@ -746,7 +746,7 @@ hardware routes; one chunk-capable `hpwl_gradient_CU` (from `hpwl_gradient_compu
 `hpwl_computer*` retired as stepping stones; both partitioners behind `partition_fm_passes`; start
 fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration.
 
-**State:** plan written; step 1 in progress. Done today as low-hanging fruit: gradient `max_rel` 1e-3
+**State:** steps 1–3 done; step 4 next. Done today as low-hanging fruit: gradient `max_rel` 1e-3
 (`vck5000/test/wa_gradient_golden.hpp`; newblue3 / mms/bigblue4 / newblue7 now pass, rel_rms still
 1e-5-bounded); `make test` 21/21 PASS.
 - [x] **Decisions, second round (Mark, 2026-10-06):** D1 mailbox A now / C later / B fallback; D2
@@ -762,9 +762,6 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
 - [x] **Step 2: `hpwl_gradient_CU` (2026-10-06).** Also `reduce_window` → `balanced_tree`,
       `TreeOutputs` removed, calls annotated with their files (Mark). Open (Mark): de-duplicate
       `PinBeat.net_max/net_min` (per-lane copies of per-net values, ~25% of the A→B FIFO width).
-- [ ] **Step 3: `FlatSink`. ← now.** Block 1 `host/sw_flat/flat_design.hpp` written (file facts
-      only, DataBase conventions). Open (Mark): DEF COVER = movable as in DataBase?; packer macro
-      rule → sw_only's `tagMovableMacros`?
       Step 2 detail:
       - **2a restructure** (`8e94220`): 8 bring_up headers → `pl/src/modules/hpwl_gradient_CU.hpp` +
         `hpwl_gradient/` (7 files); all 44 definitions character-identical, legacy vs new outputs
@@ -794,10 +791,25 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
         fallback, not a partition. (c) Capacities not a multiple of 32 fail `check_chunked` with "no
         chunk count fits". (d) Co-sim C-run numbers come from Vitis's compiler and differ from g++
         (axis 1 rel_rms 5.191e-7 vs 4.924e-7, same code): compare like with like.
-- [ ] Steps 3–9 (`FlatSink` → whole-design slot layout → `sw_flat` →
-      density path in slot order → compose → hardware → retire `/vck5000`), each with its
-      verification, in the plan.
-- Carried in: #41's timing / NMU check / URAM-resident loop; #42's widening choice.
+- [x] **Step 3: `FlatSink` (2026-10-07).** Mark: COVER movable (DataBase's rule); packer macro rule =
+      sw_only's `tagMovableMacros`. `host/sw_flat/`: `flat_design.hpp`, `flat_sink.{hpp,cpp}`,
+      `flat_netlist.hpp` (`tag_movable_macros`, `to_netlist`). `make -C host/sw_flat check-sink`:
+      **47/47** (44 + 3 fixtures): bit-exact vs DataBase, macro tags = sw_only's, legacy reader
+      differences all accounted for; 14/14 mutants (`.claude/2_ARTIFACTS/scratch_45/sink_mutants.sh`).
+      COVER / PLACED→FIXED / `.pl`-fixed occur on **0** of the 44 (fixtures only, new
+      `test/fixtures/pl_fixed`). Packer offsets now DBU from the lower-left (DataBase's), not the
+      legacy centre/micron convention. Follow-ups: FlatSink parses ~1.5× slower than DataBase
+      (serial lookups; bigblue4 3.7 vs 2.5 s).
+      → [[_NEW_REPORT_45_flat_sink_20261007.md]]
+- [ ] **Step 4: whole-design slot layout. ← next.** ⚠️ Its plan verify ("chunk counts and external
+      slots unchanged from today's `encode_chunked` on all 44") cannot hold where the macro rule
+      changed: legacy-only macros become CELLs on ispd2005/bigblue3 and mms/bigblue3 (2,480 each),
+      mms/newblue2 (3,723), and a few others. Measure before/after there instead. Offset tables also
+      change size, e.g. adaptec1 x 308 vs 557 (most shrink, a few grow), so check `offset_bits` too.
+- [ ] Steps 5–9 (`sw_flat` → density path in slot order → compose → hardware → retire
+      `/vck5000`), each with its verification, in the plan.
+- Carried in: #41's timing / NMU check / URAM-resident loop; #42's widening choice, now contested by
+  #47 (producer-side duplication; touches steps 4 and 6).
 
 → [[_NEW_PLAN_45_integration_20261006.md]]
 

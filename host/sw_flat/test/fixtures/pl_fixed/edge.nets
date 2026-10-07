@@ -1,0 +1,34 @@
+UCLA nets 1.0
+# Hand-written edge cases for the #43 parser gate: valid for both Limbo and DesignReader.
+
+NumNets : 7
+NumPins : 24
+
+NetDegree : 3   n0
+	o0	I : -0.500000	-6.000000
+	o1	O : 1.5	3
+	o6	I : 0.0 0.0
+NetDegree : 4   n1
+	o2	O : -0	-0.0
+	o3	I : 0.25 -0.125
+	o4	B : -100.000000 -60.0000
+	o5	I : 3.000000	5.500000
+# a comment between nets
+NetDegree : 2 n2
+	o7	I : 20 18 : 1 1 A
+	o8	O : -1.0 0 : 0.5 0.5
+
+NetDegree : 5   n3
+	o9	I : 0 0
+	o10	o : 0.1 0.2
+	o11	i : 0.3 0.4
+	o0	b : 0.5 0.6
+NetDegree : 1   n4
+	o1	I : 0.123456789012345678901 0.000001
+NetDegree : 3 n_big[0]
+	o2	I : 12345678.875 -0.000000000000000000001
+	o3	O : 9007199254740993.0 1.7976931348623157
+	o4	I : 0.1 0.7
+netdegree : 2 n6
+	o5	I : 1 2
+	o6	O : 3 4
