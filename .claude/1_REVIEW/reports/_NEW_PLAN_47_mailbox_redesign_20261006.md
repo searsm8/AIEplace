@@ -45,15 +45,21 @@ ascending order, and the static lists are sorted the same way. So:
   stream per consumer, each in ascending owner-slot order: the parcel order. Bursted writes, about
   E/16 beats of extra bandwidth. **This removes the send pass and its reload.**
 - **R2. Receive: keep it, or make it a load.** (a) Keep `receive` (E cycles, or E/16 widened).
-  (b) The packer places each chunk's external slots as one contiguous tail, grouped by owner in
-  parcel order. Then the inbox *is* that tail of the chunk's position image, and `load` brings the
-  externals in with everything else. That is Mark's "external slots local to URAM, loaded along with
-  the internal ones". Open cost: the tail's slot numbers fix the externals' banks, which takes
-  colouring freedom away from the bank-conflict-free packing (S-rules), so it may add padding beats.
-  Must be measured.
+  (b) The packer gives the externals their own **tail rows**: in every bank, after the owned movable
+  rows and starting at a common row, so the tail is one contiguous region of the chunk's position
+  image. Then the producer writes the externals' positions into that region, and `load` brings them
+  in with everything else. That is Mark's "external slots local to URAM, loaded along with the
+  internal ones".
+  **The catch (corrected 2026-10-07):** slot = row × 32 + bank, and each external's bank is fixed by
+  the consumer's bank colouring (B4/L4). So the tail's memory order interleaves banks; it is not
+  owner order. The producer emits in owner-slot order. Matching the two needs one of: a write-side
+  lane permutation (a crossbar, which is exactly what `receive` gets for free from the URAM banks);
+  padding; or a colouring preference that gives the external at parcel position p bank p mod 32
+  wherever B4 allows. M1 measures how far the third gets.
 - **R3. Return: keep it, or make it a drain.** External slots are movable slots, so `drain` already
   writes their gradients to `grad_DDR`; return only re-copies them in inbox order. With R2(b)'s
-  contiguous tail, the drained tail *is* the outgoing parcel list, and return disappears.
+  tail rows, the drained tail is the outgoing data, in the tail's bank-interleaved order. R4's merge
+  must read it in that order, which is the same alignment question as R2(b).
 - **R4. Collect rides on the update too.** Before the update moves chunk j, it needs j's full
   gradient. The returned gradients for j sit in K−1 parcels, each sorted by j's slot, and the update
   streams j's gradient in slot order. So collect becomes a **K−1-way sorted merge-add inside the
@@ -86,10 +92,14 @@ is worth doing. M2 onward depends on #45 step 6 (`iteration_update` in slot orde
   R1–R4 with tail), including the update stream's extra beats and a stated macro-fold cost.
   → verify: on the 8 chunked designs the model reproduces today's `chunk_profile` numbers exactly
   when the fusion is off; publish the fused numbers at 1 M and 512 K capacity (17 chunked designs).
-- **M1. Contiguous external tail in the packer** (option, off by default). → verify:
-  `check_chunked` extended (tail = parcels in order); record-beat count and padding vs today on all
-  44, plus K and externals unchanged. **Falsifier:** if the tail costs more beats than receive +
-  return save, R2(b)/R3(b) are dropped and R2(a)/R3(a) stay.
+- **M1. External tail rows in the packer** (option, off by default). `assign_node_slots` puts
+  external slots in rows after every bank's owned movable rows. The colouring gets a soft
+  preference: the external at parcel position p prefers bank p mod 32. → verify: `check_chunked`
+  extended (tail rows hold only externals; every external is in the tail); and, on all 44 designs:
+  record beats and padding vs today, slots added by the common tail start, K and externals
+  unchanged, and the **alignment rate**, the fraction of tail beats whose lane order already equals
+  the emission order. **Falsifier:** if alignment is poor, R2(b)/R3(b) need a write-side
+  permutation; if its cost exceeds receive + return, keep R2(a)/R3(a).
 - **M2. Golden in `sw_flat`.** The fused update in software: positions → per-consumer parcels;
   parcels → merge-add into the owner's gradient; macro fold placed per the decision below.
   → verify: bit-identical gradients and positions vs today's three-pass order on synthetic + the 8
