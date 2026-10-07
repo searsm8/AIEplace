@@ -371,10 +371,6 @@ struct Encoded {
     std::vector<std::vector<int>> unique_nodes;       // per net: distinct work nodes
 
     std::vector<int>  in_scope_nets;
-    // Optional colouring inputs (#47 M1); empty = none, and then assign_banks is unchanged. A hint is
-    // taken when legal; a frozen node keeps its hint as its bank. Meow.
-    std::vector<int>  bank_hint;            // per work node: preferred bank, or NO_BANK
-    std::vector<char> bank_frozen;          // per work node
     std::vector<int>  bank;                 // per work node, NO_BANK if it has no slot
     long              colliding_nets = 0;   // nets whose own nodes share a bank: not encodable
     std::vector<Beat> beats;
@@ -523,13 +519,7 @@ inline void assign_banks(Encoded& enc, const Config& cfg) {
 
     enc.bank.assign(num_nodes, NO_BANK);
     std::vector<long> bank_load[2] = {std::vector<long>(BANKS, 0), std::vector<long>(BANKS, 0)};
-    const bool hinted = !enc.bank_hint.empty();
-    auto frozen = [&](int node) { return !enc.bank_frozen.empty() && enc.bank_frozen[node]; };
-    // Frozen nodes first, so no node coloured before them can take their bank. Meow.
-    for (int node : order)
-        if (frozen(node)) { set_bank(node, enc.bank_hint[node]); bank_load[slot_class(enc.kind[node])][enc.bank_hint[node]]++; }
     for (int node : order) {
-        if (frozen(node)) continue;
         auto& load = bank_load[slot_class(enc.kind[node])];
         uint64_t forbidden = 0;
         for (int net : node_nets[node])
@@ -543,8 +533,6 @@ inline void assign_banks(Encoded& enc, const Config& cfg) {
             for (int k = 0; k < BANKS; k++)
                 if (!(forbidden >> k & 1) && (best < 0 || load[k] < load[best])) best = k;
         if (best < 0) best = (int)(std::min_element(load.begin(), load.end()) - load.begin());
-        const int hint = hinted ? enc.bank_hint[node] : NO_BANK;
-        if (hint != NO_BANK && !(forbidden >> hint & 1) && !(full >> hint & 1)) best = hint;
         set_bank(node, best);
         load[best]++;
     }
@@ -555,7 +543,7 @@ inline void assign_banks(Encoded& enc, const Config& cfg) {
     for (int pass = 0; pass < cfg.repair_passes; pass++) {
         long moved = 0;
         for (int node : order) {
-            if ((node_nets[node].empty() && node_large[node].empty()) || frozen(node)) continue;
+            if (node_nets[node].empty() && node_large[node].empty()) continue;
             auto& load = bank_load[slot_class(enc.kind[node])];
             const int current = enc.bank[node];
             std::fill(collisions.begin(), collisions.end(), 0);

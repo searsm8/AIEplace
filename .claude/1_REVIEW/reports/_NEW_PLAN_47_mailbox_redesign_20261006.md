@@ -111,6 +111,44 @@ Cycles per axis per evaluation, as a fraction of TODAY:
 - For comparison, D1-B (all four loops widened, ~128 K LUT): bigblue4 at 1 M = 1.49 M, i.e. FUSED's
   level, with all its passes still in place.
 
+## M1 result (2026-10-07): the tail works with today's colouring, and the price is a write-side buffer
+`host/sw_flat/model/tail_layout.cpp`. Raw output: `.claude/2_ARTIFACTS/mailbox_47/m1_tail_{1M,512K}_20261007.txt`
+(8 + 17 chunked designs). Each run self-checks that re-encoding a chunk's copied inputs reproduces
+it exactly (records and slots); every check passed.
+
+**Layout measured (M0's):** each external takes the next tail row *of its own bank*. The update
+writes a consumer's tail sequentially, row by row, through an on-chip **assembly buffer**: entries
+go in at (row, bank) as they're emitted, and a row is written to DDR once it's final (every bank has
+filled it, or will put nothing more there, which is known statically).
+
+| measure | 1 M (8 designs) | 512 K (17 designs) |
+|---|---|---|
+| tail size / E (padding) | 1.002–1.009 | 1.002–1.029 |
+| assembly buffer, rows of 32 floats (per consumer stream) | 32–108 | 23–162 |
+| update stalls at 2 writes/cycle per consumer | ≤ 2.3% (bigblue4 ×2) | up to 27% (bigblue4 K=6) |
+| update stalls at **4 writes/cycle** per consumer | 0% | ≤ 0.34% |
+| FIFO ahead of the buffer at 4 writes/cycle | ≤ 6.6 K entries | ≤ 8.2 K entries |
+| max entries for one bank among 16 consecutive emissions | 5 | 6 |
+| every chunk within capacity with its tail | yes | yes |
+
+- **No colouring change is needed.** The tail rows add ≤ 3% slots with the banks `encode_chunked`
+  already picks.
+- **Colouring hints don't pay.** A hint of bank = (tail position mod 32), owned banks frozen, puts
+  79–88% of externals in emission order (vs ~3% by chance), with 0 new colliding nets and ±13 record
+  beats. But the assembly buffer doesn't shrink consistently (bigblue4/1M: 105 → 89 rows;
+  mms/bigblue3/512K: 58 → 76), and the tail grows slightly. Measured with temporary packer hooks
+  (`bank_hint` / `bank_frozen`, byte-identical to HEAD when unused on 4 designs), commit ed888f9;
+  removed afterwards.
+- **So the tail's hardware cost is K−1 assembly buffers in the update** (≤ 5.2 K floats each, BRAM),
+  each fed by a **4-lane scatter into 32 banks**, plus the mirror on the gradient side: the merge reads
+  a consumer's drained tail rows and needs them back in owner order, a 32 → 4 gather per stream. M0's
+  bigblue4/1M gap between FUSED and FUSED_TAIL (1.52 M vs 0.99 M cycles, receive + return) is what
+  that hardware buys. The alternative for the same cycles is widening just receive and return
+  (D1-B for two loops, ~2 × 32 K LUT). **M5 compares the two.**
+- **Not built in M1:** the tail layout in `assign_node_slots` and the device arrays. The model shows
+  it fits (≤ 3% padding, within capacity) with no colouring change, so it can be written when M3
+  needs real arrays.
+
 ## Steps
 Each step: what, then how it's verified. M0–M1 are offline and cheap, and decide whether the rest
 is worth doing. M2 onward depends on #45 step 6 (`iteration_update` in slot order).
