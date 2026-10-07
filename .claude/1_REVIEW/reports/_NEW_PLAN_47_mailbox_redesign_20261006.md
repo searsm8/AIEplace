@@ -84,6 +84,33 @@ mailbox logic moves into `iteration_update`. K=1 is unchanged.
 For comparison, D1-B (all four loops widened, ~128 K LUT) gives bigblue4 1.49 M. The contiguous
 tail also shrinks the beat loop's surroundings to load + beats + drain, the same shape as K=1.
 
+## M0 result (2026-10-07): the model says yes
+`host/sw_flat/model/` (`cycle_model.hpp` copied from the legacy model @ ef62dba, + `chunk_model.cpp`).
+`make check` runs the legacy `chunk_profile --unburst 1` live and requires TODAY to equal it phase by
+phase: **PASS on all 8 chunked designs.** A mutant that changes one phase makes it fail. Raw output:
+`.claude/2_ARTIFACTS/mailbox_47/m0_{1M_adders1,1M_adders2,512K_adders1}_20261007.txt`.
+Cycles per axis per evaluation, as a fraction of TODAY:
+
+| capacity | chunked designs | FUSED (R1+R4) | FUSED_TAIL (R1–R4) | bigblue4 today → fused → tail |
+|---|---|---|---|---|
+| 1 M | 8 | 61–65% | 40–56% | 2.49 M → 1.52 M → **0.99 M** |
+| 512 K | 17 | 58–64% | 28–55% | 3.84 M (K=6) → 2.25 M → **1.09 M** |
+
+- **The more external slots, the bigger the win for the tail:** 28% at bigblue4/512K (27% external),
+  55% at superblue19 (2% external). FUSED is a near-constant ~38% saving, because it removes whole
+  passes whatever E is.
+- **Tail rows cost almost nothing in slots** (same colouring): ≤ 80 slot beats per design, every
+  chunk still within capacity at both capacities. The alignment (write-side permutation) is
+  **not charged**; that's M1.
+- **The merge needs 2 adders per lane:** with 1, stalls are ≤ 0.7% of bigblue4/512K's cycles; with
+  2, zero on every 1 M design.
+- **R1 has a gap: shared macro pins.** Up to 6,763 shared entries (mms/newblue6 at 512K) are
+  MACRO_PIN slots. The send pass refreshes them before sending. The update stream must compute
+  pin = macro + offset for them, or the consumer must refresh them itself. Not charged; joins
+  decision 2.
+- For comparison, D1-B (all four loops widened, ~128 K LUT): bigblue4 at 1 M = 1.49 M, i.e. FUSED's
+  level, with all its passes still in place.
+
 ## Steps
 Each step: what, then how it's verified. M0–M1 are offline and cheap, and decide whether the rest
 is worth doing. M2 onward depends on #45 step 6 (`iteration_update` in slot order).
