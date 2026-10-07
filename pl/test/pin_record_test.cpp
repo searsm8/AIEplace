@@ -4,11 +4,13 @@
 //   [1] LAYOUT     the DDR structs are the widths the m_axi ports assume
 //   [2] CONSTANTS  derived constants agree with what they are derived from
 //   [3] ROUND TRIP make_record -> record_node_slot / record_offset_idx, every offset_bits split
-//   [4] EMPTY      no real record equals EMPTY_RECORD; the node field maximum does. Meow.
+//   [4] EMPTY      no real record equals EMPTY_RECORD; the node field maximum does.
+//   [5] HPWL FIXED hpwl_to_fixed (shift form) equals the truncated multiply, exhaustively. Meow.
 
 #include "format/pin_record.hpp"
 
 #include <cstdio>
+#include <cstring>
 #include <initializer_list>
 
 using namespace pinrec;
@@ -48,6 +50,18 @@ int main() {
     }
     check(round_trip_ok, "[3] record round-trips for offset_bits 1..16");
     check(empty_ok, "[4] EMPTY_RECORD is the node-field maximum and no real record");
+
+    // The shift form must equal the multiply it replaced, on every float the device can see:
+    // all non-negative finite values below the 2^39 range, exhaustively (~1.4e9). x * 2^24 is
+    // exact in double, so the cast is the truncation the definition names. Meow.
+    long fixed_mismatches = 0;
+    const uint32_t range_end_bits = (uint32_t)(127 + 39) << 23;   // bit pattern of 2^39
+    for (uint32_t u = 0; u < range_end_bits; u++) {
+        float x;
+        std::memcpy(&x, &u, sizeof x);
+        fixed_mismatches += hpwl_to_fixed(x) != (int64_t)((double)x * (double)(1 << HPWL_FRAC_BITS));
+    }
+    check(fixed_mismatches == 0, "[5] hpwl_to_fixed == truncated x * 2^HPWL_FRAC_BITS for every float in [0, 2^39)");
 
     if (failures) { printf("FAIL: pin_record (%d checks)\n", failures); return 1; }
     printf("PASS: pin_record\n");

@@ -48,8 +48,18 @@ constexpr int      HAZARD_DISTANCE       = 4;
 // chunking or summation order, which a float or double sum is not; it feeds the lambda schedule,
 // a control path. Range 2^39 (5.5e11) per axis; quantization <= 2^-24 per net. Meow.
 constexpr int      HPWL_FRAC_BITS        = 24;
-inline int64_t hpwl_to_fixed(float net_hpwl) {   // truncates; exact for net_hpwl >= 1
-    return (int64_t)(net_hpwl * (float)(1 << HPWL_FRAC_BITS));
+// Truncates; exact for net_hpwl >= 1. Equals (int64_t)(net_hpwl * 2^HPWL_FRAC_BITS) for every finite
+// net_hpwl in [0, 2^39), but scaling a float by a power of two only moves its exponent, so the
+// mantissa is shifted into place directly: a 64-bit barrel shift, where the multiply cost a DSP per
+// net (8 per beat). Denormals are < 2^-126 and truncate to 0. Meow.
+inline int64_t hpwl_to_fixed(float net_hpwl) {
+    union { float f; uint32_t u; } bits;
+    bits.f = net_hpwl;
+    const int     biased_exponent = (bits.u >> 23) & 0xFF;
+    const int64_t mantissa        = (bits.u & 0x7FFFFF) | 0x800000;   // hidden bit restored
+    const int     shift           = biased_exponent - 150 + HPWL_FRAC_BITS;   // 150 = bias 127 + 23 mantissa bits
+    if (biased_exponent == 0 || shift < -23) return 0;
+    return shift >= 0 ? mantissa << shift : mantissa >> -shift;
 }
 
 struct RecordBeat { uint32_t r[LANES]; };   // one 512-bit DDR beat of the static stream
