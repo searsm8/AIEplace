@@ -14,9 +14,39 @@
 #include "DesignReader.h"
 
 #include <map>
+#include <string_view>
 #include <unordered_map>
 
 namespace sw_flat {
+
+// Name -> node id, flat open addressing (host/src/common/include/NameIndex.h's design, keyed on
+// FlatDesign's own name array instead of T::getName()). A parse looks a node up once per net pin,
+// ~10 M times on the largest designs, and a node-based map makes each lookup several dependent
+// cache misses. hash / prefetch / find are split so a caller holding a whole net's names can start
+// every miss before waiting on any. find() is safe from many threads while nothing inserts. Meow.
+class NodeIndex
+{
+public:
+    explicit NodeIndex(const std::vector<std::string>& names) : names(names) {}
+
+    static uint64_t hash_of(std::string_view name) { return std::hash<std::string_view>()(name); }
+    void prefetch(uint64_t hash) const { if (!slots.empty()) __builtin_prefetch(&slots[hash & mask]); }
+    void prefetch_name(uint64_t hash) const
+    {
+        if (!slots.empty() && slots[hash & mask].id >= 0) __builtin_prefetch(&names[slots[hash & mask].id]);
+    }
+    int find(std::string_view name, uint64_t hash) const;   // -1 if absent
+    // Keeps the FIRST id under a name, like std::map::emplace: returns the id already there, or
+    // records new_id (whose name must already be names[new_id]) and returns it. Meow.
+    int insert(uint64_t hash, int new_id);
+
+private:
+    struct Slot { uint64_t hash; int id; };
+    const std::vector<std::string>& names;
+    std::vector<Slot> slots;
+    size_t size = 0, mask = 0;
+    void grow();
+};
 
 class FlatSink : public AIEplace::DesignSink
 {
@@ -55,22 +85,28 @@ private:
     struct LefMacroFacts {
         float width = 0, height = 0;          // microns until finish_lefdef
         std::string lef_class;
-        std::map<std::string, std::pair<float, float>> pin_offset;   // microns, from the lower-left
+        // microns, from the lower-left; std::less<> so a pin is found by string_view, no copy
+        std::map<std::string, std::pair<float, float>, std::less<>> pin_offset;
     };
     std::vector<LefMacroFacts> lef_macros;
-    std::unordered_map<std::string, int> lef_macro_id;
+    std::map<std::string, int, std::less<>> lef_macro_id;
     LefMacroFacts* current_macro = nullptr;
     LefMacroFacts discarded_macro;            // a repeated MACRO's body: DataBase keeps the first
     std::vector<int> node_macro;              // per node, the LEF macro id; -1 = not a component
 
-    std::unordered_map<std::string, int> component_id, iopad_id;
+    // Components and IO pads are separate namespaces, as in DataBase; Bookshelf nodes are components.
+    NodeIndex component_id{design.node_name}, iopad_id{design.node_name};
     long row_xmin = 0, row_ymin = 0, row_xmax = 0, row_ymax = 0;
     int  row_count = 0;
     int  terminal_max_x = 0, terminal_max_y = 0;   // DataBase's m_max_x / m_max_y: ints, on purpose
 
-    int  add_node(const std::string& name, NodeKind kind, float x, float y, float width, float height,
-                  int macro);
-    void add_net(const std::string& name);
+    // Appends the node unless `index` already holds its name (then returns -1 and adds nothing).
+    int  add_node(NodeIndex& index, uint64_t hash, std::string_view name, NodeKind kind, float x, float y,
+                  float width, float height, int macro);
+    // Sizes the arrays for a batch of nets (first_pin: the batch's own CSR offsets, from 0) and
+    // writes its CSR rows; returns the first new net and the first new pin. Names, pins and
+    // offsets are the caller's to fill, in parallel. Meow.
+    std::pair<int, int> append_nets(const std::vector<size_t>& first_pin);
     void fail(const std::string& what) { if (error.empty()) error = what; }
 };
 

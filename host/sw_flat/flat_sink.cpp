@@ -1,5 +1,6 @@
 #include "flat_sink.hpp"
 
+#include <climits>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -8,23 +9,96 @@ namespace sw_flat {
 
 using namespace AIEplace;
 
-int FlatSink::add_node(const std::string& name, NodeKind kind, float x, float y, float width, float height,
-                       int macro)
+// ---- NodeIndex. Meow.
+
+int NodeIndex::find(std::string_view name, uint64_t hash) const
 {
-    design.node_name.push_back(name);
+    if (slots.empty()) return -1;
+    for (size_t i = hash & mask; ; i = (i + 1) & mask) {
+        const Slot& slot = slots[i];
+        if (slot.id < 0) return -1;
+        if (slot.hash == hash && names[slot.id] == name) return slot.id;
+    }
+}
+
+int NodeIndex::insert(uint64_t hash, int new_id)
+{
+    if (2 * (size + 1) > slots.size()) grow();
+    const std::string& name = names[new_id];
+    for (size_t i = hash & mask; ; i = (i + 1) & mask) {
+        Slot& slot = slots[i];
+        if (slot.id < 0) { slot = {hash, new_id}; size++; return new_id; }
+        if (slot.hash == hash && names[slot.id] == name) return slot.id;
+    }
+}
+
+void NodeIndex::grow()
+{
+    std::vector<Slot> old = std::move(slots);
+    slots.assign(old.empty() ? 1024 : 2 * old.size(), Slot{0, -1});
+    mask = slots.size() - 1;
+    for (const Slot& slot : old) {
+        if (slot.id < 0) continue;
+        size_t i = slot.hash & mask;
+        while (slots[i].id >= 0) i = (i + 1) & mask;
+        slots[i] = slot;
+    }
+}
+
+namespace {
+
+// index.find for every name of one net, each slot's cache miss started before any is waited on
+// (DataBase's findAll). Runs inside the parallel net loops, hence the per-thread scratch. Meow.
+template <typename IndexOf, typename NameOf>
+void find_all(size_t count, IndexOf index_of, NameOf name_of, int32_t* found)
+{
+    static thread_local std::vector<uint64_t> hashes;
+    hashes.resize(count);
+    for (size_t k = 0; k < count; k++) { hashes[k] = NodeIndex::hash_of(name_of(k)); index_of(k).prefetch(hashes[k]); }
+    for (size_t k = 0; k < count; k++) index_of(k).prefetch_name(hashes[k]);
+    for (size_t k = 0; k < count; k++) found[k] = index_of(k).find(name_of(k), hashes[k]);
+}
+
+constexpr long PARALLEL_MIN = 4096;   // a smaller batch is not worth waking the threads for
+
+} // namespace
+
+int FlatSink::add_node(NodeIndex& index, uint64_t hash, std::string_view name, NodeKind kind, float x, float y,
+                       float width, float height, int macro)
+{
+    design.node_name.emplace_back(name);
+    int id = design.num_nodes() - 1;
+    if (index.insert(hash, id) != id) { design.node_name.pop_back(); return -1; }
     design.node_kind.push_back(kind);
     design.node_x.push_back(x);
     design.node_y.push_back(y);
     design.node_width.push_back(width);
     design.node_height.push_back(height);
     node_macro.push_back(macro);
-    return design.num_nodes() - 1;
+    return id;
 }
 
-void FlatSink::add_net(const std::string& name)
+std::pair<int, int> FlatSink::append_nets(const std::vector<size_t>& first_pin)
 {
-    design.net_name.push_back(name);
-    design.net_first_pin.push_back(design.net_first_pin.back());
+    const int first_net = design.num_nets();
+    const int pin_base = (int)design.pin_node.size();
+    const size_t count = first_pin.size() - 1;
+    design.net_name.resize(first_net + count);
+    design.net_first_pin.resize(first_net + count + 1);
+    for (size_t i = 0; i < count; i++) design.net_first_pin[first_net + i + 1] = pin_base + (int32_t)first_pin[i + 1];
+    const size_t num_pins = pin_base + first_pin[count];
+    design.pin_node.resize(num_pins);
+    design.pin_offset_x.resize(num_pins);
+    design.pin_offset_y.resize(num_pins);
+    return {first_net, pin_base};
+}
+
+template <typename Net>
+static std::vector<size_t> batch_first_pin(const std::vector<Net>& nets)
+{
+    std::vector<size_t> first_pin(nets.size() + 1, 0);
+    for (size_t i = 0; i < nets.size(); i++) first_pin[i + 1] = first_pin[i] + nets[i].num_pins;
+    return first_pin;
 }
 
 // ---- LEF. Sizes and pin offsets stay in microns until finish_lefdef. Meow.
@@ -75,18 +149,30 @@ void FlatSink::set_def_diearea(int xl, int yl, int xh, int yh)
     design.die_xh = (float)xh; design.die_yh = (float)yh;
 }
 
+// Hashes and LEF macro lookups only read, so they run in parallel; registering each name keeps the
+// first under it, so that runs in file order. Meow.
 void FlatSink::add_def_components(const std::vector<DefComponent>& components)
 {
-    for (const DefComponent& c : components) {
-        std::string name(c.name);
-        if (component_id.count(name)) continue;
-        auto macro = lef_macro_id.find(std::string(c.macro_name));
-        if (macro == lef_macro_id.end()) return fail("component " + name + " of undefined LEF macro " + std::string(c.macro_name));
-        const std::string& lef_class = lef_macros[macro->second].lef_class;
+    const long count = (long)components.size();
+    std::vector<uint64_t> hashes(count);
+    std::vector<int> macros(count);
+    #pragma omp parallel for schedule(static) if(count >= PARALLEL_MIN)
+    for (long i = 0; i < count; i++) {
+        hashes[i] = NodeIndex::hash_of(components[i].name);
+        auto macro = lef_macro_id.find(components[i].macro_name);
+        macros[i] = macro == lef_macro_id.end() ? -1 : macro->second;
+    }
+    for (long i = 0; i < count; i++) {
+        const DefComponent& c = components[i];
+        if (macros[i] < 0) {
+            if (component_id.find(c.name, hashes[i]) >= 0) continue;   // a repeat: DataBase drops it unread
+            return fail("component " + std::string(c.name) + " of undefined LEF macro " + std::string(c.macro_name));
+        }
+        const std::string& lef_class = lef_macros[macros[i]].lef_class;
         bool placed_fixed = c.status == "PLACED" && lef_class != "CORE" && lef_class != "BLOCK";
         NodeKind kind = c.status == "FIXED" || placed_fixed ? NodeKind::FIXED : NodeKind::CELL;
-        int id = add_node(name, kind, (float)c.x, (float)c.y, 0, 0, macro->second);
-        component_id.emplace(name, id);
+        int id = add_node(component_id, hashes[i], c.name, kind, (float)c.x, (float)c.y, 0, 0, macros[i]);
+        if (id < 0) continue;
         if (placed_fixed) placed_fixed_nodes.push_back(id);
         if (c.status == "COVER") cover_nodes.push_back(id);
     }
@@ -94,42 +180,49 @@ void FlatSink::add_def_components(const std::vector<DefComponent>& components)
 
 void FlatSink::add_def_pin(const DefPin& p)
 {
-    if (iopad_id.count(p.name)) return;
     float width = std::fabs((float)p.bbox[0] - (float)p.bbox[2]);
     float height = std::fabs((float)p.bbox[1] - (float)p.bbox[3]);
-    iopad_id.emplace(p.name, add_node(p.name, NodeKind::IO_PAD, (float)p.x, (float)p.y, width, height, -1));
+    add_node(iopad_id, NodeIndex::hash_of(p.name), p.name, NodeKind::IO_PAD, (float)p.x, (float)p.y, width, height, -1);
 }
 
+// Each pin's node and offset only read the indexes and the macros, so whole nets resolve in
+// parallel into arrays sized up front. Meow.
 void FlatSink::add_def_nets(const std::vector<DefNet>& nets)
 {
+    const std::vector<size_t> first_pin = batch_first_pin(nets);
+    const auto [first_net, pin_base] = append_nets(first_pin);
     const float scale = (float)design.units_per_micron;
-    for (const DefNet& net : nets) {
-        add_net(std::string(net.name));
+    long first_bad_net = LONG_MAX;
+    #pragma omp parallel for schedule(dynamic, 256) reduction(min : first_bad_net) if((long)nets.size() >= PARALLEL_MIN)
+    for (long i = 0; i < (long)nets.size(); i++) {
+        const DefNet& net = nets[i];
+        const size_t pin0 = pin_base + first_pin[i];
+        design.net_name[first_net + i].assign(net.name);
+        auto is_pad = [&](size_t k) { return net.pins[k].first == "PIN"; };
+        find_all(net.num_pins, [&](size_t k) -> const NodeIndex& { return is_pad(k) ? iopad_id : component_id; },
+                 [&](size_t k) { return is_pad(k) ? net.pins[k].second : net.pins[k].first; }, &design.pin_node[pin0]);
         for (size_t k = 0; k < net.num_pins; k++) {
-            const DefNetPin& pin = net.pins[k];
-            int node;
+            const int node = design.pin_node[pin0 + k];
             float offset_x = 0, offset_y = 0;
-            if (pin.first == "PIN") {
-                auto it = iopad_id.find(std::string(pin.second));
-                if (it == iopad_id.end()) return fail("net " + std::string(net.name) + " names unknown PIN " + std::string(pin.second));
-                node = it->second;
-            } else {
-                auto it = component_id.find(std::string(pin.first));
-                if (it == component_id.end()) return fail("net " + std::string(net.name) + " names unknown component " + std::string(pin.first));
-                node = it->second;
+            if (node < 0) { first_bad_net = std::min(first_bad_net, i); continue; }
+            if (!is_pad(k)) {
                 const auto& offsets = lef_macros[node_macro[node]].pin_offset;
-                auto offset = offsets.find(std::string(pin.second));
+                auto offset = offsets.find(net.pins[k].second);
                 if (offset != offsets.end()) {
                     offset_x = offset->second.first * scale;
                     offset_y = offset->second.second * scale;
                 }
             }
-            design.pin_node.push_back(node);
-            design.pin_offset_x.push_back(offset_x);
-            design.pin_offset_y.push_back(offset_y);
-            design.net_first_pin.back()++;
+            design.pin_offset_x[pin0 + k] = offset_x;
+            design.pin_offset_y[pin0 + k] = offset_y;
         }
     }
+    if (first_bad_net == LONG_MAX) return;
+    const DefNet& net = nets[first_bad_net];
+    for (size_t k = 0; k < net.num_pins; k++)
+        if (design.pin_node[pin_base + first_pin[first_bad_net] + k] < 0)
+            return fail("net " + std::string(net.name) + " names unknown " + (net.pins[k].first == "PIN"
+                        ? "PIN " + std::string(net.pins[k].second) : "component " + std::string(net.pins[k].first)));
 }
 
 void FlatSink::finish_lefdef(bool scale_to_dbu)
@@ -151,29 +244,41 @@ void FlatSink::finish_lefdef(bool scale_to_dbu)
 
 void FlatSink::add_bookshelf_nodes(const std::vector<BookshelfNode>& nodes)
 {
-    for (const BookshelfNode& n : nodes) {
-        std::string name(n.name);
-        if (component_id.count(name)) continue;
-        component_id.emplace(name, add_node(name, n.terminal ? NodeKind::FIXED : NodeKind::CELL, 0, 0,
-                                            (float)n.width, (float)n.height, -1));
+    const long count = (long)nodes.size();
+    std::vector<uint64_t> hashes(count);
+    #pragma omp parallel for schedule(static) if(count >= PARALLEL_MIN)
+    for (long i = 0; i < count; i++) hashes[i] = NodeIndex::hash_of(nodes[i].name);
+    for (long i = 0; i < count; i++) {
+        const BookshelfNode& n = nodes[i];
+        add_node(component_id, hashes[i], n.name, n.terminal ? NodeKind::FIXED : NodeKind::CELL, 0, 0,
+                 (float)n.width, (float)n.height, -1);
     }
 }
 
 void FlatSink::add_bookshelf_nets(const std::vector<BookshelfNet>& nets)
 {
-    for (const BookshelfNet& net : nets) {
-        add_net(std::string(net.name));
+    const std::vector<size_t> first_pin = batch_first_pin(nets);
+    const auto [first_net, pin_base] = append_nets(first_pin);
+    long first_bad_net = LONG_MAX;
+    #pragma omp parallel for schedule(dynamic, 256) reduction(min : first_bad_net) if((long)nets.size() >= PARALLEL_MIN)
+    for (long i = 0; i < (long)nets.size(); i++) {
+        const BookshelfNet& net = nets[i];
+        const size_t pin0 = pin_base + first_pin[i];
+        design.net_name[first_net + i].assign(net.name);
+        find_all(net.num_pins, [&](size_t) -> const NodeIndex& { return component_id; },
+                 [&](size_t k) { return net.pins[k].node_name; }, &design.pin_node[pin0]);
         for (size_t k = 0; k < net.num_pins; k++) {
-            const BookshelfNetPin& pin = net.pins[k];
-            auto it = component_id.find(std::string(pin.node_name));
-            if (it == component_id.end()) return fail("net " + std::string(net.name) + " names unknown node " + std::string(pin.node_name));
-            int node = it->second;
-            design.pin_node.push_back(node);
-            design.pin_offset_x.push_back(design.node_width[node] / 2.0f + (float)pin.offset_x);
-            design.pin_offset_y.push_back(design.node_height[node] / 2.0f + (float)pin.offset_y);
-            design.net_first_pin.back()++;
+            const int node = design.pin_node[pin0 + k];
+            if (node < 0) { first_bad_net = std::min(first_bad_net, i); continue; }
+            design.pin_offset_x[pin0 + k] = design.node_width[node] / 2.0f + (float)net.pins[k].offset_x;
+            design.pin_offset_y[pin0 + k] = design.node_height[node] / 2.0f + (float)net.pins[k].offset_y;
         }
     }
+    if (first_bad_net == LONG_MAX) return;
+    const BookshelfNet& net = nets[first_bad_net];
+    for (size_t k = 0; k < net.num_pins; k++)
+        if (design.pin_node[pin_base + first_pin[first_bad_net] + k] < 0)
+            return fail("net " + std::string(net.name) + " names unknown node " + std::string(net.pins[k].node_name));
 }
 
 void FlatSink::add_bookshelf_row(const BookshelfRow& row)
@@ -192,12 +297,20 @@ void FlatSink::add_bookshelf_row(const BookshelfRow& row)
     row_count++;
 }
 
+// Lookups in parallel; applied in file order, so a node placed twice keeps its last placement. Meow.
 void FlatSink::set_bookshelf_node_positions(const std::vector<BookshelfPlacement>& placements)
 {
-    for (const BookshelfPlacement& p : placements) {
-        auto it = component_id.find(std::string(p.name));
-        if (it == component_id.end()) return fail(".pl places unknown node " + std::string(p.name));
-        int node = it->second;
+    constexpr long LOOKUP_BATCH = 64;
+    const long count = (long)placements.size();
+    std::vector<int32_t> nodes(count);
+    #pragma omp parallel for schedule(dynamic, 64) if(count >= PARALLEL_MIN)
+    for (long first = 0; first < count; first += LOOKUP_BATCH)
+        find_all(std::min(LOOKUP_BATCH, count - first), [&](size_t) -> const NodeIndex& { return component_id; },
+                 [&](size_t k) { return placements[first + k].name; }, &nodes[first]);
+    for (long i = 0; i < count; i++) {
+        const BookshelfPlacement& p = placements[i];
+        const int node = nodes[i];
+        if (node < 0) return fail(".pl places unknown node " + std::string(p.name));
         design.node_x[node] = (float)p.x;
         design.node_y[node] = (float)p.y;
         if (p.status == "FIXED") {

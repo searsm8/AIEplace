@@ -795,11 +795,11 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
       sw_only's `tagMovableMacros`. `host/sw_flat/`: `flat_design.hpp`, `flat_sink.{hpp,cpp}`,
       `flat_netlist.hpp` (`tag_movable_macros`, `to_netlist`). `make -C host/sw_flat check-sink`:
       **47/47** (44 + 3 fixtures): bit-exact vs DataBase, macro tags = sw_only's, legacy reader
-      differences all accounted for; 14/14 mutants (`.claude/2_ARTIFACTS/scratch_45/sink_mutants.sh`).
+      differences all accounted for; 16/16 mutants (`.claude/2_ARTIFACTS/scratch_45/sink_mutants.sh`).
       COVER / PLACED→FIXED / `.pl`-fixed occur on **0** of the 44 (fixtures only, new
       `test/fixtures/pl_fixed`). Packer offsets now DBU from the lower-left (DataBase's), not the
-      legacy centre/micron convention. Follow-ups: FlatSink parses ~1.5× slower than DataBase
-      (serial lookups; bigblue4 3.7 vs 2.5 s).
+      legacy centre/micron convention. Parse parallelized (Mark, same day): 2–3× faster than
+      DataBase (bigblue4 1.18 vs 2.52 s, superblue12 0.54 vs 1.44 s), still bit-exact.
       → [[_NEW_REPORT_45_flat_sink_20261007.md]]
 - [ ] **Step 4: whole-design slot layout. ← next.** ⚠️ Its plan verify ("chunk counts and external
       slots unchanged from today's `encode_chunked` on all 44") cannot hold where the macro rule

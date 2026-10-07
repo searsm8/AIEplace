@@ -6,7 +6,7 @@ Plan: [[_NEW_PLAN_45_integration_20261006.md]] step 3. Decisions taken (Mark, 20
 
 **Result:** `make -C host/sw_flat check-sink` → **ALL PASS (47 designs: 44 benchmarks + 3 fixtures)**.
 That covers every node, net, pin and offset, bit-equal to sw_only's `DataBase`. Macro tags equal
-sw_only's on all 47. Every difference from the legacy packer reader is accounted for. **14/14
+sw_only's on all 47. Every difference from the legacy packer reader is accounted for. **16/16
 mutants caught.** Wall time about 60 s (4 jobs).
 
 | block | files | verdict |
@@ -14,7 +14,7 @@ mutants caught.** Wall time about 60 s (4 jobs).
 | 1. The flat model + the sink | `flat_design.hpp`, `flat_sink.{hpp,cpp}` | — (verified by 2) |
 | 2. `[database]`: vs sw_only's DataBase | `test/flat_sink_check.cpp` | 47/47 bit-exact |
 | 3. `[macros]` + `[legacy]`: what the packer is fed | `flat_netlist.hpp`, `test/native_netlist.hpp` | 47/47; 44/44 legacy |
-| 4. Does the check bite? | `.claude/2_ARTIFACTS/scratch_45/sink_mutants.sh` | 14/14 caught |
+| 4. Does the check bite? | `.claude/2_ARTIFACTS/scratch_45/sink_mutants.sh` | 16/16 caught |
 
 Full per-design output: `.claude/2_ARTIFACTS/scratch_45/check_sink_44.txt`; mutants: `…/sink_mutants.txt`.
 
@@ -158,7 +158,7 @@ encoder.
 
 `.claude/2_ARTIFACTS/scratch_45/sink_mutants.sh` breaks one rule at a time in a temporary copy
 (`host/.sw_flat_mutant`, deleted on exit). Each mutant runs on a design that exercises the rule,
-and the check must exit non-zero. **14/14 caught**, each by the check that should catch it:
+and the check must exit non-zero. **16/16 caught** (14 at first, plus 2 for the parallel path), each by the check that should catch it:
 
 | mutant | caught by |
 |---|---|
@@ -175,6 +175,8 @@ and the check must exit non-zero. **14/14 caught**, each by the check that shoul
 | macro rule without the height test (mms/adaptec1) | `[macros]` 63 vs 62 |
 | net mask at 100, not 96 (ispd2005/bigblue2) | `[legacy]` kept nets |
 | fixed nodes marked movable in the netlist | `[legacy]` movable, unexplained |
+| parallel path: pin offset written to the wrong slot | `[database]` pin offset |
+| parallel path: a net batch's CSR rows not offset by earlier batches | `[database]` net degree |
 
 The net-mask mutant first **survived** on mms/adaptec1, which has no nets of 97–100 pins. It was
 moved to bigblue2, which has 23. These are the Bookshelf counts of 97..100-pin nets, part of #46's
@@ -190,11 +192,34 @@ The ISPD2015 designs were not counted.
 
 1. **The one parse is exact.** `FlatDesign` is sw_only's DataBase in flat form on every input we
    have. Step 4 can build the slot layout on it.
-2. **Parse time: FlatSink is ~1.5× slower than DataBase.** Serial, one at a time: bigblue4 3.66 vs
-   2.51 s, newblue7 5.21 vs 3.24 s, superblue12 2.25 vs 1.46 s. DataBase resolves names in parallel
-   with prefetching (`findAll`, `NameIndex`); FlatSink uses a serial `unordered_map<string>`. Since
-   there is no caching, this is part of every end-to-end number. The fix is to port DataBase's
-   parallel lookup, with `check-sink` guarding it. Not done here: correctness was the step-3 gate.
+2. **Parse time: FlatSink is now 2–3× faster than DataBase** (Mark asked for it to run in parallel,
+   same day). The first version used a serial `unordered_map<string>` and was ~1.5× slower. The
+   reader itself takes 0.2–0.6 s warm; the rest was callbacks.
+
+   It now has:
+   - `NodeIndex`, a flat open-addressing name → id table on FlatDesign's name array (NameIndex's
+     design);
+   - per-net split hash / prefetch / find (`find_all`, DataBase's `findAll` pattern);
+   - every net batch resolved and written in parallel (OpenMP) into arrays sized up front;
+   - `.pl` lookups in parallel;
+   - transparent `std::map` lookups for LEF macros and pins, so a lookup no longer allocates.
+
+   What stays serial, because order is the semantics: first-wins node registration, the `.pl`
+   apply, and the error report. That report is the first failing net in file order, via a parallel
+   `min` reduction.
+
+   Warm cache, 8 threads, one design at a time, before → after:
+
+   | design | DataBase | FlatSink (serial map) | FlatSink (parallel) |
+   |---|---|---|---|
+   | ispd2005/bigblue4 | 2.52 s | 3.66 s | **1.18 s** |
+   | mms/newblue7 | 2.86 s | 5.21 s | **1.32 s** |
+   | ispd2015/mgc_superblue12 | 1.44 s | 2.25 s | **0.54 s** |
+
+   With `OMP_NUM_THREADS=1` it still beats DataBase (bigblue4 2.30 vs 3.93 s), so most of the gain
+   is the flat index. `check-sink` is still 47/47 bit-exact, and a single-thread run gives the same
+   PASS. The mutant set has two new ones for the parallel path, a pin offset written to the wrong
+   slot and net batches not chained; both are caught (16/16).
 3. **Step 4's verification needs restating** for the macro-rule change (Block 3 table).
 4. **No sw_only, `common/` or `pl/` code changed**, so `make test-regress` and `make -C pl test`
    are unaffected.
@@ -204,5 +229,5 @@ The ISPD2015 designs were not counted.
 ## Reproduce
 ```bash
 cd host/sw_flat && make check-sink                         # 47 designs, ~60 s, exit 0
-bash .claude/2_ARTIFACTS/scratch_45/sink_mutants.sh        # 14 mutants, ~1 min, exit 0
+bash .claude/2_ARTIFACTS/scratch_45/sink_mutants.sh        # 16 mutants, ~1 min, exit 0
 ```
