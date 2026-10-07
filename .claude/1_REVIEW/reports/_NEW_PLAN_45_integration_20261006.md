@@ -163,6 +163,12 @@ Each step: what, then how it is verified. Don't start a step until the previous 
   gradients stay in URAM in the resident loop; does not apply to chunks), per-phase cycle numbers.
 - From #42: D1; a contracted-hypergraph multilevel or Mt-KaHyPar (parked: neither pays at 1000
   iterations today).
+- **#47 (2026-10-06): mailbox redesign, an alternative to D1-C.** Duplicate external positions at the
+  producer: `iteration_update` streams each chunk's slots in order and emits shared slots into the
+  consumers' parcels. Collect becomes a sorted merge-add in the same stream. That removes the send
+  pass and the fold pass, not just the loop cycles. Model estimate for bigblue4: 2.49 M → 0.95–1.48 M
+  cycles per axis. Constrains step 4 (slot layout: a contiguous external tail is option M1) and step 6
+  (`iteration_update` gains the streams). → [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
 
 ## What would falsify this plan
 - If step 5 cannot get `sw_flat` within tolerance of sw_only, slot order (or the flat model) hides a
