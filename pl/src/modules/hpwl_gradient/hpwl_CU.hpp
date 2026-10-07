@@ -116,7 +116,7 @@ hpwl_CU_loop:
         pin_beats.write(pb);
         if (last_beat) net_bboxes.write(NetBbox{net_hi, net_lo});
 
-        int64_t beat_hpwl = 0;   // up to 8 nets: float->int64 per net, then an adder tree
+        int64_t beat_hpwl = 0;   // up to 8 nets: float->int64 per net, then an adder tree. Meow.
         for (int k = 0; k < pinrec::MAX_NETS_PER_BEAT; k++) {
             const bool live = k < nets_per_beat && !d.empty[k * degree];
             float net_hpwl;
