@@ -51,8 +51,7 @@ namespace plalgo {
 constexpr int BEAT_FIFO_DEPTH = PL_BEAT_FIFO_DEPTH;
 
 static void gradient_beat_loop(const pinrec::RecordBeat* records_DDR, int num_beats,
-                               const int degree_group_end_REG[pinrec::NET_DEGREES_PROCESSED],
-                               const int span_group_end_REG[pinrec::SPAN_GROUPS],
+                               const int group_end_REG[pinrec::NUM_GROUP_ENDS],
                                const float pos_URAM[pinrec::BANKS][ROWS_PER_BANK],
                                const float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX],
                                const LutPair lut_BRAM[EXP_LOOKUPS][GRAD_LUT_MAX], int lut_size,
@@ -70,7 +69,7 @@ static void gradient_beat_loop(const pinrec::RecordBeat* records_DDR, int num_be
 #pragma HLS STREAM variable=net_sums depth=16
 
     // Stage A: read record beats from DDR, gather positions from pos_URAM, compute each pin's bbox, sum the nets' HPWL
-    hpwl_CU(records_DDR, num_beats, degree_group_end_REG, span_group_end_REG, pos_URAM, offset_BRAM, offset_bits,   // hpwl_CU.hpp
+    hpwl_CU(records_DDR, num_beats, group_end_REG, pos_URAM, offset_BRAM, offset_bits,   // hpwl_CU.hpp
             pin_beats, net_bboxes, chunk_hpwl_fixed);
 
     // Stage B: read each pin's bbox, compute its exp terms, write four sum trees to sum_beats
@@ -116,11 +115,8 @@ static void hpwl_gradient_CU(
 #pragma HLS ARRAY_PARTITION variable=lut_BRAM complete dim=1
 
     // control registers for the beat loop, loaded once per chunk
-    int degree_group_end_REG[pinrec::NET_DEGREES_PROCESSED];
-#pragma HLS ARRAY_PARTITION variable=degree_group_end_REG complete dim=0
-
-    int span_group_end_REG[pinrec::SPAN_GROUPS]; 
-#pragma HLS ARRAY_PARTITION variable=span_group_end_REG complete dim=0
+    int group_end_REG[pinrec::NUM_GROUP_ENDS];
+#pragma HLS ARRAY_PARTITION variable=group_end_REG complete dim=0
 
     const bool chunked = num_chunks > 1;
     load_offset_table(offset_table_DDR, offset_table_size, offset_BRAM);   // record_gather.hpp
@@ -159,8 +155,8 @@ compute_pass:
         }
         refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);   // slot_arrays.hpp
         receive_external_positions(desc, external_slots_DDR, mailbox_DDR, pos_URAM);   // mailbox.hpp
-        load_group_ends(group_ends_DDR + k * pinrec::NUM_GROUP_ENDS, degree_group_end_REG, span_group_end_REG);   // record_gather.hpp
-        gradient_beat_loop(records_DDR + desc.record_beat_offset, desc.num_beats, degree_group_end_REG, span_group_end_REG, pos_URAM,   // this file
+        load_group_ends(group_ends_DDR + k * pinrec::NUM_GROUP_ENDS, group_end_REG);   // record_gather.hpp
+        gradient_beat_loop(records_DDR + desc.record_beat_offset, desc.num_beats, group_end_REG, pos_URAM,   // this file
                            offset_BRAM, lut_BRAM, lut_size, inv_lut_step, inv_gamma, grad_URAM,
                            desc.first_fixed_slot, offset_bits, chunk_hpwl_fixed);
         hpwl_sum += chunk_hpwl_fixed;

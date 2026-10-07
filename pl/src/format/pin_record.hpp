@@ -86,7 +86,7 @@ struct MacroPinRef {
 // in DDR and located by this descriptor. External slots (nodes owned by another chunk) are filled
 // from, and return their gradients to, one DDR mailbox laid out consumer-major: chunk k's inbox
 // holds its external slots as one parcel per owner. See beat_packer.hpp (encode_chunked).
-// A chunk's group ends (degree_group_end, then span_group_end) are a separate int32 table, NUM_GROUP_ENDS
+// A chunk's group ends (degree groups, then large-net span groups) are a separate int32 table, NUM_GROUP_ENDS
 // per chunk: inside ChunkDesc they would make it 1120 bits, past the 1024-bit m_axi maximum. Meow.
 constexpr int NUM_GROUP_ENDS = NET_DEGREES_PROCESSED + SPAN_GROUPS;   // 15 degree + 7 span group ends
 struct ChunkDesc {

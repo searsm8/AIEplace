@@ -17,7 +17,7 @@
 #ifndef PL_TIER1_STUB   // tier-1 harnesses supply an hls::stream stand-in (test/tier1_stub.hpp)
 #include <hls_stream.h>
 #endif
-#include "modules/hpwl_gradient/record_gather.hpp"   // decode_lanes, gather_pin_positions, resolve_degree, balanced_tree
+#include "modules/hpwl_gradient/record_gather.hpp"   // decode_lanes, gather_pin_positions, resolve_group, balanced_tree
 #include "modules/hpwl_gradient/dhar_tree.hpp"       // dhar_tree, MaxOp/MinOp
 
 namespace plalgo {
@@ -47,8 +47,7 @@ struct PinBeat {
 struct NetBbox { float hi, lo; };
 
 static void hpwl_CU(const pinrec::RecordBeat* records_DDR, int num_beats,
-                    const int degree_group_end_REG[pinrec::NET_DEGREES_PROCESSED],
-                    const int span_group_end_REG[pinrec::SPAN_GROUPS],
+                    const int group_end_REG[pinrec::NUM_GROUP_ENDS],
                     const float pos_URAM[pinrec::BANKS][ROWS_PER_BANK],
                     const float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX],
                     int offset_bits, hls::stream<PinBeat>& pin_beats, hls::stream<NetBbox>& net_bboxes,
@@ -61,9 +60,10 @@ static void hpwl_CU(const pinrec::RecordBeat* records_DDR, int num_beats,
 hpwl_CU_loop:
     for (int beat = 0; beat < num_beats; beat++) {
 #pragma HLS PIPELINE II=1
-        const bool large      = beat >= degree_group_end_REG[pinrec::NET_DEGREES_PROCESSED - 1];
-        const int  degree     = large ? pinrec::LANES : resolve_degree(beat, degree_group_end_REG);
-        const int  span       = resolve_span(beat, span_group_end_REG);
+        const int  group      = resolve_group(beat, group_end_REG);
+        const bool large      = group >= pinrec::NET_DEGREES_PROCESSED;
+        const int  degree     = large ? pinrec::LANES : group + pinrec::MIN_NET_DEGREE;
+        const int  span       = large ? group - pinrec::NET_DEGREES_PROCESSED + 2 : 2;
         const int  degree_idx = degree - pinrec::MIN_NET_DEGREE;
         const int  nets_per_beat = pinrec::LANES / degree;
         const DecodedLanes d = decode_lanes(records_DDR[beat], offset_bits);

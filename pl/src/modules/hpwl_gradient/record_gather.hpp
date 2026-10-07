@@ -32,44 +32,27 @@ load_offsets:
     }
 }
 
-// This chunk's NUM_GROUP_ENDS entries: where each degree group ends in the stream, then where each
-// large-net span group ends (cumulative stream positions, not counts). Meow.
-static void load_group_ends(const int32_t* group_ends_DDR, int degree_group_end_REG[pinrec::NET_DEGREES_PROCESSED],
-                            int span_group_end_REG[pinrec::SPAN_GROUPS]) {
+// This chunk's NUM_GROUP_ENDS entries: the beat at which each group ends in the stream (cumulative
+// positions, not counts). Groups 0..14 are small-net degrees 2..16; groups 15..21 are large-net
+// spans 2..8. Large nets are grouped by span, not degree: the packer may give a net more beats than
+// ceil(degree/16), and the device never needs a large net's degree. Meow.
+static void load_group_ends(const int32_t* group_ends_DDR, int group_end_REG[pinrec::NUM_GROUP_ENDS]) {
 load_group_ends:
     for (int k = 0; k < pinrec::NUM_GROUP_ENDS; k++) {
 #pragma HLS PIPELINE II=1
-        const int group_end = group_ends_DDR[k];
-        if (k < pinrec::NET_DEGREES_PROCESSED) degree_group_end_REG[k] = group_end;
-        else                                   span_group_end_REG[k - pinrec::NET_DEGREES_PROCESSED] = group_end;
+        group_end_REG[k] = group_ends_DDR[k];
     }
 }
 
-// Find the current degree by referencing the degree_group_end table.
-// Beats are ordered by degree. degree_group_end holds the beat count at which each degree group ends. 
-// Returns the current degree (2-96) for the current beat.
-static int resolve_degree(int beat, const int degree_group_end_REG[pinrec::NET_DEGREES_PROCESSED]) {
+// Which group the beat sits in: the number of group ends at or before it. 22 parallel compares
+// summed, no loop-carried state. Meow.
+static int resolve_group(int beat, const int group_end_REG[pinrec::NUM_GROUP_ENDS]) {
 #pragma HLS INLINE
-    int degree = pinrec::MIN_NET_DEGREE;
-    for (int k = 0; k < pinrec::NET_DEGREES_PROCESSED; k++) {
-        if (beat >= degree_group_end_REG[k]) degree++;
+    int group = 0;
+    for (int k = 0; k < pinrec::NUM_GROUP_ENDS; k++) {
+        if (beat >= group_end_REG[k]) group++;
     }
-    return degree;
-}
-
-
-// FOR LARGE NETS ONLY: With 16 lanes, multiple beats are required for nets of degree > 16. 
-// "Span" is the number of beats required to process a large net. E.g. nets of size 17 span 2 beats.
-// Beats are ordered by span.
-// span_group_end_REG holds the beat count at which each span group ends (written once at start).
-// Returns the current span being processed (2-8) given the current beat.
-static int resolve_span(int beat, const int span_group_end_REG[pinrec::SPAN_GROUPS]) {
-#pragma HLS INLINE
-    int span = 2;
-    for (int k = 0; k < pinrec::SPAN_GROUPS; k++) {
-        if (beat >= span_group_end_REG[k]) span++;
-    }
-    return span;
+    return group;
 }
 
 // Window form: a large net's per-beat values sit in a shift register of the last MAX_SPAN beats
