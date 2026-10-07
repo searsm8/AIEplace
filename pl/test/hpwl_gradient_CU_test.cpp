@@ -43,7 +43,7 @@ static DeviceAxis run_axis(const packer::Chunked& ch, size_t num_parsed, int axi
     std::vector<float> mailbox(dev.mailbox_size + 1, NAN);
     DeviceAxis out;
     out.out.resize(records.size());
-    hpwl_gradient_CU(dev.desc.data(), dev.group_counts.data(), (int)dev.desc.size(), records.data(), pos.data(), dev.macro_pins.data(),
+    hpwl_gradient_CU(dev.desc.data(), dev.group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(), dev.macro_pins.data(),
                      dev.external_slots.data(), dev.shared_slots.data(), dev.parcels.data(), mailbox.data(),
                      dev.offset_table.data(), (int)dev.offset_table.size(), lut.table.data(), lut.size,
                      out.out.data(), grad.data(), dev.offset_bits, 1.0f / golden::GAMMA, lut.inv_step);
@@ -131,17 +131,23 @@ int main(int argc, char** argv) {
     bool ok = true;
     packer::Chunked ch, tight;
     ok &= run_config("capacity=2048", nl, 2048, node_pos, lut, true, &ch);
-    // The bare cut here: FM packs this design into 18 chunks instead of 36, whose parcels need no
-    // padding, and [5] exists to exercise the padding path. Meow.
-    ok &= run_config("capacity=768", nl, 768, node_pos, lut, false, &tight, 0);
+    // Small chunks put a node's external entries near parcel boundaries, so the owner's
+    // gradient-collect sequence needs padding. Bare cut at 704 (44 chunks): 23 padding entries,
+    // 16 straddling pairs, 0.05 s to encode (scan 2026-10-06; 768 had 1 pair). FM finds more at
+    // small capacities (68 at 384) but takes 92 s here, too slow for tier 1. Meow.
+    ok &= run_config("capacity=704", nl, 704, node_pos, lut, false, &tight, 0);
     ok &= run_config("capacity=1M", nl, SLOT_CAPACITY, node_pos, lut, false);
 
-    // Small chunks put a node's external entries near parcel boundaries, so the owner's
-    // gradient-collect sequence needs padding; the tight config must actually exercise it. Meow.
+    // The device skips padding segments whole, so a straddling pair (one slot's collect entries
+    // < HAZARD_DISTANCE apart once padding is gone) is what a wrong skip would corrupt. Require
+    // plenty: half the measured 16, so a packer or fixture change can't silently disarm [5]. Meow.
+    constexpr long MIN_STRADDLING_PAIRS = 8;
     long padding = 0;
     for (const packer::Chunk& c : tight.chunks) padding += std::count(c.shared_local.begin(), c.shared_local.end(), -1);
-    printf("%s [5] coverage: %ld padding entries in the capacity=768 return sequences\n", padding > 0 ? "ok  " : "FAIL", padding);
-    ok &= padding > 0;
+    const long straddling = fixture::straddling_pairs(tight);
+    printf("%s [5] coverage: capacity=704 return sequences hold %ld padding entries, %ld straddling pairs (need >= %ld)\n",
+           straddling >= MIN_STRADDLING_PAIRS ? "ok  " : "FAIL", padding, straddling, MIN_STRADDLING_PAIRS);
+    ok &= straddling >= MIN_STRADDLING_PAIRS;
 
     // [5] coverage: the return path must carry real gradient. Share of |grad|^2 on nodes that are
     // external somewhere (their total needs the mailbox) -- a dropped return path would lose it.

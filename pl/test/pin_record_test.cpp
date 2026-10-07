@@ -28,7 +28,7 @@ int main() {
 
     check(BANKS == 1 << BANK_BITS, "[2] BANKS == 2^BANK_BITS");
     check(NET_DEGREES_PROCESSED == 15 && MAX_NETS_PER_BEAT == 8, "[2] degrees 2..16, 8 nets per beat");
-    check(GROUP_COUNTS == NET_DEGREES_PROCESSED + SPAN_GROUPS, "[2] GROUP_COUNTS = degree + span groups");
+    check(NUM_GROUP_ENDS == NET_DEGREES_PROCESSED + SPAN_GROUPS, "[2] NUM_GROUP_ENDS = degree + span groups");
     check(MAX_LARGE_NET_DEGREE % LANES == 0, "[2] the largest net fills whole beats");
     check(MAX_LARGE_NET_DEGREE / LANES <= MAX_SPAN, "[2] the largest net's minimum span is within MAX_SPAN");
     check(MAX_NET_EXTENT >= MAX_SPAN, "[2] a net's extent bound covers its maximum span");

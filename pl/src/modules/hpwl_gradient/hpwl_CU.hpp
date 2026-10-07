@@ -1,7 +1,7 @@
-#ifndef PL_HPWL_GRADIENT_PIN_BBOX_HPP
-#define PL_HPWL_GRADIENT_PIN_BBOX_HPP
+#ifndef PL_HPWL_GRADIENT_HPWL_CU_HPP
+#define PL_HPWL_GRADIENT_HPWL_CU_HPP
 
-// pin_bbox -- stage A of the WA-gradient beat loop (#41): record beat -> pin positions and each
+// hpwl_CU -- stage A of the WA-gradient beat loop (#41): record beat -> pin positions and each
 // pin's net bbox. Gathers the 16 pin positions from pos_URAM (bank-major, as hpwl_computer_v2),
 // runs the Dhar max/min trees, hands each lane its own net's (max, min) to stage B through a
 // stream, and writes the per-net HPWL by-product to DDR.
@@ -17,8 +17,8 @@
 #ifndef PL_TIER1_STUB   // tier-1 harnesses supply an hls::stream stand-in (test/tier1_stub.hpp)
 #include <hls_stream.h>
 #endif
-#include "modules/hpwl_gradient/record_gather.hpp"   // decode_lanes, gather_pin_positions, resolve_degree, reduce_window
-#include "modules/hpwl_gradient/dhar_tree.hpp"       // build_tree_outputs, MaxOp/MinOp, OutBeat
+#include "modules/hpwl_gradient/record_gather.hpp"   // decode_lanes, gather_pin_positions, resolve_degree, balanced_tree
+#include "modules/hpwl_gradient/dhar_tree.hpp"       // dhar_tree, MaxOp/MinOp, OutBeat
 
 namespace plalgo {
 
@@ -46,23 +46,23 @@ struct PinBeat {
 
 struct NetBbox { float hi, lo; };
 
-static void pin_bbox(const pinrec::RecordBeat* records_DDR, int num_beats,
-                     const int beat_count_REG[pinrec::NET_DEGREES_PROCESSED],
-                     const int span_count_REG[pinrec::SPAN_GROUPS],
-                     const float pos_URAM[pinrec::BANKS][ROWS_PER_BANK],
-                     const float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX],
-                     OutBeat* out_beats_DDR, int offset_bits,
-                     hls::stream<PinBeat>& pin_beats, hls::stream<NetBbox>& net_bboxes) {
+static void hpwl_CU(const pinrec::RecordBeat* records_DDR, int num_beats,
+                    const int degree_group_end_REG[pinrec::NET_DEGREES_PROCESSED],
+                    const int span_group_end_REG[pinrec::SPAN_GROUPS],
+                    const float pos_URAM[pinrec::BANKS][ROWS_PER_BANK],
+                    const float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX],
+                    OutBeat* out_beats_DDR, int offset_bits,
+                    hls::stream<PinBeat>& pin_beats, hls::stream<NetBbox>& net_bboxes) {
     float hi_window[pinrec::MAX_SPAN] = {}, lo_window[pinrec::MAX_SPAN] = {};   // newest first
 #pragma HLS ARRAY_PARTITION variable=hi_window complete dim=0
 #pragma HLS ARRAY_PARTITION variable=lo_window complete dim=0
     int beat_in_net = 0;
-pin_bbox_loop:
+hpwl_CU_loop:
     for (int beat = 0; beat < num_beats; beat++) {
 #pragma HLS PIPELINE II=1
-        const bool large      = beat >= beat_count_REG[pinrec::NET_DEGREES_PROCESSED - 1];
-        const int  degree     = large ? pinrec::LANES : resolve_degree(beat, beat_count_REG);
-        const int  span       = resolve_span(beat, span_count_REG);
+        const bool large      = beat >= degree_group_end_REG[pinrec::NET_DEGREES_PROCESSED - 1];
+        const int  degree     = large ? pinrec::LANES : resolve_degree(beat, degree_group_end_REG);
+        const int  span       = resolve_span(beat, span_group_end_REG);
         const int  degree_idx = degree - pinrec::MIN_NET_DEGREE;
         const int  nets_per_beat = pinrec::LANES / degree;
         const DecodedLanes d = decode_lanes(records_DDR[beat], offset_bits);
@@ -71,6 +71,7 @@ pin_bbox_loop:
         const bool last_beat  = large && !pad && beat_in_net == span - 1;
 
         PinBeat pb;
+        // restrict PinBeat to registers, not memory.
 #pragma HLS ARRAY_PARTITION variable=pb.x complete dim=0
 #pragma HLS ARRAY_PARTITION variable=pb.net_max complete dim=0
 #pragma HLS ARRAY_PARTITION variable=pb.net_min complete dim=0
@@ -83,12 +84,16 @@ pin_bbox_loop:
         for (int i = 1; i < pinrec::LANES; i++)
             if (large && d.empty[i]) pb.x[i] = pb.x[0];
 
-        TreeOutputs t = build_tree_outputs(pb.x);
-#pragma HLS ARRAY_PARTITION variable=t.max_deg complete dim=0
-#pragma HLS ARRAY_PARTITION variable=t.min_deg complete dim=0
+        // Every degree's per-net bbox at once (Dhar trees); degree_idx picks this beat's row. Meow.
+        float net_max[pinrec::NET_DEGREES_PROCESSED][pinrec::MAX_NETS_PER_BEAT];
+        float net_min[pinrec::NET_DEGREES_PROCESSED][pinrec::MAX_NETS_PER_BEAT];
+#pragma HLS ARRAY_PARTITION variable=net_max complete dim=0
+#pragma HLS ARRAY_PARTITION variable=net_min complete dim=0
+        dhar_tree<MaxOp>(pb.x, net_max);
+        dhar_tree<MinOp>(pb.x, net_min);
         for (int i = 0; i < pinrec::LANES; i++) {
-            pb.net_max[i]  = t.max_deg[degree_idx][i / degree];
-            pb.net_min[i]  = t.min_deg[degree_idx][i / degree];
+            pb.net_max[i]  = net_max[degree_idx][i / degree];
+            pb.net_min[i]  = net_min[degree_idx][i / degree];
             pb.slot_idx[i] = d.slot_idx[i];
             pb.empty[i]    = d.empty[i];
         }
@@ -100,11 +105,11 @@ pin_bbox_loop:
                 hi_window[w] = hi_window[w - 1];
                 lo_window[w] = lo_window[w - 1];
             }
-            hi_window[0] = t.max_deg[degree_idx][0];
-            lo_window[0] = t.min_deg[degree_idx][0];
+            hi_window[0] = net_max[degree_idx][0];
+            lo_window[0] = net_min[degree_idx][0];
         }
-        const float net_hi = reduce_window<MaxOp>(hi_window, span);
-        const float net_lo = reduce_window<MinOp>(lo_window, span);
+        const float net_hi = balanced_tree<MaxOp>(hi_window, span);
+        const float net_lo = balanced_tree<MinOp>(lo_window, span);
         if (large && !pad) beat_in_net = last_beat ? 0 : beat_in_net + 1;
 
         pin_beats.write(pb);
@@ -115,7 +120,7 @@ pin_bbox_loop:
         for (int k = 0; k < pinrec::MAX_NETS_PER_BEAT; k++) {
             const bool live = k < nets_per_beat && !d.empty[k * degree];
             if (large) out_beat.v[k] = k == 0 && last_beat ? net_hi - net_lo : 0.0f;
-            else       out_beat.v[k] = live ? t.max_deg[degree_idx][k] - t.min_deg[degree_idx][k] : 0.0f;
+            else       out_beat.v[k] = live ? net_max[degree_idx][k] - net_min[degree_idx][k] : 0.0f;
         }
         out_beats_DDR[beat] = out_beat;
     }
@@ -123,4 +128,4 @@ pin_bbox_loop:
 
 } // namespace plalgo
 
-#endif // PL_HPWL_GRADIENT_PIN_BBOX_HPP
+#endif // PL_HPWL_GRADIENT_HPWL_CU_HPP

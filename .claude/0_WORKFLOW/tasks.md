@@ -759,7 +759,13 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
       from beat_packer @ 41f2193, `test/` runner over one `HARNESSES` list) and `host/sw_flat/README.md`.
       `pin_record_test`: 13 checks pass; 4/4 header mutants make `make -C pl test` exit non-zero
       (`.claude/2_ARTIFACTS/scratch_45/pl_runner_mutants.sh`).
-- [ ] **Step 2: `hpwl_gradient_CU`. ← now.** Done 2026-10-06:
+- [x] **Step 2: `hpwl_gradient_CU` (2026-10-06).** Also `reduce_window` → `balanced_tree`,
+      `TreeOutputs` removed, calls annotated with their files (Mark). Open (Mark): de-duplicate
+      `PinBeat.net_max/net_min` (per-lane copies of per-net values, ~25% of the A→B FIFO width).
+- [ ] **Step 3: `FlatSink`. ← now.** Block 1 `host/sw_flat/flat_design.hpp` written (file facts
+      only, DataBase conventions). Open (Mark): DEF COVER = movable as in DataBase?; packer macro
+      rule → sw_only's `tagMovableMacros`?
+      Step 2 detail:
       - **2a restructure** (`8e94220`): 8 bring_up headers → `pl/src/modules/hpwl_gradient_CU.hpp` +
         `hpwl_gradient/` (7 files); all 44 definitions character-identical, legacy vs new outputs
         byte-identical on 5 designs (synthetic 6/38/1 chunks, adaptec1, mms/newblue3,
@@ -771,8 +777,23 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
         (`pl/synth/hpwl_gradient_CU/cosim`, capacity 160): hazard 4 PASS with 3 same-slot pairs
         straddling skipped padding; hazard 1 negative control FAILS in RTL (passes in C).
         ⚠️ The legacy co-sim's capacity 256 has **no** padding, so that path was never co-simulated before.
-      - Remaining: tier-1 real-design sweep over all 44; `make -C pl test`'s capacity-768 padding
-        coverage is 1 entry (load-bearing: it alone catches one mutant) — strengthen it.
+      - **44-design sweep** (`hpwl_gradient_CU_test` real mode, on-chip capacity): 44/44 pass,
+        rel_rms ≤ 8.2e-7, worst max_rel 4.18e-4 (mms/newblue3), HPWL bit-exact on all 88 axes; the
+        8 chunked designs at K=2–3 (`.claude/2_ARTIFACTS/scratch_45/sweep44.txt`).
+      - **Renames (Mark):** stage `pin_bbox` → `hpwl_CU`; `beat_count`/`span_(beat_)count` →
+        `degree_group_end`/`span_group_end` (cumulative stream positions, not counts),
+        `group_counts` → `group_ends`, `GROUP_COUNTS` → `NUM_GROUP_ENDS` — device and packer alike.
+        Byte-identical on the 5 designs.
+      - **Padding coverage strengthened:** `fixture::straddling_pairs()` (collect entries of one
+        slot < HAZARD_DISTANCE apart once padding is removed) shared by tier 1 and the co-sim bench.
+        Tier 1 now runs the bare cut at capacity 704 (23 padding entries, 16 pairs, need ≥ 8); was
+        768 with 1. Both padding mutants caught, the lane-list one on both axes. `make -C pl test` 8 s.
+      - Notes for later: (a) FM at tiny capacities is slow — 92 s to encode the 3 K-cell synthetic
+        design at capacity 384 (bare cut 0.05 s); irrelevant at 1 M slots, but a pathology. (b) The
+        bare cut at capacity ≤ 576 on that design reports "64 chunks, 50 external" — looks like a
+        fallback, not a partition. (c) Capacities not a multiple of 32 fail `check_chunked` with "no
+        chunk count fits". (d) Co-sim C-run numbers come from Vitis's compiler and differ from g++
+        (axis 1 rel_rms 5.191e-7 vs 4.924e-7, same code): compare like with like.
 - [ ] Steps 3–9 (`FlatSink` → whole-design slot layout → `sw_flat` →
       density path in slot order → compose → hardware → retire `/vck5000`), each with its
       verification, in the plan.

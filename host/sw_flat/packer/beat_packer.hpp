@@ -44,8 +44,8 @@
 //      position + offset, MACRO_PIN slots NaN (the device must refresh them).     [harness: NaN]
 //  S4  num_slots <= the device's slot capacity; otherwise the design must be chunked (C rules).
 //                                                                      [harness / check_chunked]
-// Small nets (degree 2..16), stream positions [0, beat_count[NET_DEGREES_PROCESSED-1])
-//  B1  Beats are grouped by degree, ascending and contiguous; beat_count[d-2] is the cumulative
+// Small nets (degree 2..16), stream positions [0, degree_group_end[NET_DEGREES_PROCESSED-1])
+//  B1  Beats are grouped by degree, ascending and contiguous; degree_group_end[d-2] is the cumulative
 //      count through degree d (bubbles included), which is how the device finds a beat's degree.
 //                                                                          [check: decode rule]
 //  B2  Net k of a degree-d beat occupies lanes [k*d, (k+1)*d) and is wholly live or wholly EMPTY;
@@ -57,9 +57,9 @@
 //      one row per beat; and a node appears in at most one net of a beat.              [check]
 //  B5  A movable node_slot is not touched again within HAZARD_DISTANCE stream positions (the
 //      scatter-add read-modify-write). A BUBBLE (all-EMPTY beat) is a position too.    [check]
-// Large nets (degree 17..96, cfg.large_nets only), positions [beat_count[last], total)
+// Large nets (degree 17..96, cfg.large_nets only), positions [degree_group_end[last], total)
 //  L1  Follow the small nets, grouped by span 2..MAX_SPAN, ascending and contiguous;
-//      span_beat_count[s-2] is cumulative through span s and continues beat_count. Its last entry
+//      span_group_end[s-2] is cumulative through span s and continues degree_group_end. Its last entry
 //      equals the stream length, even with large nets off (then every entry equals it).  [check]
 //  L2  One net per beat; a net's `span` real beats are consecutive apart from pads (L7), so the
 //      device finds net boundaries with a counter of real beats.            [check: decode rule]
@@ -78,7 +78,7 @@
 //  L7  A PAD is an all-EMPTY beat in this section, recognised by lane 0 being EMPTY (a real beat
 //      never has an EMPTY lane 0, L3). Pads are invisible to net accounting: the device neither
 //      counts them toward a net's span nor shifts them into its window. A pad may sit between
-//      nets or inside one; its position counts in span_beat_count for the group it sits in.
+//      nets or inside one; its position counts in span_group_end for the group it sits in.
 //                                                                                      [check]
 //  L8  A net's EXTENT -- positions from its first real beat to its last, pads inside included --
 //      is at most MAX_NET_EXTENT: the gradient's stage FIFOs hold one extent while a later stage
@@ -393,8 +393,8 @@ struct Encoded {
     long              uram_grad = 0, uram_pos = 0;
 
     std::vector<uint32_t> records[2];       // per axis, LANES per stream position
-    std::vector<int>  beat_count;           // [NET_DEGREES_PROCESSED] cumulative positions per degree
-    std::vector<int>  span_beat_count;      // [SPAN_GROUPS] cumulative positions per span, continuing beat_count
+    std::vector<int>  degree_group_end;     // [NET_DEGREES_PROCESSED] cumulative positions per degree
+    std::vector<int>  span_group_end;       // [SPAN_GROUPS] cumulative positions per span, continuing degree_group_end
     std::vector<float> offset_table[2];     // per axis
     std::vector<int>  net_at;               // [position * MAX_NETS_PER_BEAT + k] -> nl net index or NO_NET
 };
@@ -854,13 +854,13 @@ inline void encode_records(Encoded& enc) {
                         make_record((uint32_t)enc.node_slot[pins[p].node], (uint32_t)pins[p].offset_key[axis], enc.offset_bits);
         }
     }
-    enc.beat_count.assign(NET_DEGREES_PROCESSED, 0);
+    enc.degree_group_end.assign(NET_DEGREES_PROCESSED, 0);
     for (int degree : enc.issue_degree)
-        for (int i = degree - MIN_NET_DEGREE; i < NET_DEGREES_PROCESSED; i++) enc.beat_count[i]++;
-    enc.span_beat_count.assign(SPAN_GROUPS, enc.beat_count.back());
+        for (int i = degree - MIN_NET_DEGREE; i < NET_DEGREES_PROCESSED; i++) enc.degree_group_end[i]++;
+    enc.span_group_end.assign(SPAN_GROUPS, enc.degree_group_end.back());
     for (int span : enc.issue_span)
         if (span > 1)
-            for (int i = span - 2; i < SPAN_GROUPS; i++) enc.span_beat_count[i]++;
+            for (int i = span - 2; i < SPAN_GROUPS; i++) enc.span_group_end[i]++;
 }
 
 // Steps 1-5 on an Encoded whose work netlist, kinds, pin-node maps, unique_nodes and in_scope_nets
@@ -921,7 +921,7 @@ inline std::vector<MacroPinRef> macro_pin_refs(const Encoded& enc, int axis) {
 
 // ---------------------------------------------------------------------------------------------
 // Independent checker: decodes the record streams using only what the device sees (records,
-// beat_count, offset_bits, first_fixed_slot, offset tables) plus the slot->node inverse, and
+// degree_group_end, offset_bits, first_fixed_slot, offset tables) plus the slot->node inverse, and
 // requires the decoded geometry -- (parsed node, total offset) per pin -- to equal the in-scope
 // nets of the PARSED netlist, so a wrong pin-node rewrite is caught too. Every beat must also
 // satisfy the bank, hazard and adjacency rules. Meow.
@@ -970,11 +970,11 @@ inline void decode_stream(const Encoded& enc, const Config& cfg, Failures& fail,
 
     std::unordered_map<uint32_t, long> last_update;
     const long num_positions = (long)enc.records[0].size() / LANES;
-    const long small_positions = enc.beat_count.back();
-    if (enc.span_beat_count.back() != num_positions) fail("span_beat_count does not end the stream", num_positions);
+    const long small_positions = enc.degree_group_end.back();
+    if (enc.span_group_end.back() != num_positions) fail("span_group_end does not end the stream", num_positions);
     for (long position = 0; position < small_positions; position++) {
         int degree = MIN_NET_DEGREE;   // resolve_beat's rule, from cumulative counts
-        for (int count : enc.beat_count) if (position >= count) degree++;
+        for (int group_end : enc.degree_group_end) if (position >= group_end) degree++;
         const int nets_per_beat = LANES / degree;
         std::vector<uint32_t> beat_slots;
         for (int lane = 0; lane < LANES; lane++) {
@@ -1026,7 +1026,7 @@ inline void decode_stream(const Encoded& enc, const Config& cfg, Failures& fail,
         }
     }
     // Large-net section, decoded by the device's rules: a pad (lane 0 EMPTY) must be all EMPTY and
-    // is skipped; the span comes from span_beat_count at the net's first real beat, and the net
+    // is skipped; the span comes from span_group_end at the net's first real beat, and the net
     // ends after that many real beats. In a real beat EMPTY lanes only trail, and a node's pins are
     // adjacent with banks distinct (a node may recur in a later beat of the net). The hazard rule
     // continues from the small-net section's last_update. Meow.
@@ -1041,7 +1041,7 @@ inline void decode_stream(const Encoded& enc, const Config& cfg, Failures& fail,
     };
     for (skip_pads(); position < num_positions; skip_pads()) {
         int span = 2;
-        for (int count : enc.span_beat_count) if (position >= count) span++;
+        for (int group_end : enc.span_group_end) if (position >= group_end) span++;
         std::vector<GeomPin> net;
         const long first_real = position;
         for (int b = 0; b < span; b++, position++) {
@@ -1419,7 +1419,7 @@ inline std::vector<float> chunk_slot_positions(const Chunked& ch, int k, int axi
 // by the descriptors. All chunks share the global offset tables, hence one offset_bits. Meow.
 struct ChunkedDevice {
     std::vector<ChunkDesc>        desc;
-    std::vector<int32_t>          group_counts;   // GROUP_COUNTS per chunk: beat_count, then span_beat_count
+    std::vector<int32_t>          group_ends;     // NUM_GROUP_ENDS per chunk: degree_group_end, then span_group_end
     std::vector<uint32_t>         records;        // LANES per beat
     std::vector<float>            slot_images;    // slot-major, each chunk a whole number of beats
     std::vector<MacroPinRef>      macro_pins;
@@ -1442,8 +1442,8 @@ inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const st
         ChunkDesc d = {};
         d.record_beat_offset = (int32_t)(dev.records.size() / LANES);
         d.num_beats          = (int32_t)c.enc.issue.size();
-        dev.group_counts.insert(dev.group_counts.end(), c.enc.beat_count.begin(), c.enc.beat_count.end());
-        dev.group_counts.insert(dev.group_counts.end(), c.enc.span_beat_count.begin(), c.enc.span_beat_count.end());
+        dev.group_ends.insert(dev.group_ends.end(), c.enc.degree_group_end.begin(), c.enc.degree_group_end.end());
+        dev.group_ends.insert(dev.group_ends.end(), c.enc.span_group_end.begin(), c.enc.span_group_end.end());
         d.slot_beat_offset   = (int32_t)(dev.slot_images.size() / LANES);
         d.num_slot_beats     = (int32_t)(c.enc.num_slots / LANES);
         d.first_fixed_slot   = (int32_t)c.enc.first_fixed_slot;

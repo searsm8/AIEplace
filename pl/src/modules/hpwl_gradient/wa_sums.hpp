@@ -14,7 +14,7 @@
 // Owns lut_BRAM inside the beat-loop DATAFLOW region (read only). Meow.
 // From vck5000/bring_up/hpwl_gradient_computer/src/modules/wa_sums.hpp @ 41f2193 (#45). Meow.
 
-#include "modules/hpwl_gradient/pin_bbox.hpp"
+#include "modules/hpwl_gradient/hpwl_CU.hpp"
 
 namespace plalgo {
 
@@ -153,8 +153,8 @@ wa_sums_loop:
             Bp_window[0] = Bp_deg[degree_idx][0]; Cp_window[0] = Cp_deg[degree_idx][0];
             Bm_window[0] = Bm_deg[degree_idx][0]; Cm_window[0] = Cm_deg[degree_idx][0];
         }
-        const NetSum net_sum = {reduce_window<AddOp>(Bp_window, f.span), reduce_window<AddOp>(Cp_window, f.span),
-                                reduce_window<AddOp>(Bm_window, f.span), reduce_window<AddOp>(Cm_window, f.span)};
+        const NetSum net_sum = {balanced_tree<AddOp>(Bp_window, f.span), balanced_tree<AddOp>(Cp_window, f.span),
+                                balanced_tree<AddOp>(Bm_window, f.span), balanced_tree<AddOp>(Cm_window, f.span)};
 
         sum_beats.write(sb);
         if (f.last) net_sums.write(net_sum);

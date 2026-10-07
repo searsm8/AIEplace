@@ -8,7 +8,7 @@ using namespace plalgo;
 
 extern "C" void hpwl_gradient_CU_top(
         const pinrec::ChunkDesc*        chunks,
-        const int32_t*                  group_counts,
+        const int32_t*                  group_ends,
         int                             num_chunks,
         const pinrec::RecordBeat*       records,
         const pinrec::SlotBeat*         pos,
@@ -27,7 +27,7 @@ extern "C" void hpwl_gradient_CU_top(
         float                           inv_gamma,
         float                           inv_lut_step) {
 #pragma HLS INTERFACE m_axi port=chunks         bundle=gmem0 offset=slave depth=16
-#pragma HLS INTERFACE m_axi port=group_counts   bundle=gmem9 offset=slave max_widen_bitwidth=32 depth=1024
+#pragma HLS INTERFACE m_axi port=group_ends     bundle=gmem9 offset=slave max_widen_bitwidth=32 depth=1024
 #pragma HLS INTERFACE m_axi port=records        bundle=gmem1 offset=slave depth=1024
 #pragma HLS INTERFACE m_axi port=pos            bundle=gmem2 offset=slave depth=1024
 #pragma HLS INTERFACE m_axi port=macro_pins     bundle=gmem3 offset=slave depth=2048
@@ -40,7 +40,7 @@ extern "C" void hpwl_gradient_CU_top(
 #pragma HLS INTERFACE m_axi port=out_beats      bundle=gmem7 offset=slave depth=1024
 #pragma HLS INTERFACE m_axi port=grad           bundle=gmem8 offset=slave depth=1024
 
-    hpwl_gradient_CU(chunks, group_counts, num_chunks, records, pos, macro_pins, external_slots, shared_slots, parcels,
+    hpwl_gradient_CU(chunks, group_ends, num_chunks, records, pos, macro_pins, external_slots, shared_slots, parcels,
                      mailbox, offset_table, offset_table_size, exp_lut, lut_size, out_beats, grad,
                      offset_bits, inv_gamma, inv_lut_step);
 }

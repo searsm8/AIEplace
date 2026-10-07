@@ -2,7 +2,7 @@
 #define PL_HPWL_GRADIENT_RECORD_GATHER_HPP
 
 // record_gather -- reading the static pin-record stream (format/pin_record.hpp): where a beat sits
-// (degree group, large-net span, from the per-chunk group counts), decoding its 16 records, and the
+// (degree group, large-net span, from the per-chunk group ends), decoding its 16 records, and the
 // bank-major gather of 16 pin positions (node position + pin offset) from pos_URAM. Also the
 // window reduction a large net uses to combine its beats.
 // From vck5000/bring_up/hpwl_computer_v2 and hpwl_computer_v3 (modules/*.hpp) @ 41f2193 (#45).
@@ -32,34 +32,42 @@ load_offsets:
     }
 }
 
-// This chunk's GROUP_COUNTS entries: the degree-group counts, then the large-net span counts. Meow.
-static void load_group_counts(const int32_t* group_counts_DDR, int beat_count_REG[pinrec::NET_DEGREES_PROCESSED],
-                              int span_count_REG[pinrec::SPAN_GROUPS]) {
-load_group_counts:
-    for (int k = 0; k < pinrec::GROUP_COUNTS; k++) {
+// This chunk's NUM_GROUP_ENDS entries: where each degree group ends in the stream, then where each
+// large-net span group ends (cumulative stream positions, not counts). Meow.
+static void load_group_ends(const int32_t* group_ends_DDR, int degree_group_end_REG[pinrec::NET_DEGREES_PROCESSED],
+                            int span_group_end_REG[pinrec::SPAN_GROUPS]) {
+load_group_ends:
+    for (int k = 0; k < pinrec::NUM_GROUP_ENDS; k++) {
 #pragma HLS PIPELINE II=1
-        const int count = group_counts_DDR[k];
-        if (k < pinrec::NET_DEGREES_PROCESSED) beat_count_REG[k] = count;
-        else                                   span_count_REG[k - pinrec::NET_DEGREES_PROCESSED] = count;
+        const int group_end = group_ends_DDR[k];
+        if (k < pinrec::NET_DEGREES_PROCESSED) degree_group_end_REG[k] = group_end;
+        else                                   span_group_end_REG[k - pinrec::NET_DEGREES_PROCESSED] = group_end;
     }
 }
 
-// Find the current degree by referencing the beat_count table.
-static int resolve_degree(int beat, const int beat_count_REG[pinrec::NET_DEGREES_PROCESSED]) {
+// Find the current degree by referencing the degree_group_end table.
+// Beats are ordered by degree. degree_group_end holds the beat count at which each degree group ends. 
+// Returns the current degree (2-96) for the current beat.
+static int resolve_degree(int beat, const int degree_group_end_REG[pinrec::NET_DEGREES_PROCESSED]) {
 #pragma HLS INLINE
     int degree = pinrec::MIN_NET_DEGREE;
     for (int k = 0; k < pinrec::NET_DEGREES_PROCESSED; k++) {
-        if (beat >= beat_count_REG[k]) degree++;
+        if (beat >= degree_group_end_REG[k]) degree++;
     }
     return degree;
 }
 
-// FOR LARGE NETS ONLY: Find the current net's span by referencing the span_count table.
-static int resolve_span(int beat, const int span_count_REG[pinrec::SPAN_GROUPS]) {
+
+// FOR LARGE NETS ONLY: With 16 lanes, multiple beats are required for nets of degree > 16. 
+// "Span" is the number of beats required to process a large net. E.g. nets of size 17 span 2 beats.
+// Beats are ordered by span.
+// span_group_end_REG holds the beat count at which each span group ends (written once at start).
+// Returns the current span being processed (2-8) given the current beat.
+static int resolve_span(int beat, const int span_group_end_REG[pinrec::SPAN_GROUPS]) {
 #pragma HLS INLINE
     int span = 2;
     for (int k = 0; k < pinrec::SPAN_GROUPS; k++) {
-        if (beat >= span_count_REG[k]) span++;
+        if (beat >= span_group_end_REG[k]) span++;
     }
     return span;
 }
@@ -70,15 +78,20 @@ static int resolve_span(int beat, const int span_count_REG[pinrec::SPAN_GROUPS])
 // like the Dhar trees. Older entries take Op's identity (-inf for max, +inf for min, 0 for add);
 // window[0] would do for max and min but double-count in a sum. Meow.
 template <typename Op>
-static float reduce_window(const float window[pinrec::MAX_SPAN], int span) {
+static float balanced_tree(const float window[pinrec::MAX_SPAN], int span) {
 #pragma HLS INLINE
-    static_assert(pinrec::MAX_SPAN == 8, "reduce_window is a 3-level tree");
+    static_assert(pinrec::MAX_SPAN == 8, "balanced_tree is a 3-level tree");
     float v[pinrec::MAX_SPAN];
 #pragma HLS ARRAY_PARTITION variable=v complete dim=0
     for (int w = 0; w < pinrec::MAX_SPAN; w++) v[w] = w < span ? window[w] : Op::identity();
-    const float v_0_1 = Op::apply(v[0], v[1]), v_2_3 = Op::apply(v[2], v[3]);
-    const float v_4_5 = Op::apply(v[4], v[5]), v_6_7 = Op::apply(v[6], v[7]);
-    return Op::apply(Op::apply(v_0_1, v_2_3), Op::apply(v_4_5, v_6_7));
+    const float v_0_1 = Op::apply(v[0], v[1]);
+    const float v_2_3 = Op::apply(v[2], v[3]);
+    const float v_4_5 = Op::apply(v[4], v[5]);
+    const float v_6_7 = Op::apply(v[6], v[7]);
+
+    const float v_0_3 = Op::apply(v_0_1, v_2_3);
+    const float v_4_7 = Op::apply(v_4_5, v_6_7);
+    return Op::apply(v_0_3, v_4_7);
 }
 
 struct DecodedLanes {

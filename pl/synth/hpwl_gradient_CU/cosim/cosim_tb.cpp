@@ -3,7 +3,7 @@
 // design is split into chunks by a small capacity. Same golden and tolerance as tier 1. Exits 0 on
 // pass.
 //
-//   cosim_tb [CAPACITY [HAZARD]]    defaults 256, HAZARD_DISTANCE
+//   cosim_tb [CAPACITY [HAZARD]]    defaults 160, HAZARD_DISTANCE
 //
 // The mailbox loops skip padding segments whole (#42 option A), so across a skipped segment the
 // collect read-add-write is spaced only by the pipeline draining between two invocations of
@@ -30,22 +30,8 @@ template <class T> static std::vector<T> padded(std::vector<T> v, size_t depth) 
     return v;
 }
 
-// Collect entries of one slot that sit < HAZARD_DISTANCE apart once padding segments are removed:
-// the cases only the pipeline drain keeps safe. Meow.
-static long straddling_pairs(const packer::Chunked& ch) {
-    long pairs = 0;
-    for (const packer::Chunk& c : ch.chunks) {
-        std::vector<int> real_sequence;
-        for (int local : c.shared_local) if (local >= 0) real_sequence.push_back(c.enc.node_slot[local]);
-        for (size_t i = 0; i < real_sequence.size(); i++)
-            for (size_t j = i + 1; j < real_sequence.size() && j < i + pinrec::HAZARD_DISTANCE; j++)
-                pairs += real_sequence[i] == real_sequence[j];
-    }
-    return pairs;
-}
-
 int main(int argc, char** argv) {
-    const long capacity = argc > 1 ? std::atol(argv[1]) : 256;
+    const long capacity = argc > 1 ? std::atol(argv[1]) : 160;
     packer::Config cfg;
     if (argc > 2) cfg.hazard = std::atoi(argv[2]);
     const bool negative_control = cfg.hazard < pinrec::HAZARD_DISTANCE;
@@ -59,7 +45,7 @@ int main(int argc, char** argv) {
     long padding_segments = 0;
     for (const packer::Chunk& c : ch.chunks)
         for (const auto& parcel : c.parcels) padding_segments += parcel.offset < 0;
-    const long straddling = straddling_pairs(ch);
+    const long straddling = fixture::straddling_pairs(ch);
     printf("     capacity=%ld hazard=%d: %d chunks, %ld external, %zu large nets, %ld padding segments, %ld straddling pairs\n",
            capacity, cfg.hazard, ch.num_chunks, ch.externals, large_nets.size(), padding_segments, straddling);
     if (!negative_control && (ch.num_chunks < 2 || straddling == 0)) {
@@ -75,7 +61,7 @@ int main(int argc, char** argv) {
     for (int axis = 0; axis < 2; axis++) {
         const packer::ChunkedDevice dev = packer::chunked_device_arrays(ch, axis, node_pos[axis]);
         const bool fits = dev.records.size() / pinrec::LANES <= 1024 && dev.slot_images.size() / pinrec::LANES <= 1024 &&
-                          dev.desc.size() <= 16 && dev.group_counts.size() <= 1024 && dev.macro_pins.size() <= 2048 &&
+                          dev.desc.size() <= 16 && dev.group_ends.size() <= 1024 && dev.macro_pins.size() <= 2048 &&
                           dev.external_slots.size() <= 4096 && dev.shared_slots.size() <= 4096 && dev.parcels.size() <= 256 &&
                           dev.mailbox_size <= 4096;
         if (!fits) { printf("FAIL design exceeds a cosim port depth\n"); return 1; }
@@ -84,7 +70,7 @@ int main(int argc, char** argv) {
         std::vector<pinrec::SlotBeat> pos(1024);
         std::memcpy(pos.data(), dev.slot_images.data(), dev.slot_images.size() * sizeof(float));
         const std::vector<pinrec::ChunkDesc> desc = padded(dev.desc, 16);
-        const std::vector<int32_t> group_counts = padded(dev.group_counts, 1024);
+        const std::vector<int32_t> group_ends = padded(dev.group_ends, 1024);
         const std::vector<pinrec::MacroPinRef> refs = padded(dev.macro_pins, 2048);
         const std::vector<int32_t> external_slots = padded(dev.external_slots, 4096), shared_slots = padded(dev.shared_slots, 4096);
         const std::vector<pinrec::ParcelRef> parcels = padded(dev.parcels, 256);
@@ -92,7 +78,7 @@ int main(int argc, char** argv) {
         std::vector<float> mailbox(4096, NAN);
         std::vector<plalgo::OutBeat> out(1024);
         std::vector<pinrec::SlotBeat> grad(1024);
-        hpwl_gradient_CU_top(desc.data(), group_counts.data(), (int)dev.desc.size(), records.data(), pos.data(), refs.data(),
+        hpwl_gradient_CU_top(desc.data(), group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(), refs.data(),
                              external_slots.data(), shared_slots.data(), parcels.data(), mailbox.data(), offsets.data(),
                              (int)dev.offset_table.size(), lut_table.data(), lut.size, out.data(), grad.data(),
                              dev.offset_bits, 1.0f / golden::GAMMA, lut.inv_step);
