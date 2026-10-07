@@ -33,7 +33,8 @@ What kept them apart:
 - **One chunk-capable gradient module, `hpwl_gradient_CU`**, grown from `hpwl_gradient_computer_v2`.
   An unchunked variant may come later, as an optimization.
 - **`hpwl_computer*` were stepping stones** to the gradient computer. They are not carried forward
-  (the gradient module already emits per-net HPWL as a by-product, at the same `v_k`).
+  (the gradient module already emits HPWL as a by-product, at the same `v_k` -- since 2026-10-06 the
+  int64 fixed-point total per axis, not a per-net DDR stream).
 - **Both partitioners stay**, switched by a config option (`partition_fm_passes`: 1 = FM, 0 = bare
   cut — already in `beat_packer::Config`; the host must expose it).
 - **Start fresh in `/AIEplace/pl`.** Pieces from `vck5000/bring_up` and `vck5000/pl` are brought in

@@ -22,7 +22,7 @@
 extern "C" void hpwl_gradient_CU_top(
         const pinrec::ChunkDesc*, const int32_t*, int, const pinrec::RecordBeat*, const pinrec::SlotBeat*, const pinrec::MacroPinRef*,
         const int32_t*, const int32_t*, const pinrec::ParcelRef*, float*, const float*, int, const float*, int,
-        plalgo::OutBeat*, pinrec::SlotBeat*, int, float, float);
+        pinrec::SlotBeat*, int, float, float, int64_t*);
 
 // Co-simulation copies `depth` elements from every pointer (cosim_top.cpp): pad to it. Meow.
 template <class T> static std::vector<T> padded(std::vector<T> v, size_t depth) {
@@ -76,12 +76,12 @@ int main(int argc, char** argv) {
         const std::vector<pinrec::ParcelRef> parcels = padded(dev.parcels, 256);
         const std::vector<float> offsets = padded(dev.offset_table, 1024);
         std::vector<float> mailbox(4096, NAN);
-        std::vector<plalgo::OutBeat> out(1024);
         std::vector<pinrec::SlotBeat> grad(1024);
+        int64_t hpwl_total_fixed = -1;
         hpwl_gradient_CU_top(desc.data(), group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(), refs.data(),
                              external_slots.data(), shared_slots.data(), parcels.data(), mailbox.data(), offsets.data(),
-                             (int)dev.offset_table.size(), lut_table.data(), lut.size, out.data(), grad.data(),
-                             dev.offset_bits, 1.0f / golden::GAMMA, lut.inv_step);
+                             (int)dev.offset_table.size(), lut_table.data(), lut.size, grad.data(),
+                             dev.offset_bits, 1.0f / golden::GAMMA, lut.inv_step, &hpwl_total_fixed);
 
         const float* grad_slots = reinterpret_cast<const float*>(grad.data());
         std::vector<float> node_grad(nl.movable.size(), NAN);
@@ -98,6 +98,10 @@ int main(int argc, char** argv) {
         const bool s_ok = s.rel_rms < golden::STRUCT_RMS_TOL && s.max_rel < golden::STRUCT_MAX_TOL;
         printf("%s axis %d: rel_rms=%.3e max_rel=%.3e\n", s_ok ? "ok  " : "FAIL", axis, s.rel_rms, s.max_rel);
         ok &= s_ok;
+        const int64_t hpwl_want = golden::hpwl_total_fixed(nl, axis, node_pos[axis], large_nets);
+        printf("%s axis %d: HPWL total device=%lld golden=%lld\n", hpwl_total_fixed == hpwl_want ? "ok  " : "FAIL", axis,
+               (long long)hpwl_total_fixed, (long long)hpwl_want);
+        ok &= hpwl_total_fixed == hpwl_want;
     }
     printf("%s: hpwl_gradient_CU co-sim, capacity=%ld hazard=%d\n", ok ? "PASS" : "FAIL", capacity, cfg.hazard);
     return ok ? 0 : 1;

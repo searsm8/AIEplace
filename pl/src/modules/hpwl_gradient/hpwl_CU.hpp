@@ -4,7 +4,7 @@
 // hpwl_CU -- stage A of the WA-gradient beat loop (#41): record beat -> pin positions and each
 // pin's net bbox. Gathers the 16 pin positions from pos_URAM (bank-major, as hpwl_computer_v2),
 // runs the Dhar max/min trees, hands each lane its own net's (max, min) to stage B through a
-// stream, and writes the per-net HPWL by-product to DDR.
+// stream, and sums every net's HPWL into hpwl_total_fixed (pinrec::hpwl_to_fixed units).
 //
 // Large nets (17..96 pins) are hpwl_computer_v2's path: a window of the last MAX_SPAN beats'
 // degree-16 max/min, reduced on the net's last real beat. That bbox is known only then, so it goes
@@ -18,7 +18,7 @@
 #include <hls_stream.h>
 #endif
 #include "modules/hpwl_gradient/record_gather.hpp"   // decode_lanes, gather_pin_positions, resolve_degree, balanced_tree
-#include "modules/hpwl_gradient/dhar_tree.hpp"       // dhar_tree, MaxOp/MinOp, OutBeat
+#include "modules/hpwl_gradient/dhar_tree.hpp"       // dhar_tree, MaxOp/MinOp
 
 namespace plalgo {
 
@@ -51,12 +51,13 @@ static void hpwl_CU(const pinrec::RecordBeat* records_DDR, int num_beats,
                     const int span_group_end_REG[pinrec::SPAN_GROUPS],
                     const float pos_URAM[pinrec::BANKS][ROWS_PER_BANK],
                     const float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX],
-                    OutBeat* out_beats_DDR, int offset_bits,
-                    hls::stream<PinBeat>& pin_beats, hls::stream<NetBbox>& net_bboxes) {
+                    int offset_bits, hls::stream<PinBeat>& pin_beats, hls::stream<NetBbox>& net_bboxes,
+                    int64_t& hpwl_total_fixed) {
     float hi_window[pinrec::MAX_SPAN] = {}, lo_window[pinrec::MAX_SPAN] = {};   // newest first
 #pragma HLS ARRAY_PARTITION variable=hi_window complete dim=0
 #pragma HLS ARRAY_PARTITION variable=lo_window complete dim=0
     int beat_in_net = 0;
+    int64_t hpwl_sum = 0;   // integer add: one cycle, so no partial sums needed for II=1. Meow.
 hpwl_CU_loop:
     for (int beat = 0; beat < num_beats; beat++) {
 #pragma HLS PIPELINE II=1
@@ -115,15 +116,17 @@ hpwl_CU_loop:
         pin_beats.write(pb);
         if (last_beat) net_bboxes.write(NetBbox{net_hi, net_lo});
 
-        OutBeat out_beat;   // HPWL by-product, as hpwl_computer_v2
-#pragma HLS ARRAY_PARTITION variable=out_beat.v complete dim=0
+        int64_t beat_hpwl = 0;   // up to 8 nets: float->int64 per net, then an adder tree
         for (int k = 0; k < pinrec::MAX_NETS_PER_BEAT; k++) {
             const bool live = k < nets_per_beat && !d.empty[k * degree];
-            if (large) out_beat.v[k] = k == 0 && last_beat ? net_hi - net_lo : 0.0f;
-            else       out_beat.v[k] = live ? net_max[degree_idx][k] - net_min[degree_idx][k] : 0.0f;
+            float net_hpwl;
+            if (large) net_hpwl = k == 0 && last_beat ? net_hi - net_lo : 0.0f;
+            else       net_hpwl = live ? net_max[degree_idx][k] - net_min[degree_idx][k] : 0.0f;
+            beat_hpwl += pinrec::hpwl_to_fixed(net_hpwl);
         }
-        out_beats_DDR[beat] = out_beat;
+        hpwl_sum += beat_hpwl;
     }
+    hpwl_total_fixed = hpwl_sum;
 }
 
 } // namespace plalgo

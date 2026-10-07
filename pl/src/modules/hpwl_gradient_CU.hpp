@@ -1,7 +1,7 @@
 #ifndef PL_HPWL_GRADIENT_CU_HPP
 #define PL_HPWL_GRADIENT_CU_HPP
 
-// hpwl_gradient_CU -- the WA-wirelength gradient per node (and per-net HPWL as a by-product) from
+// hpwl_gradient_CU -- the WA-wirelength gradient per node (and the total HPWL as a by-product) from
 // the static pin-record stream, one axis per call, for a design split into chunks of at most
 // SLOT_CAPACITY on-chip slots (one chunk when it fits). Same math as sw_only
 // computeHpwlPartials_CPU (Partials.cpp): exponents shifted by the net's bbox, exp from the host
@@ -15,7 +15,7 @@
 //                 chunks computed for its nodes, fold macro pins, drain
 //
 // The beat loop is three stages in a DATAFLOW region, joined by streams (hpwl_gradient/):
-//   hpwl_CU     gather -> bbox trees -> each pin's net (max, min); HPWL out
+//   hpwl_CU     gather -> bbox trees -> each pin's net (max, min); HPWL total
 //   wa_sums      per-pin exp terms (Dhar Fig. 5) -> four sum trees (Fig. 6/7)
 //   wa_gradient  per-pin combiner (Fig. 8, eq. 4) -> merge -> scatter-add
 //
@@ -33,7 +33,7 @@
 
 namespace plalgo {
 
-// The record stream -> scatter-added gradient (and per-net HPWL), against positions already
+// The record stream -> scatter-added gradient (and the chunk's total HPWL), against positions already
 // resident in pos_URAM and a grad_URAM the caller has zeroed.
 // Deadlock bound: B reads a large net's first beat, then blocks on net_bboxes until A has finished
 // the net's last real beat; likewise C on net_sums. A writes the net's bbox `skew` pipeline states
@@ -58,7 +58,7 @@ static void gradient_beat_loop(const pinrec::RecordBeat* records_DDR, int num_be
                                const LutPair lut_BRAM[EXP_LOOKUPS][GRAD_LUT_MAX], int lut_size,
                                float inv_lut_step, float inv_gamma,
                                float grad_URAM[pinrec::BANKS][ROWS_PER_BANK], int first_fixed_slot,
-                               OutBeat* out_beats_DDR, int offset_bits) {
+                               int offset_bits, int64_t& chunk_hpwl_fixed) {
 #pragma HLS DATAFLOW // three stages working simultaneously, joined by streams
     hls::stream<PinBeat> pin_beats;  // stream between Stage A (hpwl_CU) and Stage B (wa_sums)
     hls::stream<SumBeat> sum_beats;  // stream between Stage B (wa_sums) and Stage C (wa_gradient)
@@ -69,9 +69,9 @@ static void gradient_beat_loop(const pinrec::RecordBeat* records_DDR, int num_be
 #pragma HLS STREAM variable=net_bboxes depth=16
 #pragma HLS STREAM variable=net_sums depth=16
 
-    // Stage A: read record beats from DDR, gather positions from pos_URAM, compute each pin's bbox and HPWL, write HPWL to DDR
-    hpwl_CU(records_DDR, num_beats, degree_group_end_REG, span_group_end_REG, pos_URAM, offset_BRAM, out_beats_DDR, offset_bits,   // hpwl_CU.hpp
-            pin_beats, net_bboxes);
+    // Stage A: read record beats from DDR, gather positions from pos_URAM, compute each pin's bbox, sum the nets' HPWL
+    hpwl_CU(records_DDR, num_beats, degree_group_end_REG, span_group_end_REG, pos_URAM, offset_BRAM, offset_bits,   // hpwl_CU.hpp
+            pin_beats, net_bboxes, chunk_hpwl_fixed);
 
     // Stage B: read each pin's bbox, compute its exp terms, write four sum trees to sum_beats
     wa_sums(pin_beats, net_bboxes, num_beats, lut_BRAM, lut_size, inv_lut_step, sum_beats, net_sums);   // wa_sums.hpp
@@ -95,11 +95,11 @@ static void hpwl_gradient_CU(
         int                             offset_table_size,
         const float*                    exp_lut_DDR,       // [lut_size] exp(-t) table
         int                             lut_size,
-        OutBeat*                        out_beats_DDR,     // per-net HPWL, same layout as records_DDR
         pinrec::SlotBeat*               grad_DDR,          // same layout as pos_DDR; movable slots written
         int                             offset_bits,
         float                           inv_gamma,
-        float                           inv_lut_step) {
+        float                           inv_lut_step,
+        int64_t&                        hpwl_total_fixed) { // this axis, pinrec::hpwl_to_fixed units
 
     ONCHIP_ARRAY float pos_URAM[pinrec::BANKS][ROWS_PER_BANK];
 #pragma HLS ARRAY_PARTITION variable=pos_URAM complete dim=1
@@ -134,10 +134,12 @@ send_pass:
         send_external_positions(desc, parcels_DDR, shared_slots_DDR, pos_URAM, mailbox_DDR);   // mailbox.hpp
     }
 
+    int64_t hpwl_sum = 0;
 compute_pass:
     for (int k = 0; k < num_chunks; k++) {
         const pinrec::ChunkDesc desc = chunks_DDR[k];
         const int movable_slot_beats = desc.first_fixed_slot / pinrec::LANES;
+        int64_t chunk_hpwl_fixed;
         // Positions in with grad_URAM zeroed in the same pass (separate arrays, no extra cycles). Meow.
         const pinrec::SlotBeat* chunk_pos_DDR = pos_DDR + desc.slot_beat_offset;
     load_pos_zero_grad:
@@ -160,11 +162,13 @@ compute_pass:
         load_group_ends(group_ends_DDR + k * pinrec::NUM_GROUP_ENDS, degree_group_end_REG, span_group_end_REG);   // record_gather.hpp
         gradient_beat_loop(records_DDR + desc.record_beat_offset, desc.num_beats, degree_group_end_REG, span_group_end_REG, pos_URAM,   // this file
                            offset_BRAM, lut_BRAM, lut_size, inv_lut_step, inv_gamma, grad_URAM,
-                           desc.first_fixed_slot, out_beats_DDR + desc.record_beat_offset, offset_bits);
+                           desc.first_fixed_slot, offset_bits, chunk_hpwl_fixed);
+        hpwl_sum += chunk_hpwl_fixed;
         if (chunked) return_external_gradients(desc, external_slots_DDR, grad_URAM, mailbox_DDR);   // mailbox.hpp
         else         fold_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, grad_URAM, pos_URAM);   // slot_arrays.hpp
         drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR + desc.slot_beat_offset);   // slot_arrays.hpp
     }
+    hpwl_total_fixed = hpwl_sum;
 
 fold_pass:
     for (int j = 0; j < num_chunks && chunked; j++) {

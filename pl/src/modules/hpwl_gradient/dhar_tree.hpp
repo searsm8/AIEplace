@@ -18,10 +18,6 @@ using pinrec::MIN_NET_DEGREE;
 using pinrec::NET_DEGREES_PROCESSED;
 using pinrec::MAX_NETS_PER_BEAT;
 
-struct OutBeat {
-    float v[MAX_NETS_PER_BEAT];
-};
-
 // identity(): the value that leaves apply() unchanged, for masked tree inputs. Meow.
 struct MaxOp {
     static inline float apply(float a, float b) { return a > b ? a : b; }

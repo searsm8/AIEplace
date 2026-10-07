@@ -110,6 +110,29 @@ inline float span(const packer::Netlist& nl, int net, int axis, const std::vecto
     return hi - lo;
 }
 
+// The device's HPWL total over the same nets as wa_gradient: per-net float span, quantized and summed
+// as integers, so bit-exact whatever order the device adds in. `exact` gets the unquantized double
+// sum, to bound the quantization itself. Meow.
+inline int64_t hpwl_total_fixed(const packer::Netlist& nl, int axis, const std::vector<float>& node_pos,
+                                const std::vector<int>& large_nets, double* exact = nullptr, long* num_nets = nullptr) {
+    std::vector<char> keep(nl.nets.size(), 0);
+    for (size_t n = 0; n < nl.nets.size(); n++) keep[n] = packer::in_scope(nl.nets[n]);
+    for (int n : large_nets) keep[n] = 1;
+    int64_t total = 0;
+    double sum = 0;
+    long count = 0;
+    for (size_t n = 0; n < nl.nets.size(); n++) {
+        if (!keep[n]) continue;
+        const float net_hpwl = span(nl, (int)n, axis, node_pos);
+        total += pinrec::hpwl_to_fixed(net_hpwl);
+        sum += net_hpwl;
+        count++;
+    }
+    if (exact) *exact = sum;
+    if (num_nets) *num_nets = count;
+    return total;
+}
+
 } // namespace golden
 
 #endif // WA_GRADIENT_GOLDEN_HPP

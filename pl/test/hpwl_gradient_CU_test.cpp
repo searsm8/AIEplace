@@ -11,7 +11,8 @@
 //                  capacity 2048 (several chunks) and capacity 1M (one chunk, no mailbox)
 //   [2] LUT BUDGET vs true-exp golden, rel_rms < 1e-4, max_rel < 1e-3 (chunked config)
 //   [3] ZERO       movable nodes with no in-scope pin get exactly 0
-//   [4] HPWL       the per-net HPWL by-product, bit-exact
+//   [4] HPWL       the total-HPWL by-product, bit-exact vs the golden's integer sum; the golden's
+//                  quantization within 2^-HPWL_FRAC_BITS per net of the exact double sum
 //   [5] COVERAGE   several chunks; external cells and macro pins exist; external gradients carry
 //                  a real share of the total (a dropped return path would be visible)
 //
@@ -27,7 +28,7 @@
 using namespace plalgo;
 
 struct DeviceAxis {
-    std::vector<OutBeat> out;
+    int64_t hpwl_total_fixed = -1;
     std::vector<float>   node_grad;   // per parsed node
 };
 
@@ -42,11 +43,10 @@ static DeviceAxis run_axis(const packer::Chunked& ch, size_t num_parsed, int axi
     for (auto& beat : grad) for (float& v : beat.v) v = NAN;     // unwritten slots stay visibly wrong
     std::vector<float> mailbox(dev.mailbox_size + 1, NAN);
     DeviceAxis out;
-    out.out.resize(records.size());
     hpwl_gradient_CU(dev.desc.data(), dev.group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(), dev.macro_pins.data(),
                      dev.external_slots.data(), dev.shared_slots.data(), dev.parcels.data(), mailbox.data(),
                      dev.offset_table.data(), (int)dev.offset_table.size(), lut.table.data(), lut.size,
-                     out.out.data(), grad.data(), dev.offset_bits, 1.0f / golden::GAMMA, lut.inv_step);
+                     grad.data(), dev.offset_bits, 1.0f / golden::GAMMA, lut.inv_step, out.hpwl_total_fixed);
 
     const float* grad_slots = reinterpret_cast<const float*>(grad.data());
     out.node_grad.assign(num_parsed, NAN);
@@ -89,18 +89,14 @@ static bool run_config(const char* label, const packer::Netlist& nl, long capaci
             printf("%s [2] [%s] axis %d LUT budget: rel_rms=%.3e max_rel=%.3e\n", l_ok ? "ok  " : "FAIL", label, axis, l.rel_rms, l.max_rel);
             ok &= l_ok;
         }
-        long hpwl_bad = 0, base = 0;
-        for (const packer::Chunk& c : ch.chunks) {
-            for (size_t position = 0; position < c.enc.issue.size(); position++)
-                for (int k = 0; k < pinrec::MAX_NETS_PER_BEAT; k++) {
-                    const int local = c.enc.net_at[position * pinrec::MAX_NETS_PER_BEAT + k];
-                    const float want = local == packer::NO_NET ? 0.0f : golden::span(nl, c.net_global[local], axis, node_pos[axis]);
-                    hpwl_bad += !(dev.out[base + position].v[k] == want);
-                }
-            base += (long)c.enc.issue.size();
-        }
-        printf("%s [4] [%s] axis %d HPWL by-product: %ld mismatches\n", hpwl_bad ? "FAIL" : "ok  ", label, axis, hpwl_bad);
-        ok &= hpwl_bad == 0;
+        double hpwl_exact = 0;
+        long hpwl_nets = 0;
+        const int64_t hpwl_want = golden::hpwl_total_fixed(nl, axis, node_pos[axis], large_nets, &hpwl_exact, &hpwl_nets);
+        const double hpwl_quant_err = std::fabs((double)hpwl_want / (1 << pinrec::HPWL_FRAC_BITS) - hpwl_exact);
+        const bool hpwl_ok = dev.hpwl_total_fixed == hpwl_want && hpwl_quant_err <= hpwl_nets * std::ldexp(1.0, -pinrec::HPWL_FRAC_BITS);
+        printf("%s [4] [%s] axis %d HPWL total: device=%lld golden=%lld (%ld nets, quantization %.2e)\n", hpwl_ok ? "ok  " : "FAIL",
+               label, axis, (long long)dev.hpwl_total_fixed, (long long)hpwl_want, hpwl_nets, hpwl_quant_err);
+        ok &= hpwl_ok;
 
         long untouched = 0, nonzero = 0;
         for (size_t node = 0; node < nl.movable.size(); node++)

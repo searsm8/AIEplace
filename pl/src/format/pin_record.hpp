@@ -43,6 +43,15 @@ constexpr uint32_t EMPTY_RECORD          = 0xFFFFFFFFu;
 // The host schedules to it; the device declares it to HLS as the true dependence distance. Meow.
 constexpr int      HAZARD_DISTANCE       = 4;
 
+// The device's total HPWL (one axis) is an int64 sum of each net's float HPWL in units of
+// 2^-HPWL_FRAC_BITS. Integer addition is associative, so the total is bit-exact whatever the
+// chunking or summation order, which a float or double sum is not; it feeds the lambda schedule,
+// a control path. Range 2^39 (5.5e11) per axis; quantization <= 2^-24 per net. Meow.
+constexpr int      HPWL_FRAC_BITS        = 24;
+inline int64_t hpwl_to_fixed(float net_hpwl) {   // truncates; exact for net_hpwl >= 1
+    return (int64_t)(net_hpwl * (float)(1 << HPWL_FRAC_BITS));
+}
+
 struct RecordBeat { uint32_t r[LANES]; };   // one 512-bit DDR beat of the static stream
 struct SlotBeat   { float    v[LANES]; };   // one 512-bit DDR beat of a slot-major array
 
