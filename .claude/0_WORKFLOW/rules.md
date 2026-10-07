@@ -38,6 +38,11 @@ If a rule stops being true, flag it for deletion and tell Mark — a stale rule 
   first: backticks run as commands and vanish from the text, and `$VAR` expands to empty, even inside
   a quoted heredoc. Write or modify files with the Write/Edit tools; if a script is needed, Write it
   to a file and run the file. (Promoted from noteToSelf 2026-10-02: hit 2026-09-22 ×5, 10-02 ×2, 10-02 ×4.)
+- **On `\\wsl.localhost\…`, one Edit/Write per batch, and never alongside a command.** Edits in the
+  same parallel batch, even to different files, or batched with a `make` that reads the file, fail
+  with `EUNKNOWN … ftruncate (… EPERM … rename …tmp…)`, and **that edit has not landed**. Re-grep to
+  see what did land, then retry it alone; a lone retry has always worked. (Promoted from noteToSelf
+  2026-10-07: hit 10-02 ×4, 10-06 ×4, 10-07 ×3, the last with two different files in one batch.)
 
 ## Verification — a module isn't done until it's verified
 - **Every PL module is verified offline against a golden before it goes near the device.**
