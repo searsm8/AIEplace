@@ -94,7 +94,7 @@ Subtitle: AIEplace #47, HPWL-gradient kernel on the VCK5000 PL. B1–B3 built an
   wraps over many times).
 - **Packer checker** replays every block's ops on **node ids**: every tail slot must receive exactly
   the right node, and every merge must add into that node's owner slot.
-- **Mutants:** 14 deliberate bugs across B1–B3 (4 + 4 + 6), all caught.
+- **Mutants:** 15 deliberate bugs across B1–B3 (4 + 4 + 7), all caught.
 - **C-synthesis:** every loop II = 1, estimate 3.48 ns (was 3.62 ns with the mailbox).
 - **RTL co-sim:** PASS at 16 chunks, with 361 send and 542 merge back-to-back row-buffer uses; the hazard-1 negative control FAILS as required.
 
