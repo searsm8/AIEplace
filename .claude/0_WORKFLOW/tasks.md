@@ -1,7 +1,7 @@
 # Tasks
 
-**Active Task (2026-10-07): #45 step 4 — whole-design slot layout (steps 1–3 done).** All decisions
-are in (D1–D7, second round); see the plan. Step 3 report: [[REPORT_45_flat_sink_20261007.md]].
+**Active Task (2026-10-09): #45 step 5 — `sw_flat`, CPU phase-1 GP on the slot layout (steps 1–4
+done).** All decisions are in (D1–D7, second round); see the plan. Step 4 report: [[REPORT_45_slot_layout_20261009.md]].
 → [[_NEW_PLAN_45_integration_20261006.md]]
 
 Open work, one section per task. **Status lives here; evidence lives in a
@@ -746,7 +746,7 @@ hardware routes; one chunk-capable `hpwl_gradient_CU` (from `hpwl_gradient_compu
 `hpwl_computer*` retired as stepping stones; both partitioners behind `partition_fm_passes`; start
 fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration.
 
-**State:** steps 1–3 done; step 4 next. Done today as low-hanging fruit: gradient `max_rel` 1e-3
+**State:** steps 1–4 done; step 5 next. Done today as low-hanging fruit: gradient `max_rel` 1e-3
 (`vck5000/test/wa_gradient_golden.hpp`; newblue3 / mms/bigblue4 / newblue7 now pass, rel_rms still
 1e-5-bounded); `make test` 21/21 PASS.
 - [x] **Decisions, second round (Mark, 2026-10-06):** D1 mailbox A now / C later / B fallback; D2
@@ -813,10 +813,17 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
       their macro-pin fold goes. Other 6 designs within 60 cycles; #47's bigblue4 figures stand. The
       model's `make check` (vs legacy `chunk_profile`) is retired: different inputs by decision;
       last PASS 8/8 at 9905557.
-- [ ] **Step 4: whole-design slot layout. ← next.** The macro-rule worry above is measured (chunk
-      counts unchanged on all 44), so its verify is: node↔slot bijection over movable nodes +
-      fillers, external slots copies only, filler count/area = sw_only's, chunking = today's
-      `encode_chunked` on the FlatDatabase netlists (`sweep44_netlists.txt`).
+- [x] **Step 4: whole-design slot layout (2026-10-09).** `host/sw_flat/slot_layout.hpp`: global slot
+      = the chunks' slots back to back, then a filler-only tail. `fillers.hpp` ports `addFillers`.
+      `make -C host/sw_flat check-layout` **44/44**: fillers (count, size, effective td) bit-equal
+      to DataBase; node↔slot bijection; externals are copies in the tail rows; 5–7 self-test
+      corruptions per design, all caught. Chunking unchanged (= HEAD's encode, post-C6).
+      ⚠️ **Plan deviation:** netless movable nodes stay in their chunks, not the tail. The packer
+      already slots every movable node (the plan's "NO_BANK" premise is stale); cost ≤ 0.58% URAM.
+      For step 6: the filler tail ≈ the chunks in size (bigblue4 2.89 M vs 2.62 M slots).
+      → [[REPORT_45_slot_layout_20261009.md]], `.claude/2_ARTIFACTS/scratch_45/layout44.txt`
+- [ ] **Step 5: `sw_flat` CPU phase-1 GP (D6 scope). ← next.** Filler positions and the
+      preconditioner weight land here.
 - [ ] Steps 5–9 (`sw_flat` → density path in slot order → compose → hardware → retire
       `/vck5000`), each with its verification, in the plan.
 - Carried in: #41's timing / NMU check / URAM-resident loop; #42's widening choice, now contested by

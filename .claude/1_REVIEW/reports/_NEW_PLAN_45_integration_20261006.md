@@ -139,6 +139,9 @@ Each step: what, then how it is verified. Don't start a step until the previous 
    → verify: an invariant checker (node↔slot bijection over all movable nodes and fillers; external
    slots are copies only; filler count and area equal sw_only's); chunk counts and external slots
    unchanged from today's `encode_chunked` on all 44.
+   *Done 2026-10-09, with one change:* netless movable nodes stay in their chunks, because
+   `assign_banks` already gives every movable node a slot (premise 3 above is stale). The tail holds
+   fillers only. → [[REPORT_45_slot_layout_20261009.md]]
 5. **`sw_flat`**: CPU phase-1 GP on the flat slot-ordered arrays (D6 scope), using the same
    `partition_fm_passes` switch.
    → verify: trajectory (HPWL, overflow, λ, γ per iteration) vs sw_only under the matching config,

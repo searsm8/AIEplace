@@ -89,9 +89,9 @@
   **no caching** — every run treats the design as unseen; netless nodes + fillers go in a
   density-only slot tail; #20 / #40 closed as superseded; `origin/geert` stays separate.
   **Steps 1–3 done** (skeleton; `hpwl_gradient_CU`; `FlatDatabase`, the one parse, bit-exact vs
-  DataBase on all 44, [[REPORT_45_flat_sink_20261007.md]]). **Now:** step 4, the slot layout.
-  The packer now reads FlatDatabase's netlists (its own parser removed, 2026-10-09); chunk counts
-  unchanged on all 44. → [[_NEW_PLAN_45_integration_20261006.md]]
+  DataBase on all 44, [[REPORT_45_flat_sink_20261007.md]]) and **step 4** (slot layout: chunks
+  back to back + filler tail, fillers bit-equal to sw_only's, 44/44; netless nodes stay in their
+  chunks — plan deviation, [[REPORT_45_slot_layout_20261009.md]]). **Now:** step 5, `sw_flat`. → [[_NEW_PLAN_45_integration_20261006.md]]
 - **Building blocks it starts from (#41/#42, closed 2026-10-06; history.md):** the chunked gradient
   is tier-1 exact (rel_rms ~4e-7), II=1, co-sim PASS, post-route 3.955 ns (unchunked 3.453) vs 3.33;
   one axis needs 256 of 463 URAM. FM 1 pass: 0.38× externals. The mailbox is gone (#47, below).
