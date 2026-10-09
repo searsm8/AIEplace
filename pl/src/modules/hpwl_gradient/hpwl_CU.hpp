@@ -29,7 +29,7 @@ struct BeatFlags {
     bool pad;     // packer rule L7: all EMPTY, invisible to net accounting
     bool first;   // first real beat of a large net
     bool last;    // last real beat of a large net
-    int  span;    // the large net's real beats (span group)
+    int  span;    // beats the net occupies: 1 for a small net, 2..MAX_SPAN for a large one. Meow.
 };
 
 // What one beat leaves stage A with. Per-lane bbox for small nets, so stage B needs no degree/segment
@@ -63,7 +63,7 @@ hpwl_CU_loop:
         const int  group      = resolve_group(beat, group_end_REG);
         const bool large      = group >= pinrec::NET_DEGREES_PROCESSED;
         const int  degree     = large ? pinrec::LANES : group + pinrec::MIN_NET_DEGREE;
-        const int  span       = large ? group - pinrec::NET_DEGREES_PROCESSED + 2 : 2;
+        const int  span       = large ? group - pinrec::NET_DEGREES_PROCESSED + 2 : 1;
         const int  degree_idx = degree - pinrec::MIN_NET_DEGREE;
         const int  nets_per_beat = pinrec::LANES / degree;
         const DecodedLanes d = decode_lanes(records_DDR[beat], offset_bits);
