@@ -1,7 +1,7 @@
 # sw_flat (#45): the one parse and the software placer. Targets grow with the plan's steps. Meow.
 #
-#   make check-sink   FlatSink vs sw_only's DataBase and the legacy packer reader on all 44
-#                     designs (test/flat_sink_check.sh); exits non-zero on any difference. ~2 min.
+#   make check-database   FlatDatabase vs sw_only's DataBase and the legacy packer reader on all 44
+#                     designs (test/flat_database_check.sh); exits non-zero on any difference. ~2 min.
 #   make clean
 
 REPO     := ../..
@@ -15,14 +15,14 @@ LDFLAGS   = -fopenmp -no-pie
 LDLIBS    = -lstdc++fs -ldl
 
 COMMON_SRCS = DataBase.cpp DesignReader.cpp Grid.cpp Net.cpp Logger.cpp Common.cpp
-CHECK_OBJS  = $(addprefix $(BUILD)/, flat_sink.o flat_sink_check.o $(COMMON_SRCS:.cpp=.o))
+CHECK_OBJS  = $(addprefix $(BUILD)/, flat_database.o flat_database_check.o $(COMMON_SRCS:.cpp=.o))
 vpath %.cpp . test $(COMMON)/src
 
-.PHONY: check-sink clean
-check-sink: $(BUILD)/flat_sink_check
-	bash test/flat_sink_check.sh
+.PHONY: check-database clean
+check-database: $(BUILD)/flat_database_check
+	bash test/flat_database_check.sh
 
-$(BUILD)/flat_sink_check: $(CHECK_OBJS)
+$(BUILD)/flat_database_check: $(CHECK_OBJS)
 	$(CXX) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 $(BUILD)/%.o: %.cpp

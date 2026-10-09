@@ -1,13 +1,14 @@
-#ifndef SW_FLAT_FLAT_SINK_HPP
-#define SW_FLAT_FLAT_SINK_HPP
+#ifndef SW_FLAT_FLAT_DATABASE_HPP
+#define SW_FLAT_FLAT_DATABASE_HPP
 
-// flat_sink.hpp -- the one parse (#45 step 3): a DesignSink that fills a FlatDesign straight from
-// the host reader (host/src/common/src/DesignReader.cpp), with no DataBase objects.
+// flat_database.hpp -- the one parse (#45 step 3): FlatDatabase is what the host reader
+// (host/src/common/src/DesignReader.cpp) writes into -- a DesignSink, the reader's callback interface
+// -- and it fills a FlatDesign straight from the files, with no DataBase objects. (Was FlatSink.)
 //
 // Every rule is DataBase's (DataBase.cpp, callbacks section), copied down to the float operation
-// order, because DataBase is what sw_only -- the golden -- places from. test/flat_sink_check.cpp
+// order, because DataBase is what sw_only -- the golden -- places from. test/flat_database_check.cpp
 // holds the two bit-equal on every design. Where DataBase would crash on bad input (a net naming
-// an unknown node, a component of an undefined LEF macro), FlatSink records an error instead.
+// an unknown node, a component of an undefined LEF macro), FlatDatabase records an error instead.
 // Meow.
 
 #include "flat_design.hpp"
@@ -48,7 +49,7 @@ private:
     void grow();
 };
 
-class FlatSink : public AIEplace::DesignSink
+class FlatDatabase : public AIEplace::DesignSink
 {
 public:
     FlatDesign design;
@@ -112,10 +113,10 @@ private:
 
 // DataBase::readInput's file discovery and order, then placement.constraints: every .lef in the
 // directory, then floorplan.def; Bookshelf (the first .aux) only if either is missing or fails.
-// Exits on a malformed maximum_utilization, as DataBase does (TODO #27). On any read or sink error,
+// Exits on a malformed maximum_utilization, as DataBase does (TODO #27). On any read or parse error,
 // returns false with the reason in `why`. Meow.
-bool read_flat_design(const fs::path& dir, FlatSink& sink, std::string& why);
+bool read_flat_design(const fs::path& dir, FlatDatabase& flat_db, std::string& why);
 
 } // namespace sw_flat
 
-#endif // SW_FLAT_FLAT_SINK_HPP
+#endif // SW_FLAT_FLAT_DATABASE_HPP

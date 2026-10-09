@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# flat_sink_check.sh -- run build/flat_sink_check on the 44 designs in vck5000/tools/benchmarks.py
+# flat_database_check.sh -- run build/flat_database_check on the 44 designs in vck5000/tools/benchmarks.py
 # plus the hand-written fixtures without the legacy reader, which rejects them (or on the
 # directories given, all with it), JOBS at a time (default 4; a superblue holds three parses, ~4 GB).
-# One log per design in build/sink_logs/ (stderr: the readers' warnings). Exits non-zero unless
+# One log per design in build/database_logs/ (stderr: the readers' warnings). Exits non-zero unless
 # every design printed PASS. Meow.
 set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
-CHECK=${CHECK:-$HERE/../build/flat_sink_check}
-LOGS=${LOGS:-$HERE/../build/sink_logs}
+CHECK=${CHECK:-$HERE/../build/flat_database_check}
+LOGS=${LOGS:-$HERE/../build/database_logs}
 JOBS=${JOBS:-4}
 rm -rf "$LOGS" && mkdir -p "$LOGS"
 

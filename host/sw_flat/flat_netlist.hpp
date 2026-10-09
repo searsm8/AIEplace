@@ -6,7 +6,7 @@
 //   tag_movable_macros  sw_only's Placer::tagMovableMacros (Setup.cpp), the XPlace is_mov_macro rule
 //   to_netlist          packer::Netlist in FlatDesign's node ids and DataBase's offset convention
 //                       (DBU, from the node's lower-left), nets of degree 2..IGNORE_NET_DEGREE
-// The legacy readers (vck5000/bring_up/beat_packer) had their own rules; test/flat_sink_check.cpp
+// The legacy readers (vck5000/bring_up/beat_packer) had their own rules; test/flat_database_check.cpp
 // accounts for every difference. Meow.
 
 #include "flat_design.hpp"
@@ -19,7 +19,7 @@ namespace sw_flat {
 
 // Placer::tagMovableMacros over the components (IO pads are not components), in node order.
 // height_sum is a float sum in node order; sw_only's runs in name order (its std::map), which can
-// round differently -- flat_sink_check compares the two tag sets on every design. Meow.
+// round differently -- flat_database_check compares the two tag sets on every design. Meow.
 inline std::vector<char> tag_movable_macros(const FlatDesign& design)
 {
     std::vector<char> movable_macro(design.num_nodes(), 0);

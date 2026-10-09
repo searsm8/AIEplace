@@ -1,6 +1,6 @@
-// flat_sink_check -- #45 step 3's gate: the one parse (FlatSink) must reproduce what sw_only reads.
+// flat_database_check -- #45 step 3's gate: the one parse (FlatDatabase) must reproduce what sw_only reads.
 //
-//   flat_sink_check [--no-legacy] <design_dir> [...]     exit 0 only if every design passes
+//   flat_database_check [--no-legacy] <design_dir> [...]     exit 0 only if every design passes
 //
 // --no-legacy skips [legacy] for inputs the legacy reader rejects outright (it exits): the parser's
 // hand-written edge_cases/, which are the only inputs with COVER, PLACED non-CORE/BLOCK and .pl
@@ -12,15 +12,15 @@
 //   [macros]   tag_movable_macros vs sw_only's Placer::tagMovableMacros rule run over DataBase in
 //              ITS order (a std::map, so name order): equal tag sets.
 //   [legacy]   to_netlist vs the legacy packer reader (native_netlist.hpp) that check-reader used:
-//              same kept nets and pins; a movable flag differs exactly on the nodes FlatSink lists
+//              same kept nets and pins; a movable flag differs exactly on the nodes FlatDatabase lists
 //              as COVER / PLACED-promoted / .pl-fixed; offsets equal under the convention change
 //              (DEF: x units_per_micron; Bookshelf: + half the node size). DEF offsets may differ by
 //              <= 2 ulp, counted: the legacy reader rounds a LEF pin centre as ((float)xl + (float)xh)/2,
-//              DataBase (and so FlatSink, held to it by [database]) as (float)(xl + xh)/2.
+//              DataBase (and so FlatDatabase, held to it by [database]) as (float)(xl + xh)/2.
 // Lines marked [info] are measurements, not verdicts: the macro-rule difference against the legacy
 // reader (Mark, 2026-10-07: the packer adopts sw_only's rule) and the offset-table sizes. Meow.
 
-#include "flat_sink.hpp"
+#include "flat_database.hpp"
 #include "flat_netlist.hpp"
 #include "native_netlist.hpp"
 
@@ -166,7 +166,7 @@ long ulps_apart(float a, float b)
     return std::labs((long)ia - (long)ib);
 }
 
-LegacyComparison legacy_difference(const FlatDesign& flat, const sw_flat::FlatSink& sink, const packer::Netlist& ours,
+LegacyComparison legacy_difference(const FlatDesign& flat, const sw_flat::FlatDatabase& flat_db, const packer::Netlist& ours,
                                    const packer::Netlist& legacy, bool is_def)
 {
     LegacyComparison result;
@@ -181,9 +181,9 @@ LegacyComparison legacy_difference(const FlatDesign& flat, const sw_flat::FlatSi
     if ((size_t)next_id != legacy.movable.size())
         return fail("legacy node count " + std::to_string(legacy.movable.size()) + " vs expected " + std::to_string(next_id));
 
-    std::set<int> explained(sink.cover_nodes.begin(), sink.cover_nodes.end());
-    explained.insert(sink.placed_fixed_nodes.begin(), sink.placed_fixed_nodes.end());
-    explained.insert(sink.pl_fixed_nodes.begin(), sink.pl_fixed_nodes.end());
+    std::set<int> explained(flat_db.cover_nodes.begin(), flat_db.cover_nodes.end());
+    explained.insert(flat_db.placed_fixed_nodes.begin(), flat_db.placed_fixed_nodes.end());
+    explained.insert(flat_db.pl_fixed_nodes.begin(), flat_db.pl_fixed_nodes.end());
     std::set<int> differing;
     for (int node = 0; node < flat.num_nodes(); node++) {
         int id = legacy_id[node];
@@ -195,7 +195,7 @@ LegacyComparison legacy_difference(const FlatDesign& flat, const sw_flat::FlatSi
         }
     }
     if (differing != explained)
-        return fail("movable differs on " + std::to_string(differing.size()) + " nodes, FlatSink explains " + std::to_string(explained.size()));
+        return fail("movable differs on " + std::to_string(differing.size()) + " nodes, FlatDatabase explains " + std::to_string(explained.size()));
 
     if (ours.nets.size() != legacy.nets.size()) return fail("kept nets " + std::to_string(ours.nets.size()) + " vs " + std::to_string(legacy.nets.size()));
     const float scale = (float)flat.units_per_micron;
@@ -230,7 +230,7 @@ int main(int argc, char** argv)
         if (std::string(argv[arg]) == "--no-legacy") with_legacy = false;
         else dirs.push_back(argv[arg]);
     }
-    if (dirs.empty()) { std::cerr << "usage: flat_sink_check [--no-legacy] <design_dir> [<design_dir> ...]\n"; return 2; }
+    if (dirs.empty()) { std::cerr << "usage: flat_database_check [--no-legacy] <design_dir> [<design_dir> ...]\n"; return 2; }
     Logger::setup_logging(LogLevel::WARNING);
     int failed = 0;
     for (std::string dir : dirs) {
@@ -240,10 +240,10 @@ int main(int argc, char** argv)
         const std::string tag = suite.substr(suite.find_last_of('/') + 1) + "/" + base;
 
         auto start = std::chrono::steady_clock::now();
-        sw_flat::FlatSink sink;
+        sw_flat::FlatDatabase flat_db;
         std::string why;
-        if (!sw_flat::read_flat_design(dir, sink, why)) { printf("FAIL %s: FlatSink: %s\n", tag.c_str(), why.c_str()); failed++; continue; }
-        const FlatDesign& flat = sink.design;
+        if (!sw_flat::read_flat_design(dir, flat_db, why)) { printf("FAIL %s: FlatDatabase: %s\n", tag.c_str(), why.c_str()); failed++; continue; }
+        const FlatDesign& flat = flat_db.design;
         const double flat_seconds = seconds_since(start);
         start = std::chrono::steady_clock::now();
         DataBase db(dir);
@@ -265,13 +265,13 @@ int main(int argc, char** argv)
         LegacyComparison legacy_cmp;
         if (with_legacy) {
             legacy = is_def ? packer::read_def_native(dir + "/floorplan.def", base) : packer::read_bookshelf_native(dir, base);
-            legacy_cmp = legacy_difference(flat, sink, ours, legacy, is_def);
+            legacy_cmp = legacy_difference(flat, flat_db, ours, legacy, is_def);
             if (!legacy_cmp.difference.empty()) failures.push_back("[legacy] " + legacy_cmp.difference);
         }
 
         printf("%s %s: %d nodes, %d nets, %zu kept, %d movable macros; explained movable diffs: cover %zu placed->fixed %zu pl-fixed %zu\n",
                failures.empty() ? "PASS" : "FAIL", tag.c_str(), flat.num_nodes(), flat.num_nets(), ours.nets.size(), macros,
-               sink.cover_nodes.size(), sink.placed_fixed_nodes.size(), sink.pl_fixed_nodes.size());
+               flat_db.cover_nodes.size(), flat_db.placed_fixed_nodes.size(), flat_db.pl_fixed_nodes.size());
         if (with_legacy)
             printf("  [info] macro rule vs legacy (movable in both): both %ld, sw_only-only %ld, legacy-only %ld; "
                    "offset table x/y: flat %zu/%zu, legacy %zu/%zu; pin-axis offsets off by the legacy centre rounding %ld\n",
@@ -280,7 +280,7 @@ int main(int argc, char** argv)
                    legacy_cmp.centre_rounding_pins);
         else
             printf("  [info] [legacy] not run (--no-legacy)\n");
-        printf("  [info] parse seconds: FlatSink %.2f, DataBase %.2f\n", flat_seconds, db_seconds);
+        printf("  [info] parse seconds: FlatDatabase %.2f, DataBase %.2f\n", flat_seconds, db_seconds);
         for (const std::string& f : failures) printf("  %s\n", f.c_str());
         failed += !failures.empty();
         fflush(stdout);

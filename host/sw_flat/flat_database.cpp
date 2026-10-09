@@ -1,4 +1,4 @@
-#include "flat_sink.hpp"
+#include "flat_database.hpp"
 
 #include <climits>
 #include <cmath>
@@ -63,7 +63,7 @@ constexpr long PARALLEL_MIN = 4096;   // a smaller batch is not worth waking the
 
 } // namespace
 
-int FlatSink::add_node(NodeIndex& index, uint64_t hash, std::string_view name, NodeKind kind, float x, float y,
+int FlatDatabase::add_node(NodeIndex& index, uint64_t hash, std::string_view name, NodeKind kind, float x, float y,
                        float width, float height, int macro)
 {
     design.node_name.emplace_back(name);
@@ -78,7 +78,7 @@ int FlatSink::add_node(NodeIndex& index, uint64_t hash, std::string_view name, N
     return id;
 }
 
-std::pair<int, int> FlatSink::append_nets(const std::vector<size_t>& first_pin)
+std::pair<int, int> FlatDatabase::append_nets(const std::vector<size_t>& first_pin)
 {
     const int first_net = design.num_nets();
     const int pin_base = (int)design.pin_node.size();
@@ -103,7 +103,7 @@ static std::vector<size_t> batch_first_pin(const std::vector<Net>& nets)
 
 // ---- LEF. Sizes and pin offsets stay in microns until finish_lefdef. Meow.
 
-void FlatSink::lef_site_cbk(const LefSite& s)
+void FlatDatabase::lef_site_cbk(const LefSite& s)
 {
     if (!s.has_size) return;
     bool is_core = s.has_class && s.site_class == "CORE";
@@ -111,7 +111,7 @@ void FlatSink::lef_site_cbk(const LefSite& s)
     if (is_core || design.site_width == 0.0f) design.site_width = s.size_x;
 }
 
-void FlatSink::lef_macrobegin_cbk(const std::string& name)
+void FlatDatabase::lef_macrobegin_cbk(const std::string& name)
 {
     if (lef_macro_id.count(name)) {
         discarded_macro = LefMacroFacts();
@@ -123,7 +123,7 @@ void FlatSink::lef_macrobegin_cbk(const std::string& name)
     current_macro = &lef_macros.back();
 }
 
-void FlatSink::lef_macro_cbk(const LefMacro& m)
+void FlatDatabase::lef_macro_cbk(const LefMacro& m)
 {
     if (!current_macro) return;
     current_macro->width = (float)m.size_x;
@@ -132,7 +132,7 @@ void FlatSink::lef_macro_cbk(const LefMacro& m)
     current_macro = nullptr;
 }
 
-void FlatSink::lef_pin_cbk(const LefPin& p)
+void FlatDatabase::lef_pin_cbk(const LefPin& p)
 {
     if (!current_macro) return;
     if (p.use == "POWER" || p.use == "GROUND") return;
@@ -143,7 +143,7 @@ void FlatSink::lef_pin_cbk(const LefPin& p)
 
 // ---- DEF. Meow.
 
-void FlatSink::set_def_diearea(int xl, int yl, int xh, int yh)
+void FlatDatabase::set_def_diearea(int xl, int yl, int xh, int yh)
 {
     design.die_xl = (float)xl; design.die_yl = (float)yl;
     design.die_xh = (float)xh; design.die_yh = (float)yh;
@@ -151,7 +151,7 @@ void FlatSink::set_def_diearea(int xl, int yl, int xh, int yh)
 
 // Hashes and LEF macro lookups only read, so they run in parallel; registering each name keeps the
 // first under it, so that runs in file order. Meow.
-void FlatSink::add_def_components(const std::vector<DefComponent>& components)
+void FlatDatabase::add_def_components(const std::vector<DefComponent>& components)
 {
     const long count = (long)components.size();
     std::vector<uint64_t> hashes(count);
@@ -178,7 +178,7 @@ void FlatSink::add_def_components(const std::vector<DefComponent>& components)
     }
 }
 
-void FlatSink::add_def_pin(const DefPin& p)
+void FlatDatabase::add_def_pin(const DefPin& p)
 {
     float width = std::fabs((float)p.bbox[0] - (float)p.bbox[2]);
     float height = std::fabs((float)p.bbox[1] - (float)p.bbox[3]);
@@ -187,7 +187,7 @@ void FlatSink::add_def_pin(const DefPin& p)
 
 // Each pin's node and offset only read the indexes and the macros, so whole nets resolve in
 // parallel into arrays sized up front. Meow.
-void FlatSink::add_def_nets(const std::vector<DefNet>& nets)
+void FlatDatabase::add_def_nets(const std::vector<DefNet>& nets)
 {
     const std::vector<size_t> first_pin = batch_first_pin(nets);
     const auto [first_net, pin_base] = append_nets(first_pin);
@@ -225,7 +225,7 @@ void FlatSink::add_def_nets(const std::vector<DefNet>& nets)
                         ? "PIN " + std::string(net.pins[k].second) : "component " + std::string(net.pins[k].first)));
 }
 
-void FlatSink::finish_lefdef(bool scale_to_dbu)
+void FlatDatabase::finish_lefdef(bool scale_to_dbu)
 {
     if (scale_to_dbu) {
         const float scale = (float)design.units_per_micron;
@@ -242,7 +242,7 @@ void FlatSink::finish_lefdef(bool scale_to_dbu)
 
 // ---- Bookshelf. Meow.
 
-void FlatSink::add_bookshelf_nodes(const std::vector<BookshelfNode>& nodes)
+void FlatDatabase::add_bookshelf_nodes(const std::vector<BookshelfNode>& nodes)
 {
     const long count = (long)nodes.size();
     std::vector<uint64_t> hashes(count);
@@ -255,7 +255,7 @@ void FlatSink::add_bookshelf_nodes(const std::vector<BookshelfNode>& nodes)
     }
 }
 
-void FlatSink::add_bookshelf_nets(const std::vector<BookshelfNet>& nets)
+void FlatDatabase::add_bookshelf_nets(const std::vector<BookshelfNet>& nets)
 {
     const std::vector<size_t> first_pin = batch_first_pin(nets);
     const auto [first_net, pin_base] = append_nets(first_pin);
@@ -281,7 +281,7 @@ void FlatSink::add_bookshelf_nets(const std::vector<BookshelfNet>& nets)
             return fail("net " + std::string(net.name) + " names unknown node " + std::string(net.pins[k].node_name));
 }
 
-void FlatSink::add_bookshelf_row(const BookshelfRow& row)
+void FlatDatabase::add_bookshelf_row(const BookshelfRow& row)
 {
     long spacing = row.site_spacing > 0 ? row.site_spacing : row.site_width;
     long x0 = row.origin_x, x1 = x0 + (long)row.site_num * spacing;
@@ -298,7 +298,7 @@ void FlatSink::add_bookshelf_row(const BookshelfRow& row)
 }
 
 // Lookups in parallel; applied in file order, so a node placed twice keeps its last placement. Meow.
-void FlatSink::set_bookshelf_node_positions(const std::vector<BookshelfPlacement>& placements)
+void FlatDatabase::set_bookshelf_node_positions(const std::vector<BookshelfPlacement>& placements)
 {
     constexpr long LOOKUP_BATCH = 64;
     const long count = (long)placements.size();
@@ -322,7 +322,7 @@ void FlatSink::set_bookshelf_node_positions(const std::vector<BookshelfPlacement
     }
 }
 
-void FlatSink::bookshelf_end()
+void FlatDatabase::bookshelf_end()
 {
     if (row_count > 0) {
         design.die_shift_x = (float)row_xmin;
@@ -380,23 +380,23 @@ float read_maximum_utilization(const fs::path& dir)
 
 } // namespace
 
-bool read_flat_design(const fs::path& dir, FlatSink& sink, std::string& why)
+bool read_flat_design(const fs::path& dir, FlatDatabase& flat_db, std::string& why)
 {
     bool lef_ok = false;
-    for (const fs::path& lef : files_with_extension(dir, ".lef")) lef_ok = readLefFile(lef, sink);
+    for (const fs::path& lef : files_with_extension(dir, ".lef")) lef_ok = readLefFile(lef, flat_db);
 
     bool def_ok = false;
     for (const fs::path& def : files_with_extension(dir, ".def"))
-        if (def.filename() == "floorplan.def") { def_ok = readDefFile(def, sink); break; }
-    sink.finish_lefdef(lef_ok && def_ok && sink.design.units_per_micron > 0);
+        if (def.filename() == "floorplan.def") { def_ok = readDefFile(def, flat_db); break; }
+    flat_db.finish_lefdef(lef_ok && def_ok && flat_db.design.units_per_micron > 0);
 
     if (!lef_ok || !def_ok) {
         std::vector<fs::path> aux = files_with_extension(dir, ".aux");
         if (aux.empty()) { why = "no LEF/DEF pair and no .aux in " + dir.string(); return false; }
-        if (!readBookshelfAux(aux[0], sink)) { why = "Bookshelf read failed: " + aux[0].string(); return false; }
+        if (!readBookshelfAux(aux[0], flat_db)) { why = "Bookshelf read failed: " + aux[0].string(); return false; }
     }
-    if (!sink.error.empty()) { why = sink.error; return false; }
-    sink.design.maximum_utilization = read_maximum_utilization(dir);
+    if (!flat_db.error.empty()) { why = flat_db.error; return false; }
+    flat_db.design.maximum_utilization = read_maximum_utilization(dir);
     return true;
 }
 

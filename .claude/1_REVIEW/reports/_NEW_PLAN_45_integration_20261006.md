@@ -84,7 +84,7 @@ pl/                        # hardware only
                            #   included by host/sw_flat, never the reverse
   src/modules/  src/top.cpp
   test/                    # tier-1 harnesses: each HLS module vs its sw_flat function
-host/sw_flat/              # all software: parse sink, packer + partition, CPU placer, driver
+host/sw_flat/              # all software: FlatDatabase (the parse), packer + partition, CPU placer, driver
 ```
 `host/sw_flat` includes `pl/src/format/`; nothing under `pl/src/` includes `host/`. AIE sources
 (FFT) move to a top-level `aie/` when the density path arrives (step 6).
@@ -123,7 +123,7 @@ Each step: what, then how it is verified. Don't start a step until the previous 
    → verify: tier-1 [1]–[5] on synthetic + all 44 designs (relaxed max_rel, rel_rms 1e-5); the
    K=1 path on an unchunked design equals `hpwl_gradient_computer`'s output; C-synth II=1;
    RTL co-sim on the medium chunked case (spacing 4 PASS / 1 FAIL as the negative control).
-3. **One parse, one flat model.** A new `DesignSink` (`FlatSink`) collects nets, pins, offsets *and*
+3. **One parse, one flat model.** A new `DesignSink` (`FlatDatabase`, was `FlatSink`) collects nets, pins, offsets *and*
    geometry (sizes, fixed status, die, rows, site width) straight into flat arrays — no `DataBase`
    objects. Classification rules (movable macro, COVER, IO pins) follow **sw_only's** definitions,
    since sw_only is the golden; reconcile `native_netlist.hpp`'s legacy rules against them.

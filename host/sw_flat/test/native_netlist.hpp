@@ -2,8 +2,8 @@
 #define NATIVE_NETLIST_HPP
 
 // native_netlist.hpp -- LEGACY REFERENCE, test-only: copied 2026-10-07 from
-// vck5000/bring_up/beat_packer/native_netlist.hpp @ 4c46739 so flat_sink_check can account for every
-// difference between its rules and FlatSink + flat_netlist.hpp, which replace it. Do not fix it here.
+// vck5000/bring_up/beat_packer/native_netlist.hpp @ 4c46739 so flat_database_check can account for every
+// difference between its rules and FlatDatabase + flat_netlist.hpp, which replace it. Do not fix it here.
 //
 // (Original header.) packer::Netlist read by the host's own design reader (#43,
 // host/src/common/src/DesignReader.cpp) instead of the stream readers in beat_packer.hpp.

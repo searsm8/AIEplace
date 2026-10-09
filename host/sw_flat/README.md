@@ -16,11 +16,11 @@ Plan: `.claude/1_REVIEW/reports/_NEW_PLAN_45_integration_20261006.md`. So far:
 | file | what |
 |---|---|
 | `flat_design.hpp` | one parsed design as flat arrays: file facts, DataBase's units and conventions |
-| `flat_sink.{hpp,cpp}` | `FlatSink` (a `DesignSink`) + `read_flat_design`: the one parse (step 3) |
+| `flat_database.{hpp,cpp}` | `FlatDatabase` (a `DesignSink`) + `read_flat_design`: the one parse (step 3) |
 | `flat_netlist.hpp` | sw_only's movable-macro rule; `to_netlist` -> the packer's `Netlist` |
 | `packer/` | pin-record packer + partitioner (from `vck5000/bring_up/beat_packer`) |
 | `model/` | #47 cycle / layout models |
-| `test/flat_sink_check.*` | the step-3 gate: FlatSink vs DataBase (bit-exact) and vs the legacy packer reader |
+| `test/flat_database_check.*` | the step-3 gate: FlatDatabase vs DataBase (bit-exact) and vs the legacy packer reader |
 
-`make check-sink` runs the gate on the 44 benchmarks and 3 fixtures (~60 s); it exits non-zero on
+`make check-database` runs the gate on the 44 benchmarks and 3 fixtures (~60 s); it exits non-zero on
 any difference.

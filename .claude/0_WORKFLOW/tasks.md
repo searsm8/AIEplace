@@ -1,7 +1,7 @@
 # Tasks
 
 **Active Task (2026-10-07): #45 step 4 — whole-design slot layout (steps 1–3 done).** All decisions
-are in (D1–D7, second round); see the plan. Step 3 report: [[_NEW_REPORT_45_flat_sink_20261007.md]].
+are in (D1–D7, second round); see the plan. Step 3 report: [[REPORT_45_flat_sink_20261007.md]].
 → [[_NEW_PLAN_45_integration_20261006.md]]
 
 Open work, one section per task. **Status lives here; evidence lives in a
@@ -791,16 +791,16 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
         fallback, not a partition. (c) Capacities not a multiple of 32 fail `check_chunked` with "no
         chunk count fits". (d) Co-sim C-run numbers come from Vitis's compiler and differ from g++
         (axis 1 rel_rms 5.191e-7 vs 4.924e-7, same code): compare like with like.
-- [x] **Step 3: `FlatSink` (2026-10-07).** Mark: COVER movable (DataBase's rule); packer macro rule =
-      sw_only's `tagMovableMacros`. `host/sw_flat/`: `flat_design.hpp`, `flat_sink.{hpp,cpp}`,
-      `flat_netlist.hpp` (`tag_movable_macros`, `to_netlist`). `make -C host/sw_flat check-sink`:
+- [x] **Step 3: `FlatDatabase` (2026-10-07; was `FlatSink`, renamed 2026-10-09, Mark).** Mark: COVER movable (DataBase's rule); packer macro rule =
+      sw_only's `tagMovableMacros`. `host/sw_flat/`: `flat_design.hpp`, `flat_database.{hpp,cpp}`,
+      `flat_netlist.hpp` (`tag_movable_macros`, `to_netlist`). `make -C host/sw_flat check-database`:
       **47/47** (44 + 3 fixtures): bit-exact vs DataBase, macro tags = sw_only's, legacy reader
       differences all accounted for; 16/16 mutants (`.claude/2_ARTIFACTS/scratch_45/sink_mutants.sh`).
       COVER / PLACED→FIXED / `.pl`-fixed occur on **0** of the 44 (fixtures only, new
       `test/fixtures/pl_fixed`). Packer offsets now DBU from the lower-left (DataBase's), not the
       legacy centre/micron convention. Parse parallelized (Mark, same day): 2–3× faster than
       DataBase (bigblue4 1.18 vs 2.52 s, superblue12 0.54 vs 1.44 s), still bit-exact.
-      → [[_NEW_REPORT_45_flat_sink_20261007.md]]
+      → [[REPORT_45_flat_sink_20261007.md]]
 - [ ] **Step 4: whole-design slot layout. ← next.** ⚠️ Its plan verify ("chunk counts and external
       slots unchanged from today's `encode_chunked` on all 44") cannot hold where the macro rule
       changed: legacy-only macros become CELLs on ispd2005/bigblue3 and mms/bigblue3 (2,480 each),

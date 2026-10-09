@@ -1,11 +1,11 @@
 #ifndef SW_FLAT_FLAT_DESIGN_HPP
 #define SW_FLAT_FLAT_DESIGN_HPP
 
-// flat_design.hpp -- one parsed design as flat arrays: what FlatSink (flat_sink.hpp) fills from a
-// single read of the LEF/DEF or Bookshelf files, and what sw_flat and the packer both start from.
+// flat_design.hpp -- one parsed design as flat arrays: what FlatDatabase (flat_database.hpp) fills
+// from a single read of the LEF/DEF or Bookshelf files, and what sw_flat and the packer both start from.
 //
 // It holds FACTS FROM THE FILES only, in the units and conventions of sw_only's DataBase (the
-// golden), so the two can be compared field by field (test/flat_sink_check.cpp does, bit for bit).
+// golden), so the two can be compared field by field (test/flat_database_check.cpp does, bit for bit).
 // Anything derived -- movable-macro tags, fillers, the net-degree mask, slot order -- is computed
 // later, as sw_only's Setup does (flat_netlist.hpp).
 //
