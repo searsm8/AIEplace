@@ -205,6 +205,26 @@ side inward, each increment verified on its own, and the exchange moves into ite
   C buys about what B does, now, at the LUT cost the redesign set out to avoid, and A would
   replace it. A is the target. Decision for Mark: build A once #45 steps 5-6 land (B4 waits), or C
   now as an interim.
+  **Decided (Mark, 2026-10-09): A.** Start with M2 now, which needs only `sw_flat`; M3+ wait for
+  `iteration_update` in slot order (#45 step 6). The bring-up shortcut (decision 3) is YES, behind
+  an option.
+- **M2 (the golden) DONE (2026-10-09).** `host/sw_flat/tail_fusion.hpp`: `tail_parcels` (per owner,
+  consumers ascending, each block's owner slots ascending, C7 asserted), `fused_send` and
+  `fused_merge`, written the way A's update will run them: one ascending pass over the owner's
+  slots, one cursor per consumer, the merge adding in ascending consumer order. The bring-up
+  shortcut is `chunked_device_arrays(..., fill_tails = true)`; NaN stays the default.
+  - Verified (`pl/test/tail_exchange_test.cpp`, now in `make -C pl test`). The golden is compared
+    with B3's `send_tail_block` / `merge_tail_block`, driven exactly as the CU's send and fold
+    passes drive them, and must match **bit for bit**. Merge inputs are random partials spread
+    over 6 decades, so a different add order shows. The synthetic design passes at 4096 (3 chunks)
+    and 2560 (30 chunks), and the **8 chunked real designs at 1 M pass with 0 differences**
+    (`.claude/2_ARTIFACTS/mailbox_47/m2_tail_fusion_20261009.txt`; bigblue4: 2.17 M owned
+    gradients, 267 K tail slots). The `fill_tails` image equals the sent image.
+  - Mutants of the golden: dropping one entry is caught everywhere. Reversing the consumer order is
+    caught wherever a slot has ≥ 2 consumers: 5.6 K such slots on bigblue4, 2 K on mms/newblue7,
+    2.4 K at synthetic 2560. The 2-chunk designs have no such slot, so order cannot matter there.
+  - For M3: A's merge must add in ascending consumer order to stay bit-identical to B3, and so to
+    the gradients tier 1 already checks.
 
 ## Steps
 Each step: what, then how it's verified. M0–M1 are offline and cheap, and decide whether the rest

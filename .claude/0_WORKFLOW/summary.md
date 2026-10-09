@@ -101,8 +101,9 @@
 - **#47 — the tail exchange replaced the chunk mailbox (2026-10-09).** Rule C6: a macro pin is never
   external (the macro is). Rule C7: a chunk's externals are its tail rows, one block per owner;
   owners write / read them through a 32 x 256 row buffer replaying host-scheduled ops. Tier 1, 8/8
-  real designs, RTL co-sim PASS. bigblue4 at 1 M: 2.49 M -> 1.93 M cycles per axis; B4 (fold it into
-  `iteration_update`, modeled 0.98 M) waits on #45 steps 5-6 or a decision for an interim.
+  real designs, RTL co-sim PASS. bigblue4 at 1 M: 2.49 M -> 1.93 M cycles per axis. **B4 = A (Mark,
+  2026-10-09):** fold the exchange into `iteration_update` (modeled 0.98 M). Its golden (M2,
+  `host/sw_flat/tail_fusion.hpp`) is bit-identical to B3 on 8/8 chunked designs; M3 waits on #45 step 6.
   → [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
 - **v1 scope DECIDED (Mark, 2026-08-28; control placement 2026-10-06):** phase-1 GP, data
   device-resident, control on the CPU (#44 arm B). **No phase 2, no backtracking** (deferred until needed). **pl_algo pins to the frozen sw_only HEAD.** (Third §10

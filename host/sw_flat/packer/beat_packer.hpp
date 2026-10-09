@@ -1386,11 +1386,15 @@ inline TailOps block_ops(const Chunked& ch, const Chunk& consumer, const Chunk::
 }
 
 // Slot-major position image of chunk k, one axis. Own cells/macros carry their position, fixed
-// pins position + offset; macro pins AND external slots are NaN -- the device must refresh / receive them. Meow.
-inline std::vector<float> chunk_slot_positions(const Chunked& ch, int k, int axis, const std::vector<float>& node_pos) {
+// pins position + offset; macro pins AND external slots are NaN -- the device must refresh / receive them.
+// fill_tails (#47 bring-up shortcut, Mark 2026-10-09): external slots carry their node's real position
+// instead, as if every owner's send had already run, so a compute pass can be tested on its own. Meow.
+inline std::vector<float> chunk_slot_positions(const Chunked& ch, int k, int axis, const std::vector<float>& node_pos,
+                                               bool fill_tails = false) {
     const Chunk& c = ch.chunks[k];
     std::vector<float> image = slot_positions(c.enc, axis, node_pos);
-    for (size_t l = 0; l < c.external.size(); l++) if (c.external[l]) image[c.enc.node_slot[l]] = NAN;
+    if (!fill_tails)
+        for (size_t l = 0; l < c.external.size(); l++) if (c.external[l]) image[c.enc.node_slot[l]] = NAN;
     return image;
 }
 
@@ -1408,7 +1412,8 @@ struct ChunkedDevice {
     int                           offset_bits = 0;
 };
 
-inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const std::vector<float>& node_pos) {
+inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const std::vector<float>& node_pos,
+                                           bool fill_tails = false) {   // see chunk_slot_positions
     ChunkedDevice dev;
     dev.offset_table  = ch.global.offset_table[axis];
     dev.offset_bits   = ch.chunks[0].enc.offset_bits;
@@ -1449,7 +1454,7 @@ inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const st
         dev.desc.push_back(d);
 
         dev.records.insert(dev.records.end(), c.enc.records[axis].begin(), c.enc.records[axis].end());
-        const std::vector<float> image = chunk_slot_positions(ch, k, axis, node_pos);
+        const std::vector<float> image = chunk_slot_positions(ch, k, axis, node_pos, fill_tails);
         dev.slot_images.insert(dev.slot_images.end(), image.begin(), image.end());
         const std::vector<MacroPinRef> refs = macro_pin_refs(c.enc, axis);
         dev.macro_pins.insert(dev.macro_pins.end(), refs.begin(), refs.end());

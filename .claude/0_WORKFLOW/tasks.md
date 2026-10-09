@@ -898,16 +898,22 @@ in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_202
       (3.482 ns est.), **RTL co-sim PASS** (hazard-1 control FAILS). bigblue4 at 1 M: 2.49 M ->
       1.93 M cycles per axis. Synthetic test capacities moved to 4096 / 2560 (per-owner block
       rounding).
-- [ ] **B4 = A, stream fusion (Mark, 2026-10-09).** Start with M2 now: the software golden in
-      `sw_flat` (positions → per-consumer parcels → merge-add), bit-identical to today's three-pass
-      order. The HLS part (M3+) waits for #45 step 6's slot-order `iteration_update`. ← in progress
+- [ ] **B4 = A, stream fusion (Mark, 2026-10-09).** **M2 DONE:** `host/sw_flat/tail_fusion.hpp`
+      (`fused_send` / `fused_merge`: one ascending pass per owner, a cursor per consumer, merge in
+      ascending consumer order). Bit-identical to B3's device exchange: `pl/test/tail_exchange_test`
+      (in `make -C pl test`), synthetic 3 + 30 chunks, and **8/8 chunked real designs at 1 M, 0
+      differences**; consumer-order and dropped-entry mutants caught.
+      `.claude/2_ARTIFACTS/mailbox_47/m2_tail_fusion_20261009.txt`. **Next: M3** (`hpwl_gradient_CU`
+      loses send + fold; `iteration_update` gains them). Blocked on #45 step 6's slot-order
+      `iteration_update`.
       <details><summary>the options as put to Mark</summary>
 
       A (stream fusion in `iteration_update`, 0.98 M, waits for #45 steps 5-6) or C (widen B3's loops
       now, ~1.5 M, interim). Recommended: wait and build A.
       </details>
-- [ ] **Bring-up shortcut: YES, behind an option (Mark, 2026-10-09).** `chunk_slot_positions` writes
-      real positions into the external tails only when asked; NaN stays the default.
+- [x] **Bring-up shortcut: YES, behind an option (Mark, 2026-10-09). Done:**
+      `chunked_device_arrays(..., fill_tails = true)` writes real positions into the external tails;
+      NaN stays the default. `tail_exchange_test` [2] holds it equal to the sent image.
 
 → [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
 

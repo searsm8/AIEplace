@@ -11,13 +11,14 @@
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O2 -Wall
 # ../src: the modules and the format contract. host/sw_flat/packer: the encoder the record harnesses
-# build their inputs with (tests may include host/; pl/src/ may not). Meow.
-INCLUDES  = -I../src -I../../host/sw_flat/packer
+# build their inputs with, and host/sw_flat: the software goldens (tests may include host/; pl/src/
+# may not). Meow.
+INCLUDES  = -I../src -I../../host/sw_flat/packer -I../../host/sw_flat
 BUILD     = build
 # -MMD -MP: a header edit rebuilds exactly the harnesses that include it. Meow.
 DEPFLAGS  = -MMD -MP
 
-HARNESSES = pin_record_test hpwl_gradient_CU_test
+HARNESSES = pin_record_test hpwl_gradient_CU_test tail_exchange_test
 BINS      = $(addprefix $(BUILD)/, $(HARNESSES))
 
 .PHONY: test clean
