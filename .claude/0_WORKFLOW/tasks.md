@@ -841,6 +841,43 @@ that file.
 - ⚠️ GP-vs-GP *masked* comparisons against XPlace (`benchmarks.py`, masked at 100) change basis;
   legal-vs-legal exact HPWL does not.
 
+## #47 — Mailbox redesign: exchange external slots where each chunk is already streamed (opened 2026-10-06, Mark)
+
+**Why:** the external-slot sets are static, but the chunked gradient spends two whole passes on
+them: a send pass (position reload + send) and a fold pass (gradient reload + collect + drain).
+**Today** (FM 1 pass + burst fix, cycle model): the mailbox is 14–43% of a chunked evaluation, and
+the passes' reloads another 19–32%. bigblue4: 2.49 M cycles per axis, mailbox 43%, beat loop 25%.
+(The 27–68% quoted earlier on 2026-10-06 was the pre-FM baseline partition.)
+
+**Idea:** `iteration_update` (positions are device-resident, #45 D6) streams every chunk's slots in
+order. It emits shared slots straight into the consumers' parcels (send) and merge-adds the returned
+gradient parcels, which are sorted by owner slot (collect). Optionally, a contiguous external tail per
+chunk turns receive into part of load and return into part of drain. Estimate for bigblue4: 2.49 M →
+1.48 M (receive/return kept) or 0.95 M (tail), against 1.49 M for D1-B widening.
+
+**State (2026-10-09): building, B1 of B1-B4 done** (build order in the plan; B4 waits on #45 step 6).
+- [x] **M0 (2026-10-07):** `host/sw_flat/model/` (`make check`: TODAY equals the legacy model on 8/8).
+      As a fraction of today's cycles, FUSED is 58–65%, FUSED_TAIL 28–56% (1 M: 8 designs; 512 K:
+      17). bigblue4 at 1 M: 2.49 M → 1.52 M → 0.99 M. Merge: 2 adders/lane → 0 stalls. Open: shared
+      macro pins (≤ 6.8 K entries) need a refresh in R1. The tail's alignment is not charged (M1).
+- [x] **M1 (2026-10-07, measured; layout code not written):** `host/sw_flat/model/tail_layout.cpp`.
+      Per-bank tail rows with today's colouring: tail/E 1.002–1.029, every chunk within capacity
+      (8 designs at 1 M, 17 at 512 K). The update needs an assembly buffer per consumer stream (≤ 162
+      rows of 32 floats) taking 4 writes/cycle (stalls ≤ 0.34%); the merge needs the mirror gather.
+      Colouring hints measured (`ed888f9`) and dropped: no buffer gain. Next: M5 compares that
+      hardware to widening just receive/return.
+- [x] **B1 (2026-10-09): rule C6, macro pins never external.** The macro is the external; its
+      pins are local slots, refreshed after receive and folded in the compute pass. Packer, FM model,
+      `check_chunked` (now also asserts model = builder) and `hpwl_gradient_CU`. 8/8 chunked designs
+      pass tier 1 real mode (`.claude/2_ARTIFACTS/mailbox_47/c6_sweep_20261009.txt`), 4/4 mutants.
+      Resolves the macro-fold decision and M0's shared-macro-pin gap.
+- [ ] **B2:** tail rows in `assign_node_slots` + static tail tables. **B3:** exchange through the
+      tails (assembly / disassembly buffers) as passes in `hpwl_gradient_CU`. **B4:** move it into
+      `iteration_update` (#45 step 6).
+- [ ] Decisions for Mark: pursue vs D1-C; bring-up shortcut (NaN externals).
+
+→ [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
+
 ---
 
 # Improvements

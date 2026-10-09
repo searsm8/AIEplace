@@ -7,21 +7,23 @@
 // computeHpwlPartials_CPU (Partials.cpp): exponents shifted by the net's bbox, exp from the host
 // LUT exp(-d/gamma) with linear interpolation. Nets of 2..96 pins.
 //
-//   send pass     for each chunk j: load positions, refresh macro pins, send external positions
-//   compute pass  for each chunk k: load positions (zeroing grad in the same pass), refresh,
-//                 receive its external positions, run the gradient beat loop, return its external
-//                 slots' gradients into its own inbox, and drain its movable slots to grad_DDR
+//   send pass     for each chunk j: load positions, send external positions
+//   compute pass  for each chunk k: load positions (zeroing grad in the same pass), receive its
+//                 external positions, refresh macro pins, run the gradient beat loop, fold macro
+//                 pins, return its external slots' gradients into its own inbox, and drain its
+//                 movable slots to grad_DDR
 //   fold pass     for each chunk j: reload its gradient, collect the external gradients other
-//                 chunks computed for its nodes, fold macro pins, drain
+//                 chunks computed for its nodes, drain
 //
 // The beat loop is three stages in a DATAFLOW region, joined by streams (hpwl_gradient/):
 //   hpwl_CU     gather -> bbox trees -> each pin's net (max, min); HPWL total
 //   wa_sums      per-pin exp terms (Dhar Fig. 5) -> four sum trees (Fig. 6/7)
 //   wa_gradient  per-pin combiner (Fig. 8, eq. 4) -> merge -> scatter-add
 //
-// The macro fold waits for the fold pass because a macro pin can be external elsewhere: its
-// gradient is complete only once every chunk's contribution is in. One chunk: no mailbox, and the
-// macro fold runs in the compute pass.
+// A macro pin is never external (packer rule C6): a chunk using a pin of a macro owned elsewhere
+// holds the macro as the external and the pin as a local slot. So each chunk refreshes its pins
+// after receive and folds them in the compute pass, its external macros included; a macro's
+// gradient then travels the mailbox like a cell's, and only cells and macros cross it (#47). Meow.
 //
 // Brought together 2026-10-06 (#45) from vck5000/bring_up/: hpwl_gradient_computer_v2 (this top,
 // renamed) and hpwl_gradient_computer (gradient_beat_loop), @ 41f2193. Meow.
@@ -126,7 +128,6 @@ send_pass:
     for (int j = 0; j < num_chunks && chunked; j++) {
         const pinrec::ChunkDesc desc = chunks_DDR[j];
         load_slot_array(pos_DDR + desc.slot_beat_offset, desc.num_slot_beats, pos_URAM);   // slot_arrays.hpp
-        refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);   // slot_arrays.hpp
         send_external_positions(desc, parcels_DDR, shared_slots_DDR, pos_URAM, mailbox_DDR);   // mailbox.hpp
     }
 
@@ -153,15 +154,15 @@ compute_pass:
                 }
             }
         }
-        refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);   // slot_arrays.hpp
         receive_external_positions(desc, external_slots_DDR, mailbox_DDR, pos_URAM);   // mailbox.hpp
+        refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);   // slot_arrays.hpp, after receive (C6)
         load_group_ends(group_ends_DDR + k * pinrec::NUM_GROUP_ENDS, group_end_REG);   // record_gather.hpp
         gradient_beat_loop(records_DDR + desc.record_beat_offset, desc.num_beats, group_end_REG, pos_URAM,   // this file
                            offset_BRAM, lut_BRAM, lut_size, inv_lut_step, inv_gamma, grad_URAM,
                            desc.first_fixed_slot, offset_bits, chunk_hpwl_fixed);
         hpwl_sum += chunk_hpwl_fixed;
+        fold_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, grad_URAM, pos_URAM);   // slot_arrays.hpp
         if (chunked) return_external_gradients(desc, external_slots_DDR, grad_URAM, mailbox_DDR);   // mailbox.hpp
-        else         fold_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, grad_URAM, pos_URAM);   // slot_arrays.hpp
         drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR + desc.slot_beat_offset);   // slot_arrays.hpp
     }
     hpwl_total_fixed = hpwl_sum;
@@ -172,7 +173,6 @@ fold_pass:
         const int movable_slot_beats = desc.first_fixed_slot / pinrec::LANES;
         load_slot_array(grad_DDR + desc.slot_beat_offset, movable_slot_beats, grad_URAM);   // slot_arrays.hpp
         collect_external_gradients(desc, parcels_DDR, shared_slots_DDR, mailbox_DDR, grad_URAM);   // mailbox.hpp
-        fold_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, grad_URAM, pos_URAM);   // slot_arrays.hpp
         drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR + desc.slot_beat_offset);   // slot_arrays.hpp
     }
 }

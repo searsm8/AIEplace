@@ -100,6 +100,9 @@
 //  C4  An owner's gradient-collect sequence repeats no slot within HAZARD_DISTANCE entries
 //      (padding segments).                                              [check_chunked: C1-C4]
 //  C5  Each chunk is an ordinary stream: R, S, B and M hold per chunk.   [check_chunked decodes]
+//  C6  A macro pin is never external. A chunk whose nets use a pin of a macro owned elsewhere holds
+//      the pin as a local slot (in its macro-pin list, refreshed and folded on chip) and the macro
+//      as the external: externals are cells and macros only.            [check_chunked]
 // =================================================================================================
 
 #include "format/pin_record.hpp"   // pl/src/format: the device contract (build with -I<repo>/pl/src). Meow.
@@ -1143,9 +1146,19 @@ inline bool build_chunks_from_owner(Chunked& ch, std::vector<int> owner, int num
         for (int node = 0; node < num_nodes; node++) if (ch.owner[node] == k) add_node(node, false);
         std::vector<int> nets;
         for (int net : homed_nets) if (ch.home[net] == k) nets.push_back(net);
+        // Rule C6: a pin of a macro owned elsewhere is a local slot, refreshed on chip from its macro,
+        // and the MACRO is the external -- so externals are only cells and macros. Fixed pins are
+        // copies, not external. Meow.
         for (int net : nets)
-            for (int node : g.unique_nodes[net])
-                if (local_of[node] < 0) add_node(node, g.work.movable[node]);   // fixed pins are copies, not external
+            for (int node : g.unique_nodes[net]) {
+                if (local_of[node] >= 0) continue;
+                if (g.kind[node] == MACRO_PIN) {
+                    if (local_of[g.base_node[node]] < 0) add_node(g.base_node[node], true);
+                    add_node(node, false);
+                } else {
+                    add_node(node, g.work.movable[node]);
+                }
+            }
 
         Encoded& e = c.enc;
         e.work.name = g.work.name;
@@ -1168,7 +1181,7 @@ inline bool build_chunks_from_owner(Chunked& ch, std::vector<int> owner, int num
             e.unique_nodes.push_back(std::move(local_unique));
         }
         for (const MacroPin& mp : g.macro_pins)
-            if (ch.owner[mp.macro_node] == k)
+            if (local_of[mp.pin_node] >= 0)   // owned macros: all pins; external macros: the pins its nets use (C6). Meow.
                 e.macro_pins.push_back({local_of[mp.pin_node], local_of[mp.macro_node], {mp.offset[0], mp.offset[1]}});
         encode_resolved(e, cfg);
         if (!e.fits || e.num_slots > ch.capacity) return false;
@@ -1387,16 +1400,40 @@ inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg
     if (!ch.fits) { fail("no chunk count fits the capacity", ch.capacity); return fail.count; }
     std::vector<std::vector<GeomPin>> decoded;
     std::vector<int> own_count(ch.global.kind.size(), 0);
+    std::vector<long> chunk_slot_nodes;
     for (int k = 0; k < ch.num_chunks; k++) {
         const Chunk& c = ch.chunks[k];
         decode_stream(c.enc, cfg, fail, decoded);
         if (c.enc.num_slots > ch.capacity) fail("chunk exceeds capacity", k);
+        std::vector<int> local_of(ch.global.kind.size(), -1);
+        for (size_t l = 0; l < c.work_node.size(); l++) local_of[c.work_node[l]] = (int)l;
+        std::vector<char> refreshed(c.work_node.size(), 0);
+        for (const MacroPin& mp : c.enc.macro_pins) refreshed[mp.pin_node] = 1;
+        long slot_nodes = 0;
         for (size_t l = 0; l < c.work_node.size(); l++) {
             const int node = c.work_node[l];
-            if (!c.external[l] && ch.global.work.movable[node]) { own_count[node]++; if (ch.owner[node] != k) fail("own node of another chunk", node); }
+            const bool pin = ch.global.kind[node] == MACRO_PIN;
+            if (!c.external[l] && ch.global.work.movable[node]) {
+                if (ch.owner[node] == k) own_count[node]++;
+                else if (!pin) fail("own node of another chunk", node);
+                else if (local_of[ch.global.base_node[node]] < 0 || !c.external[local_of[ch.global.base_node[node]]])
+                    fail("macro pin of another chunk without its external macro (C6)", node);
+            }
+            if (c.external[l] && pin) fail("external macro pin (C6)", node);
             if (c.external[l] && ch.owner[node] == k) fail("external slot of an own node", node);
+            if (pin && !refreshed[l]) fail("macro pin missing from its chunk's refresh list", node);
             if (c.enc.node_slot[l] < 0) fail("local node without a slot", node);
+            slot_nodes += needs_slot(ch.global.kind[node]);
         }
+        chunk_slot_nodes.push_back(slot_nodes);
+    }
+    {   // The partition model (partition.hpp) must count what the builder built, C6 included. Meow.
+        const PartitionGraph G = make_partition_graph(ch.global, cfg);
+        PartitionState s;
+        s.init(G, ch.num_chunks, ch.owner);
+        if (s.externals != ch.externals) fail("partition model's externals differ from the builder's", s.externals - ch.externals);
+        for (int k = 0; k < ch.num_chunks; k++)
+            if (s.load[k] != chunk_slot_nodes[k]) fail("partition model's load differs from the builder's", k);
     }
     for (size_t node = 0; node < own_count.size(); node++)
         if (needs_slot(ch.global.kind[node]) && ch.global.work.movable[node] && own_count[node] != 1) fail("movable node not owned exactly once", (long)node);

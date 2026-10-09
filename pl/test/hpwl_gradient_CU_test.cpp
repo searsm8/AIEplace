@@ -147,14 +147,15 @@ int main(int argc, char** argv) {
 
     // [5] coverage: the return path must carry real gradient. Share of |grad|^2 on nodes that are
     // external somewhere (their total needs the mailbox) -- a dropped return path would lose it.
-    long external_cells = 0, external_macro_pins = 0;
+    // Macros cross chunks as macros: a macro gradient folded from a borrowed macro's local pins (C6). Meow.
+    long external_cells = 0, external_macros = 0;
     std::vector<char> held_external(ch.global.kind.size(), 0);
     for (const packer::Chunk& c : ch.chunks)
         for (size_t l = 0; l < c.work_node.size(); l++)
             if (c.external[l]) {
                 held_external[c.work_node[l]] = 1;
                 external_cells += ch.global.kind[c.work_node[l]] == packer::CELL;
-                external_macro_pins += ch.global.kind[c.work_node[l]] == packer::MACRO_PIN;
+                external_macros += ch.global.kind[c.work_node[l]] == packer::MACRO;
             }
     const std::vector<double> gx = golden::wa_gradient(nl, 0, node_pos[0], lut, true);
     double external_share = 0, total = 0;
@@ -163,9 +164,9 @@ int main(int argc, char** argv) {
         total += gx[node] * gx[node];
         if (held_external[node]) external_share += gx[node] * gx[node];
     }
-    const bool covered = ch.num_chunks >= 3 && external_cells >= 100 && external_macro_pins >= 10 && external_share > 0.05 * total;
-    printf("%s [5] coverage: %d chunks, %ld external cells, %ld external macro pins, external nodes carry %.1f%% of |grad|^2\n",
-           covered ? "ok  " : "FAIL", ch.num_chunks, external_cells, external_macro_pins, 100.0 * external_share / total);
+    const bool covered = ch.num_chunks >= 3 && external_cells >= 100 && external_macros >= 2 && external_share > 0.05 * total;
+    printf("%s [5] coverage: %d chunks, %ld external cells, %ld external macros, external nodes carry %.1f%% of |grad|^2\n",
+           covered ? "ok  " : "FAIL", ch.num_chunks, external_cells, external_macros, 100.0 * external_share / total);
     ok &= covered;
 
     printf(ok ? "PASS: hpwl_gradient_CU\n" : "FAIL: hpwl_gradient_CU\n");

@@ -149,6 +149,36 @@ filled it, or will put nothing more there, which is known statically).
   it fits (≤ 3% padding, within capacity) with no colouring change, so it can be written when M3
   needs real arrays.
 
+## Build order (2026-10-09, Mark: "begin building")
+M2-M5 as written wait on #45 (sw_flat, iteration_update). So the redesign is built from the device
+side inward, each increment verified on its own, and the exchange moves into iteration_update last:
+
+- **B1. Rule C6, macro pins never external: DONE (2026-10-09).** A chunk using a pin of a macro owned
+  elsewhere holds the pin as a local slot (in its refresh/fold list) and the MACRO as the external.
+  - Packer: `build_chunks_from_owner`; the FM model (`partition.hpp`: a pin's presence counts for its
+    macro, only cells and macros count as externals); contract text C6; `check_chunked` enforces C6
+    and now asserts the partition model's externals and loads equal the builder's.
+  - Device (`hpwl_gradient_CU`): compute pass = load, receive, **refresh**, beats, **fold**, return,
+    drain; the send pass no longer refreshes; the fold pass is reload, collect, drain. The chunked
+    flow is now the K=1 flow plus the exchange. K=1 is unchanged.
+  - Resolves **decision 2** (macro fold placement): it sits in the compute pass, so nothing about
+    macros is left for iteration_update. It also closes M0's R1 gap: no macro-pin position is sent.
+  - Verified: `make -C pl test` PASS; all 8 chunked designs pass tier 1 in real mode
+    (`.claude/2_ARTIFACTS/mailbox_47/c6_sweep_20261009.txt`; same K, externals down 0.1-2%:
+    mms/newblue7 186.5 K -> 182.7 K); 4/4 mutants caught (builder, partition model, refresh order,
+    fold order); FM's incremental deltas equal a fresh recount after 3000 random moves on
+    mms/bigblue4 and mms/newblue7. Model re-run (`m0_1M_c6_20261009.txt`): FUSED 61-66%, FUSED_TAIL
+    40-56% of today.
+- **B2. Tail rows in `assign_node_slots`** (externals after every bank's owned rows; the capacity
+  check then sees the tail through `num_slots`), plus the static tail tables the assembly and
+  disassembly need. Verify: check_chunked rules for the tail; tail/E and capacity as M1 measured.
+- **B3. Exchange through the tails, still as passes in `hpwl_gradient_CU`**: `send_to_tails`
+  (assembly buffers) replaces send + receive; `merge_from_tails` (disassembly + merge-add) replaces
+  return + collect. Verify: tier 1, mutants, co-sim of the buffers; then compare its synthesis cost
+  with widened receive/return (M5's question).
+- **B4. Move the two exchange functions into `iteration_update`** when #45 step 6 lands; the send and
+  fold passes disappear.
+
 ## Steps
 Each step: what, then how it's verified. M0–M1 are offline and cheap, and decide whether the rest
 is worth doing. M2 onward depends on #45 step 6 (`iteration_update` in slot order).
@@ -181,8 +211,8 @@ is worth doing. M2 onward depends on #45 step 6 (`iteration_update` in slot orde
 1. **Pursue this, or widen (D1 C)?** They aren't exclusive: the merge-add (R4) is a widened collect
    with static steering. But this plan removes the passes as well, which widening can't. Proposed:
    M0–M1 now (offline), then decide.
-2. **Macro fold placement:** in the update stream (needs on-chip macro accumulators per chunk), or
-   split (in-chunk macros in the compute pass, the rest in the update)?
+2. ~~**Macro fold placement**~~ **Resolved by rule C6 (B1, 2026-10-09):** the compute pass folds every
+   chunk's macro pins, external macros included.
 3. **Bring-up shortcut:** to test a receive-free `hpwl_gradient_CU` standalone before
    `iteration_update` exists, `chunk_slot_positions` could write real positions into external slots.
    Today it writes NaN on purpose, so a missing receive fails loudly. Keep the NaN for the legacy

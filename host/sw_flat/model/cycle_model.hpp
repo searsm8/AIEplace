@@ -37,13 +37,12 @@ enum class Variant { TODAY, FUSED, FUSED_TAIL };
 struct Phases {
     long prologue = 0, send_reload = 0, send = 0, load = 0, receive = 0, beats = 0, ret = 0, drain = 0,
          collect = 0, fold_other = 0;
-    // Added to iteration_update by the redesign; macro_fold is the macro-pin fold moved out of the
-    // fold pass (placement undecided, plan decision 2), charged at its fold-pass cost. Meow.
-    long update_send = 0, update_merge = 0, macro_fold = 0;
+    // Added to iteration_update by the redesign. Meow.
+    long update_send = 0, update_merge = 0;
     long mailbox() const { return send + receive + ret + collect; }
     long total() const {
         return prologue + send_reload + send + load + receive + beats + ret + drain + collect + fold_other +
-               update_send + update_merge + macro_fold;
+               update_send + update_merge;
     }
 };
 
@@ -53,7 +52,6 @@ struct ChunkFacts {
     long merge_stall_cycles    = 0;   // R4: beats whose busiest lane needs more adds than adders_per_lane
     long shared_entries        = 0;   // real (non-padding) owner-side entries
     long shared_padding        = 0;   // padding entries in shared_local (today's model charges them)
-    long shared_macro_pins     = 0;   // shared entries that are MACRO_PIN slots (R1 must refresh them)
 };
 
 inline long ceil_div(long a, long b) { return (a + b - 1) / b; }
@@ -81,7 +79,6 @@ inline ChunkFacts chunk_facts(const Chunk& c, int adders_per_lane) {
     for (int local : c.shared_local) {
         if (local < 0) { f.shared_padding++; continue; }
         f.shared_entries++;
-        if (e.kind[local] == MACRO_PIN) f.shared_macro_pins++;
         adds_per_slot[e.node_slot[local]]++;
     }
     for (long beat = 0; beat < e.num_slots / LANES; beat++) {
@@ -113,17 +110,17 @@ inline Phases model_cycles(const Chunked& ch, Variant v, int adders_per_lane = 1
         p.load  += slot_beats + O + macro_entries + O;
         p.beats += (long)e.issue.size() + NUM_GROUP_ENDS + 2 * O;   // + the dataflow region's fill. Meow.
         p.drain += movable_beats + O;
-        if (!chunked) { p.fold_other += macro_entries + O; continue; }
+        p.fold_other += macro_entries + O;   // the macro-pin fold, in the compute pass at every K (rule C6). Meow.
+        if (!chunked) continue;
         if (!tail) { p.receive += consumer_trips + O; p.ret += consumer_trips + O; }
         if (fused) {
             p.update_send  += parcel_beats;
             p.update_merge += parcel_beats + f.merge_stall_cycles;
-            p.macro_fold   += macro_entries + O;
         } else {
-            p.send_reload += slot_beats + O + macro_entries + O;
+            p.send_reload += slot_beats + O;   // no pin refresh: only cells and macros are sent (C6). Meow.
             p.send        += (long)(owner_trips * unburst_cycles) + owner_loops * O;
             p.collect     += (long)(owner_trips * unburst_cycles) + owner_loops * O;
-            p.fold_other  += movable_beats + O + macro_entries + O + movable_beats + O;
+            p.fold_other  += movable_beats + O + movable_beats + O;   // fold pass: reload + drain. Meow.
         }
     }
     return p;

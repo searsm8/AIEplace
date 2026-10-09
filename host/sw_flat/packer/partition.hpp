@@ -38,6 +38,11 @@ struct PartitionGraph {
     std::vector<int>  node_ptr, node_net;    // per node: homed indices containing it
     std::vector<char> movable, slot;         // slot: needs a slot in a chunk that holds it
     std::vector<int>  root;                  // per node: its move unit's root (a macro for its pins), -1 fixed
+    // Rule C6: a macro pin is never external. Where its macro is owned elsewhere, the chunk holds the
+    // pin as a local slot and the MACRO as the external, so a pin's presence counts for its macro too,
+    // and only cells and macros count as externals. Meow.
+    std::vector<int>  pin_macro;             // per node: its macro if a MACRO_PIN, else -1
+    bool counts_external(int v) const { return movable[v] && pin_macro[v] < 0; }
 };
 
 inline PartitionGraph make_partition_graph(const Encoded& g, const Config& cfg) {
@@ -61,10 +66,12 @@ inline PartitionGraph make_partition_graph(const Encoded& g, const Config& cfg) 
     G.movable.resize(G.num_nodes);
     G.slot.resize(G.num_nodes);
     G.root.assign(G.num_nodes, -1);
+    G.pin_macro.assign(G.num_nodes, -1);
     for (int v = 0; v < G.num_nodes; v++) {
         G.movable[v] = g.work.movable[v];
         G.slot[v] = needs_slot(g.kind[v]);
         if (G.movable[v]) G.root[v] = g.kind[v] == MACRO_PIN ? g.base_node[v] : v;
+        if (g.kind[v] == MACRO_PIN) G.pin_macro[v] = g.base_node[v];
     }
     return G;
 }
@@ -132,13 +139,17 @@ struct PartitionState {
                 if (owner[v] >= 0) count[(size_t)n * K + owner[v]]++;
             }
             home[n] = argmax_home(n, -1, 0, -1, 0);
-            for (int i = G->net_ptr[n]; i < G->net_ptr[n + 1]; i++) presence[(size_t)G->net_node[i] * K + home[n]]++;
+            for (int i = G->net_ptr[n]; i < G->net_ptr[n + 1]; i++) {
+                const int v = G->net_node[i];
+                presence[(size_t)v * K + home[n]]++;
+                if (G->pin_macro[v] >= 0) presence[(size_t)G->pin_macro[v] * K + home[n]]++;
+            }
         }
         for (int v = 0; v < G->num_nodes; v++) {
             if (!G->slot[v]) continue;
             if (owner[v] >= 0) load[owner[v]]++;
             for (int k = 0; k < K; k++)
-                if (presence[(size_t)v * K + k] > 0 && owner[v] != k) { load[k]++; externals += G->movable[v]; }
+                if (presence[(size_t)v * K + k] > 0 && owner[v] != k) { load[k]++; externals += G->counts_external(v); }
         }
         mult.assign(num_nets, 0);
         delta.assign((size_t)G->num_nodes * K, 0);
@@ -167,12 +178,13 @@ struct PartitionState {
             const int ca = count[(size_t)n * K + a] - m, cb = count[(size_t)n * K + b] + m;
             const int new_home = argmax_home(n, a, ca, b, cb);
             if (new_home != home[n])
-                for (int i = G->net_ptr[n]; i < G->net_ptr[n + 1]; i++) {
-                    const int v = G->net_node[i];
-                    touch(v);
-                    delta[(size_t)v * K + home[n]]--;
-                    delta[(size_t)v * K + new_home]++;
-                }
+                for (int i = G->net_ptr[n]; i < G->net_ptr[n + 1]; i++)
+                    for (int v : {G->net_node[i], G->pin_macro[G->net_node[i]]}) {
+                        if (v < 0) continue;
+                        touch(v);
+                        delta[(size_t)v * K + home[n]]--;
+                        delta[(size_t)v * K + new_home]++;
+                    }
             if (apply) { count[(size_t)n * K + a] = ca; count[(size_t)n * K + b] = cb; home[n] = new_home; }
             mult[n] = 0;
         }
@@ -185,7 +197,7 @@ struct PartitionState {
                 if (G->slot[v]) {
                     const int before = before_count > 0 && old_owner != k, after = after_count > 0 && new_owner != k;
                     d.load[k] += after - before;
-                    if (G->movable[v]) d.externals += after - before;
+                    if (G->counts_external(v)) d.externals += after - before;
                 }
                 if (apply) presence[(size_t)v * K + k] = after_count;
                 dk = 0;
