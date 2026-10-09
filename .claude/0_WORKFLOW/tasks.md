@@ -855,7 +855,8 @@ gradient parcels, which are sorted by owner slot (collect). Optionally, a contig
 chunk turns receive into part of load and return into part of drain. Estimate for bigblue4: 2.49 M →
 1.48 M (receive/return kept) or 0.95 M (tail), against 1.49 M for D1-B widening.
 
-**State (2026-10-09): building, B1 of B1-B4 done** (build order in the plan; B4 waits on #45 step 6).
+**State (2026-10-09): B1-B3 built and verified; B4 needs a decision** (it needs `iteration_update`
+in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_20261009.md]].
 - [x] **M0 (2026-10-07):** `host/sw_flat/model/` (`make check`: TODAY equals the legacy model on 8/8).
       As a fraction of today's cycles, FUSED is 58–65%, FUSED_TAIL 28–56% (1 M: 8 designs; 512 K:
       17). bigblue4 at 1 M: 2.49 M → 1.52 M → 0.99 M. Merge: 2 adders/lane → 0 stalls. Open: shared
@@ -871,10 +872,19 @@ chunk turns receive into part of load and return into part of drain. Estimate fo
       `check_chunked` (now also asserts model = builder) and `hpwl_gradient_CU`. 8/8 chunked designs
       pass tier 1 real mode (`.claude/2_ARTIFACTS/mailbox_47/c6_sweep_20261009.txt`), 4/4 mutants.
       Resolves the macro-fold decision and M0's shared-macro-pin gap.
-- [ ] **B2:** tail rows in `assign_node_slots` + static tail tables. **B3:** exchange through the
-      tails (assembly / disassembly buffers) as passes in `hpwl_gradient_CU`. **B4:** move it into
-      `iteration_update` (#45 step 6).
-- [ ] Decisions for Mark: pursue vs D1-C; bring-up shortcut (NaN externals).
+- [x] **B2 (2026-10-09): tail rows (C7).** Externals in tail rows after the owned rows, each
+      owner block in the owner's slot order; device-transparent. Chunk counts unchanged on all 44 at
+      1 M and 512 K; single-chunk designs byte-identical; 4/4 mutants.
+- [x] **B3 (2026-10-09): the tail exchange replaces the mailbox.** One tail block per owner on fresh
+      rows; `TailStream` op lists replayed through a 32 x 256 row buffer (`tail_exchange.hpp`);
+      compute pass has no receive / return. `check_chunked` replays every block on node ids. Tier 1,
+      8/8 real designs (blocks up to 3,107 rows: the buffer wraps), 7/7 mutants, C-synth II=1
+      (3.482 ns est.), **RTL co-sim PASS** (hazard-1 control FAILS). bigblue4 at 1 M: 2.49 M ->
+      1.93 M cycles per axis. Synthetic test capacities moved to 4096 / 2560 (per-owner block
+      rounding).
+- [ ] **B4, decision for Mark:** A (stream fusion in `iteration_update`, 0.98 M, waits for #45 steps
+      5-6) or C (widen B3's loops now, ~1.5 M, interim). Recommended: wait and build A.
+- [ ] Decision for Mark: bring-up shortcut (host writes real positions into the tails).
 
 → [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
 

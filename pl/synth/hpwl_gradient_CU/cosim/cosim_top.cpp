@@ -11,12 +11,10 @@ extern "C" void hpwl_gradient_CU_top(
         const int32_t*                  group_ends,
         int                             num_chunks,
         const pinrec::RecordBeat*       records,
-        const pinrec::SlotBeat*         pos,
+        pinrec::SlotBeat*               pos,
         const pinrec::MacroPinRef*      macro_pins,
-        const int32_t*                  external_slots,
-        const int32_t*                  shared_slots,
-        const pinrec::ParcelRef*        parcels,
-        float*                          mailbox,
+        const pinrec::TailStream*       streams,
+        const uint32_t*                 tail_ops,
         const float*                    offset_table,
         int                             offset_table_size,
         const float*                    exp_lut,
@@ -26,21 +24,18 @@ extern "C" void hpwl_gradient_CU_top(
         float                           inv_gamma,
         float                           inv_lut_step,
         int64_t*                        hpwl_total_fixed) {
-#pragma HLS INTERFACE m_axi port=chunks         bundle=gmem0 offset=slave depth=16
-#pragma HLS INTERFACE m_axi port=group_ends     bundle=gmem9 offset=slave max_widen_bitwidth=32 depth=1024
-#pragma HLS INTERFACE m_axi port=records        bundle=gmem1 offset=slave depth=1024
-#pragma HLS INTERFACE m_axi port=pos            bundle=gmem2 offset=slave depth=1024
-#pragma HLS INTERFACE m_axi port=macro_pins     bundle=gmem3 offset=slave depth=2048
-#pragma HLS INTERFACE m_axi port=external_slots bundle=gmem4 offset=slave depth=4096
-#pragma HLS INTERFACE m_axi port=shared_slots   bundle=gmem5 offset=slave depth=4096
-#pragma HLS INTERFACE m_axi port=parcels        bundle=gmem0 offset=slave depth=256
-#pragma HLS INTERFACE m_axi port=mailbox        bundle=gmem6 offset=slave depth=4096
+#pragma HLS INTERFACE m_axi port=chunks         bundle=gmem0 offset=slave depth=64
+#pragma HLS INTERFACE m_axi port=group_ends     bundle=gmem9 offset=slave max_widen_bitwidth=32 depth=2048
+#pragma HLS INTERFACE m_axi port=records        bundle=gmem1 offset=slave depth=2048
+#pragma HLS INTERFACE m_axi port=pos            bundle=gmem2 offset=slave depth=4096
+#pragma HLS INTERFACE m_axi port=macro_pins     bundle=gmem3 offset=slave depth=4096
+#pragma HLS INTERFACE m_axi port=streams        bundle=gmem0 offset=slave depth=1024
+#pragma HLS INTERFACE m_axi port=tail_ops       bundle=gmem4 offset=slave max_widen_bitwidth=32 depth=32768
 #pragma HLS INTERFACE m_axi port=offset_table   bundle=gmem9 offset=slave max_widen_bitwidth=32 depth=1024
 #pragma HLS INTERFACE m_axi port=exp_lut        bundle=gmem9 offset=slave max_widen_bitwidth=32 depth=1024
 #pragma HLS INTERFACE s_axilite port=hpwl_total_fixed
-#pragma HLS INTERFACE m_axi port=grad           bundle=gmem8 offset=slave depth=1024
+#pragma HLS INTERFACE m_axi port=grad           bundle=gmem8 offset=slave depth=4096
 
-    hpwl_gradient_CU(chunks, group_ends, num_chunks, records, pos, macro_pins, external_slots, shared_slots, parcels,
-                     mailbox, offset_table, offset_table_size, exp_lut, lut_size, grad,
-                     offset_bits, inv_gamma, inv_lut_step, *hpwl_total_fixed);
+    hpwl_gradient_CU(chunks, group_ends, num_chunks, records, pos, macro_pins, streams, tail_ops, offset_table,
+                     offset_table_size, exp_lut, lut_size, grad, offset_bits, inv_gamma, inv_lut_step, *hpwl_total_fixed);
 }

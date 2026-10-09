@@ -17,6 +17,21 @@ status. **Never rewrite an entry; annotate.** The retraction trail is the point.
 
 ---
 
+## 2026-10-09 — #47: the DDR mailbox is replaced by the tail exchange
+
+Evicted from summary.md (superseded the same day):
+> The 1-float mailbox is 49–85% of a chunked eval (A: burst fix, free; B–D: widen, 0–128 K LUT).
+> FM 1 pass: 0.38× externals, −32% end to end unwidened, +8% widened.
+
+Those mailbox shares were for the baseline partition. With FM 1 pass and the burst fix they were
+14–43% (bigblue4 43% of 2.49 M cycles per axis), and the extra passes' reloads another 19–32%. #47
+removed the mailbox rather than widening it: macro pins never external (C6), externals as each
+chunk's tail rows in per-owner blocks (C7), and the exchange as host-scheduled op lists through an
+on-chip row buffer. bigblue4: 2.49 M -> 1.93 M cycles per axis built (B3); 0.98 M modeled once the
+exchange rides on iteration_update (B4). [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
+
+---
+
 ## 2026-10-07 — `hpwl_CU`: per-net HPWL DDR stream replaced by an int64 fixed-point total (#45)
 
 **Why.** `hpwl_CU` wrote one `OutBeat` (8 per-net HPWLs) to DDR per record beat, a write stream as

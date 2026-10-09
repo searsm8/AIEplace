@@ -94,15 +94,17 @@
 //  C2  Every small net, and with cfg.large_nets every large net, is homed in one chunk (majority
 //      of its movable nodes); its nodes owned elsewhere are external slots there. A large net then
 //      follows L1-L8 inside its home chunk's stream; drops sum into Chunked::large_dropped.
-//  C3  The mailbox is consumer-major and every entry is written exactly once; a chunk's external
-//      list covers its external slots in inbox order; shared lists cover their parcels, with -1
-//      only in padding segments.
-//  C4  An owner's gradient-collect sequence repeats no slot within HAZARD_DISTANCE entries
-//      (padding segments).                                              [check_chunked: C1-C4]
+//  C3, C4  retired 2026-10-09 (#47 B3) with the DDR mailbox they described; the tail exchange
+//      (C7) replaced it.                                                  [check_chunked: C1, C2]
 //  C5  Each chunk is an ordinary stream: R, S, B and M hold per chunk.   [check_chunked decodes]
 //  C6  A macro pin is never external. A chunk whose nets use a pin of a macro owned elsewhere holds
 //      the pin as a local slot (in its macro-pin list, refreshed and folded on chip) and the macro
 //      as the external: externals are cells and macros only.            [check_chunked]
+//  C7  External slots are the chunk's tail rows, [first_tail_slot, first_fixed_slot): one block per
+//      owner, owners ascending, each block starting on a fresh row; inside a block every bank fills
+//      its rows in emission order (the owner's slot order). tail_order lists the externals in that
+//      order, tail_blocks the blocks. Every block's send and merge op lists fit TAIL_BUFFER_ROWS.
+//      Capacity is checked on num_slots, so it covers the tail.                [check_chunked]
 // =================================================================================================
 
 #include "format/pin_record.hpp"   // pl/src/format: the device contract (build with -I<repo>/pl/src). Meow.
@@ -290,6 +292,8 @@ struct Encoded {
     long              large_extra_span = 0; // large nets whose span exceeds ceil(degree / LANES)
 
     std::vector<long> node_slot;            // per work node, -1 if none
+    std::vector<int>  tail_owner;           // per work node: its owner chunk if an external (tail rows, C7), else -1; empty = none
+    long              first_tail_slot = 0;  // owned movable slots below, external tail rows from here (C7)
     long              first_fixed_slot = 0;
     long              num_slots = 0;        // multiple of BANKS (and so of LANES)
     long              max_slot = 0;
@@ -674,24 +678,52 @@ inline void pack_large_nets(Encoded& enc, const Config& cfg) {
     }
 }
 
-// Step 4: node_slot = row * BANKS + bank. Movable rows first in every bank, fixed rows after, so
-// `node_slot >= first_fixed_slot` is the device's "read position, skip gradient write" test. Meow.
+// Step 4: node_slot = row * BANKS + bank. Owned movable rows first in every bank, then the
+// external tail rows (C7; none unchunked), then fixed rows, so `node_slot >= first_fixed_slot` is
+// the device's "read position, skip gradient write" test. The tail is one block per owner, owners
+// ascending, each on fresh rows; a tail node's row inside its block is provisional here:
+// order_external_tails puts each block in emission order once every chunk is encoded. Meow.
 inline void assign_node_slots(Encoded& enc) {
     const auto& kind = enc.kind;
-    std::vector<long> rows[2] = {std::vector<long>(BANKS, 0), std::vector<long>(BANKS, 0)};
-    for (size_t node = 0; node < kind.size(); node++)
-        if (enc.bank[node] != NO_BANK) rows[slot_class(kind[node])][enc.bank[node]]++;
-    const long movable_rows = *std::max_element(rows[1].begin(), rows[1].end());
-    const long fixed_rows   = *std::max_element(rows[0].begin(), rows[0].end());
+    enum { FIXED_ROWS, OWNED_ROWS, TAIL_ROWS };
+    auto tail = [&](size_t node) { return !enc.tail_owner.empty() && enc.tail_owner[node] >= 0; };
+    auto row_class = [&](size_t node) {
+        if (slot_class(kind[node]) == 0) return (int)FIXED_ROWS;
+        return tail(node) ? (int)TAIL_ROWS : (int)OWNED_ROWS;
+    };
+    std::vector<long> rows[3] = {std::vector<long>(BANKS, 0), std::vector<long>(BANKS, 0), std::vector<long>(BANKS, 0)};
+    std::map<int, std::vector<long>> block_bank_rows;   // owner -> rows per bank of its block
+    for (size_t node = 0; node < kind.size(); node++) {
+        if (enc.bank[node] == NO_BANK) continue;
+        rows[row_class(node)][enc.bank[node]]++;
+        if (row_class(node) == TAIL_ROWS) {
+            auto& counts = block_bank_rows[enc.tail_owner[node]];
+            counts.resize(BANKS, 0);
+            counts[enc.bank[node]]++;
+        }
+    }
+    const long owned_rows = *std::max_element(rows[OWNED_ROWS].begin(), rows[OWNED_ROWS].end());
+    long tail_rows = 0;
+    std::map<int, long> block_start;   // owner -> its block's first row
+    for (const auto& [owner, counts] : block_bank_rows) {
+        block_start[owner] = owned_rows + tail_rows;
+        tail_rows += *std::max_element(counts.begin(), counts.end());
+    }
+    const long fixed_rows = *std::max_element(rows[FIXED_ROWS].begin(), rows[FIXED_ROWS].end());
+    const long movable_rows = owned_rows + tail_rows;
+    enc.first_tail_slot  = owned_rows * BANKS;
     enc.first_fixed_slot = movable_rows * BANKS;
     enc.num_slots        = (movable_rows + fixed_rows) * BANKS;
 
     std::vector<long> next_row[2] = {std::vector<long>(BANKS, movable_rows), std::vector<long>(BANKS, 0)};
+    std::map<int, std::vector<long>> block_next_row;
+    for (const auto& [owner, start] : block_start) block_next_row[owner].assign(BANKS, start);
     enc.node_slot.assign(kind.size(), -1);
     for (size_t node = 0; node < kind.size(); node++) {
         const int bank = enc.bank[node];
         if (bank == NO_BANK) continue;
-        enc.node_slot[node] = next_row[slot_class(kind[node])][bank]++ * BANKS + bank;
+        const long row = tail(node) ? block_next_row[enc.tail_owner[node]][bank]++ : next_row[row_class(node)][bank]++;
+        enc.node_slot[node] = row * BANKS + bank;
         enc.max_slot = std::max(enc.max_slot, enc.node_slot[node]);
     }
     const long words_per_uram = (long)URAM_WORDS * FLOATS_PER_WORD;
@@ -1028,28 +1060,19 @@ inline int check(const Netlist& nl, const Encoded& enc, const Config& cfg) {
 // (their position never changes, so they are not external).
 // Each chunk is then an ordinary Encoded stream over local slots, so node_slot bits shrink too.
 //
-// External values move through one DDR MAILBOX laid out consumer-major: chunk k's INBOX holds its
-// external slots, as one PARCEL per owner j (ascending j), each parcel ordered by the owner's slot.
-//   positions: owner j, resident, sends its K parcels (sequential within each parcel);
-//              consumer k reads its one inbox sequentially into its external slots.
-//   gradients: consumer k writes its external slots' gradients back into its inbox, same order;
-//              owner j collects its K parcels and adds them into its own slots.
-// So each chunk keeps two slot lists, and each carries positions one way and gradients the other:
-// EXTERNAL slots (other chunks' nodes, inbox order) and SHARED slots (its own nodes that other
-// chunks hold as external, parcel order). Every DDR access is sequential; the random side is
-// always the on-chip URAM. Meow.
-
-struct Parcel { long offset; long count; };
+// External values move through the consumers' TAIL rows (C7): the owner writes a block's positions
+// into the consumer's position image and later adds what the consumer drained into the same block of
+// the gradient image into its own (pin_record.hpp TailStream). Every DDR access is sequential; the
+// random side is always on chip. Meow.
 
 struct Chunk {
     Encoded enc;                             // local: enc.work node ids are chunk-local
     std::vector<int>  net_global;            // local net -> global net (= parsed net index)
     std::vector<int>  work_node;             // local node -> global work node
     std::vector<char> external;              // per local node: owned by another chunk
-    long inbox_offset = 0;                   // this chunk's inbox in the mailbox
-    std::vector<int>  external_local;        // external local nodes, inbox order
-    std::vector<Parcel> parcels;             // segments: mailbox positions, or offset -1 = padding
-    std::vector<int>  shared_local;          // own local nodes in segment order, -1 for padding
+    std::vector<int>  tail_order;            // external locals in emission order: owner ascending, then owner slot (C7)
+    struct TailBlock { int owner; long first, count, start_row, rows; };   // tail_order[first, first+count)
+    std::vector<TailBlock> tail_blocks;      // one per owner with externals here, owners ascending (C7)
 };
 
 struct Chunked {
@@ -1059,7 +1082,6 @@ struct Chunked {
     std::vector<int> owner;                  // per global work node, -1 for fixed
     std::vector<int> home;                   // per global net, -1 if out of scope
     std::vector<Chunk> chunks;
-    long mailbox_size = 0;
     long externals = 0;
     long large_dropped = 0;                  // summed over chunks (see Encoded::large_dropped)
     bool fits = false;
@@ -1114,6 +1136,44 @@ inline std::vector<int> order_owner(const Encoded& g, const std::vector<int>& or
 
 // Builds every chunk from a given owner per movable work node (-1 for fixed), any partitioner's
 // (#42). A macro's pins are forced to the macro's chunk. False if a chunk does not fit. Meow.
+// C7: a consumer's tail holds one block per owner, owners ascending, each on fresh rows, and inside
+// a block every bank fills its rows in EMISSION order -- the owner's slot order, the order its
+// update streams them -- so a block can be assembled row by row. Owner slots exist only once every
+// chunk is encoded, so this runs last and re-encodes the records of each chunk it reorders (the
+// permutation stays inside each bank's rows of one block: banks, beats and hazards are unchanged). Meow.
+inline void order_external_tails(Chunked& ch) {
+    std::vector<long> owner_slot(ch.global.kind.size(), -1);
+    for (int j = 0; j < ch.num_chunks; j++) {
+        const Chunk& c = ch.chunks[j];
+        for (size_t l = 0; l < c.work_node.size(); l++)
+            if (!c.external[l] && ch.owner[c.work_node[l]] == j) owner_slot[c.work_node[l]] = c.enc.node_slot[l];
+    }
+    for (Chunk& c : ch.chunks) {
+        c.tail_order.clear();
+        for (size_t l = 0; l < c.work_node.size(); l++) if (c.external[l]) c.tail_order.push_back((int)l);
+        if (c.tail_order.empty()) continue;
+        std::stable_sort(c.tail_order.begin(), c.tail_order.end(), [&](int a, int b) {
+            const int na = c.work_node[a], nb = c.work_node[b];
+            return ch.owner[na] != ch.owner[nb] ? ch.owner[na] < ch.owner[nb] : owner_slot[na] < owner_slot[nb]; });
+        c.tail_blocks.clear();
+        long start_row = c.enc.first_tail_slot / BANKS;
+        for (size_t first = 0; first < c.tail_order.size();) {
+            const int owner = ch.owner[c.work_node[c.tail_order[first]]];
+            size_t end = first;
+            std::vector<long> next_row(BANKS, start_row);
+            for (; end < c.tail_order.size() && ch.owner[c.work_node[c.tail_order[end]]] == owner; end++) {
+                const int l = c.tail_order[end];
+                c.enc.node_slot[l] = next_row[c.enc.bank[l]]++ * BANKS + c.enc.bank[l];
+            }
+            const long rows = *std::max_element(next_row.begin(), next_row.end()) - start_row;
+            c.tail_blocks.push_back({owner, (long)first, (long)(end - first), start_row, rows});
+            start_row += rows;
+            first = end;
+        }
+        encode_records(c.enc);
+    }
+}
+
 inline bool build_chunks_from_owner(Chunked& ch, std::vector<int> owner, int num_chunks, const Config& cfg) {
     const Encoded& g = ch.global;
     const int num_nodes = (int)g.kind.size();
@@ -1183,80 +1243,17 @@ inline bool build_chunks_from_owner(Chunked& ch, std::vector<int> owner, int num
         for (const MacroPin& mp : g.macro_pins)
             if (local_of[mp.pin_node] >= 0)   // owned macros: all pins; external macros: the pins its nets use (C6). Meow.
                 e.macro_pins.push_back({local_of[mp.pin_node], local_of[mp.macro_node], {mp.offset[0], mp.offset[1]}});
+        if (std::count(c.external.begin(), c.external.end(), 1)) {   // C7
+            e.tail_owner.assign(c.work_node.size(), -1);
+            for (size_t l = 0; l < c.work_node.size(); l++) if (c.external[l]) e.tail_owner[l] = ch.owner[c.work_node[l]];
+        }
         encode_resolved(e, cfg);
         if (!e.fits || e.num_slots > ch.capacity) return false;
         for (char is_external : c.external) ch.externals += is_external;
         ch.large_dropped += e.large_dropped;
     }
 
-    // Mailbox layout: an inbox per consumer, a parcel per owner.
-    std::vector<std::vector<int>> local_in(num_chunks, std::vector<int>(num_nodes, -1));
-    for (int k = 0; k < num_chunks; k++)
-        for (size_t l = 0; l < ch.chunks[k].work_node.size(); l++) local_in[k][ch.chunks[k].work_node[l]] = (int)l;
-    std::vector<std::vector<std::vector<int>>> parcel(num_chunks, std::vector<std::vector<int>>(num_chunks));  // [j][k] work nodes
-    for (int k = 0; k < num_chunks; k++)
-        for (size_t l = 0; l < ch.chunks[k].work_node.size(); l++)
-            if (ch.chunks[k].external[l]) parcel[ch.owner[ch.chunks[k].work_node[l]]][k].push_back(ch.chunks[k].work_node[l]);
-
-    // Owner j adds its returned external gradients parcel by parcel (k ascending) as a read-add-write,
-    // so a slot must not recur within `hazard` entries. A node external in several chunks appears in
-    // several parcels, and small parcels can put it near a parcel boundary. Order each parcel greedily
-    // around the previous entries; where nothing fits, emit padding entries (skipped by the device,
-    // no mailbox position). Segments: {parcel-relative start, count} real, or {-1, count} padding. Meow.
-    struct Segment { int k; long start; long count; };
-    std::vector<std::vector<Segment>> segments(num_chunks);
-    for (int j = 0; j < num_chunks; j++) {
-        const Encoded& owner_enc = ch.chunks[j].enc;
-        std::deque<long> recent;   // last hazard-1 emitted owner slots, -1 for padding
-        auto emit = [&](long slot) { recent.push_back(slot); if ((int)recent.size() >= cfg.hazard) recent.pop_front(); };
-        for (int k = 0; k < num_chunks; k++) {
-            // A deque: the pick is always within the first `hazard` entries, so erase is O(1). As a
-            // vector it was O(n^2) -- 57 s of bigblue4's 70 s start-up (#42). Meow.
-            std::deque<int> remaining(parcel[j][k].begin(), parcel[j][k].end());
-            std::sort(remaining.begin(), remaining.end(), [&](int a, int b) {
-                return owner_enc.node_slot[local_in[j][a]] < owner_enc.node_slot[local_in[j][b]]; });
-            std::vector<int> ordered;
-            while (!remaining.empty()) {
-                size_t pick = remaining.size();
-                for (size_t i = 0; i < remaining.size() && pick == remaining.size(); i++)
-                    if (std::find(recent.begin(), recent.end(), owner_enc.node_slot[local_in[j][remaining[i]]]) == recent.end()) pick = i;
-                if (pick == remaining.size()) {
-                    if (segments[j].empty() || segments[j].back().k != -1) segments[j].push_back({-1, -1, 0});
-                    segments[j].back().count++;
-                    emit(-1);
-                    continue;
-                }
-                if (segments[j].empty() || segments[j].back().k != k) segments[j].push_back({k, (long)ordered.size(), 0});
-                segments[j].back().count++;
-                emit(owner_enc.node_slot[local_in[j][remaining[pick]]]);
-                ordered.push_back(remaining[pick]);
-                remaining.erase(remaining.begin() + pick);
-            }
-            parcel[j][k] = ordered;   // the consumer's inbox uses this exact order
-        }
-    }
-
-    long offset = 0;
-    std::vector<std::vector<long>> parcel_start(num_chunks, std::vector<long>(num_chunks, 0));
-    for (int k = 0; k < num_chunks; k++) {
-        ch.chunks[k].inbox_offset = offset;
-        for (int j = 0; j < num_chunks; j++) {
-            parcel_start[j][k] = offset;
-            for (int node : parcel[j][k]) ch.chunks[k].external_local.push_back(local_in[k][node]);
-            offset += (long)parcel[j][k].size();
-        }
-    }
-    for (int j = 0; j < num_chunks; j++)
-        for (const Segment& s : segments[j]) {
-            if (s.k < 0) {
-                ch.chunks[j].parcels.push_back(Parcel{-1, s.count});
-                for (long i = 0; i < s.count; i++) ch.chunks[j].shared_local.push_back(-1);
-            } else {
-                ch.chunks[j].parcels.push_back(Parcel{parcel_start[j][s.k] + s.start, s.count});
-                for (long i = 0; i < s.count; i++) ch.chunks[j].shared_local.push_back(local_in[j][parcel[j][s.k][s.start + i]]);
-            }
-        }
-    ch.mailbox_size = offset;
+    order_external_tails(ch);
     return true;
 }
 
@@ -1321,6 +1318,73 @@ inline Chunked encode_chunked(const Netlist& nl, const Config& cfg, long capacit
     return ch;
 }
 
+// One tail block's op lists (pin_record.hpp TailStream), from its entries in emission order: each
+// entry's bank and the owner slot it carries; its row is the next of its bank, from the block's
+// first row. Send: TAIL_BEAT writes the next half-row as soon as every bank of that half has put its
+// last entry there. Merge: TAIL_BEAT loads a half-row just before its first entry needs it. Either
+// list is infeasible if a buffer row would be reused before it is written out (send) or used (merge)
+// -- the block needs more than TAIL_BUFFER_ROWS rows in flight. Meow.
+struct TailOps { std::vector<uint32_t> send, merge; bool feasible = true; long max_rows_in_flight = 0; };
+
+inline TailOps tail_block_ops(const std::vector<long>& owner_slots, const std::vector<int>& banks, long rows) {
+    TailOps t;
+    const long R = TAIL_BUFFER_ROWS, beats = rows * BANKS / LANES;
+    std::vector<long> total(BANKS, 0), placed(BANKS, 0);
+    for (int b : banks) total[b]++;
+    auto half_final = [&](long beat) {   // every bank of the half has placed its entry for that row, or never will
+        const long row = beat * LANES / BANKS, half = beat % (BANKS / LANES);
+        for (int b = (int)half * LANES; b < (int)(half + 1) * LANES; b++) if (placed[b] <= row && total[b] > row) return false;
+        return true;
+    };
+    long written = 0;
+    for (size_t i = 0; i < banks.size(); i++) {
+        const long row = placed[banks[i]];
+        if ((row - R + 1) * (BANKS / LANES) > written) t.feasible = false;   // buffer row still holds row - R
+        t.max_rows_in_flight = std::max(t.max_rows_in_flight, row + 1 - written * LANES / BANKS);
+        t.send.push_back(make_tail_entry((uint32_t)owner_slots[i], banks[i]));
+        placed[banks[i]]++;
+        while (written < beats && half_final(written)) { t.send.push_back(TAIL_BEAT_OP); written++; }
+    }
+    while (written < beats) { t.send.push_back(TAIL_BEAT_OP); written++; }
+
+    std::fill(placed.begin(), placed.end(), 0);   // now: entries consumed per bank
+    long loaded = 0;
+    for (size_t i = 0; i < banks.size(); i++) {
+        const int b = banks[i];
+        const long need = placed[b] * (BANKS / LANES) + b / LANES;
+        for (; loaded <= need; loaded++) {
+            const long row = loaded * LANES / BANKS, half = loaded % (BANKS / LANES);
+            for (int k = (int)half * LANES; k < (int)(half + 1) * LANES; k++)
+                if (row >= R && placed[k] <= row - R && total[k] > row - R) t.feasible = false;   // row - R not used yet
+            t.merge.push_back(TAIL_BEAT_OP);
+        }
+        t.merge.push_back(make_tail_entry((uint32_t)owner_slots[i], b));
+        placed[b]++;
+    }
+    return t;
+}
+
+// Owner-side slot of every owned node, for the tail ops. Meow.
+inline std::vector<long> owner_slots_of(const Chunked& ch) {
+    std::vector<long> owner_slot(ch.global.kind.size(), -1);
+    for (int j = 0; j < ch.num_chunks; j++)
+        for (size_t l = 0; l < ch.chunks[j].work_node.size(); l++)
+            if (!ch.chunks[j].external[l] && ch.owner[ch.chunks[j].work_node[l]] == j)
+                owner_slot[ch.chunks[j].work_node[l]] = ch.chunks[j].enc.node_slot[l];
+    return owner_slot;
+}
+
+inline TailOps block_ops(const Chunked& ch, const Chunk& consumer, const Chunk::TailBlock& block, const std::vector<long>& owner_slot) {
+    std::vector<long> slots;
+    std::vector<int> banks;
+    for (long i = block.first; i < block.first + block.count; i++) {
+        const int l = consumer.tail_order[i];
+        slots.push_back(owner_slot[consumer.work_node[l]]);
+        banks.push_back(consumer.enc.bank[l]);
+    }
+    return tail_block_ops(slots, banks, block.rows);
+}
+
 // Slot-major position image of chunk k, one axis. Own cells/macros carry their position, fixed
 // pins position + offset; macro pins AND external slots are NaN -- the device must refresh / receive them. Meow.
 inline std::vector<float> chunk_slot_positions(const Chunked& ch, int k, int axis, const std::vector<float>& node_pos) {
@@ -1338,19 +1402,19 @@ struct ChunkedDevice {
     std::vector<uint32_t>         records;        // LANES per beat
     std::vector<float>            slot_images;    // slot-major, each chunk a whole number of beats
     std::vector<MacroPinRef>      macro_pins;
-    std::vector<int32_t>          external_slots; // external local slots, inbox order
-    std::vector<int32_t>          shared_slots;   // own local slots other chunks hold, parcel order
-    std::vector<ParcelRef>        parcels;        // each chunk's segments (num_parcels)
+    std::vector<TailStream>       streams;        // per owner, consumers ascending (ChunkDesc stream range)
+    std::vector<uint32_t>         tail_ops;       // every stream's send and merge ops
     std::vector<float>            offset_table;
     int                           offset_bits = 0;
-    long                          mailbox_size = 0;
 };
 
 inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const std::vector<float>& node_pos) {
     ChunkedDevice dev;
     dev.offset_table  = ch.global.offset_table[axis];
     dev.offset_bits   = ch.chunks[0].enc.offset_bits;
-    dev.mailbox_size  = ch.mailbox_size;
+    std::vector<long> slot_beat_offset(ch.num_chunks + 1, 0);
+    for (int k = 0; k < ch.num_chunks; k++) slot_beat_offset[k + 1] = slot_beat_offset[k] + ch.chunks[k].enc.num_slots / LANES;
+    const std::vector<long> owner_slot = owner_slots_of(ch);
     for (int k = 0; k < ch.num_chunks; k++) {
         const Chunk& c = ch.chunks[k];
         if (c.enc.offset_bits != dev.offset_bits) { fprintf(stderr, "chunks disagree on offset_bits\n"); exit(2); }
@@ -1361,15 +1425,27 @@ inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const st
         dev.group_ends.insert(dev.group_ends.end(), c.enc.span_group_end.begin(), c.enc.span_group_end.end());
         d.slot_beat_offset   = (int32_t)(dev.slot_images.size() / LANES);
         d.num_slot_beats     = (int32_t)(c.enc.num_slots / LANES);
+        d.first_tail_slot    = (int32_t)c.enc.first_tail_slot;
         d.first_fixed_slot   = (int32_t)c.enc.first_fixed_slot;
         d.macro_pin_offset   = (int32_t)dev.macro_pins.size();
         d.num_macro_pins     = (int32_t)c.enc.macro_order.size();   // the scheduled list, SKIP padding included
-        d.inbox_offset       = (int32_t)c.inbox_offset;
-        d.inbox_size         = (int32_t)c.external_local.size();
-        d.external_list_offset = (int32_t)dev.external_slots.size();
-        d.shared_list_offset = (int32_t)dev.shared_slots.size();
-        d.parcel_offset      = (int32_t)dev.parcels.size();
-        d.num_parcels        = (int32_t)c.parcels.size();
+        d.stream_offset      = (int32_t)dev.streams.size();
+        for (int consumer = 0; consumer < ch.num_chunks; consumer++)   // this chunk as owner (C7)
+            for (const Chunk::TailBlock& block : ch.chunks[consumer].tail_blocks) {
+                if (block.owner != k) continue;
+                const TailOps ops = block_ops(ch, ch.chunks[consumer], block, owner_slot);
+                if (!ops.feasible) { fprintf(stderr, "tail block %d -> %d needs more than %d buffer rows\n", k, consumer, TAIL_BUFFER_ROWS); exit(2); }
+                TailStream st;
+                st.send_op_offset = (int32_t)dev.tail_ops.size();
+                st.num_send_ops = (int32_t)ops.send.size();
+                dev.tail_ops.insert(dev.tail_ops.end(), ops.send.begin(), ops.send.end());
+                st.merge_op_offset = (int32_t)dev.tail_ops.size();
+                st.num_merge_ops = (int32_t)ops.merge.size();
+                dev.tail_ops.insert(dev.tail_ops.end(), ops.merge.begin(), ops.merge.end());
+                st.block_beat_offset = (int32_t)(slot_beat_offset[consumer] + block.start_row * BANKS / LANES);
+                dev.streams.push_back(st);
+            }
+        d.num_streams        = (int32_t)dev.streams.size() - d.stream_offset;
         dev.desc.push_back(d);
 
         dev.records.insert(dev.records.end(), c.enc.records[axis].begin(), c.enc.records[axis].end());
@@ -1377,9 +1453,6 @@ inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const st
         dev.slot_images.insert(dev.slot_images.end(), image.begin(), image.end());
         const std::vector<MacroPinRef> refs = macro_pin_refs(c.enc, axis);
         dev.macro_pins.insert(dev.macro_pins.end(), refs.begin(), refs.end());
-        for (int local : c.external_local) dev.external_slots.push_back((int32_t)c.enc.node_slot[local]);
-        for (int local : c.shared_local) dev.shared_slots.push_back(local < 0 ? -1 : (int32_t)c.enc.node_slot[local]);
-        for (const Parcel& parcel : c.parcels) dev.parcels.push_back({(int32_t)parcel.offset, (int32_t)parcel.count});
     }
     return dev;
 }
@@ -1391,10 +1464,55 @@ inline std::vector<int> chunked_large_nets(const Chunked& ch) {
     return large_nets;
 }
 
+// Replays one block's send and merge ops on NODE IDS, exactly as the device moves floats (row buffer,
+// per-bank row counters, half-row beats), and checks that every consumer slot of the block receives
+// its own node from the owner, and that every merge entry adds that node into its owner slot. A buffer
+// row reused too early, a wrong bank or row, or a beat out of place all show as a wrong node. Meow.
+inline bool tail_ops_deliver(const Chunked& ch, const Chunk& consumer, const Chunk::TailBlock& block, const TailOps& ops) {
+    const Chunk& owner = ch.chunks[block.owner];
+    std::vector<int> owner_node(owner.enc.num_slots, -1), consumer_node(consumer.enc.num_slots, -1);
+    for (size_t l = 0; l < owner.work_node.size(); l++) if (owner.enc.node_slot[l] >= 0) owner_node[owner.enc.node_slot[l]] = owner.work_node[l];
+    for (size_t l = 0; l < consumer.work_node.size(); l++) if (consumer.enc.node_slot[l] >= 0) consumer_node[consumer.enc.node_slot[l]] = consumer.work_node[l];
+    const long R = TAIL_BUFFER_ROWS, first_slot = block.start_row * BANKS;
+    std::vector<int> buffer(BANKS * R, -1), row(BANKS, 0);
+    long beat = 0;
+    for (uint32_t op : ops.send) {
+        if (op & TAIL_BEAT_OP) {
+            const long r = beat * LANES / BANKS, half = beat % (BANKS / LANES);
+            for (int j = 0; j < LANES; j++) {
+                const int b = (int)half * LANES + j;
+                const long slot = first_slot + beat * LANES + j;
+                const int want = slot < consumer.enc.num_slots ? consumer_node[slot] : -2;
+                if (want >= 0 && buffer[b * R + r % R] != want) return false;   // a real slot got the wrong node
+            }
+            beat++;
+        } else {
+            const int b = tail_entry_bank(op);
+            buffer[b * R + row[b]++ % R] = owner_node[tail_entry_slot(op)];
+        }
+    }
+    if (beat != block.rows * BANKS / LANES) return false;
+    std::fill(buffer.begin(), buffer.end(), -1);
+    std::fill(row.begin(), row.end(), 0);
+    beat = 0;
+    for (uint32_t op : ops.merge) {
+        if (op & TAIL_BEAT_OP) {
+            const long r = beat * LANES / BANKS, half = beat % (BANKS / LANES);
+            for (int j = 0; j < LANES; j++) buffer[((int)half * LANES + j) * R + r % R] = consumer_node[first_slot + beat * LANES + j];
+            beat++;
+        } else {
+            const int b = tail_entry_bank(op);
+            const int node = buffer[b * R + row[b]++ % R];
+            if (node < 0 || node != owner_node[tail_entry_slot(op)]) return false;   // adds another node's gradient
+        }
+    }
+    return true;
+}
+
 // Chunked checker: every chunk decodes on its own (local slots -> parsed geometry); the union must
-// be the in-scope netlist exactly. Plus ownership, capacity, and the mailbox: every entry
-// written once, by the owner of the node the consumer expects, and each owner's gradient-collect
-// sequence keeps a slot `hazard` entries apart. Meow.
+// be the in-scope netlist exactly. Plus ownership, capacity, the tail layout (C7), and the tail ops
+// replayed on node ids: every external slot receives the node its consumer expects, and every merge
+// adds into that node's owner slot. Meow.
 inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg) {
     Failures fail;
     if (!ch.fits) { fail("no chunk count fits the capacity", ch.capacity); return fail.count; }
@@ -1427,6 +1545,50 @@ inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg
         }
         chunk_slot_nodes.push_back(slot_nodes);
     }
+    {   // C7: every external in its chunk's tail rows, each bank's tail in emission order. Meow.
+        const std::vector<long> owner_slot = owner_slots_of(ch);
+        for (int k = 0; k < ch.num_chunks; k++) {
+            const Chunk& c = ch.chunks[k];
+            const Encoded& e = c.enc;
+            long externals = 0;
+            for (size_t l = 0; l < c.work_node.size(); l++) {
+                const long slot = e.node_slot[l];
+                if (c.external[l]) {
+                    externals++;
+                    if (slot < e.first_tail_slot || slot >= e.first_fixed_slot) fail("external outside its chunk's tail rows (C7)", k);
+                } else if (slot_class(e.kind[l]) == 1 && slot >= e.first_tail_slot) {
+                    fail("owned movable slot in the tail rows (C7)", k);
+                }
+            }
+            if ((long)c.tail_order.size() != externals) { fail("tail_order does not list every external (C7)", k); continue; }
+            for (size_t i = 0; i < c.tail_order.size(); i++) {
+                const int l = c.tail_order[i];
+                if (!c.external[l]) { fail("tail_order names a non-external (C7)", k); break; }
+                if (i > 0) {
+                    const int a = c.work_node[c.tail_order[i - 1]], b = c.work_node[l];
+                    if (ch.owner[a] > ch.owner[b] || (ch.owner[a] == ch.owner[b] && owner_slot[a] >= owner_slot[b]))
+                        { fail("tail_order not in emission order (C7)", k); break; }
+                }
+            }
+            long row = e.first_tail_slot / BANKS, covered = 0;
+            for (const Chunk::TailBlock& block : c.tail_blocks) {
+                if (block.start_row != row || block.first != covered) { fail("tail blocks not contiguous, fresh rows (C7)", k); break; }
+                std::vector<long> next_row(BANKS, block.start_row);
+                for (long i = block.first; i < block.first + block.count; i++) {
+                    const int l = c.tail_order[i];
+                    if (ch.owner[c.work_node[l]] != block.owner) { fail("a tail block holds another owner's node (C7)", k); break; }
+                    if (e.node_slot[l] != next_row[e.bank[l]]++ * BANKS + e.bank[l]) { fail("a bank's rows in a tail block not in emission order (C7)", k); break; }
+                }
+                if (*std::max_element(next_row.begin(), next_row.end()) - block.start_row != block.rows) fail("tail block row count (C7)", k);
+                const TailOps ops = block_ops(ch, c, block, owner_slot);
+                if (!ops.feasible) fail("tail block needs more than TAIL_BUFFER_ROWS rows in flight (C7)", k);
+                if (!tail_ops_deliver(ch, c, block, ops)) fail("tail ops deliver a node to the wrong slot (C7)", k);
+                row += block.rows;
+                covered += block.count;
+            }
+            if (covered != externals || row * BANKS != e.first_fixed_slot) fail("tail blocks do not cover the tail (C7)", k);
+        }
+    }
     {   // The partition model (partition.hpp) must count what the builder built, C6 included. Meow.
         const PartitionGraph G = make_partition_graph(ch.global, cfg);
         PartitionState s;
@@ -1440,43 +1602,6 @@ inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg
     for (const MacroPin& mp : ch.global.macro_pins)
         if (ch.owner[mp.pin_node] != ch.owner[mp.macro_node]) fail("macro pin split from its macro", mp.pin_node);
 
-    std::vector<int> written_node(ch.mailbox_size, -1), writes(ch.mailbox_size, 0);
-    for (int j = 0; j < ch.num_chunks; j++) {
-        const Chunk& p = ch.chunks[j];
-        size_t e = 0;
-        std::vector<long> fold_slots;
-        for (const Parcel& segment : p.parcels)
-            for (long i = 0; i < segment.count; i++, e++) {
-                if (e >= p.shared_local.size()) { fail("shared list shorter than its parcels", j); break; }
-                if (segment.offset < 0) {   // padding: no mailbox position, no slot
-                    if (p.shared_local[e] != -1) fail("padding segment names a node", j);
-                    fold_slots.push_back(-1);
-                    continue;
-                }
-                if (p.shared_local[e] < 0) { fail("real segment holds padding", j); continue; }
-                const long position = segment.offset + i;
-                if (position >= ch.mailbox_size) { fail("send past the mailbox", j); continue; }
-                writes[position]++;
-                written_node[position] = p.work_node[p.shared_local[e]];
-                if (p.external[p.shared_local[e]]) fail("external slot listed as shared", j);
-                fold_slots.push_back(p.enc.node_slot[p.shared_local[e]]);
-            }
-        if (e != p.shared_local.size()) fail("shared list longer than its parcels", j);
-        for (size_t a = 0; a < fold_slots.size(); a++)
-            for (size_t b = a + 1; b < fold_slots.size() && b < a + (size_t)cfg.hazard; b++)
-                if (fold_slots[a] >= 0 && fold_slots[a] == fold_slots[b]) fail("owner collect RAW hazard", j);
-    }
-    for (long position = 0; position < ch.mailbox_size; position++) if (writes[position] != 1) fail("mailbox entry not written exactly once", position);
-    for (int k = 0; k < ch.num_chunks; k++) {
-        const Chunk& c = ch.chunks[k];
-        long externals = 0;
-        for (char is_external : c.external) externals += is_external;
-        if ((long)c.external_local.size() != externals) fail("external list does not cover every external slot", k);
-        for (size_t i = 0; i < c.external_local.size(); i++) {
-            const long position = c.inbox_offset + (long)i;
-            if (position >= ch.mailbox_size || written_node[position] != c.work_node[c.external_local[i]]) fail("external slot receives the wrong node", k);
-        }
-    }
     std::sort(decoded.begin(), decoded.end());
     if (decoded != in_scope_geometry(nl, chunked_large_nets(ch))) fail("decoded chunks differ from the input netlist", (long)decoded.size());
     return fail.count;

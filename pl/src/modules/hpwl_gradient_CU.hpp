@@ -7,13 +7,13 @@
 // computeHpwlPartials_CPU (Partials.cpp): exponents shifted by the net's bbox, exp from the host
 // LUT exp(-d/gamma) with linear interpolation. Nets of 2..96 pins.
 //
-//   send pass     for each chunk j: load positions, send external positions
-//   compute pass  for each chunk k: load positions (zeroing grad in the same pass), receive its
-//                 external positions, refresh macro pins, run the gradient beat loop, fold macro
-//                 pins, return its external slots' gradients into its own inbox, and drain its
-//                 movable slots to grad_DDR
-//   fold pass     for each chunk j: reload its gradient, collect the external gradients other
-//                 chunks computed for its nodes, drain
+//   send pass     for each chunk j: load its owned positions, write them into every consumer's
+//                 tail block (tail_exchange.hpp)
+//   compute pass  for each chunk k: load positions, tail included (zeroing grad in the same pass),
+//                 refresh macro pins, run the gradient beat loop, fold macro pins, and drain its
+//                 movable slots, tail included, to grad_DDR
+//   fold pass     for each chunk j: reload its owned gradients, merge in what every consumer drained
+//                 into its tail block for j, drain
 //
 // The beat loop is three stages in a DATAFLOW region, joined by streams (hpwl_gradient/):
 //   hpwl_CU     gather -> bbox trees -> each pin's net (max, min); HPWL total
@@ -23,7 +23,7 @@
 // A macro pin is never external (packer rule C6): a chunk using a pin of a macro owned elsewhere
 // holds the macro as the external and the pin as a local slot. So each chunk refreshes its pins
 // after receive and folds them in the compute pass, its external macros included; a macro's
-// gradient then travels the mailbox like a cell's, and only cells and macros cross it (#47). Meow.
+// gradient then crosses chunks like a cell's, and only cells and macros cross (#47). Meow.
 //
 // Brought together 2026-10-06 (#45) from vck5000/bring_up/: hpwl_gradient_computer_v2 (this top,
 // renamed) and hpwl_gradient_computer (gradient_beat_loop), @ 41f2193. Meow.
@@ -31,7 +31,7 @@
 #include "modules/hpwl_gradient/slot_arrays.hpp"
 #include "modules/hpwl_gradient/record_gather.hpp"
 #include "modules/hpwl_gradient/wa_gradient.hpp"   // includes wa_sums, hpwl_CU
-#include "modules/hpwl_gradient/mailbox.hpp"
+#include "modules/hpwl_gradient/tail_exchange.hpp"
 
 namespace plalgo {
 
@@ -86,12 +86,10 @@ static void hpwl_gradient_CU(
         const int32_t*                  group_ends_DDR,  // [num_chunks * NUM_GROUP_ENDS]
         int                             num_chunks,
         const pinrec::RecordBeat*       records_DDR,       // every chunk's stream, concatenated, this axis
-        const pinrec::SlotBeat*         pos_DDR,           // every chunk's slot-major positions, this axis
+        pinrec::SlotBeat*               pos_DDR,           // every chunk's slot-major positions, this axis; the send pass fills the tails
         const pinrec::MacroPinRef*      macro_pins_DDR,    // every chunk's refresh / fold list, this axis
-        const int32_t*                  external_slots_DDR, // every chunk's external slots, inbox order
-        const int32_t*                  shared_slots_DDR,  // every chunk's shared own slots, parcel order
-        const pinrec::ParcelRef*        parcels_DDR,       // each chunk's segments (num_parcels)
-        float*                          mailbox_DDR,       // scratch: external positions, then external gradients
+        const pinrec::TailStream*       streams_DDR,       // every owner's tail streams (ChunkDesc stream range)
+        const uint32_t*                 tail_ops_DDR,      // their send and merge ops
         const float*                    offset_table_DDR,  // [offset_table_size] shared by all chunks
         int                             offset_table_size,
         const float*                    exp_lut_DDR,       // [lut_size] exp(-t) table
@@ -127,8 +125,9 @@ static void hpwl_gradient_CU(
 send_pass:
     for (int j = 0; j < num_chunks && chunked; j++) {
         const pinrec::ChunkDesc desc = chunks_DDR[j];
-        load_slot_array(pos_DDR + desc.slot_beat_offset, desc.num_slot_beats, pos_URAM);   // slot_arrays.hpp
-        send_external_positions(desc, parcels_DDR, shared_slots_DDR, pos_URAM, mailbox_DDR);   // mailbox.hpp
+        load_slot_array(pos_DDR + desc.slot_beat_offset, desc.first_tail_slot / pinrec::LANES, pos_URAM);   // slot_arrays.hpp
+        for (int s = 0; s < desc.num_streams; s++)
+            send_tail_block(streams_DDR[desc.stream_offset + s], tail_ops_DDR, pos_URAM, pos_DDR);   // tail_exchange.hpp
     }
 
     int64_t hpwl_sum = 0;
@@ -154,15 +153,13 @@ compute_pass:
                 }
             }
         }
-        receive_external_positions(desc, external_slots_DDR, mailbox_DDR, pos_URAM);   // mailbox.hpp
-        refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);   // slot_arrays.hpp, after receive (C6)
+        refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);   // slot_arrays.hpp; external macros arrived with the tail (C6)
         load_group_ends(group_ends_DDR + k * pinrec::NUM_GROUP_ENDS, group_end_REG);   // record_gather.hpp
         gradient_beat_loop(records_DDR + desc.record_beat_offset, desc.num_beats, group_end_REG, pos_URAM,   // this file
                            offset_BRAM, lut_BRAM, lut_size, inv_lut_step, inv_gamma, grad_URAM,
                            desc.first_fixed_slot, offset_bits, chunk_hpwl_fixed);
         hpwl_sum += chunk_hpwl_fixed;
         fold_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, grad_URAM, pos_URAM);   // slot_arrays.hpp
-        if (chunked) return_external_gradients(desc, external_slots_DDR, grad_URAM, mailbox_DDR);   // mailbox.hpp
         drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR + desc.slot_beat_offset);   // slot_arrays.hpp
     }
     hpwl_total_fixed = hpwl_sum;
@@ -170,10 +167,11 @@ compute_pass:
 fold_pass:
     for (int j = 0; j < num_chunks && chunked; j++) {
         const pinrec::ChunkDesc desc = chunks_DDR[j];
-        const int movable_slot_beats = desc.first_fixed_slot / pinrec::LANES;
-        load_slot_array(grad_DDR + desc.slot_beat_offset, movable_slot_beats, grad_URAM);   // slot_arrays.hpp
-        collect_external_gradients(desc, parcels_DDR, shared_slots_DDR, mailbox_DDR, grad_URAM);   // mailbox.hpp
-        drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR + desc.slot_beat_offset);   // slot_arrays.hpp
+        const int owned_slot_beats = desc.first_tail_slot / pinrec::LANES;
+        load_slot_array(grad_DDR + desc.slot_beat_offset, owned_slot_beats, grad_URAM);   // slot_arrays.hpp
+        for (int s = 0; s < desc.num_streams; s++)   // consumers ascending: each slot's adds in a fixed order
+            merge_tail_block(streams_DDR[desc.stream_offset + s], tail_ops_DDR, grad_DDR, grad_URAM);   // tail_exchange.hpp
+        drain_slot_array(grad_URAM, owned_slot_beats, grad_DDR + desc.slot_beat_offset);   // slot_arrays.hpp
     }
 }
 

@@ -1,20 +1,23 @@
 // Verify hpwl_gradient_CU (src/modules/hpwl_gradient_CU.hpp) -- WA gradient for a design split into
-// chunks: external positions out, external gradients back, through DDR (#41).
+// chunks: external positions out, external gradients back, through the consumers' tail rows (#41, #47).
 // From vck5000/test/hpwl_gradient_computer_v2_test.cpp @ 41f2193 (#45). Meow.
 //
 // Golden: wa_gradient_golden.hpp (sw_only's WA partial in double from the PARSED netlist), so it
-// is independent of the partition, homes, external slots and mailbox layout. Each movable parsed
-// node's device gradient is read from its OWNER chunk's slot. External slots, macro-pin slots and
-// the mailbox all start as NaN, so a missed send, receive or fold cannot pass.
+// is independent of the partition, homes, external slots and tail layout. Each movable parsed
+// node's device gradient is read from its OWNER chunk's slot. External slots and macro-pin slots
+// start as NaN, so a missed send, refresh or fold cannot pass.
 //
 //   [1] STRUCTURE  vs same-LUT golden, rel_rms < 1e-5, max_rel < 1e-3, both axes:
-//                  capacity 2048 (several chunks) and capacity 1M (one chunk, no mailbox)
+//                  capacity 4096 (several chunks), 2560 (bare cut, many owner blocks per tail) and
+//                  1M (one chunk, no tail)
 //   [2] LUT BUDGET vs true-exp golden, rel_rms < 1e-4, max_rel < 1e-3 (chunked config)
 //   [3] ZERO       movable nodes with no in-scope pin get exactly 0
 //   [4] HPWL       the total-HPWL by-product, bit-exact vs the golden's integer sum; the golden's
 //                  quantization within 2^-HPWL_FRAC_BITS per net of the exact double sum
-//   [5] COVERAGE   several chunks; external cells and macro pins exist; external gradients carry
-//                  a real share of the total (a dropped return path would be visible)
+//   [5] COVERAGE   several chunks; external cells and macros exist; external gradients carry a
+//                  real share of the total (a dropped merge would be visible); tails with many
+//                  owner blocks, and blocks of several rows. Row-buffer wrap-around (a block of more
+//                  than TAIL_BUFFER_ROWS rows) appears only on real designs (--netlist).
 //
 // `hpwl_gradient_CU_test --netlist FILE [CAPACITY]` runs [1]+[4] on a real design (FILE from
 // `make -C host/sw_flat netlists`); CAPACITY defaults to the on-chip SLOT_CAPACITY. Meow.
@@ -41,10 +44,9 @@ static DeviceAxis run_axis(const packer::Chunked& ch, size_t num_parsed, int axi
     std::memcpy(pos.data(), dev.slot_images.data(), dev.slot_images.size() * sizeof(float));
     std::vector<pinrec::SlotBeat> grad(pos.size());
     for (auto& beat : grad) for (float& v : beat.v) v = NAN;     // unwritten slots stay visibly wrong
-    std::vector<float> mailbox(dev.mailbox_size + 1, NAN);
     DeviceAxis out;
     hpwl_gradient_CU(dev.desc.data(), dev.group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(), dev.macro_pins.data(),
-                     dev.external_slots.data(), dev.shared_slots.data(), dev.parcels.data(), mailbox.data(),
+                     dev.streams.data(), dev.tail_ops.data(),
                      dev.offset_table.data(), (int)dev.offset_table.size(), lut.table.data(), lut.size,
                      grad.data(), dev.offset_bits, 1.0f / golden::GAMMA, lut.inv_step, out.hpwl_total_fixed);
 
@@ -126,24 +128,23 @@ int main(int argc, char** argv) {
 
     bool ok = true;
     packer::Chunked ch, tight;
-    ok &= run_config("capacity=2048", nl, 2048, node_pos, lut, true, &ch);
-    // Small chunks put a node's external entries near parcel boundaries, so the owner's
-    // gradient-collect sequence needs padding. Bare cut at 704 (44 chunks): 23 padding entries,
-    // 16 straddling pairs, 0.05 s to encode (scan 2026-10-06; 768 had 1 pair). FM finds more at
-    // small capacities (68 at 384) but takes 92 s here, too slow for tier 1. Meow.
-    ok &= run_config("capacity=704", nl, 704, node_pos, lut, false, &tight, 0);
+    ok &= run_config("capacity=4096", nl, 4096, node_pos, lut, true, &ch);
+    // Many small chunks: a consumer's tail holds blocks from many owners (C7). Bare cut at 2560
+    // (30 chunks); the per-owner blocks' row rounding means 2048 and below fit no K (scan 2026-10-09). Meow.
+    ok &= run_config("capacity=2560", nl, 2560, node_pos, lut, false, &tight, 0);
     ok &= run_config("capacity=1M", nl, SLOT_CAPACITY, node_pos, lut, false);
 
-    // The device skips padding segments whole, so a straddling pair (one slot's collect entries
-    // < HAZARD_DISTANCE apart once padding is gone) is what a wrong skip would corrupt. Require
-    // plenty: half the measured 16, so a packer or fixture change can't silently disarm [5]. Meow.
-    constexpr long MIN_STRADDLING_PAIRS = 8;
-    long padding = 0;
-    for (const packer::Chunk& c : tight.chunks) padding += std::count(c.shared_local.begin(), c.shared_local.end(), -1);
-    const long straddling = fixture::straddling_pairs(tight);
-    printf("%s [5] coverage: capacity=704 return sequences hold %ld padding entries, %ld straddling pairs (need >= %ld)\n",
-           straddling >= MIN_STRADDLING_PAIRS ? "ok  " : "FAIL", padding, straddling, MIN_STRADDLING_PAIRS);
-    ok &= straddling >= MIN_STRADDLING_PAIRS;
+    // [5] the tail exchange's corner cases are present, so [1] exercised them. Meow.
+    long streams = 0, max_blocks = 0, multi_row_blocks = 0;
+    for (const packer::Chunk& c : tight.chunks) {
+        streams += (long)c.tail_blocks.size();
+        max_blocks = std::max(max_blocks, (long)c.tail_blocks.size());
+        for (const auto& block : c.tail_blocks) multi_row_blocks += block.rows > 1;
+    }
+    const bool tails_covered = streams >= 50 && max_blocks >= 5 && multi_row_blocks >= 10;
+    printf("%s [5] coverage: capacity=2560 has %ld tail blocks, up to %ld per tail, %ld of several rows\n",
+           tails_covered ? "ok  " : "FAIL", streams, max_blocks, multi_row_blocks);
+    ok &= tails_covered;
 
     // [5] coverage: the return path must carry real gradient. Share of |grad|^2 on nodes that are
     // external somewhere (their total needs the mailbox) -- a dropped return path would lose it.

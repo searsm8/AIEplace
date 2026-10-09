@@ -169,15 +169,42 @@ side inward, each increment verified on its own, and the exchange moves into ite
     fold order); FM's incremental deltas equal a fresh recount after 3000 random moves on
     mms/bigblue4 and mms/newblue7. Model re-run (`m0_1M_c6_20261009.txt`): FUSED 61-66%, FUSED_TAIL
     40-56% of today.
-- **B2. Tail rows in `assign_node_slots`** (externals after every bank's owned rows; the capacity
-  check then sees the tail through `num_slots`), plus the static tail tables the assembly and
-  disassembly need. Verify: check_chunked rules for the tail; tail/E and capacity as M1 measured.
-- **B3. Exchange through the tails, still as passes in `hpwl_gradient_CU`**: `send_to_tails`
-  (assembly buffers) replaces send + receive; `merge_from_tails` (disassembly + merge-add) replaces
-  return + collect. Verify: tier 1, mutants, co-sim of the buffers; then compare its synthesis cost
-  with widened receive/return (M5's question).
-- **B4. Move the two exchange functions into `iteration_update`** when #45 step 6 lands; the send and
-  fold passes disappear.
+- **B2. Tail rows (rule C7): DONE (2026-10-09).** `assign_node_slots` puts externals in tail rows
+  after the owned rows; `order_external_tails` orders each block by the owner's slot once every chunk
+  is encoded, then re-encodes the records. Device-transparent. Verified: tier 1, 8/8 real designs,
+  single-chunk designs byte-identical (4 designs), 4/4 mutants; chunk counts unchanged on all 44 at
+  1 M and 512 K (`b2_chunk_counts_20261009.txt`).
+- **B3. The tail exchange: DONE (2026-10-09).** C7 amended:
+  one block per owner, on fresh rows. `pin_record.hpp`: `ChunkDesc` loses the mailbox fields, gains
+  `first_tail_slot` and a stream range; new `TailStream` with 32-bit ENTRY / TAIL_BEAT ops.
+  `tail_exchange.hpp` (replaces `mailbox.hpp`): `send_tail_block` and `merge_tail_block` replay the
+  ops through a 32-bank x 256-row buffer. Passes: send = owner load + send streams; compute = load,
+  refresh, beats, fold, drain (no receive / return); fold = owned reload + merge streams + owned
+  drain. Packer: `tail_block_ops` schedules the ops; `check_chunked` replays every block on node ids
+  (every tail slot gets its node, every merge adds into that node's owner slot); the mailbox
+  machinery (parcels, hazard padding, C3/C4) is removed.
+  - Verified: tier 1 (synthetic capacities now 4096 / 2560 / 1M: owner blocks round per block, so
+    2048 and below fit no K); 8/8 real designs (blocks up to 3,107 rows, so the buffer wraps; at most
+    134 rows in flight); chunk counts unchanged on all 44 at 1 M and 512 K
+    (`b3_chunk_counts_20261009.txt`); 7/7 mutants; C-synth all loops II=1, 3.482 ns est. (3.617 ns
+    with the mailbox); RTL co-sim PASS at capacity 1536 (16 chunks; 361 send and 542 merge
+    back-to-back row-buffer uses), hazard-1 negative control FAILS as it must.
+  - Model (`m0_1M_b3_20261009.txt`): bigblue4 at 1 M 2.49 M -> **1.93 M** cycles per axis today; the
+    exchange is 30% of it.
+- **B4. Fold the exchange into the position update.** As planned, it needs `iteration_update` in
+  slot order, which is #45 step 6 (after step 5, `sw_flat`); today only the legacy node-ordered
+  module exists (`vck5000/pl/src/pl_algo/src/modules/iteration_update.hpp`). Three ways forward,
+  bigblue4 at 1 M per axis:
+
+  | option | what | needs | cycles (est.) |
+  |---|---|---|---|
+  | **A. stream fusion** (the plan) | the update streams owned beats 16 slots/cycle; per consumer, a 4-wide assembly buffer (send) and disassembly + 2 adders/lane (merge), all consumers concurrently | #45 steps 5-6; K-1 concurrent buffers (5 at 512 K) | **0.98 M** (modeled) |
+  | B. URAM-staged fusion | one owner pass: load owned pos + grad, replay B3 merge streams, run the update over URAM, replay B3 send streams | #45 steps 5-6; reuses B3's loops as built | ~1.5 M (B3 minus one reload/drain) |
+  | C. widen B3's loops to 4 entries/cycle, in place | 4-lane scatter into the row buffer, 4-lane URAM gather / read-add-write | nothing; buildable now | ~1.5 M |
+
+  C buys about what B does, now, at the LUT cost the redesign set out to avoid, and A would
+  replace it. A is the target. Decision for Mark: build A once #45 steps 5-6 land (B4 waits), or C
+  now as an interim.
 
 ## Steps
 Each step: what, then how it's verified. M0–M1 are offline and cheap, and decide whether the rest

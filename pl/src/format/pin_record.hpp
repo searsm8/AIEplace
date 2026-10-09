@@ -83,28 +83,46 @@ struct MacroPinRef {
 
 // ---- Chunking (a design larger than one on-chip slot space) ----
 // Each chunk is an ordinary stream over its own local slots; the per-chunk arrays are concatenated
-// in DDR and located by this descriptor. External slots (nodes owned by another chunk) are filled
-// from, and return their gradients to, one DDR mailbox laid out consumer-major: chunk k's inbox
-// holds its external slots as one parcel per owner. See beat_packer.hpp (encode_chunked).
+// in DDR and located by this descriptor. External slots (nodes owned by another chunk) are the
+// chunk's TAIL rows (packer rule C7): one block per owner, each starting on a fresh row. The owner
+// fills its block in the consumer's position image and later adds the gradients the consumer drained
+// there into its own, through a TailStream (#47). See beat_packer.hpp (encode_chunked).
 // A chunk's group ends (degree groups, then large-net span groups) are a separate int32 table, NUM_GROUP_ENDS
 // per chunk: inside ChunkDesc they would make it 1120 bits, past the 1024-bit m_axi maximum. Meow.
 constexpr int NUM_GROUP_ENDS = NET_DEGREES_PROCESSED + SPAN_GROUPS;   // 15 degree + 7 span group ends
 struct ChunkDesc {
     int32_t record_beat_offset, num_beats;          // into the concatenated record stream
     int32_t slot_beat_offset, num_slot_beats;       // into the concatenated slot-major images
+    int32_t first_tail_slot;                        // owned movable slots below, the tail rows from here
     int32_t first_fixed_slot;
     int32_t macro_pin_offset, num_macro_pins;       // into the concatenated macro-pin lists
-    int32_t inbox_offset, inbox_size;               // this chunk's inbox in the mailbox
-    int32_t external_list_offset;                   // into the concatenated external-slot lists
-    int32_t shared_list_offset;                     // into the concatenated shared-slot lists
-    int32_t parcel_offset;                          // into the parcel table
-    int32_t num_parcels;                            // this chunk's segments in the parcel table
+    int32_t stream_offset, num_streams;             // this chunk's tail streams AS OWNER, consumers ascending
 };
 
-// One segment of an owner's send / gradient-collect sequence: `count` consecutive mailbox
-// positions from `offset`, or -- offset -1 -- `count` padding entries (shared slot -1, skipped) that
-// keep a slot HAZARD_DISTANCE entries from itself in the gradient read-add-write. Meow.
-struct ParcelRef { int32_t offset, count; };
+// One owner -> consumer block of the consumer's tail, exchanged through an on-chip row buffer of
+// BANKS banks x TAIL_BUFFER_ROWS rows. Each list is replayed in order, one op per cycle; an ENTRY's
+// row is the next one of its bank (rows within a block fill bank by bank, in emission order):
+//   send  (owner's send pass) : ENTRY     buffer[bank][row] = pos[owner slot]
+//                               TAIL_BEAT the buffer's next half-row -> the block, in pos_DDR
+//   merge (owner's fold pass) : TAIL_BEAT the block's next half-row, from grad_DDR -> the buffer
+//                               ENTRY     grad[owner slot] += buffer[bank][row]
+// The host orders the ops so no buffer row is overwritten before it is written out (send) or used
+// (merge). A block's entries name distinct owner slots, ascending. Meow.
+struct TailStream {
+    int32_t send_op_offset, num_send_ops;
+    int32_t merge_op_offset, num_merge_ops;         // into the concatenated tail ops
+    int32_t block_beat_offset;                      // the block's first beat in the concatenated slot images
+};
+
+#ifndef PL_TAIL_BUFFER_ROWS
+#define PL_TAIL_BUFFER_ROWS 256   // override (-D) only for experiments; the host schedules against it
+#endif
+constexpr int      TAIL_BUFFER_ROWS   = PL_TAIL_BUFFER_ROWS;   // a power of 2
+constexpr uint32_t TAIL_BEAT_OP       = 1u << 31;
+constexpr int      TAIL_OP_BANK_SHIFT = 25;                     // ENTRY: owner slot (25 bits) | bank << 25
+inline uint32_t make_tail_entry(uint32_t owner_slot, int bank) { return owner_slot | (uint32_t)bank << TAIL_OP_BANK_SHIFT; }
+inline uint32_t tail_entry_slot(uint32_t op) { return op & ((1u << TAIL_OP_BANK_SHIFT) - 1u); }
+inline int      tail_entry_bank(uint32_t op) { return (int)(op >> TAIL_OP_BANK_SHIFT) & (BANKS - 1); }
 
 inline uint32_t record_node_slot(uint32_t record, int offset_bits)  { return record >> offset_bits; }
 inline uint32_t record_offset_idx(uint32_t record, int offset_bits) { return record & ((1u << offset_bits) - 1u); }

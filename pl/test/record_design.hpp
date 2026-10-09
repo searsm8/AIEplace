@@ -117,22 +117,6 @@ inline bool load_from_args(int argc, char** argv, packer::Netlist& nl) {
     return false;
 }
 
-// The cases a skipped padding segment must still keep safe: pairs of one slot's entries in an owner's
-// gradient-collect sequence that sit < HAZARD_DISTANCE apart once padding is removed. The device
-// skips padding segments whole, so only the pipeline drain between two invocations of collect_parcel
-// separates these; a harness that wants to exercise that path must see some. Meow.
-inline long straddling_pairs(const packer::Chunked& ch) {
-    long pairs = 0;
-    for (const packer::Chunk& c : ch.chunks) {
-        std::vector<long> real_sequence;
-        for (int local : c.shared_local) if (local >= 0) real_sequence.push_back(c.enc.node_slot[local]);
-        for (size_t i = 0; i < real_sequence.size(); i++)
-            for (size_t j = i + 1; j < real_sequence.size() && j < i + pinrec::HAZARD_DISTANCE; j++)
-                pairs += real_sequence[i] == real_sequence[j];
-    }
-    return pairs;
-}
-
 } // namespace fixture
 
 #endif // RECORD_DESIGN_HPP
