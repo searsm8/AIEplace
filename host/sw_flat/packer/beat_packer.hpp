@@ -6,7 +6,7 @@
 // Copied 2026-10-06 (#45) with partition.hpp from vck5000/bring_up/beat_packer/ @ 4bf0baf; this is
 // now the live copy, the vck5000 one is read-only legacy. Meow.
 //
-// Flow:  Netlist nl = read_bookshelf(...) / read_def(...) / built by a test
+// Flow:  Netlist nl = read_netlist(file) / built by a test   // file: host/sw_flat export_netlist
 //        Encoded enc = encode_netlist(nl, cfg);        // nl is not modified
 //        check(nl, enc, cfg)                           // decode the stream, compare geometry
 //        slot_positions(enc, axis, node_pos)           // per-call position image, slot-major
@@ -112,11 +112,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
-#include <fstream>
 #include <map>
 #include <numeric>
 #include <random>
-#include <sstream>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -179,167 +177,71 @@ inline bool is_large(const std::vector<Pin>& net) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Parsers. Bookshelf (ISPD2005, MMS): "terminal"/"terminal_NI" in .nodes = fixed; a movable node
-// taller than the most common movable height is a macro; pin offsets from .nets.
-// DEF (ISPD2015): COMPONENTS "+ FIXED" = fixed; LEF CLASS BLOCK = macro; each "( PIN x )" is its
-// own fixed IO node at offset 0; pin offsets from cells.lef next to the DEF, by the sw_only
-// parser's rule (DataBase::lef_pin_cbk): center of the first RECT of the first PORT.
+// Netlist file (#45). The packer has no parser of its own: host/sw_flat's export_netlist reads a
+// design once with FlatDatabase, derives this Netlist by sw_only's rules (flat_netlist.hpp), and
+// writes it here; the tier-1 harnesses and the #47 models read it back, header-only. A file is a
+// test/model input, not a run-time cache: a placement run builds its Netlist in memory (no caching).
+// Little-endian, no padding:
+//   char[8] "AIEPNL01" | u32 name_len, name
+//   u32 num_nodes | u8 movable[num_nodes] | u8 is_macro[num_nodes]
+//   per axis: u32 num_offsets, f32 offset_value[num_offsets]
+//   u32 num_nets | u32 degree[num_nets] | per pin, net by net: i32 node, i32 offset_key[2]
+// read_netlist checks every index and degree against Netlist's contract and exits on a bad file. Meow.
+constexpr char NETLIST_MAGIC[8] = {'A', 'I', 'E', 'P', 'N', 'L', '0', '1'};
 
-inline Netlist read_bookshelf(const std::string& dir, const std::string& name) {
+inline void write_netlist(const Netlist& nl, const std::string& path) {
+    FILE* out = fopen(path.c_str(), "wb");
+    if (!out) { fprintf(stderr, "cannot write %s\n", path.c_str()); exit(2); }
+    auto put = [&](const void* data, size_t bytes) {
+        if (bytes && fwrite(data, 1, bytes, out) != bytes) { fprintf(stderr, "write failed: %s\n", path.c_str()); exit(2); }
+    };
+    auto put_u32 = [&](size_t value) { const uint32_t v = (uint32_t)value; put(&v, 4); };
+    put(NETLIST_MAGIC, 8);
+    put_u32(nl.name.size()); put(nl.name.data(), nl.name.size());
+    put_u32(nl.movable.size()); put(nl.movable.data(), nl.movable.size()); put(nl.is_macro.data(), nl.is_macro.size());
+    for (int axis = 0; axis < 2; axis++) {
+        put_u32(nl.offset_value[axis].size());
+        put(nl.offset_value[axis].data(), 4 * nl.offset_value[axis].size());
+    }
+    put_u32(nl.nets.size());
+    for (const auto& net : nl.nets) put_u32(net.size());
+    for (const auto& net : nl.nets)
+        for (const Pin& pin : net) { const int32_t rec[3] = {pin.node, pin.offset_key[0], pin.offset_key[1]}; put(rec, 12); }
+    if (fclose(out) != 0) { fprintf(stderr, "write failed: %s\n", path.c_str()); exit(2); }
+}
+
+inline Netlist read_netlist(const std::string& path) {
+    FILE* in = fopen(path.c_str(), "rb");
+    if (!in) { fprintf(stderr, "cannot open netlist %s (make -C host/sw_flat netlists)\n", path.c_str()); exit(2); }
+    auto bad = [&](const char* what) { fprintf(stderr, "bad netlist %s: %s\n", path.c_str(), what); exit(2); };
+    auto get = [&](void* data, size_t bytes) { if (bytes && fread(data, 1, bytes, in) != bytes) bad("truncated"); };
+    auto get_u32 = [&]() { uint32_t v; get(&v, 4); return (size_t)v; };
+    char magic[8];
+    get(magic, 8);
+    if (std::memcmp(magic, NETLIST_MAGIC, 8) != 0) bad("not an AIEPNL01 file");
     Netlist nl;
-    const std::string suite_dir = dir.substr(0, dir.find_last_of('/'));
-    nl.name = suite_dir.substr(suite_dir.find_last_of('/') + 1) + "/" + name;   // mms/ and ispd2005/ share names
-    std::unordered_map<std::string, int> node_id;
-    std::vector<double> height;
-    std::ifstream nodes(dir + "/" + name + ".nodes");
-    if (!nodes) { fprintf(stderr, "cannot open %s.nodes\n", name.c_str()); exit(2); }
-    std::string line;
-    while (std::getline(nodes, line)) {
-        std::istringstream ss(line);
-        std::string first; if (!(ss >> first)) continue;
-        if (first[0] == '#' || first == "UCLA" || first == "NumNodes" || first == "NumTerminals") continue;
-        double width = 0, node_height = 0; std::string kind; ss >> width >> node_height >> kind;
-        node_id.emplace(first, (int)nl.movable.size());
-        nl.movable.push_back(kind.rfind("terminal", 0) == 0 ? 0 : 1);
-        height.push_back(node_height);
-    }
-    std::map<double, long> height_count;
-    for (size_t n = 0; n < height.size(); n++) if (nl.movable[n]) height_count[height[n]]++;
-    double row_height = 0; long best = -1;
-    for (const auto& entry : height_count) if (entry.second > best) { best = entry.second; row_height = entry.first; }
-    nl.is_macro.resize(height.size());
-    for (size_t n = 0; n < height.size(); n++) nl.is_macro[n] = height[n] > row_height;
-
-    std::ifstream nets(dir + "/" + name + ".nets");
-    if (!nets) { fprintf(stderr, "cannot open %s.nets\n", name.c_str()); exit(2); }
-    OffsetDict dict[2];
-    std::vector<Pin> cur; int remaining = 0;
-    long header_nets = -1, header_pins = -1, parsed_nets = 0, parsed_pins = 0;
-    while (std::getline(nets, line)) {
-        std::istringstream ss(line);
-        std::string first; if (!(ss >> first)) continue;
-        std::string colon;
-        if (first == "NumNets") ss >> colon >> header_nets;
-        else if (first == "NumPins") ss >> colon >> header_pins;
-        else if (first == "NetDegree") {
-            ss >> colon >> remaining;
-            cur.clear();
-            parsed_nets++; parsed_pins += remaining;
-        } else if (remaining > 0) {
-            auto it = node_id.find(first);
-            if (it == node_id.end()) { fprintf(stderr, "unknown node %s\n", first.c_str()); exit(2); }
-            std::string direction, offset_text[2] = {"0", "0"};
-            ss >> direction >> colon >> offset_text[0] >> offset_text[1];
-            Pin pin; pin.node = it->second;
+    nl.name.resize(get_u32()); get(&nl.name[0], nl.name.size());
+    const size_t num_nodes = get_u32();
+    nl.movable.resize(num_nodes); nl.is_macro.resize(num_nodes);
+    get(nl.movable.data(), num_nodes); get(nl.is_macro.data(), num_nodes);
+    for (int axis = 0; axis < 2; axis++) { nl.offset_value[axis].resize(get_u32()); get(nl.offset_value[axis].data(), 4 * nl.offset_value[axis].size()); }
+    std::vector<uint32_t> degree(get_u32());
+    get(degree.data(), 4 * degree.size());
+    nl.nets.resize(degree.size());
+    for (size_t n = 0; n < degree.size(); n++) {
+        if ((int)degree[n] < MIN_NET_DEGREE || (int)degree[n] > IGNORE_NET_DEGREE) bad("net degree outside 2..IGNORE_NET_DEGREE");
+        nl.nets[n].resize(degree[n]);
+        for (Pin& pin : nl.nets[n]) {
+            int32_t rec[3];
+            get(rec, 12);
+            if (rec[0] < 0 || (size_t)rec[0] >= num_nodes) bad("pin node out of range");
             for (int axis = 0; axis < 2; axis++)
-                pin.offset_key[axis] = dict[axis].key(std::stof(offset_text[axis]), nl.offset_value[axis]);
-            cur.push_back(pin);
-            if (--remaining == 0 && (int)cur.size() >= MIN_NET_DEGREE && (int)cur.size() <= IGNORE_NET_DEGREE)
-                nl.nets.push_back(cur);
+                if (rec[1 + axis] < 0 || (size_t)rec[1 + axis] >= nl.offset_value[axis].size()) bad("offset key out of range");
+            pin = {rec[0], {rec[1], rec[2]}};
         }
     }
-    if (parsed_nets != header_nets || parsed_pins != header_pins || remaining != 0) {
-        fprintf(stderr, "%s: parsed %ld nets / %ld pins, header says %ld / %ld\n",
-                name.c_str(), parsed_nets, parsed_pins, header_nets, header_pins);
-        exit(2);
-    }
-    return nl;
-}
-
-struct LefMacro {
-    bool block = false;
-    std::unordered_map<std::string, std::array<float, 2>> pin_offset;
-};
-
-inline std::unordered_map<std::string, LefMacro> read_lef(const std::string& path) {
-    std::unordered_map<std::string, LefMacro> macros;
-    std::ifstream in(path);
-    if (!in) { fprintf(stderr, "cannot open %s\n", path.c_str()); exit(2); }
-    std::string line, macro, pin;
-    bool want_rect = false;
-    while (std::getline(in, line)) {
-        std::istringstream ss(line);
-        std::string tok; if (!(ss >> tok)) continue;
-        if (tok == "MACRO") { ss >> macro; pin.clear(); }
-        else if (tok == "CLASS" && pin.empty() && !macro.empty()) { std::string cls; ss >> cls; macros[macro].block = cls == "BLOCK"; }
-        else if (tok == "PIN") { ss >> pin; want_rect = false; }
-        else if (tok == "PORT" && !pin.empty() && !macros[macro].pin_offset.count(pin)) want_rect = true;
-        else if (tok == "RECT" && want_rect) {
-            float x0, y0, x1, y1; ss >> x0 >> y0 >> x1 >> y1;
-            macros[macro].pin_offset[pin] = {(x0 + x1) / 2.0f, (y0 + y1) / 2.0f};
-            want_rect = false;
-        } else if (tok == "END") {
-            std::string what; ss >> what;
-            if (what == pin) { pin.clear(); want_rect = false; }
-        }
-    }
-    return macros;
-}
-
-inline Netlist read_def(const std::string& path, const std::string& name) {
-    Netlist nl; nl.name = name;
-    const auto lef = read_lef(path.substr(0, path.find_last_of('/')) + "/cells.lef");
-    std::ifstream in(path);
-    if (!in) { fprintf(stderr, "cannot open %s\n", path.c_str()); exit(2); }
-    std::unordered_map<std::string, int> node_id, io_pin_node;
-    std::unordered_map<std::string, std::string> master_of;
-    OffsetDict dict[2];
-    enum { NONE, COMPS, NETS } section = NONE;
-    std::string tok, comp_name, comp_master;
-    std::vector<Pin> cur;
-    bool in_stmt = false, comp_fixed = false, collecting = false;
-    while (in >> tok) {
-        if (tok == "COMPONENTS") { section = COMPS; in >> tok >> tok; continue; }   // count ;
-        if (tok == "NETS" && section != NETS) { section = NETS; in >> tok >> tok; continue; }
-        if (tok == "END") { std::string what; in >> what; section = NONE; continue; }
-        if (section == COMPS) {
-            if (tok == "-") { in >> comp_name >> comp_master; in_stmt = true; comp_fixed = false; }
-            else if (tok == "FIXED" || tok == "COVER") comp_fixed = true;
-            else if (tok == ";" && in_stmt) {
-                node_id.emplace(comp_name, (int)nl.movable.size());
-                master_of.emplace(comp_name, comp_master);
-                nl.movable.push_back(comp_fixed ? 0 : 1);
-                auto it = lef.find(comp_master);
-                nl.is_macro.push_back(it != lef.end() && it->second.block);
-                in_stmt = false;
-            }
-        } else if (section == NETS) {
-            if (tok == "-") { in >> tok; cur.clear(); in_stmt = true; collecting = true; }
-            else if (tok == "+") collecting = false;    // routing attributes carry ( x y ) points. Meow.
-            else if (tok == "(" && collecting) {
-                std::string comp, pin_name; in >> comp >> pin_name >> tok;   // ( comp pin )
-                Pin pin;
-                std::array<float, 2> offset = {0.0f, 0.0f};
-                if (comp == "PIN") {
-                    auto it = io_pin_node.find(pin_name);
-                    if (it == io_pin_node.end()) {
-                        it = io_pin_node.emplace(pin_name, (int)nl.movable.size()).first;
-                        nl.movable.push_back(0);
-                        nl.is_macro.push_back(0);
-                    }
-                    pin.node = it->second;
-                } else {
-                    auto it = node_id.find(comp);
-                    if (it == node_id.end()) { fprintf(stderr, "unknown comp %s\n", comp.c_str()); exit(2); }
-                    pin.node = it->second;
-                    const std::array<float, 2>* lef_offset = nullptr;
-                    auto macro = lef.find(master_of[comp]);
-                    if (macro != lef.end()) {
-                        auto lef_pin = macro->second.pin_offset.find(pin_name);
-                        if (lef_pin != macro->second.pin_offset.end()) lef_offset = &lef_pin->second;
-                    }
-                    if (!lef_offset) { fprintf(stderr, "no LEF pin %s/%s\n", master_of[comp].c_str(), pin_name.c_str()); exit(2); }
-                    offset = *lef_offset;
-                }
-                for (int axis = 0; axis < 2; axis++)
-                    pin.offset_key[axis] = dict[axis].key(offset[axis], nl.offset_value[axis]);
-                cur.push_back(pin);
-            } else if (tok == ";" && in_stmt) {
-                if ((int)cur.size() >= MIN_NET_DEGREE && (int)cur.size() <= IGNORE_NET_DEGREE) nl.nets.push_back(cur);
-                in_stmt = false;
-            }
-        }
-    }
+    if (fgetc(in) != EOF) bad("trailing bytes");
+    fclose(in);
     return nl;
 }
 

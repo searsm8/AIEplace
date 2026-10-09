@@ -46,22 +46,18 @@ static TailCost tail_cost(const std::vector<int>& order_banks) {
 int main(int argc, char** argv) {
     Config cfg;
     long capacity = 1L << 20;
-    std::vector<std::pair<std::string, std::string>> designs;
-    std::vector<char> is_def;
+    std::vector<std::string> designs;   // netlist files: make -C host/sw_flat netlists
     for (int i = 1; i < argc; i++) {
         const std::string arg = argv[i];
         auto next = [&]() { if (i + 1 >= argc) exit(2); return std::string(argv[++i]); };
         if (arg == "--capacity") capacity = std::stol(next());
-        else if (arg == "--bookshelf" || arg == "--def") {
-            const std::string path = next(), name = next();
-            designs.emplace_back(path, name); is_def.push_back(arg == "--def");
-        } else { fprintf(stderr, "usage: tail_layout [--capacity SLOTS] (--bookshelf DIR NAME | --def FILE NAME)...\n"); exit(2); }
+        else if (arg == "--netlist") designs.push_back(next());
+        else { fprintf(stderr, "usage: tail_layout [--capacity SLOTS] (--netlist FILE)...\n"); exit(2); }
     }
     printf("#47 tail_layout: capacity=%ld; tail size as a multiple of E (1.00 = no padding)\n", capacity);
 
     for (size_t d = 0; d < designs.size(); d++) {
-        const Netlist nl = is_def[d] ? read_def(designs[d].first, designs[d].second)
-                                     : read_bookshelf(designs[d].first, designs[d].second);
+        const Netlist nl = read_netlist(designs[d]);
         const Chunked ch = encode_chunked(nl, cfg, capacity);
         if (!ch.fits) { printf("%s: no K fits\n", nl.name.c_str()); continue; }
         if (ch.num_chunks == 1) continue;

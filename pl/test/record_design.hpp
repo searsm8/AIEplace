@@ -110,10 +110,10 @@ inline float pin_position(const packer::Netlist& nl, const packer::Pin& pin, int
     return node_pos[pin.node] + nl.offset_value[axis][pin.offset_key[axis]];
 }
 
-// `--bookshelf DIR NAME` or `--def FILE NAME` -> a real netlist; returns false if no such args.
+// `--netlist FILE` -> a real netlist; returns false if no such args. The files come from
+// `make -C host/sw_flat netlists` (FlatDatabase's parse, sw_only's rules). Meow.
 inline bool load_from_args(int argc, char** argv, packer::Netlist& nl) {
-    if (argc == 4 && std::strcmp(argv[1], "--bookshelf") == 0) { nl = packer::read_bookshelf(argv[2], argv[3]); return true; }
-    if (argc == 4 && std::strcmp(argv[1], "--def") == 0)       { nl = packer::read_def(argv[2], argv[3]); return true; }
+    if (argc == 3 && std::strcmp(argv[1], "--netlist") == 0) { nl = packer::read_netlist(argv[2]); return true; }
     return false;
 }
 

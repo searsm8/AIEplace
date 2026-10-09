@@ -801,11 +801,22 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
       legacy centre/micron convention. Parse parallelized (Mark, same day): 2–3× faster than
       DataBase (bigblue4 1.18 vs 2.52 s, superblue12 0.54 vs 1.44 s), still bit-exact.
       → [[REPORT_45_flat_sink_20261007.md]]
-- [ ] **Step 4: whole-design slot layout. ← next.** ⚠️ Its plan verify ("chunk counts and external
-      slots unchanged from today's `encode_chunked` on all 44") cannot hold where the macro rule
-      changed: legacy-only macros become CELLs on ispd2005/bigblue3 and mms/bigblue3 (2,480 each),
-      mms/newblue2 (3,723), and a few others. Measure before/after there instead. Offset tables also
-      change size, e.g. adaptec1 x 308 vs 557 (most shrink, a few grow), so check `offset_bits` too.
+- [x] **Packer fed by FlatDatabase; its internal parser removed (2026-10-09, Mark).**
+      `host/sw_flat/export_netlist` writes the packer's `Netlist` file (`write_netlist` /
+      `read_netlist` in `beat_packer.hpp`, round-trip asserted); `make -C host/sw_flat netlists` writes
+      all 44 in 21 s. `pl/test` (`--netlist FILE`) and the #47 models read them, still header-only.
+      Re-measured on the new input: `make -C pl test` PASS; real-mode sweep **44/44**, HPWL bit-exact
+      on 88/88 axes, worst max_rel 4.83e-4 (bound 1e-3), `.claude/2_ARTIFACTS/scratch_45/sweep44_netlists.txt`;
+      **chunk counts identical on all 44**, externals change only on bigblue3 (ispd2005 51,456 →
+      50,398; mms 56,031 → 54,687). #47 model (`chunk_model_before_after_netlist.md` there): bigblue3
+      `today` −14–15% (981 K → 837 K cycles; mms 1.07 M → 921 K): the legacy "macros" are cells now, so
+      their macro-pin fold goes. Other 6 designs within 60 cycles; #47's bigblue4 figures stand. The
+      model's `make check` (vs legacy `chunk_profile`) is retired: different inputs by decision;
+      last PASS 8/8 at 9905557.
+- [ ] **Step 4: whole-design slot layout. ← next.** The macro-rule worry above is measured (chunk
+      counts unchanged on all 44), so its verify is: node↔slot bijection over movable nodes +
+      fillers, external slots copies only, filler count/area = sw_only's, chunking = today's
+      `encode_chunked` on the FlatDatabase netlists (`sweep44_netlists.txt`).
 - [ ] Steps 5–9 (`sw_flat` → density path in slot order → compose → hardware → retire
       `/vck5000`), each with its verification, in the plan.
 - Carried in: #41's timing / NMU check / URAM-resident loop; #42's widening choice, now contested by

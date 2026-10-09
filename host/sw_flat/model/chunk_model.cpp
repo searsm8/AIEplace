@@ -17,7 +17,7 @@ static void print_phases(const char* label, const Phases& p, long today_total) {
 }
 
 static void usage() {
-    fprintf(stderr, "usage: chunk_model [--capacity SLOTS] [--adders N] [--fm-passes N] (--bookshelf DIR NAME | --def FILE NAME)...\n"
+    fprintf(stderr, "usage: chunk_model [--capacity SLOTS] [--adders N] [--fm-passes N] (--netlist FILE)...\n"
                     "  --adders: merge-add adders per lane (default 1)\n");
     exit(2);
 }
@@ -26,26 +26,22 @@ int main(int argc, char** argv) {
     Config cfg;
     long capacity = 1L << 20;
     int adders = 1;
-    std::vector<std::pair<std::string, std::string>> designs;
-    std::vector<char> is_def;
+    std::vector<std::string> designs;   // netlist files: make -C host/sw_flat netlists
     for (int i = 1; i < argc; i++) {
         const std::string arg = argv[i];
         auto next = [&]() { if (i + 1 >= argc) usage(); return std::string(argv[++i]); };
         if      (arg == "--capacity")  capacity = std::stol(next());
         else if (arg == "--adders")    adders = std::stoi(next());
         else if (arg == "--fm-passes") cfg.partition_fm_passes = std::stoi(next());
-        else if (arg == "--bookshelf" || arg == "--def") {
-            const std::string path = next(), name = next();
-            designs.emplace_back(path, name); is_def.push_back(arg == "--def");
-        } else usage();
+        else if (arg == "--netlist")   designs.push_back(next());
+        else usage();
     }
     if (designs.empty()) usage();
     printf("#47 chunk_model: capacity=%ld, loop overhead=%ld, send/collect %.2f cycles/entry, %d merge adder(s) per lane, %.0f MHz\n",
            capacity, loop_overhead, unburst_cycles, adders, CLOCK_HZ / 1e6);
 
     for (size_t d = 0; d < designs.size(); d++) {
-        const Netlist nl = is_def[d] ? read_def(designs[d].first, designs[d].second)
-                                     : read_bookshelf(designs[d].first, designs[d].second);
+        const Netlist nl = read_netlist(designs[d]);
         const Chunked ch = encode_chunked(nl, cfg, capacity);
         if (!ch.fits) { printf("%s: no K fits\n", nl.name.c_str()); continue; }
 

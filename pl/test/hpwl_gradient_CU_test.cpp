@@ -16,8 +16,8 @@
 //   [5] COVERAGE   several chunks; external cells and macro pins exist; external gradients carry
 //                  a real share of the total (a dropped return path would be visible)
 //
-// `hpwl_gradient_CU_test --bookshelf DIR NAME [CAPACITY]` / `--def FILE NAME [CAPACITY]`
-// runs [1]+[4] on a real design; CAPACITY defaults to the on-chip SLOT_CAPACITY. Meow.
+// `hpwl_gradient_CU_test --netlist FILE [CAPACITY]` runs [1]+[4] on a real design (FILE from
+// `make -C host/sw_flat netlists`); CAPACITY defaults to the on-chip SLOT_CAPACITY. Meow.
 
 #include "tier1_stub.hpp"                  // PL_TIER1_STUB + hls::stream stand-in, BEFORE the module
 #include "wa_gradient_golden.hpp"
@@ -109,7 +109,7 @@ static bool run_config(const char* label, const packer::Netlist& nl, long capaci
 
 int main(int argc, char** argv) {
     packer::Netlist nl;
-    const bool real = argc >= 4 && fixture::load_from_args(4, argv, nl);
+    const bool real = argc >= 3 && fixture::load_from_args(3, argv, nl);
     if (!real) {
         fixture::SyntheticSpec spec;
         spec.max_large_degree = pinrec::MAX_LARGE_NET_DEGREE;   // every span group
@@ -120,7 +120,7 @@ int main(int argc, char** argv) {
                                             fixture::random_positions(nl.movable.size(), 12u, golden::EXTENT)};
     const golden::Lut lut = golden::make_lut();
     if (real) {
-        const long capacity = argc >= 5 ? std::atol(argv[4]) : SLOT_CAPACITY;
+        const long capacity = argc >= 4 ? std::atol(argv[3]) : SLOT_CAPACITY;
         return run_config(nl.name.c_str(), nl, capacity, node_pos, lut, false) ? 0 : 1;
     }
 

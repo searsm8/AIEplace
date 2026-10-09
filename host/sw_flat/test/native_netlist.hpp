@@ -23,6 +23,12 @@
 
 namespace packer {
 
+// Was in beat_packer.hpp with the legacy parsers, removed from the live packer 2026-10-09 (#45). Meow.
+struct LefMacro {
+    bool block = false;
+    std::unordered_map<std::string, std::array<float, 2>> pin_offset;
+};
+
 class NetlistSink : public AIEplace::DesignSink
 {
 public:
