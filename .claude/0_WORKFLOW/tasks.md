@@ -1,7 +1,8 @@
 # Tasks
 
-**Active Task (2026-10-09): #45 step 5 — `sw_flat`, CPU phase-1 GP on the slot layout (steps 1–4
-done).** All decisions are in (D1–D7, second round); see the plan. Step 4 report: [[REPORT_45_slot_layout_20261009.md]].
+**Active Task (2026-10-09): #45 step 5b — slot-order sums in `sw_flat_place` (steps 1–5 done; step 5
+is bit-identical to sw_only).** All decisions are in (D1–D7, second round); see the plan. Step 5
+report: [[REPORT_45_sw_flat_placer_20261009.md]].
 → [[_NEW_PLAN_45_integration_20261006.md]]
 
 Open work, one section per task. **Status lives here; evidence lives in a
@@ -746,7 +747,7 @@ hardware routes; one chunk-capable `hpwl_gradient_CU` (from `hpwl_gradient_compu
 `hpwl_computer*` retired as stepping stones; both partitioners behind `partition_fm_passes`; start
 fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration.
 
-**State:** steps 1–4 done; step 5 next. Done today as low-hanging fruit: gradient `max_rel` 1e-3
+**State:** steps 1–5 done (5 bit-identical to sw_only); 5b (slot-order sums) next. Done today as low-hanging fruit: gradient `max_rel` 1e-3
 (`vck5000/test/wa_gradient_golden.hpp`; newblue3 / mms/bigblue4 / newblue7 now pass, rel_rms still
 1e-5-bounded); `make test` 21/21 PASS.
 - [x] **Decisions, second round (Mark, 2026-10-06):** D1 mailbox A now / C later / B fallback; D2
@@ -822,10 +823,18 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
       already slots every movable node (the plan's "NO_BANK" premise is stale); cost ≤ 0.58% URAM.
       For step 6: the filler tail ≈ the chunks in size (bigblue4 2.89 M vs 2.62 M slots).
       → [[REPORT_45_slot_layout_20261009.md]], `.claude/2_ARTIFACTS/scratch_45/layout44.txt`
-- [ ] **Step 5: `sw_flat` CPU phase-1 GP (D6 scope). ← next.** Filler positions and the
-      preconditioner weight land here.
-- [ ] Steps 5–9 (`sw_flat` → density path in slot order → compose → hardware → retire
-      `/vck5000`), each with its verification, in the plan.
+- [x] **Step 5: `sw_flat_place`, CPU phase-1 GP (D6 scope) (2026-10-09).** `host/sw_flat/placer/`,
+      one file per sw_only file. **Bit-identical to sw_only** (Mark's call over D3's tolerance A/B):
+      the state is in slot order, but the sums run in sw_only's orders. `make -C host/sw_flat
+      check-placer` diffs `schedule_trace.csv` as text plus the stop and final report: PASS on
+      mgc_fft_a, mgc_pci_bridge32_b, adaptec1, mms/adaptec1 (phase 1, 62 movable macros), bigblue4
+      (3 chunks, 759 iterations). 2–3× faster than sw_only (bigblue4 369 s vs 1102 s). A 2-ULP `init_gamma` change diverges at row 1.
+      Not done: DEF output for `dse.py` (redundant while bit-identical), final-position hash.
+      → [[REPORT_45_sw_flat_placer_20261009.md]]
+- [ ] **Step 5b: slot-order sums** — flip each order-sensitive sum to slot order and measure the drift
+      against the bit-identical baseline. ← next. It makes sw_flat the golden for step 6's modules.
+- [ ] Steps 6–9 (density path in slot order → compose → hardware → retire `/vck5000`), each with its
+      verification, in the plan.
 - Carried in: #41's timing / NMU check / URAM-resident loop; #42's widening choice, now contested by
   #47 (producer-side duplication; touches steps 4 and 6).
 
@@ -889,9 +898,16 @@ in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_202
       (3.482 ns est.), **RTL co-sim PASS** (hazard-1 control FAILS). bigblue4 at 1 M: 2.49 M ->
       1.93 M cycles per axis. Synthetic test capacities moved to 4096 / 2560 (per-owner block
       rounding).
-- [ ] **B4, decision for Mark:** A (stream fusion in `iteration_update`, 0.98 M, waits for #45 steps
-      5-6) or C (widen B3's loops now, ~1.5 M, interim). Recommended: wait and build A.
-- [ ] Decision for Mark: bring-up shortcut (host writes real positions into the tails).
+- [ ] **B4 = A, stream fusion (Mark, 2026-10-09).** Start with M2 now: the software golden in
+      `sw_flat` (positions → per-consumer parcels → merge-add), bit-identical to today's three-pass
+      order. The HLS part (M3+) waits for #45 step 6's slot-order `iteration_update`. ← in progress
+      <details><summary>the options as put to Mark</summary>
+
+      A (stream fusion in `iteration_update`, 0.98 M, waits for #45 steps 5-6) or C (widen B3's loops
+      now, ~1.5 M, interim). Recommended: wait and build A.
+      </details>
+- [ ] **Bring-up shortcut: YES, behind an option (Mark, 2026-10-09).** `chunk_slot_positions` writes
+      real positions into the external tails only when asked; NaN stays the default.
 
 → [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
 

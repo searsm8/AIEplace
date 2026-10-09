@@ -24,7 +24,18 @@ Plan: `.claude/1_REVIEW/reports/_NEW_PLAN_45_integration_20261006.md`. So far:
 | `packer/` | pin-record packer + partitioner (from `vck5000/bring_up/beat_packer`); no parser of its own, it reads `Netlist` files (`read_netlist`) |
 | `model/` | #47 cycle / layout models |
 | `test/flat_database_check.*` | the step-3 gate: FlatDatabase vs DataBase (bit-exact) and vs the legacy packer reader |
+| `placer/` | `sw_flat_place`, the CPU phase-1 placer (step 5): sw_only's algorithm on slot-ordered state, one file per sw_only file (see `placer.hpp`) |
+| `test/placer_check.sh`, `test/d6_config.py` | the step-5 gate: `sw_flat_place` vs sw_only under the D6 config, schedule traces identical as text |
 
 `make check-database` runs the gate on the 44 benchmarks and 3 fixtures (~60 s); it exits non-zero on
 any difference. `make check-layout` is step 4's gate (`test/slot_layout_check.*`): the slot-layout
 invariants and the fillers bit-equal to DataBase's, on all 44.
+
+`make check-placer` is step 5's gate: it builds sw_only, writes the D6 config (phase 1, no
+backtracking, nets ≤ 96 pins) for each design, runs both placers, and requires identical
+`schedule_trace.csv` plus the same stop and final report. Pass other designs as arguments to
+`test/placer_check.sh` (`ispd2005/adaptec1`, `ispd2005/bigblue4`, ...).
+
+**sw_flat is bit-identical to sw_only, not merely close.** Its state is in slot order, but every
+order-sensitive float sum runs in sw_only's order (`placer.hpp` names the orders). Summing in slot
+order, the order the PL uses, is a separate change that will be measured on its own.

@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-10-06. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-10-09. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 > **Soft cap — one in, one out.** Current state only, ~2 screens. To add a line, remove one:
 > superseded snapshots & dated "Closed" narration → [[journal.md]]; finished task sections → [[history.md]].
 > If it's done and no longer live context, it isn't "where things stand" — evict it.
@@ -91,7 +91,10 @@
   **Steps 1–3 done** (skeleton; `hpwl_gradient_CU`; `FlatDatabase`, the one parse, bit-exact vs
   DataBase on all 44, [[REPORT_45_flat_sink_20261007.md]]) and **step 4** (slot layout: chunks
   back to back + filler tail, fillers bit-equal to sw_only's, 44/44; netless nodes stay in their
-  chunks — plan deviation, [[REPORT_45_slot_layout_20261009.md]]). **Now:** step 5, `sw_flat`. → [[_NEW_PLAN_45_integration_20261006.md]]
+  chunks — plan deviation, [[REPORT_45_slot_layout_20261009.md]]) and **step 5** (`sw_flat_place`,
+  CPU phase-1 GP on the slot layout, **bit-identical to sw_only** under D6: sums in sw_only's orders,
+  `make -C host/sw_flat check-placer`, [[REPORT_45_sw_flat_placer_20261009.md]]). **Now:** step 5b,
+  move the sums to slot order and measure the drift. → [[_NEW_PLAN_45_integration_20261006.md]]
 - **Building blocks it starts from (#41/#42, closed 2026-10-06; history.md):** the chunked gradient
   is tier-1 exact (rel_rms ~4e-7), II=1, co-sim PASS, post-route 3.955 ns (unchunked 3.453) vs 3.33;
   one axis needs 256 of 463 URAM. FM 1 pass: 0.38× externals. The mailbox is gone (#47, below).

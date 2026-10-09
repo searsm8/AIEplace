@@ -147,6 +147,10 @@ Each step: what, then how it is verified. Don't start a step until the previous 
    → verify: trajectory (HPWL, overflow, λ, γ per iteration) vs sw_only under the matching config,
    within a stated tolerance, on adaptec1, mgc_fft_a and one chunked design (bigblue4); final
    quality through `dse.py` on a subset, legal-vs-legal, against sw_only at the same config.
+   *Done 2026-10-09, with a stricter bar (Mark): BIT-IDENTICAL, not within tolerance.* The state is
+   in slot order, the sums run in sw_only's orders, and the schedule traces match as text. The
+   `dse.py` step is redundant while the placement is sw_only's. Summing in slot order becomes a
+   separate, measured step. → [[REPORT_45_sw_flat_placer_20261009.md]]
 6. **Density path in slot order**, one module at a time (`node_footprint`, `density_bin`, DCT/FFT
    pre/post + AIE FFT, `force_gather`, `iteration_update`, `bb_reduce`, `metrics`), each copied from
    `vck5000/pl`, converted, and verified.
