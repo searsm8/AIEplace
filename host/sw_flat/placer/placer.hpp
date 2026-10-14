@@ -10,7 +10,8 @@
 //                   fillers. The deposit, the initial draws, and every OrderedReduce sum use it.
 //   fixed_nodes     FIXED components (not IO pads), in name order: the fixed deposit.
 //   nets            gradient replay in FILE order (DataBase::mv_nets); the HPWL metric in NAME order.
-// Summing in slot order instead is a later, deliberate change, measured on its own.
+// That is the default. [sw_flat] slot_order and wa_exp switch sums to slot order and exp to the PL's
+// table (#45 step 5b), each measured on its own against the bit-identical default.
 //
 // Files follow sw_only's (host/src/sw_only/src/placer/): setup.cpp = Setup.cpp, wirelength.cpp =
 // Partials.cpp + the HPWL metric, density.cpp = Density.cpp + Grid.cpp, step.cpp = Step.cpp,
@@ -23,6 +24,7 @@
 
 #include "Common.h"   // AIEplace::Position / Gradient: the same float operators as sw_only's Node
 
+#include <chrono>
 #include <limits>
 #include <string>
 #include <vector>
@@ -31,6 +33,11 @@ namespace sw_flat {
 
 using AIEplace::Gradient;
 using AIEplace::Position;
+
+// The PL exp table's geometry: the host's PLACE_STEP_NORM (host/src/pl_algo/src/Placement.hpp) and
+// pl/test's GAMMA_MULT; exp reads 0 past 12 gamma. Meow.
+constexpr float PL_LUT_STEP_NORM  = 0.05f;
+constexpr int   PL_LUT_GAMMA_MULT = 12;
 
 // The run_config.toml [params] keys sw_only reads on the phase-1 path, with its defaults. Meow.
 struct PlacerConfig {
@@ -53,12 +60,24 @@ struct PlacerConfig {
     int   min_iterations = 0, max_iterations = 0, convergence_iterations = 30;
     float overflow_threshold = 0, aux_select_hpwl_ratio = 1.005f;
     bool  dump_schedule_trace = false;
+
+    // [sw_flat] -- sw_flat-only knobs, all off by default: off, the run is bit-identical to sw_only.
+    bool wa_exp_lut = false;              // wa_exp = "lut": the PL's exp table (hpwl_gradient_CU), not std::exp
+    bool slot_order_deposit = false;      // slot_order has "deposit": density deposits (solver + overflow metric)
+    bool slot_order_reductions = false;   // slot_order has "reductions": the per-node sums (BB, L1s, precond, lambda_0)
 };
 // Exits with a message on a missing required key or a config outside sw_flat's scope (D6). Meow.
 PlacerConfig read_placer_config(const std::string& path);
 
 enum class StopReason { RUNNING, CONVERGED, MAX_ITERATIONS, NAN_METRICS, NAN_PARTIALS, DIVERGED_HPWL, DIVERGENCE_GUARD };
 const char* stop_reason_name(StopReason reason);
+
+// Adds the scope's wall time to `total`. Meow.
+struct PhaseTimer {
+    double& total;
+    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    ~PhaseTimer() { total += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); }
+};
 
 struct BestSolution {
     float hpwl = std::numeric_limits<float>::max();
@@ -86,6 +105,9 @@ struct Placer {
     // sw_only's orders (see the file comment).
     std::vector<long> movable_slots;
     int filler_start = 0;              // movable_slots[filler_start..] are the fillers
+    // The order each sum family walks: movable_slots (sw_only's), or ascending slots under
+    // [sw_flat] slot_order (#45 step 5b). Components still precede fillers, so filler_start holds. Meow.
+    std::vector<long> deposit_slots, reduce_slots;
     std::vector<int> fixed_nodes;
     std::vector<int> gradient_nets;    // file order, degree 2..ignore_net_degree
     std::vector<int> nets_by_name;     // name order, first of each name (std::map::emplace)
@@ -117,6 +139,12 @@ struct Placer {
     StopReason stop_reason = StopReason::RUNNING;
     std::vector<float> hpwl_history, ovfw_history;
     BestSolution best[3];
+
+    // The PL's exp(-d/gamma) table (pl/src/modules/hpwl_gradient/wa_sums.hpp), for wa_exp = "lut". Meow.
+    std::vector<float> exp_lut;
+
+    // Wall time per phase, seconds, summed over the run (final.txt). Meow.
+    double time_gradient = 0, time_field = 0, time_combine = 0, time_metrics = 0;
 
     // setup.cpp
     void setup(const PlacerConfig& config);

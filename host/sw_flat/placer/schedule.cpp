@@ -51,8 +51,8 @@ void Placer::update_precond_weights()
 {
     float lambda_area_coef = precond_coef * density_weight;
     float a1_norm = 0.0f, a2_norm = 0.0f;
-    for (int i = 0; i < (int)movable_slots.size(); i++) {
-        const long slot = movable_slots[i];
+    for (int i = 0; i < (int)reduce_slots.size(); i++) {
+        const long slot = reduce_slots[i];
         float pins = (i < filler_start) ? num_pins[slot] : 0.0f;
         float a2 = lambda_area_coef * area[slot];
         a1_norm += pins;
@@ -69,6 +69,7 @@ void Placer::update_precond_weights()
 // update_best_sol (param_scheduler.py:390-451) from iteration 50. Meow.
 void Placer::record_iteration_results()
 {
+    PhaseTimer timer{time_metrics};
     float hpwl = total_wirelength(cfg.ignore_net_degree, true);
     float overflow = compute_overflow(true);
     hpwl_history.push_back(hpwl);

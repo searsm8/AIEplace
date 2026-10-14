@@ -50,14 +50,14 @@ void Placer::estimate_initial_step()
     restore_state();
 }
 
-// computeLipschitzEstimate: |v_next - v|^2 and |P (g_next - g)|^2, summed in movable_slots order. Meow.
+// computeLipschitzEstimate: |v_next - v|^2 and |P (g_next - g)|^2, summed in reduce_slots order. Meow.
 float Placer::lipschitz_estimate()
 {
     float pos_norm_sq = 0.0f, grad_norm_sq = 0.0f;
-    std::vector<float> pos_terms(movable_slots.size()), grad_terms(movable_slots.size());
+    std::vector<float> pos_terms(reduce_slots.size()), grad_terms(reduce_slots.size());
     #pragma omp parallel for schedule(static)
-    for (int i = 0; i < (int)movable_slots.size(); i++) {
-        const long slot = movable_slots[i];
+    for (int i = 0; i < (int)reduce_slots.size(); i++) {
+        const long slot = reduce_slots[i];
         float dx = next.probe_pos[slot].x - current.probe_pos[slot].x;
         float dy = next.probe_pos[slot].y - current.probe_pos[slot].y;
         pos_terms[i] = dx*dx + dy*dy;
@@ -66,19 +66,20 @@ float Placer::lipschitz_estimate()
         float dgy = inv_pw * (next.probe_grad[slot].y - current.probe_grad[slot].y);
         grad_terms[i] = dgx*dgx + dgy*dgy;
     }
-    for (size_t i = 0; i < movable_slots.size(); i++) { pos_norm_sq += pos_terms[i]; grad_norm_sq += grad_terms[i]; }
+    for (size_t i = 0; i < reduce_slots.size(); i++) { pos_norm_sq += pos_terms[i]; grad_norm_sq += grad_terms[i]; }
 
     last_pos_norm_sq = pos_norm_sq; last_grad_norm_sq = grad_norm_sq;
     return sqrtf(pos_norm_sq) / sqrtf(grad_norm_sq + 1e-8f);
 }
 
-// combineGradients: probe_grad -= lambda * density force, and the two L1 norms in movable order. Meow.
+// combineGradients: probe_grad -= lambda * density force, and the two L1 norms in reduce_slots order. Meow.
 void Placer::combine_gradients()
 {
-    std::vector<float> gwl_terms(movable_slots.size()), gden_terms(movable_slots.size());
+    PhaseTimer timer{time_combine};
+    std::vector<float> gwl_terms(reduce_slots.size()), gden_terms(reduce_slots.size());
     #pragma omp parallel for schedule(static)
-    for (int i = 0; i < (int)movable_slots.size(); i++) {
-        const long slot = movable_slots[i];
+    for (int i = 0; i < (int)reduce_slots.size(); i++) {
+        const long slot = reduce_slots[i];
         Gradient& g = next.probe_grad[slot];
         gwl_terms[i] = (i < filler_start) ? fabsf(g.x) + fabsf(g.y) : 0.0f;
         Gradient electro = electrostatic_force(slot);
@@ -86,7 +87,7 @@ void Placer::combine_gradients()
         g -= electro;
     }
     last_gwl_L1 = 0.0f; last_gden_L1 = 0.0f;
-    for (size_t i = 0; i < movable_slots.size(); i++) { last_gwl_L1 += gwl_terms[i]; last_gden_L1 += gden_terms[i]; }
+    for (size_t i = 0; i < reduce_slots.size(); i++) { last_gwl_L1 += gwl_terms[i]; last_gden_L1 += gden_terms[i]; }
 }
 
 // Node::step, then enforceDieBoundaries. Meow.

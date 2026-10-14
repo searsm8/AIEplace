@@ -70,16 +70,17 @@ inline Footprint fixed_footprint(const Placer& placer, int node, bool clamp)
 } // namespace
 
 // computeOverlaps + computeElectricFields_DCT. The deposit is one serial pass in sw_only's order:
-// fixed, the cap, then movable_slots. Meow.
+// fixed, the cap, then deposit_slots (sw_only's order unless [sw_flat] slot_order has "deposit"). Meow.
 void Placer::compute_electric_fields()
 {
+    PhaseTimer timer{time_field};
     std::fill(bin_overlap.begin(), bin_overlap.end(), 0.0f);
     auto deposit = [&](size_t bin, float overlap_area) { bin_overlap[bin] += overlap_area; };
     for (int node : fixed_nodes) for_each_overlap(*this, fixed_footprint(*this, node, cfg.enable_density_clamp), deposit);
     // Grid::clampFixedDensity: min(rho, td), the cap (CLAUDE.md, deliberate divergences). Meow.
     for (size_t bin = 0; bin < bin_overlap.size(); bin++)
         bin_overlap[bin] = std::min(bin_overlap[bin], bin_area[bin] * cfg.target_density);
-    for (long slot : movable_slots) for_each_overlap(*this, slot_footprint(*this, slot, cfg.enable_density_clamp), deposit);
+    for (long slot : deposit_slots) for_each_overlap(*this, slot_footprint(*this, slot, cfg.enable_density_clamp), deposit);
 
     // compute_a_uv_DCT, verbatim: Grid::getBinDensities is [col][row], scaled by bin [0][0]'s area. Meow.
     const int num_rows = bins, num_cols = bins;
@@ -174,7 +175,7 @@ float Placer::compute_overflow(bool smooth) const
     };
     for (int node : fixed_nodes) deposit(fixed_footprint(*this, node, false));
     for (float& d : density) d = std::min(d, bin_area_metric * cfg.target_density);   // capFixedDensity
-    for (int i = 0; i < filler_start; i++) deposit(slot_footprint(*this, movable_slots[i], smooth));
+    for (int i = 0; i < filler_start; i++) deposit(slot_footprint(*this, deposit_slots[i], smooth));
 
     float overflow_area = 0.0f;
     for (float d : density) overflow_area += std::max(0.0f, d - cap);

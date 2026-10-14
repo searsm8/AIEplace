@@ -10,6 +10,7 @@
 #   make placer          build/sw_flat_place, the CPU phase-1 placer (placer/, step 5).
 #   make check-placer     sw_flat_place vs sw_only on the D6 configs (test/placer_check.sh): the
 #                         schedule traces must be identical text. Builds sw_only first. ~1 min.
+#   make gradient-bench   build/gradient_bench: the WA gradient with std::exp vs the PL's table, timed.
 #   make clean
 
 REPO     := ../..
@@ -28,8 +29,9 @@ COMMON_OBJS = $(addprefix $(BUILD)/, $(COMMON_SRCS:.cpp=.o))
 vpath %.cpp . test $(COMMON)/src placer $(REPO)/host/src/sw_only/src
 
 # DCT.cpp is sw_only's own transform, linked rather than copied: the field must round the same. Meow.
-PLACER_SRCS = setup.cpp wirelength.cpp density.cpp step.cpp schedule.cpp main.cpp DCT.cpp
+PLACER_SRCS = placer.cpp setup.cpp wirelength.cpp density.cpp step.cpp schedule.cpp main.cpp DCT.cpp
 PLACER_OBJS = $(addprefix $(BUILD)/, $(PLACER_SRCS:.cpp=.o))
+PLACER_LIB  = $(filter-out $(BUILD)/main.o, $(PLACER_OBJS))
 
 # The 44 designs, as "<suite>/<name>"; a netlist file is named <suite>_<name> (no suite has a '_'). Meow.
 DESIGNS      = $(shell cd $(REPO)/vck5000/tools && python3 -c 'import benchmarks; print(" ".join(sorted(benchmarks.BENCHMARKS)))')
@@ -37,7 +39,7 @@ NETLIST_DIR  = $(BUILD)/netlists
 NETLISTS     = $(foreach d,$(DESIGNS),$(NETLIST_DIR)/$(subst /,_,$(d)).netlist)
 suite_of     = $(firstword $(subst _, ,$(1)))
 
-.PHONY: check-database check-layout netlists placer check-placer clean
+.PHONY: check-database check-layout netlists placer check-placer gradient-bench clean
 check-database: $(BUILD)/flat_database_check
 	bash test/flat_database_check.sh
 
@@ -47,6 +49,11 @@ check-layout: $(BUILD)/slot_layout_check
 netlists: $(NETLISTS)
 
 placer: $(BUILD)/sw_flat_place
+
+gradient-bench: $(BUILD)/gradient_bench
+
+$(BUILD)/gradient_bench: $(BUILD)/flat_database.o $(BUILD)/gradient_bench.o $(PLACER_LIB) $(COMMON_OBJS)
+	$(CXX) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 check-placer: $(BUILD)/sw_flat_place
 	bash test/placer_check.sh

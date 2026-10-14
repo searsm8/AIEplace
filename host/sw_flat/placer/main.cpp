@@ -1,4 +1,4 @@
-// main.cpp -- sw_flat_place: sw_only's AIEplace.cpp loop, its schedule trace, and the final report.
+// main.cpp -- sw_flat_place: config, setup, Placer::run (placer.cpp), and the final report.
 //
 //   sw_flat_place <config.toml> <output_dir>
 //
@@ -14,58 +14,6 @@
 
 namespace fs = std::experimental::filesystem;
 
-namespace sw_flat {
-
-// Placer::run: phase 1 only; sw_only's NaN check follows the convergence test. Meow.
-void Placer::run()
-{
-    initialize_placement();
-    compute_hpwl_partials();      // performIterationZero
-    compute_electric_fields();
-    initialize_density_weight();
-
-    while (true) {
-        perform_iteration();
-        if (check_convergence()) break;
-        if (nan_detected) { stop_reason = StopReason::NAN_PARTIALS; break; }
-    }
-}
-
-void Placer::perform_iteration()
-{
-    ++iteration;
-    update_precond_weights();
-    if (iteration == 1) estimate_initial_step();
-    perform_next_step();
-    record_iteration_results();
-    update_schedule();
-
-    // dumpScheduleTrace: after updateSchedule, so each row pairs the schedule's inputs with the
-    // values the next iteration consumes. Phase is always 1, backtrack_steps always 0. Meow.
-    if (!cfg.dump_schedule_trace) return;
-    std::ofstream f(fs::path(cfg.output_dir) / "schedule_trace.csv", std::ios_base::app);
-    if (iteration == 1)
-        f << "iter,hpwl,overflow,pos_norm_sq,grad_norm_sq,density_force_fraction,"
-             "base_gamma,gamma,inv_gamma,step_length,nesterov_ak,momentum_coeff,density_weight,"
-             "precond_coef,precond_a1_norm,precond_a2_norm,"
-             "precond_kappa,phase,phase_iteration,stop_reason,backtrack_steps\n";
-    f << std::scientific << std::setprecision(9)
-      << iteration              << ','
-      << hpwl_history.back()    << ',' << ovfw_history.back()   << ','
-      << last_pos_norm_sq       << ',' << last_grad_norm_sq     << ','
-      << density_force_fraction << ',' << base_gamma            << ','
-      << gamma                  << ',' << inv_gamma             << ','
-      << step_length            << ',' << nesterov_ak           << ','
-      << momentum_coeff         << ',' << density_weight        << ','
-      << precond_coef           << ',' << precond_a1_norm       << ','
-      << precond_a2_norm        << ','
-      << precond_kappa          << ',' << 1                     << ','
-      << iteration              << ',' << (int)stop_reason      << ','
-      << 0                      << '\n';
-}
-
-} // namespace sw_flat
-
 int main(int argc, char* argv[])
 {
     if (argc != 3) {
@@ -78,8 +26,12 @@ int main(int argc, char* argv[])
     fs::remove(fs::path(cfg.output_dir) / "schedule_trace.csv");
 
     sw_flat::Placer placer;
+    const auto setup_start = std::chrono::steady_clock::now();
     placer.setup(cfg);
+    const auto run_start = std::chrono::steady_clock::now();
     placer.run();
+    const auto run_end = std::chrono::steady_clock::now();
+    auto seconds = [](auto from, auto to) { return std::chrono::duration<double>(to - from).count(); };
 
     // printFinalResults: restore the chosen tracker into u and v, then measure it. Meow.
     const int chosen = placer.select_best_solution();
@@ -110,7 +62,14 @@ int main(int argc, char* argv[])
         << "final_hpwl " << final_hpwl << '\n'
         << "final_hpwl_exact " << final_hpwl_exact << '\n'
         << "final_overflow " << final_overflow << '\n'
-        << "final_smoothed_overflow " << final_smoothed_overflow << '\n';
+        << "final_smoothed_overflow " << final_smoothed_overflow << '\n'
+        << std::fixed << std::setprecision(3)
+        << "seconds_setup " << seconds(setup_start, run_start) << '\n'
+        << "seconds_run " << seconds(run_start, run_end) << '\n'
+        << "seconds_gradient " << placer.time_gradient << '\n'
+        << "seconds_field " << placer.time_field << '\n'
+        << "seconds_combine " << placer.time_combine << '\n'
+        << "seconds_metrics " << placer.time_metrics << '\n';
     printf("%s: %d iterations, %s, final HPWL %.6e (exact %.6e), overflow %.4f\n", placer.design.name.c_str(),
            placer.iteration, sw_flat::stop_reason_name(placer.stop_reason), final_hpwl, final_hpwl_exact, final_overflow);
     return 0;

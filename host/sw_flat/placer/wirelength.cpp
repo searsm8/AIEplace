@@ -22,12 +22,25 @@ inline Position pin_position(const Placer& placer, int pin, bool at_probe)
     return node_pos + Position(placer.design.pin_offset_x[pin], placer.design.pin_offset_y[pin]);
 }
 
+// wa_sums.hpp lut_exp_pair: exp(-d / gamma) by linear interpolation, 0 past the table. Meow.
+inline float lut_exp(const std::vector<float>& lut, float inv_lut_step, float d)
+{
+    const float idx_f = d * inv_lut_step;
+    const int   idx   = (int)idx_f;
+    if (idx >= (int)lut.size() - 1) return 0.0f;
+    const float frac  = idx_f - (float)idx;
+    return lut[idx] * (1.0f - frac) + lut[idx + 1] * frac;
+}
+
 } // namespace
 
 // Per net in parallel into pin_partials, then replayed serially in file order (net, then pin):
 // sw_only's deterministic path, so every slot's probe_grad rounds identically. Meow.
 void Placer::compute_hpwl_partials()
 {
+    PhaseTimer timer{time_gradient};
+    const bool use_lut = cfg.wa_exp_lut;
+    const float inv_lut_step = 1.0f / (PL_LUT_STEP_NORM * gamma);   // the pl_algo host's
     for (long slot : movable_slots) next.probe_grad[slot].clear();
 
     #pragma omp parallel for schedule(dynamic, 256)
@@ -48,10 +61,17 @@ void Placer::compute_hpwl_partials()
         if ((int)A.size() < net_size) A.resize(net_size);
         for (int i = 0; i < net_size; i++) {
             Position p = pin_position(*this, first + i, true);
-            A[i].plus.x  = std::exp((p.x - max_x) * inv_gamma);
-            A[i].minus.x = std::exp((min_x - p.x) * inv_gamma);
-            A[i].plus.y  = std::exp((p.y - max_y) * inv_gamma);
-            A[i].minus.y = std::exp((min_y - p.y) * inv_gamma);
+            if (use_lut) {
+                A[i].plus.x  = lut_exp(exp_lut, inv_lut_step, max_x - p.x);
+                A[i].minus.x = lut_exp(exp_lut, inv_lut_step, p.x - min_x);
+                A[i].plus.y  = lut_exp(exp_lut, inv_lut_step, max_y - p.y);
+                A[i].minus.y = lut_exp(exp_lut, inv_lut_step, p.y - min_y);
+            } else {
+                A[i].plus.x  = std::exp((p.x - max_x) * inv_gamma);
+                A[i].minus.x = std::exp((min_x - p.x) * inv_gamma);
+                A[i].plus.y  = std::exp((p.y - max_y) * inv_gamma);
+                A[i].minus.y = std::exp((min_y - p.y) * inv_gamma);
+            }
         }
 
         AIEplace::Term B, C;

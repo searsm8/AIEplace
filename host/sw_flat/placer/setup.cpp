@@ -82,6 +82,17 @@ PlacerConfig read_placer_config(const std::string& path)
     if (require<std::string>(cfg, "params", "wirelength_method") != "HPWL") fail("wirelength_method must be \"HPWL\"");
     if (!params["deterministic"].value_or(true)) fail("deterministic = false: sw_flat always sums in order");
     c.enable_phase2 = params["enable_phase2"].value_or(true);   // checked once the macros are tagged
+
+    const std::string wa_exp = cfg["sw_flat"]["wa_exp"].value_or(std::string("exact"));
+    if (wa_exp != "exact" && wa_exp != "lut") fail("[sw_flat] wa_exp must be \"exact\" or \"lut\"");
+    c.wa_exp_lut = wa_exp == "lut";
+    if (const toml::array* order = cfg["sw_flat"]["slot_order"].as_array())
+        for (const auto& item : *order) {
+            const std::string family = item.value_or(std::string());
+            if (family == "deposit") c.slot_order_deposit = true;
+            else if (family == "reductions") c.slot_order_reductions = true;
+            else fail("[sw_flat] slot_order: unknown sum family \"" + family + "\" (deposit, reductions)");
+        }
     return c;
 }
 
@@ -127,6 +138,13 @@ void Placer::setup(const PlacerConfig& config)
     total_movable_area = (float)movable_sum;   // DataBase::computeAreaBreakdown
     filler_start = (int)movable_slots.size();
     for (int filler = 0; filler < fillers.count; filler++) movable_slots.push_back(layout.first_filler_slot + filler);
+    std::vector<long> ascending_slots = movable_slots;
+    std::sort(ascending_slots.begin(), ascending_slots.end());   // the fillers' tail stays last
+    deposit_slots = cfg.slot_order_deposit ? ascending_slots : movable_slots;
+    reduce_slots = cfg.slot_order_reductions ? ascending_slots : movable_slots;
+
+    // wa_sums.hpp's table: exp(-i * 0.05) for i < 12 / 0.05 + 2, read as exp(-d / gamma). Meow.
+    for (int i = 0; i < (int)(PL_LUT_GAMMA_MULT / PL_LUT_STEP_NORM) + 2; i++) exp_lut.push_back(std::exp(-(float)i * PL_LUT_STEP_NORM));
 
     for (int net = 0; net < design.num_nets(); net++)
         if (design.net_degree(net) > 1 && design.net_degree(net) <= cfg.ignore_net_degree) gradient_nets.push_back(net);
@@ -250,13 +268,13 @@ void Placer::initialize_density_weight()
     float HPWL_L1_norm = 0.0f;
     float density_L1_norm = 0.0f;
     for (int i = 0; i < filler_start; i++) {
-        const Gradient& partials = next.probe_grad[movable_slots[i]];
+        const Gradient& partials = next.probe_grad[reduce_slots[i]];
         HPWL_L1_norm += std::fabs(partials.x) + std::fabs(partials.y);
-        Gradient electro_force = electrostatic_force(movable_slots[i]);
+        Gradient electro_force = electrostatic_force(reduce_slots[i]);
         density_L1_norm += std::fabs(electro_force.x) + std::fabs(electro_force.y);
     }
-    for (int i = filler_start; i < (int)movable_slots.size(); i++) {
-        Gradient electro_force = electrostatic_force(movable_slots[i]);
+    for (int i = filler_start; i < (int)reduce_slots.size(); i++) {
+        Gradient electro_force = electrostatic_force(reduce_slots[i]);
         density_L1_norm += std::fabs(electro_force.x) + std::fabs(electro_force.y);
     }
     density_weight = (HPWL_L1_norm / (density_L1_norm + 1e-8f)) * cfg.density_weight_init_multiplier;

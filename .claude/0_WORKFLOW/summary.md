@@ -93,8 +93,11 @@
   back to back + filler tail, fillers bit-equal to sw_only's, 44/44; netless nodes stay in their
   chunks — plan deviation, [[REPORT_45_slot_layout_20261009.md]]) and **step 5** (`sw_flat_place`,
   CPU phase-1 GP on the slot layout, **bit-identical to sw_only** under D6: sums in sw_only's orders,
-  `make -C host/sw_flat check-placer`, [[REPORT_45_sw_flat_placer_20261009.md]]). **Now:** step 5b,
-  move the sums to slot order and measure the drift. → [[_NEW_PLAN_45_integration_20261006.md]]
+  `make -C host/sw_flat check-placer`, [[REPORT_45_sw_flat_placer_20261009.md]]). **Step 5b:** slot-order
+  sums and the PL's exp table are `[sw_flat]` switches, off by default; their drift is within 2-ULP
+  noise on 28/30 runs, so slot order hides no semantic difference
+  ([[_NEW_REPORT_45_slot_order_sums_20261014.md]]). **Now:** the rest of the PL's arithmetic in sw_flat
+  (gradient formula, fixed-point HPWL), so it can be step 6's golden. → [[_NEW_PLAN_45_integration_20261006.md]]
 - **Building blocks it starts from (#41/#42, closed 2026-10-06; history.md):** the chunked gradient
   is tier-1 exact (rel_rms ~4e-7), II=1, co-sim PASS, post-route 3.955 ns (unchunked 3.453) vs 3.33;
   one axis needs 256 of 463 URAM. FM 1 pass: 0.38× externals. The mailbox is gone (#47, below).

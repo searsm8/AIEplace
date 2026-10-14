@@ -832,7 +832,15 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
       Not done: DEF output for `dse.py` (redundant while bit-identical), final-position hash.
       → [[REPORT_45_sw_flat_placer_20261009.md]]
 - [ ] **Step 5b: slot-order sums** — flip each order-sensitive sum to slot order and measure the drift
-      against the bit-identical baseline. ← next. It makes sw_flat the golden for step 6's modules.
+      against the bit-identical baseline. ← in progress (2026-10-14). `[sw_flat] slot_order =
+      ["deposit", "reductions"]` and `wa_exp = "lut"` (the PL's exp table), all off by default
+      (check-placer still PASS). `test/sum_order_drift.py`: **28/30 variant runs inside the 2-ULP
+      noise band** on fft_a, pci_bridge32_b, adaptec1, mms/adaptec1, bigblue4 (5/5, ±0.011%); the 2
+      outliers (mms/adaptec1) ≤ 0.1% HPWL. In-run drift 1e-7..1e-5 for 200-300 iterations, ~1e-4 in
+      the endgame; larger final differences come from the stop firing a few iterations off.
+      **Slot order hides no semantic difference.** Remaining: the rest of the PL's arithmetic (below). The table saves 12-21% of the gradient but only ~2-3% of
+      software run time (gradient = 15% of an iteration; deposit + DCT 43%, metrics 24%).
+      → [[_NEW_REPORT_45_slot_order_sums_20261014.md]]
 - [ ] Steps 6–9 (density path in slot order → compose → hardware → retire `/vck5000`), each with its
       verification, in the plan.
 - Carried in: #41's timing / NMU check / URAM-resident loop; #42's widening choice, now contested by
@@ -999,3 +1007,14 @@ Open questions worth measuring, not yet scoped into a task.
       mid-run, where they differ. Cheap to try: one-line change in `computeNodeFootprint`, then
       `make test-regress` (expect it to CHANGE — needs a deliberate A/B, not a pass/fail).
       </details>
+
+## #48 — On-chip density path: density map, field, force gather (opened 2026-10-14, Mark)
+
+**Why:** XPlace on the GPU spends 54% of bigblue4's kernel time on density scatter + force gather,
+3.6% on the DCTs ([[_NEW_REPORT_xplace_gpu_iteration_breakdown_20261013.md]]). The VCK can keep the
+grid on chip and run density alongside the WL gradient. Bar: the paper's 3090, bigblue4 10.0 ms/step
+(Table IV), ~12 ms deterministic. v1 grid 1024; 2048 is a planned extension.
+
+**State (2026-10-14):** plan written; `density_map_CU` skeleton + tier-1 harness landed (`2dad68f`).
+Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE FFT, 4 evaluation.
+→ [[_NEW_PLAN_48_density_onchip_20261014.md]]
