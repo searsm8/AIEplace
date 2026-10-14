@@ -1017,4 +1017,13 @@ grid on chip and run density alongside the WL gradient. Bar: the paper's 3090, b
 
 **State (2026-10-14):** plan written; `density_map_CU` skeleton + tier-1 harness landed (`2dad68f`).
 Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE FFT, 4 evaluation.
+- [x] **Phase 2, real-design harness + footprint count (2026-10-14).** `host/sw_flat/density_inputs.hpp`
+      builds the module's inputs from a placer (footprint table by (w, h, macro) bits, per-slot index,
+      fixed base map, now built once in setup: check-placer still bit-identical).
+      `make -C host/sw_flat check-density-map`: `density_map_CU` vs sw_flat's slot-order deposit after
+      30 iterations, **rho BIT-EQUAL on 44/44 designs** (grid capped at 1024; the 7 grid-2048 designs
+      run at 1024); a dropped-slot mutant is caught on every design. Name order differs from slot order
+      in hundreds to thousands of bins ([info]), so the check sees order. **Footprint table: 4-105
+      entries** (max mms/bigblue4; MMS 40-105, ISPD 4-49), against an assumed 4096: a 128-entry table
+      would do. `.claude/2_ARTIFACTS/scratch_48/density_map_check_44_20261014.txt`
 → [[_NEW_PLAN_48_density_onchip_20261014.md]]

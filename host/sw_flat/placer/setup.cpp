@@ -215,6 +215,7 @@ void Placer::setup(const PlacerConfig& config)
             bin_area[(size_t)col * bins + row] = std::fabs(col * bin_w - (col + 1) * bin_w) * std::fabs(row * bin_h - (row + 1) * bin_h);
     bin_overlap.assign((size_t)bins * bins, 0.0f);
     efield.assign((size_t)bins * bins, {});
+    deposit_fixed_base();
 
     // configureGammaSchedule. Meow.
     base_gamma = cfg.init_gamma;

@@ -124,6 +124,7 @@ struct Placer {
     int   bins = 0, die_w = 0, die_h = 0;   // die_w / die_h: Grid::getDieWidth, an int on purpose
     float bin_w = 0, bin_h = 0;
     std::vector<float> bin_area, bin_overlap;
+    std::vector<float> fixed_base;     // the fixed nodes' deposit, capped: constant, so built once (density_map_CU's base map)
     std::vector<Gradient> efield;
     int   num_movable_macros = 0, formula_bins_per_row = 0;
     float total_movable_area = 0;
@@ -154,6 +155,7 @@ struct Placer {
     void compute_hpwl_partials();
     float total_wirelength(int max_net_degree, bool at_probe) const;
     // density.cpp
+    void deposit_fixed_base();
     void compute_electric_fields();
     Gradient electrostatic_force(long slot) const;
     float compute_overflow(bool smooth) const;

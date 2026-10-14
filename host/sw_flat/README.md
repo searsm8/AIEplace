@@ -24,6 +24,7 @@ Plan: `.claude/1_REVIEW/reports/_NEW_PLAN_45_integration_20261006.md`. So far:
 | `packer/` | pin-record packer + partitioner (from `vck5000/bring_up/beat_packer`); no parser of its own, it reads `Netlist` files (`read_netlist`) |
 | `model/` | #47 cycle / layout models |
 | `test/flat_database_check.*` | the step-3 gate: FlatDatabase vs DataBase (bit-exact) and vs the legacy packer reader |
+| `density_inputs.hpp` | #48: `density_map_CU`'s host inputs from a placer (footprint table, per-slot index); `make check-density-map` holds the module bit-equal to sw_flat's deposit on real designs |
 | `tail_fusion.hpp` | #47 M2: the chunk exchange as `iteration_update` will do it (option A); `pl/test/tail_exchange_test` holds it bit-equal to B3's device exchange |
 | `placer/` | `sw_flat_place`, the CPU phase-1 placer (step 5): sw_only's algorithm on slot-ordered state, one file per sw_only file (see `placer.hpp`) |
 | `test/placer_check.sh`, `test/d6_config.py` | the step-5 gate: `sw_flat_place` vs sw_only under the D6 config, schedule traces identical as text |

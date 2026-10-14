@@ -10,6 +10,8 @@
 #   make placer          build/sw_flat_place, the CPU phase-1 placer (placer/, step 5).
 #   make check-placer     sw_flat_place vs sw_only on the D6 configs (test/placer_check.sh): the
 #                         schedule traces must be identical text. Builds sw_only first. ~1 min.
+#   make check-density-map  density_map_CU (pl/src/modules) vs sw_flat's own deposit on the 44 designs at
+#                         grid <= 1024, bit for bit, 30 iterations in (test/density_map_check.sh). Use JOBS=n.
 #   make gradient-bench   build/gradient_bench: the WA gradient with std::exp vs the PL's table, timed.
 #   make clean
 
@@ -39,7 +41,7 @@ NETLIST_DIR  = $(BUILD)/netlists
 NETLISTS     = $(foreach d,$(DESIGNS),$(NETLIST_DIR)/$(subst /,_,$(d)).netlist)
 suite_of     = $(firstword $(subst _, ,$(1)))
 
-.PHONY: check-database check-layout netlists placer check-placer gradient-bench clean
+.PHONY: check-database check-layout netlists placer check-placer check-density-map gradient-bench clean
 check-database: $(BUILD)/flat_database_check
 	bash test/flat_database_check.sh
 
@@ -51,6 +53,12 @@ netlists: $(NETLISTS)
 placer: $(BUILD)/sw_flat_place
 
 gradient-bench: $(BUILD)/gradient_bench
+
+check-density-map: $(BUILD)/density_map_check
+	bash test/density_map_check.sh
+
+$(BUILD)/density_map_check: $(BUILD)/flat_database.o $(BUILD)/density_map_check.o $(PLACER_LIB) $(COMMON_OBJS)
+	$(CXX) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 $(BUILD)/gradient_bench: $(BUILD)/flat_database.o $(BUILD)/gradient_bench.o $(PLACER_LIB) $(COMMON_OBJS)
 	$(CXX) $(LDFLAGS) $^ -o $@ $(LDLIBS)

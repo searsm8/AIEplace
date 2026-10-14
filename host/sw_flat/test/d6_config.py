@@ -2,12 +2,13 @@
 """d6_config.py -- write the D6 config (#45 plan) for one design: sw_only's phase-1 run that sw_flat
 must reproduce bit for bit.
 
-    d6_config.py <suite/name> <results_dir> <out.toml>
+    d6_config.py <suite/name> <results_dir> <out.toml> [max_grid]
 
 The base is the design's frozen regress config (vck5000/test/regress/configs/<name>.toml) when one
 exists, else mgc_fft_a's with the benchmark, target density and grid from tools/benchmarks.py (a
 bare config silently gets those wrong). Then D6: no backtracking, no phase 2, nets <= 96 pins, and
 the schedule trace on. The benchmark path is made absolute so either placer can run from anywhere.
+max_grid caps bins_per_row (density_map_CU takes at most 1024); it is set only when it binds.
 Meow.
 """
 import re
@@ -48,6 +49,8 @@ def main():
     text = set_key(text, "params", "ignore_net_degree", 96)
     text = set_key(text, "output", "dump_schedule_trace", "true")
     text = set_key(text, "output", "results_dir", f'"{results_dir}"')
+    if len(sys.argv) > 4 and entry["grid"] > int(sys.argv[4]):
+        text = set_key(text, "params", "bins_per_row", int(sys.argv[4]))
     Path(out).write_text(text)
 
 

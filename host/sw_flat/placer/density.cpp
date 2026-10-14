@@ -69,17 +69,25 @@ inline Footprint fixed_footprint(const Placer& placer, int node, bool clamp)
 
 } // namespace
 
-// computeOverlaps + computeElectricFields_DCT. The deposit is one serial pass in sw_only's order:
-// fixed, the cap, then deposit_slots (sw_only's order unless [sw_flat] slot_order has "deposit"). Meow.
+// computeOverlaps' first pass: the fixed nodes in name order, then Grid::clampFixedDensity's cap
+// min(rho, td) (CLAUDE.md, deliberate divergences). Fixed nodes never move, so sw_only's per-iteration
+// recompute always gives this same map; built once in setup. Meow.
+void Placer::deposit_fixed_base()
+{
+    fixed_base.assign((size_t)bins * bins, 0.0f);
+    auto deposit = [&](size_t bin, float overlap_area) { fixed_base[bin] += overlap_area; };
+    for (int node : fixed_nodes) for_each_overlap(*this, fixed_footprint(*this, node, cfg.enable_density_clamp), deposit);
+    for (size_t bin = 0; bin < fixed_base.size(); bin++)
+        fixed_base[bin] = std::min(fixed_base[bin], bin_area[bin] * cfg.target_density);
+}
+
+// computeOverlaps + computeElectricFields_DCT: the fixed base, then one serial pass over deposit_slots
+// (sw_only's order unless [sw_flat] slot_order has "deposit"; then it is density_map_CU's). Meow.
 void Placer::compute_electric_fields()
 {
     PhaseTimer timer{time_field};
-    std::fill(bin_overlap.begin(), bin_overlap.end(), 0.0f);
+    bin_overlap = fixed_base;
     auto deposit = [&](size_t bin, float overlap_area) { bin_overlap[bin] += overlap_area; };
-    for (int node : fixed_nodes) for_each_overlap(*this, fixed_footprint(*this, node, cfg.enable_density_clamp), deposit);
-    // Grid::clampFixedDensity: min(rho, td), the cap (CLAUDE.md, deliberate divergences). Meow.
-    for (size_t bin = 0; bin < bin_overlap.size(); bin++)
-        bin_overlap[bin] = std::min(bin_overlap[bin], bin_area[bin] * cfg.target_density);
     for (long slot : deposit_slots) for_each_overlap(*this, slot_footprint(*this, slot, cfg.enable_density_clamp), deposit);
 
     // compute_a_uv_DCT, verbatim: Grid::getBinDensities is [col][row], scaled by bin [0][0]'s area. Meow.
