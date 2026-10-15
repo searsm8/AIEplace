@@ -93,6 +93,12 @@ PlacerConfig read_placer_config(const std::string& path)
             else if (family == "reductions") c.slot_order_reductions = true;
             else fail("[sw_flat] slot_order: unknown sum family \"" + family + "\" (deposit, reductions)");
         }
+    const std::string fixed_base = cfg["sw_flat"]["fixed_base"].value_or(std::string("clamped"));
+    if (fixed_base != "clamped" && fixed_base != "exact") fail("[sw_flat] fixed_base must be \"clamped\" or \"exact\"");
+    c.fixed_base_exact = fixed_base == "exact";
+    const std::string overflow_map = cfg["sw_flat"]["overflow_map"].value_or(std::string("separate"));
+    if (overflow_map != "separate" && overflow_map != "snapshot") fail("[sw_flat] overflow_map must be \"separate\" or \"snapshot\"");
+    c.overflow_snapshot = overflow_map == "snapshot";
     return c;
 }
 

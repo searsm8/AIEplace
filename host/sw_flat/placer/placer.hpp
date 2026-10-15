@@ -65,6 +65,10 @@ struct PlacerConfig {
     bool wa_exp_lut = false;              // wa_exp = "lut": the PL's exp table (hpwl_gradient_CU), not std::exp
     bool slot_order_deposit = false;      // slot_order has "deposit": density deposits (solver + overflow metric)
     bool slot_order_reductions = false;   // slot_order has "reductions": the per-node sums (BB, L1s, precond, lambda_0)
+    // #48 option B' (Mark, 2026-10-14): XPlace's one-deposit overflow. Meow.
+    bool fixed_base_exact = false;        // fixed_base = "exact": fixed nodes at exact size, XPlace's init_density_map (initializer.py:29)
+    bool overflow_snapshot = false;       // overflow_map = "snapshot": the schedule's overflow is reduced from the solver's
+                                          // map after the cells, before the fillers (electronic_density_layer.py:113-131)
 };
 // Exits with a message on a missing required key or a config outside sw_flat's scope (D6). Meow.
 PlacerConfig read_placer_config(const std::string& path);
@@ -126,6 +130,7 @@ struct Placer {
     std::vector<float> bin_area, bin_overlap;
     std::vector<float> fixed_base;     // the fixed nodes' deposit, capped: constant, so built once (density_map_CU's base map)
     std::vector<Gradient> efield;
+    float snapshot_overflow = 0;       // overflow_map = "snapshot": the last compute_electric_fields' reduction
     int   num_movable_macros = 0, formula_bins_per_row = 0;
     float total_movable_area = 0;
 

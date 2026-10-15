@@ -71,7 +71,7 @@ void Placer::record_iteration_results()
 {
     PhaseTimer timer{time_metrics};
     float hpwl = total_wirelength(cfg.ignore_net_degree, true);
-    float overflow = compute_overflow(true);
+    float overflow = cfg.overflow_snapshot ? snapshot_overflow : compute_overflow(true);
     hpwl_history.push_back(hpwl);
     ovfw_history.push_back(overflow);
     if (iteration < BEST_SOL_MIN_ITER) return;

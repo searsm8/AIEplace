@@ -8,7 +8,8 @@ Per design, from the D6 config (d6_config.py), runs:
     base         the default: bit-identical to sw_only
     noise+/-     init_gamma * (1 +/- 2.5e-7), about 2 ULP: the noise floor. A placement run is chaotic, so
                  ANY perturbation moves the result; a variant is only meaningful against this scale.
-    deposit, reductions, slot (both), lut, slot+lut     the [sw_flat] switches
+    deposit, reductions, slot (both), lut, slot+lut     the [sw_flat] switches (#45 step 5b)
+    snapshot, exact_base, Bprime                          #48's overflow map: B, the exact fixed base, both
 and prints, vs base: the first trace row that differs, iterations, and the final masked HPWL, exact
 HPWL and exact overflow as relative differences. Runs in build/sum_order_drift/. This is a
 measurement, not a pass/fail test: the verdict is read against the noise rows. Meow.
@@ -33,6 +34,9 @@ VARIANTS = {
     "slot":       {"slot_order": ["deposit", "reductions"]},
     "lut":        {"wa_exp": "lut"},
     "slot+lut":   {"slot_order": ["deposit", "reductions"], "wa_exp": "lut"},
+    "snapshot":   {"overflow_map": "snapshot"},
+    "exact_base": {"fixed_base": "exact"},
+    "Bprime":     {"overflow_map": "snapshot", "fixed_base": "exact"},
 }
 
 
@@ -44,8 +48,9 @@ def variant_config(base_text, spec):
     lines = []
     if "slot_order" in spec:
         lines.append("slot_order = [" + ", ".join(f'"{f}"' for f in spec["slot_order"]) + "]")
-    if "wa_exp" in spec:
-        lines.append(f'wa_exp = "{spec["wa_exp"]}"')
+    for key in ("wa_exp", "overflow_map", "fixed_base"):
+        if key in spec:
+            lines.append(f'{key} = "{spec[key]}"')
     if lines:
         text += "\n[sw_flat]\n" + "\n".join(lines) + "\n"
     return text
@@ -82,7 +87,15 @@ def main():
     parser.add_argument("designs", nargs="+")
     parser.add_argument("--jobs", type=int, default=3)
     parser.add_argument("--threads", type=int, default=2)
+    parser.add_argument("--variants", nargs="+", help="run only these (base and the noise rows always run)")
     args = parser.parse_args()
+
+    if args.variants:
+        unknown = set(args.variants) - set(VARIANTS)
+        if unknown:
+            parser.error(f"unknown variants {sorted(unknown)}")
+        for name in [n for n in VARIANTS if n != "base" and n not in NOISE and n not in args.variants]:
+            del VARIANTS[name]
 
     tasks = {}
     with futures.ThreadPoolExecutor(args.jobs) as pool:

@@ -71,24 +71,38 @@ inline Footprint fixed_footprint(const Placer& placer, int node, bool clamp)
 
 // computeOverlaps' first pass: the fixed nodes in name order, then Grid::clampFixedDensity's cap
 // min(rho, td) (CLAUDE.md, deliberate divergences). Fixed nodes never move, so sw_only's per-iteration
-// recompute always gives this same map; built once in setup. Meow.
+// recompute always gives this same map; built once in setup. sw_only clamps small fixed nodes like
+// cells; fixed_base = "exact" deposits them at exact size, as XPlace's init_density_map does. Meow.
 void Placer::deposit_fixed_base()
 {
     fixed_base.assign((size_t)bins * bins, 0.0f);
     auto deposit = [&](size_t bin, float overlap_area) { fixed_base[bin] += overlap_area; };
-    for (int node : fixed_nodes) for_each_overlap(*this, fixed_footprint(*this, node, cfg.enable_density_clamp), deposit);
+    const bool clamp_fixed = cfg.enable_density_clamp && !cfg.fixed_base_exact;
+    for (int node : fixed_nodes) for_each_overlap(*this, fixed_footprint(*this, node, clamp_fixed), deposit);
     for (size_t bin = 0; bin < fixed_base.size(); bin++)
         fixed_base[bin] = std::min(fixed_base[bin], bin_area[bin] * cfg.target_density);
 }
 
 // computeOverlaps + computeElectricFields_DCT: the fixed base, then one serial pass over deposit_slots
-// (sw_only's order unless [sw_flat] slot_order has "deposit"; then it is density_map_CU's). Meow.
+// (sw_only's order unless [sw_flat] slot_order has "deposit"; then it is density_map_CU's). The fillers
+// are deposit_slots' tail, so with overflow_map = "snapshot" the map between cells and fillers is
+// XPlace's mov_density_map, and the overflow is reduced from it there. Meow.
 void Placer::compute_electric_fields()
 {
     PhaseTimer timer{time_field};
     bin_overlap = fixed_base;
     auto deposit = [&](size_t bin, float overlap_area) { bin_overlap[bin] += overlap_area; };
-    for (long slot : deposit_slots) for_each_overlap(*this, slot_footprint(*this, slot, cfg.enable_density_clamp), deposit);
+    for (int i = 0; i < filler_start; i++)
+        for_each_overlap(*this, slot_footprint(*this, deposit_slots[i], cfg.enable_density_clamp), deposit);
+    if (cfg.overflow_snapshot) {
+        // XPlace's overflow_fn (run_placement_nesterov.py:41): one uniform bin area, as sw_only's metric. Meow.
+        const float cap = bin_w * bin_h * cfg.target_density;
+        float overflow_area = 0.0f;
+        for (float d : bin_overlap) overflow_area += std::max(0.0f, d - cap);
+        snapshot_overflow = overflow_area / (total_movable_area + 1e-8f);
+    }
+    for (size_t i = filler_start; i < deposit_slots.size(); i++)
+        for_each_overlap(*this, slot_footprint(*this, deposit_slots[i], cfg.enable_density_clamp), deposit);
 
     // compute_a_uv_DCT, verbatim: Grid::getBinDensities is [col][row], scaled by bin [0][0]'s area. Meow.
     const int num_rows = bins, num_cols = bins;

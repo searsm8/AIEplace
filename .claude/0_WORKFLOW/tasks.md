@@ -1,9 +1,8 @@
 # Tasks
 
-**Active Task (2026-10-09): #45 step 5b — slot-order sums in `sw_flat_place` (steps 1–5 done; step 5
-is bit-identical to sw_only).** All decisions are in (D1–D7, second round); see the plan. Step 5
-report: [[REPORT_45_sw_flat_placer_20261009.md]].
-→ [[_NEW_PLAN_45_integration_20261006.md]]
+**Active Task (2026-10-15): #48 phase 2 — B' decided and measured in sw_flat; next the device side**
+(`density_map_CU`: filler barrier + overflow reduction). → [[REPORT_48_overflow_map_20261015.md]].
+(#45 steps 1-5b done; next #45 work is the rest of the PL's arithmetic in sw_flat.)
 
 Open work, one section per task. **Status lives here; evidence lives in a
 report.** Don't reuse task numbers, find the highest number and add one.
@@ -1026,4 +1025,17 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       in hundreds to thousands of bins ([info]), so the check sees order. **Footprint table: 4-105
       entries** (max mms/bigblue4; MMS 40-105, ISPD 4-49), against an assumed 4096: a 128-entry table
       would do. `.claude/2_ARTIFACTS/scratch_48/density_map_check_44_20261014.txt`
+- [x] **Phase 2, overflow map: B' (Mark, 2026-10-14: "XPlace as gospel, URAM is precious").** The
+      overflow is reduced from the solver's map after the cells, before the fillers, over an EXACT-size
+      fixed base (XPlace's one deposit; no second accumulator). sw_flat `[sw_flat] overflow_map =
+      "snapshot"` + `fixed_base = "exact"` (default off, check-placer still bit-identical).
+      `make check-overflow-map`: B' == sw_only's metric bit-equal 38/44, ≤2.5e-4 rel (rounding) on 6;
+      B alone reads 1.3-6.7% LOW at the stop on bigblue2/3/4, so the exact base is required.
+      Trajectories (7 designs): stop ±2 it, HPWL ≤0.03%. Moves the solver away from frozen sw_only,
+      toward XPlace (small fixed nodes no longer stretched; 6/44 designs affected).
+      → [[REPORT_48_overflow_map_20261015.md]]
+- [ ] **Phase 2, device side: ← next.** `density_map_CU`: split the deposit at `first_filler_slot`
+      (beat alignment to check), one reduction pass over `rho_URAM`, tier-1 vs sw_flat's
+      `snapshot_overflow`. Turn B' on in the step-6 golden config. Optional: bigblue3/4 trajectory at
+      grid 1024 (the drift ran at 2048, where fewer fixed nodes are stretched).
 → [[_NEW_PLAN_48_density_onchip_20261014.md]]

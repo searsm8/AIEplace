@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-10-09. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-10-15. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 > **Soft cap — one in, one out.** Current state only, ~2 screens. To add a line, remove one:
 > superseded snapshots & dated "Closed" narration → [[journal.md]]; finished task sections → [[history.md]].
 > If it's done and no longer live context, it isn't "where things stand" — evict it.
@@ -98,9 +98,13 @@
   noise on 28/30 runs, so slot order hides no semantic difference
   ([[_NEW_REPORT_45_slot_order_sums_20261014.md]]). **Now:** the rest of the PL's arithmetic in sw_flat
   (gradient formula, fixed-point HPWL), so it can be step 6's golden. → [[_NEW_PLAN_45_integration_20261006.md]]
-- **Building blocks it starts from (#41/#42, closed 2026-10-06; history.md):** the chunked gradient
-  is tier-1 exact (rel_rms ~4e-7), II=1, co-sim PASS, post-route 3.955 ns (unchunked 3.453) vs 3.33;
-  one axis needs 256 of 463 URAM. FM 1 pass: 0.38× externals. The mailbox is gone (#47, below).
+- **Building blocks (#41/#42, closed 2026-10-06; history.md):** chunked gradient tier-1 exact, II=1,
+  post-route 3.955 ns vs 3.33; one axis 256 of 463 URAM; FM 1 pass 0.38× externals.
+- **#48 phase 2 — overflow map = B' (Mark, 2026-10-14; measured 10-15).** The device reduces the overflow
+  from its own solver map after the cells, before the fillers, over an EXACT-size fixed base (XPlace's one
+  deposit, no extra URAM). sw_flat switches `overflow_map`/`fixed_base`; B' == sw_only's metric (38/44
+  bit-equal, rest rounding); B without the exact base reads 1.3-6.7% low on bigblue2/3/4. Trajectories
+  within noise. Next: the `density_map_CU` side. → [[REPORT_48_overflow_map_20261015.md]]
 - **#47 — the tail exchange replaced the chunk mailbox (2026-10-09).** Rule C6: a macro pin is never
   external (the macro is). Rule C7: a chunk's externals are its tail rows, one block per owner;
   owners write / read them through a 32 x 256 row buffer replaying host-scheduled ops. Tier 1, 8/8
