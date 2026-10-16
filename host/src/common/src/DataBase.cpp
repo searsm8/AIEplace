@@ -600,7 +600,9 @@ float DataBase::computeTotalWirelength(string method, int max_net_degree, bool a
     // delta_hpwl, and convergence all measure the SAME masked wirelength XPlace does.
     // mv_nets_by_name is mm_nets' own order, so summing in index order reproduces the original
     // map walk exactly. Masked-out nets contribute +0.0f, which is an exact no-op on the sum.
-    return m_ordered_reduce.sum((int)mv_nets_by_name.size(), [&](int i) {
+    // Accumulated in double: in float, a total over ~2 M nets reaches ~7e8, where one ulp (64 DBU)
+    // exceeds many nets' HPWL; bigblue4 read 0.39% low (#45, _NEW_REPORT_45_pl_arithmetic_20261016). Meow.
+    return m_ordered_reduce.sum_in_double((int)mv_nets_by_name.size(), [&](int i) {
         Net* net_p = mv_nets_by_name[i];
         return (net_p->getDegree() <= max_net_degree) ? net_p->computeWirelength(method, at_probe) : 0.0f;
     });

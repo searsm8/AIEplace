@@ -844,7 +844,8 @@ in slot order, each module vs sw_flat `pl+Bprime`. Done 2026-10-06 as low-hangin
       flip (primary @641 vs aux @657), with the trajectory within 1e-3. **Step 6's golden = `pl+Bprime`.**
       ⚠️ Found: sw_only's float HPWL metric reads **0.39% low on bigblue4** (float accumulation over
       2.2 M nets; 1e-6 on the small designs; int64 exact to 2e-8). It touches sw_only's schedule and
-      printed GP HPWL, not the scored goldens. Not changed (sw_only frozen); Mark's call.
+      printed GP HPWL, not the scored goldens. **Fixed the same day by #49** (double sum, Mark;
+      history.md).
       → [[_NEW_REPORT_45_pl_arithmetic_20261016.md]]
 - [x] **Step 5b part 1: slot-order sums** — flip each order-sensitive sum to slot order and measure the drift
       against the bit-identical baseline (2026-10-14). `[sw_flat] slot_order =
@@ -873,7 +874,9 @@ in slot order, each module vs sw_flat `pl+Bprime`. Done 2026-10-06 as low-hangin
 that file.
 - [ ] Count the 97..100-pin nets per design (all 44) to size the effect.
 - [ ] Set `ignore_net_degree = 96` in `default_config.toml`; re-score both suites through `make dse`
-      → new GOLDEN dirs (ISPD 28, MMS 16), legal-vs-legal vs XPlace.
+      → new GOLDEN dirs (ISPD 28, MMS 16), legal-vs-legal vs XPlace. The current goldens also predate
+      #49's double HPWL metric (history.md), so this re-score picks that up too. Run the suites
+      separately, or fix dse.py's lgdp.json key first: ISPD2005 and MMS share design names.
 - [ ] Register the divergence in `CLAUDE.md` ("Deliberate divergences from XPlace").
 - [ ] Decide whether the frozen `test/regress` configs move to 96 (regenerate with `--reason`) or
       stay at 100 as the stability tripwire.

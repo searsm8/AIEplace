@@ -112,8 +112,9 @@ int main(int argc, char** argv)
         failures += !same;
     }
 
-    // [info] the HPWL three ways at these positions: the int64 stream sum, sw_only's float metric, and a
-    // double sum over the stream's nets (the reference both are read against). Meow.
+    // [info] the HPWL three ways at these positions: the int64 stream sum, sw_only's metric (summed in
+    // double since 2026-10-16; in float it read 0.39% low on bigblue4), and a double sum over the
+    // stream's nets (the reference both are read against). Meow.
     {
         auto double_sum = [&](const std::vector<int>& nets) {
             double total = 0;
@@ -132,7 +133,7 @@ int main(int argc, char** argv)
         };
         const double reference = double_sum(placer.stream.nets), by_name = double_sum(placer.nets_by_name);
         const double fixed = placer.stream_wirelength(true), floating = placer.total_wirelength(placer.cfg.ignore_net_degree, true);
-        printf("[info]        HPWL vs a double sum over the stream's nets: int64 %+.2e, sw_only's float %+.2e "
+        printf("[info]        HPWL vs a double sum over the stream's nets: int64 %+.2e, sw_only's metric %+.2e "
                "(sw_only's net set in double: %+.2e)\n",
                (fixed - reference) / reference, (floating - reference) / reference, (by_name - reference) / reference);
     }

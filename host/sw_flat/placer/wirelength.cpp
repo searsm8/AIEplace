@@ -110,11 +110,11 @@ void Placer::compute_net_partials()
     }
 }
 
-// Net::computeWirelength_HPWL summed in net-name order; a masked net adds +0.0f (exact). Degree 1
-// is NOT masked here (its HPWL is 0), unlike the gradient. Meow.
+// Net::computeWirelength_HPWL summed in net-name order, in double like DataBase::computeTotalWirelength;
+// a masked net adds +0.0f (exact). Degree 1 is NOT masked here (its HPWL is 0), unlike the gradient. Meow.
 float Placer::total_wirelength(int max_net_degree, bool at_probe) const
 {
-    float total = 0.0f;
+    double total = 0.0;
     for (int net : nets_by_name) {
         const int degree = design.net_degree(net);
         if (degree == 0 || degree > max_net_degree) { total += 0.0f; continue; }
@@ -129,7 +129,7 @@ float Placer::total_wirelength(int max_net_degree, bool at_probe) const
         }
         total += (max_x - min_x) + (max_y - min_y);
     }
-    return total;
+    return (float)total;
 }
 
 } // namespace sw_flat

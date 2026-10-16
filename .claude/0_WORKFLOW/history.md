@@ -16,6 +16,8 @@ removed — it had been sitting in both files since 2026-07-30).
 
 **Compacted 2026-08-07:** the full pre-compaction text of the still-OPEN tasks (#1, #3, #6, #7, #9, #10, #11, #14, #15, #17, #19, #20, #21, #22, #23, Parked, Improvements) - first section below.
 
+**Closed 2026-10-16:** **#49** — sw_only's HPWL metric sums in double (Mark un-froze sw_only for this one fix). In float it read up to 0.39% low (bigblue4) on the large designs (found by #45 step 5b). Post-DP HPWL unchanged over 13 large designs (+0.015% mean); the reported GP HPWL is now correct. Regress baselines regenerated with a reason. Also found: `dse.py` lgdp.json collides `ispd2005/X` with `mms/X` in one sweep (open).
+
 **Closed 2026-10-06 (superseded by #45, Mark):** **#40** — `hpwl_gradient_dhar` failed on real hardware from timing (WNS −0.71 ns, 22% of endpoints, 85% route delay in the fully unrolled 16-lane `net_loop`), not logic. Its successor line — `hpwl_gradient_dhar_v2` → `hpwl_computer` (II=1, 2026-09-22) → #41's record-stream `hpwl_gradient_computer` — replaced it; the partial-unroll restructure was never needed. #45 carries the gradient forward as `hpwl_gradient_CU`.
 
 **Closed 2026-10-06 (superseded by #45, Mark):** **#20** — pl_algo Stage 5, the resident loop in `vck5000/pl`. Done before closing: `dumpScheduleTrace()` restored and `sched_verify` fed from the frozen sw_only (step 1); schedule + convergence bit-exact (step 2 core); the `formats.hpp` wall broken so all modules are tier-1-covered (step 3); the `node_footprint` / `iteration_update` geometry pair (step 4); `hpwl_gradient` de-gathered (P1b+P2). Not done: the sw_emu geometry A/B, step 5 (fillers + movable-macro weight) and step 6 (compose the loop). Those, re-planned in slot order with control on the CPU (#44 arm B), are #45 steps 4-7; the verified modules and `sched_verify` are #45's starting material. → [[_NEW_PLAN_45_integration_20261006.md]]
@@ -85,6 +87,25 @@ did not fix are now **#29** (the XPlace reference belongs in the placer, masked-
 site-width-correct) and **#30** (LG+DP inside `dse.py`).
 
 ---
+
+## #49 — sw_only: HPWL metric in double (opened and CLOSED 2026-10-16, Mark)
+
+**Why:** #45 step 5b found that `DataBase::computeTotalWirelength` summed ~2 M per-net HPWLs into a
+float. At iteration 30 it read 0.39% low on bigblue4, and 1.7e-3 to 2.5e-3 low on bigblue3,
+mgc_superblue12 and mms/bigblue3, against a double sum over the same nets. Mark: un-freeze sw_only for
+this one fix.
+- [x] `OrderedReduce::sum_in_double` (Common.h): same order, double accumulator. `computeTotalWirelength`
+      uses it, and sw_flat's `total_wirelength` mirrors it (check-placer PASS).
+- [x] Regress: PASS at HEAD before, drifts after. Baselines regenerated with `--reason` (pci_bridge32_b
+      693 → 701 iterations, mms_adaptec1 1274 → 1283), re-verified PASS.
+- [x] Measured on 13 large designs (ISPD2005 bigblue1–4, 5 superblues, mms/bigblue1–4) vs the
+      archived goldens. A control run reproduced the golden's bigblue1 row exactly. **Post-DP HPWL Δ:
+      mean +0.015%, range −0.24..+0.27%.** Reported GP HPWL rises up to +0.46% (the correct value).
+- Open, not done here: the `dse.py` lgdp.json key collision (`name@grid` without the suite) that
+  corrupted 4 of this run's 8 bigblue rows in `dse_results.csv` (recovered from `dse.log`). The
+  archived goldens are pre-fix; a full re-score fits with #46's.
+
+→ [[_NEW_REPORT_49_hpwl_double_sum_20261016.md]], `.claude/2_ARTIFACTS/results/HPWL_double_sum_20261016/`
 
 ## #20 — pl_algo Stage 5: wire the full device design (opened 2026-08-06, CLOSED 2026-10-06 — superseded by #45)
 

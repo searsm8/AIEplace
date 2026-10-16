@@ -8,6 +8,9 @@
 - **sw_only** — CPU golden reference; goal is to match XPlace. **FROZEN 2026-08-17 (Mark's call).**
   Parity reached; no further algorithm/behaviour changes without an explicit decision. Cleanup,
   tooling, docs and tests are NOT frozen. `make test-regress` bit-identical is now the contract.
+  **One authorized exception (#49, Mark, 2026-10-16):** the HPWL metric sums in double (it read
+  0.39% low on bigblue4 in float). Post-DP HPWL unchanged (+0.015% mean, 13 large designs); reported GP
+  HPWL now correct, up to +0.46% on bigblue4. Regress baselines regenerated. [[_NEW_REPORT_49_hpwl_double_sum_20261016.md]]
 - **pl_algo** — move the whole placement iteration onto the PL. **The active thread**, now as
   **#45**: integration restarts in a new top-level `/AIEplace/pl`, slot order everywhere; the
   `vck5000/` tree becomes read-only legacy until it is deleted. Why freezing came first: pl_algo's
@@ -98,9 +101,8 @@
   noise on 28/30 runs, so slot order hides no semantic difference
   ([[_NEW_REPORT_45_slot_order_sums_20261014.md]]). **Step 5b part 2 (10-16):** `wa_sums`/`grad_merge`/`hpwl`
   switches make sw_flat's gradient + int64 HPWL **bit-exact to `hpwl_gradient_CU`** on 6/6 (chunked, macros);
-  drift within noise apart from one best-solution flip. **Step 6's golden = sw_flat `pl+Bprime`.** ⚠️ sw_only's
-  float HPWL metric reads 0.39% low on bigblue4 (float accumulation; not in scored goldens; frozen, Mark's
-  call) ([[_NEW_REPORT_45_pl_arithmetic_20261016.md]]). **Next:** step 6, density path.
+  drift within noise apart from one best-solution flip. **Step 6's golden = sw_flat `pl+Bprime`.** It also found
+  sw_only's float HPWL error, fixed by #49 ([[_NEW_REPORT_45_pl_arithmetic_20261016.md]]). **Next:** step 6, density path.
   → [[_NEW_PLAN_45_integration_20261006.md]]
 - **Building blocks (#41/#42, closed 2026-10-06; history.md):** chunked gradient tier-1 exact, II=1,
   post-route 3.955 ns vs 3.33; one axis 256 of 463 URAM; FM 1 pass 0.38× externals.

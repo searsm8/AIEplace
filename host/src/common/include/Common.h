@@ -186,6 +186,20 @@ public:
         return total;
     }
 
+    /// @brief sum(), accumulated in double and rounded to float once: for a total far larger than
+    ///        its terms, where a float accumulator drops their low bits. Meow.
+    template <typename F>
+    float sum_in_double(int count, F&& per_item)
+    {
+        if ((int)m_partials.size() < count) m_partials.resize(count);
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i < count; i++) m_partials[i] = per_item(i);
+
+        double total = 0.0;
+        for (int i = 0; i < count; i++) total += m_partials[i];
+        return (float)total;
+    }
+
     /// @brief Two sums from one pass: @p per_item(i, first_i, second_i) writes both terms.
     ///        Each is accumulated in increasing i, independently of the other.
     template <typename F>

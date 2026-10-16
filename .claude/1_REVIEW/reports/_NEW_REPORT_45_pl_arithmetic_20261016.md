@@ -101,6 +101,9 @@ B' (step 6's golden config). Full table: `.claude/2_ARTIFACTS/scratch_45/sum_ord
 **So the PL's arithmetic hides no semantic difference either.** Step 6's golden is `pl+Bprime`.
 
 ## Found on the way: sw_only's float HPWL metric reads 0.4% low on bigblue4
+> **Fixed 2026-10-16 by #49** (Mark un-froze sw_only for it): the metric now sums in double. Placement
+> quality is unchanged; see [[_NEW_REPORT_49_hpwl_double_sum_20261016.md]].
+
 At the same iterate, the schedule's HPWL under `hpwl = "fixed"` was 0.46% above the float metric on
 bigblue4, and within 1e-5 of it on the other four designs. `record_stream_check` now prints both
 against a double sum (`[info]`, iteration 30):
