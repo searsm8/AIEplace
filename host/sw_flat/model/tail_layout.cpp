@@ -1,21 +1,21 @@
 // tail_layout.cpp -- #47 M1: can each chunk's external slots form a tail that iteration_update
 // writes as a plain sequential stream? (.claude/1_REVIEW/reports/_NEW_PLAN_47_mailbox_redesign_20261006.md)
 //
-// Emission order into consumer k's tail: owners j ascending, each owner's externals in its own slot
+// Emission order into borrower k's tail: owners j ascending, each owner's externals in its own slot
 // order under the tail layout (owned movable rows only, per bank in node order -- the order the
 // update streams them). Layout (M0's): each external takes the next tail row OF ITS BANK (the bank
 // encode_chunked's colouring chose), so the tail is max_b(externals in bank b) rows. The update writes
 // the tail row by row, holding rows in an on-chip assembly buffer until they are final (every bank
 // has filled the row, or will put nothing more there -- known statically). Reported: tail size / E
 // (1.00 = no padding), the buffer depth in rows, the most entries for one bank among 16 consecutive
-// emissions, and the update's stalls / FIFO depth at W buffer writes per cycle per consumer.
+// emissions, and the update's stalls / FIFO depth at W buffer writes per cycle per borrower.
 // Colouring hints toward the emission order were measured in ed888f9 and did not pay. Meow.
 
 #include "cycle_model.hpp"
 
 using namespace packer;
 
-constexpr int WRITE_RATES[] = {1, 2, 4, 8};   // assembly-buffer entries per cycle, per consumer stream
+constexpr int WRITE_RATES[] = {1, 2, 4, 8};   // assembly-buffer entries per cycle, per borrower stream
 constexpr int NUM_RATES = 4;
 
 struct TailCost { long tail_slots = 0, buffer_rows = 0, bank_ports = 0; };
@@ -88,7 +88,7 @@ int main(int argc, char** argv) {
                 return ja != jb ? ja < jb : owner_slot[c.work_node[a]] < owner_slot[c.work_node[b]]; });
             E += (long)order.size();
 
-            // Write rate: owner j's update reaches its slot s at beat s / LANES and hands consumer k's
+            // Write rate: owner j's update reaches its slot s at beat s / LANES and hands borrower k's
             // assembly buffer W entries per cycle. An entry waits (FIFO) behind pending writes; owner
             // j's update stalls by however far k's last write runs past its final beat. Meow.
             for (int w = 0; w < NUM_RATES; w++)
@@ -118,7 +118,7 @@ int main(int argc, char** argv) {
         for (int w = 0; w < NUM_RATES; w++) {
             long stall_total = 0;
             for (int j = 0; j < K; j++) stall_total += std::max(0L, stall[w][j]);
-            printf("  write rate %d/cycle per consumer: update stalls %7ld cycles (%6.2f%%), FIFO %6ld entries\n",
+            printf("  write rate %d/cycle per borrower: update stalls %7ld cycles (%6.2f%%), FIFO %6ld entries\n",
                    WRITE_RATES[w], stall_total, 100.0 * stall_total / update_beats, max_fifo[w]);
         }
         printf("  tail/E %5.3f  assembly buffer %4ld rows  bank ports %ld  max chunk %ld slots with tail (%s capacity)\n",

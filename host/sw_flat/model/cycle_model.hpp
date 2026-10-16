@@ -6,10 +6,10 @@
 // vck5000/bring_up/beat_packer/cycle_model.hpp @ ef62dba (#47 M0); rewritten for the tail exchange
 // (#47 B3, .claude/1_REVIEW/reports/_NEW_PLAN_47_mailbox_redesign_20261006.md):
 //
-//   TODAY   hpwl_gradient_CU as built (B3): send pass (owner load + send ops), compute pass, fold
-//           pass (owned reload + merge ops + owned drain).
-//   FUSED   B4: send and merge ride on iteration_update's chunk-major stream, so the send pass and
-//           the fold pass's reload / drain disappear. Charged instead: each block's beats, written
+//   TODAY   hpwl_gradient_CU as built (B3): send_tails_pass (owner load + send ops), compute_pass,
+//           merge_tails_pass (owned reload + merge ops + owned drain).
+//   FUSED   B4: send and merge ride on iteration_update's chunk-major stream, so send_tails_pass and
+//           merge_tails_pass's reload / drain disappear. Charged instead: each block's beats, written
 //           (send) and read (merge) as if DDR-bound, and merge stalls on a lane that needs more adds
 //           than it has adders.
 //
@@ -41,7 +41,7 @@ struct Phases {
 
 inline long ceil_div(long a, long b) { return (a + b - 1) / b; }
 
-// B4 merge: owner j's update streams its slots 16 a beat; a slot gets one add per consumer that holds
+// B4 merge: owner j's update streams its slots 16 a beat; a slot gets one add per borrower that holds
 // it, and the busiest lane of a beat sets that beat's cycles. Meow.
 inline long merge_stall_cycles(const Chunked& ch, int owner, const std::vector<long>& owner_slot, int adders_per_lane) {
     std::vector<int> adds(ch.chunks[owner].enc.num_slots, 0);
@@ -70,12 +70,12 @@ inline Phases model_cycles(const Chunked& ch, Variant v, int adders_per_lane = 2
         const long owned_beats = e.first_tail_slot / LANES, macro_entries = (long)e.macro_order.size();
         p.load       += slot_beats + O + macro_entries + O;   // load + refresh
         p.beats      += (long)e.issue.size() + NUM_GROUP_ENDS + 2 * O;   // + the dataflow region's fill. Meow.
-        p.fold_other += macro_entries + O;                     // the macro-pin fold, compute pass (C6)
+        p.fold_other += macro_entries + O;                     // the macro-pin fold, compute_pass (C6)
         p.drain      += movable_beats + O;
         if (!chunked) continue;
         if (!fused) {
             p.send_reload += owned_beats + O;
-            p.fold_other  += owned_beats + O + owned_beats + O;   // fold pass: reload + drain owned rows
+            p.fold_other  += owned_beats + O + owned_beats + O;   // merge_tails_pass: reload + drain owned rows
         } else {
             p.update_merge += merge_stall_cycles(ch, k, owner_slot, adders_per_lane);
         }
