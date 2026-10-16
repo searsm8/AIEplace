@@ -10,6 +10,9 @@ Per design, from the D6 config (d6_config.py), runs:
                  ANY perturbation moves the result; a variant is only meaningful against this scale.
     deposit, reductions, slot (both), lut, slot+lut     the [sw_flat] switches (#45 step 5b)
     snapshot, exact_base, Bprime                          #48's overflow map: B, the exact fixed base, both
+    tree, stream, fixed   hpwl_gradient_CU's arithmetic, one switch each (record_stream.cpp)
+    pl                    all of the PL's arithmetic: slot+lut, tree, stream, fixed
+    pl+Bprime             pl plus #48's B': step 6's golden config
 and prints, vs base: the first trace row that differs, iterations, and the final masked HPWL, exact
 HPWL and exact overflow as relative differences. Runs in build/sum_order_drift/. This is a
 measurement, not a pass/fail test: the verdict is read against the noise rows. Meow.
@@ -37,6 +40,13 @@ VARIANTS = {
     "snapshot":   {"overflow_map": "snapshot"},
     "exact_base": {"fixed_base": "exact"},
     "Bprime":     {"overflow_map": "snapshot", "fixed_base": "exact"},
+    "tree":       {"wa_sums": "tree"},
+    "stream":     {"grad_merge": "stream"},
+    "fixed":      {"hpwl": "fixed"},
+    "pl":         {"slot_order": ["deposit", "reductions"], "wa_exp": "lut", "wa_sums": "tree",
+                   "grad_merge": "stream", "hpwl": "fixed"},
+    "pl+Bprime":  {"slot_order": ["deposit", "reductions"], "wa_exp": "lut", "wa_sums": "tree",
+                   "grad_merge": "stream", "hpwl": "fixed", "overflow_map": "snapshot", "fixed_base": "exact"},
 }
 
 
@@ -48,7 +58,7 @@ def variant_config(base_text, spec):
     lines = []
     if "slot_order" in spec:
         lines.append("slot_order = [" + ", ".join(f'"{f}"' for f in spec["slot_order"]) + "]")
-    for key in ("wa_exp", "overflow_map", "fixed_base"):
+    for key in ("wa_exp", "overflow_map", "fixed_base", "wa_sums", "grad_merge", "hpwl"):
         if key in spec:
             lines.append(f'{key} = "{spec[key]}"')
     if lines:

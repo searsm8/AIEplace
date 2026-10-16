@@ -17,6 +17,9 @@
 #                         over an exact fixed base, vs sw_only's separate metric, 44 designs
 #                         (test/overflow_map_check.sh). Use JOBS=n, ITERATIONS=n.
 #   make gradient-bench   build/gradient_bench: the WA gradient with std::exp vs the PL's table, timed.
+#   make check-record-stream  sw_flat's record-stream gradient and HPWL (placer/record_stream.cpp) vs
+#                         hpwl_gradient_CU on the same positions, bit for bit, 6 designs
+#                         (test/record_stream_check.sh).
 #   make clean
 
 REPO     := ../..
@@ -35,7 +38,7 @@ COMMON_OBJS = $(addprefix $(BUILD)/, $(COMMON_SRCS:.cpp=.o))
 vpath %.cpp . test $(COMMON)/src placer $(REPO)/host/src/sw_only/src
 
 # DCT.cpp is sw_only's own transform, linked rather than copied: the field must round the same. Meow.
-PLACER_SRCS = placer.cpp setup.cpp wirelength.cpp density.cpp step.cpp schedule.cpp main.cpp DCT.cpp
+PLACER_SRCS = placer.cpp setup.cpp wirelength.cpp record_stream.cpp density.cpp step.cpp schedule.cpp main.cpp DCT.cpp
 PLACER_OBJS = $(addprefix $(BUILD)/, $(PLACER_SRCS:.cpp=.o))
 PLACER_LIB  = $(filter-out $(BUILD)/main.o, $(PLACER_OBJS))
 
@@ -45,7 +48,7 @@ NETLIST_DIR  = $(BUILD)/netlists
 NETLISTS     = $(foreach d,$(DESIGNS),$(NETLIST_DIR)/$(subst /,_,$(d)).netlist)
 suite_of     = $(firstword $(subst _, ,$(1)))
 
-.PHONY: check-database check-layout netlists placer check-placer check-density-map check-overflow-map gradient-bench clean
+.PHONY: check-database check-layout netlists placer check-placer check-density-map check-overflow-map gradient-bench check-record-stream clean
 check-database: $(BUILD)/flat_database_check
 	bash test/flat_database_check.sh
 
@@ -71,6 +74,12 @@ $(BUILD)/overflow_map_check: $(BUILD)/flat_database.o $(BUILD)/overflow_map_chec
 	$(CXX) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 $(BUILD)/gradient_bench: $(BUILD)/flat_database.o $(BUILD)/gradient_bench.o $(PLACER_LIB) $(COMMON_OBJS)
+	$(CXX) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
+check-record-stream: $(BUILD)/record_stream_check
+	bash test/record_stream_check.sh
+
+$(BUILD)/record_stream_check: $(BUILD)/flat_database.o $(BUILD)/record_stream_check.o $(PLACER_LIB) $(COMMON_OBJS)
 	$(CXX) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 check-placer: $(BUILD)/sw_flat_place

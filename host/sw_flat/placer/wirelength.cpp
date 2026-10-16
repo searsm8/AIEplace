@@ -9,39 +9,32 @@
 
 namespace sw_flat {
 
-namespace {
-
-// NetPin::getProbePos / getPos: the node's position plus the pin's offset. A fixed node or IO pad
-// never moves, so its position is the file's. Meow.
-inline Position pin_position(const Placer& placer, int pin, bool at_probe)
-{
-    const long slot = placer.pin_slot[pin];
-    const int node = placer.design.pin_node[pin];
-    Position node_pos = slot < 0 ? Position(placer.design.node_x[node], placer.design.node_y[node])
-                      : at_probe ? placer.next.probe_pos[slot] : placer.next.node_pos[slot];
-    return node_pos + Position(placer.design.pin_offset_x[pin], placer.design.pin_offset_y[pin]);
-}
-
-// wa_sums.hpp lut_exp_pair: exp(-d / gamma) by linear interpolation, 0 past the table. Meow.
-inline float lut_exp(const std::vector<float>& lut, float inv_lut_step, float d)
-{
-    const float idx_f = d * inv_lut_step;
-    const int   idx   = (int)idx_f;
-    if (idx >= (int)lut.size() - 1) return 0.0f;
-    const float frac  = idx_f - (float)idx;
-    return lut[idx] * (1.0f - frac) + lut[idx + 1] * frac;
-}
-
-} // namespace
-
 // Per net in parallel into pin_partials, then replayed serially in file order (net, then pin):
-// sw_only's deterministic path, so every slot's probe_grad rounds identically. Meow.
+// sw_only's deterministic path, so every slot's probe_grad rounds identically. [sw_flat] wa_sums and
+// grad_merge swap either half for the PL's (record_stream.cpp). Meow.
 void Placer::compute_hpwl_partials()
 {
     PhaseTimer timer{time_gradient};
+    for (long slot : movable_slots) next.probe_grad[slot].clear();
+    if (cfg.wa_sums_tree) compute_stream_partials();
+    else compute_net_partials();
+    if (nan_detected) return;
+    if (cfg.grad_merge_stream) { merge_stream_gradient(); return; }
+    if (cfg.wa_sums_tree)
+        for (size_t lane = 0; lane < stream.lane_pin.size(); lane++)
+            if (stream.lane_pin[lane] >= 0) pin_partials[stream.lane_pin[lane]] = lane_grad[lane];
+
+    for (int net : gradient_nets) {
+        const int first = design.net_first_pin[net];
+        for (int i = 0; i < design.net_degree(net); i++)
+            if (pin_slot[first + i] >= 0) next.probe_grad[pin_slot[first + i]] += pin_partials[first + i];
+    }
+}
+
+void Placer::compute_net_partials()
+{
     const bool use_lut = cfg.wa_exp_lut;
     const float inv_lut_step = 1.0f / (PL_LUT_STEP_NORM * gamma);   // the pl_algo host's
-    for (long slot : movable_slots) next.probe_grad[slot].clear();
 
     #pragma omp parallel for schedule(dynamic, 256)
     for (int k = 0; k < (int)gradient_nets.size(); k++) {
@@ -114,13 +107,6 @@ void Placer::compute_hpwl_partials()
             }
             pin_partials[first + i] = partial;
         }
-    }
-    if (nan_detected) return;
-
-    for (int net : gradient_nets) {
-        const int first = design.net_first_pin[net];
-        for (int i = 0; i < design.net_degree(net); i++)
-            if (pin_slot[first + i] >= 0) next.probe_grad[pin_slot[first + i]] += pin_partials[first + i];
     }
 }
 

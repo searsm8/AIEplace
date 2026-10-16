@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-10-15. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-10-16. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 > **Soft cap — one in, one out.** Current state only, ~2 screens. To add a line, remove one:
 > superseded snapshots & dated "Closed" narration → [[journal.md]]; finished task sections → [[history.md]].
 > If it's done and no longer live context, it isn't "where things stand" — evict it.
@@ -96,8 +96,12 @@
   `make -C host/sw_flat check-placer`, [[REPORT_45_sw_flat_placer_20261009.md]]). **Step 5b:** slot-order
   sums and the PL's exp table are `[sw_flat]` switches, off by default; their drift is within 2-ULP
   noise on 28/30 runs, so slot order hides no semantic difference
-  ([[_NEW_REPORT_45_slot_order_sums_20261014.md]]). **Now:** the rest of the PL's arithmetic in sw_flat
-  (gradient formula, fixed-point HPWL), so it can be step 6's golden. → [[_NEW_PLAN_45_integration_20261006.md]]
+  ([[_NEW_REPORT_45_slot_order_sums_20261014.md]]). **Step 5b part 2 (10-16):** `wa_sums`/`grad_merge`/`hpwl`
+  switches make sw_flat's gradient + int64 HPWL **bit-exact to `hpwl_gradient_CU`** on 6/6 (chunked, macros);
+  drift within noise apart from one best-solution flip. **Step 6's golden = sw_flat `pl+Bprime`.** ⚠️ sw_only's
+  float HPWL metric reads 0.39% low on bigblue4 (float accumulation; not in scored goldens; frozen, Mark's
+  call) ([[_NEW_REPORT_45_pl_arithmetic_20261016.md]]). **Next:** step 6, density path.
+  → [[_NEW_PLAN_45_integration_20261006.md]]
 - **Building blocks (#41/#42, closed 2026-10-06; history.md):** chunked gradient tier-1 exact, II=1,
   post-route 3.955 ns vs 3.33; one axis 256 of 463 URAM; FM 1 pass 0.38× externals.
 - **#48 phase 2 — overflow map = B' (Mark, 2026-10-14; measured 10-15).** The device reduces the overflow

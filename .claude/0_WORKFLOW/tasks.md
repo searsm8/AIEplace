@@ -2,7 +2,8 @@
 
 **Active Task (2026-10-15): #48 phase 2 — B' device side landed in `density_map_CU`; next turn B' on in
 the step-6 golden config.** → [[REPORT_48_overflow_map_20261015.md]].
-(#45 steps 1-5b done; next #45 work is the rest of the PL's arithmetic in sw_flat.)
+(#45 steps 1-5b done 2026-10-16: sw_flat `pl+Bprime` is bit-exact to `hpwl_gradient_CU`; next #45
+work is step 6, the density path. [[_NEW_REPORT_45_pl_arithmetic_20261016.md]])
 
 Open work, one section per task. **Status lives here; evidence lives in a
 report.** Don't reuse task numbers, find the highest number and add one.
@@ -746,7 +747,9 @@ hardware routes; one chunk-capable `hpwl_gradient_CU` (from `hpwl_gradient_compu
 `hpwl_computer*` retired as stepping stones; both partitioners behind `partition_fm_passes`; start
 fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration.
 
-**State:** steps 1–5 done (5 bit-identical to sw_only); 5b (slot-order sums) next. Done today as low-hanging fruit: gradient `max_rel` 1e-3
+**State:** steps 1–5b done (5 bit-identical to sw_only; 5b: sw_flat's `pl+Bprime` config computes the
+gradient + HPWL bit-exact to `hpwl_gradient_CU`, drift within noise). **Next: step 6**, density path
+in slot order, each module vs sw_flat `pl+Bprime`. Done 2026-10-06 as low-hanging fruit: gradient `max_rel` 1e-3
 (`vck5000/test/wa_gradient_golden.hpp`; newblue3 / mms/bigblue4 / newblue7 now pass, rel_rms still
 1e-5-bounded); `make test` 21/21 PASS.
 - [x] **Decisions, second round (Mark, 2026-10-06):** D1 mailbox A now / C later / B fallback; D2
@@ -830,14 +833,27 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
       (3 chunks, 759 iterations). 2–3× faster than sw_only (bigblue4 369 s vs 1102 s). A 2-ULP `init_gamma` change diverges at row 1.
       Not done: DEF output for `dse.py` (redundant while bit-identical), final-position hash.
       → [[REPORT_45_sw_flat_placer_20261009.md]]
-- [ ] **Step 5b: slot-order sums** — flip each order-sensitive sum to slot order and measure the drift
-      against the bit-identical baseline. ← in progress (2026-10-14). `[sw_flat] slot_order =
+- [x] **Step 5b part 2: the rest of the PL's arithmetic (2026-10-16).** `[sw_flat] wa_sums = "tree"`,
+      `grad_merge = "stream"`, `hpwl = "fixed"` (`placer/record_stream.cpp`; need `ignore_net_degree =
+      96`; off by default, check-placer PASS). With `wa_exp = "lut"` the gradient and both int64 HPWLs
+      equal `hpwl_gradient_CU`'s **bit for bit on 6/6** (fft_a, pci_bridge32_b, adaptec1, mms/adaptec1,
+      bigblue4 and mms/bigblue4 with 3 chunks, tail merges and folds): `make -C host/sw_flat
+      check-record-stream`, ~1.5 min. 7 mutants caught (`scratch_45/record_stream_mutants.sh`). The
+      combiner was already the CU's; what changed is the sum order and the merge order. Drift: 19/25
+      inside noise. bigblue4's outliers are ≤ 0.012%; mms/adaptec1's `pl` −0.49% is a best-solution
+      flip (primary @641 vs aux @657), with the trajectory within 1e-3. **Step 6's golden = `pl+Bprime`.**
+      ⚠️ Found: sw_only's float HPWL metric reads **0.39% low on bigblue4** (float accumulation over
+      2.2 M nets; 1e-6 on the small designs; int64 exact to 2e-8). It touches sw_only's schedule and
+      printed GP HPWL, not the scored goldens. Not changed (sw_only frozen); Mark's call.
+      → [[_NEW_REPORT_45_pl_arithmetic_20261016.md]]
+- [x] **Step 5b part 1: slot-order sums** — flip each order-sensitive sum to slot order and measure the drift
+      against the bit-identical baseline (2026-10-14). `[sw_flat] slot_order =
       ["deposit", "reductions"]` and `wa_exp = "lut"` (the PL's exp table), all off by default
       (check-placer still PASS). `test/sum_order_drift.py`: **28/30 variant runs inside the 2-ULP
       noise band** on fft_a, pci_bridge32_b, adaptec1, mms/adaptec1, bigblue4 (5/5, ±0.011%); the 2
       outliers (mms/adaptec1) ≤ 0.1% HPWL. In-run drift 1e-7..1e-5 for 200-300 iterations, ~1e-4 in
       the endgame; larger final differences come from the stop firing a few iterations off.
-      **Slot order hides no semantic difference.** Remaining: the rest of the PL's arithmetic (below). The table saves 12-21% of the gradient but only ~2-3% of
+      **Slot order hides no semantic difference.** The table saves 12-21% of the gradient but only ~2-3% of
       software run time (gradient = 15% of an iteration; deposit + DCT 43%, metrics 24%).
       → [[_NEW_REPORT_45_slot_order_sums_20261014.md]]
 - [ ] Steps 6–9 (density path in slot order → compose → hardware → retire `/vck5000`), each with its

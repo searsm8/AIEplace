@@ -11,7 +11,9 @@
 //   fixed_nodes     FIXED components (not IO pads), in name order: the fixed deposit.
 //   nets            gradient replay in FILE order (DataBase::mv_nets); the HPWL metric in NAME order.
 // That is the default. [sw_flat] slot_order and wa_exp switch sums to slot order and exp to the PL's
-// table (#45 step 5b), each measured on its own against the bit-identical default.
+// table (#45 step 5b), each measured on its own against the bit-identical default. wa_sums,
+// grad_merge and hpwl switch the gradient and the HPWL to hpwl_gradient_CU's arithmetic over the
+// record stream (record_stream.cpp); all on, with wa_exp = "lut", the gradient is the CU's bit for bit.
 //
 // Files follow sw_only's (host/src/sw_only/src/placer/): setup.cpp = Setup.cpp, wirelength.cpp =
 // Partials.cpp + the HPWL metric, density.cpp = Density.cpp + Grid.cpp, step.cpp = Step.cpp,
@@ -68,7 +70,11 @@ struct PlacerConfig {
     // #48 option B' (Mark, 2026-10-14): XPlace's one-deposit overflow. Meow.
     bool fixed_base_exact = false;        // fixed_base = "exact": fixed nodes at exact size, XPlace's init_density_map (initializer.py:29)
     bool overflow_snapshot = false;       // overflow_map = "snapshot": the schedule's overflow is reduced from the solver's
-                                          // map after the cells, before the fillers (electronic_density_layer.py:113-131)
+                                          // map after the cells, before the fillers (electronic_density_layer.py:113-131)    // The rest of the PL's arithmetic (#45 step 5b, record_stream.cpp). Each needs ignore_net_degree = 96. Meow.
+    bool wa_sums_tree = false;            // wa_sums = "tree": B/C sums over the record lanes by the Dhar trees (wa_sums.hpp)
+    bool grad_merge_stream = false;       // grad_merge = "stream": scatter-add in stream order, macro fold, tail merge
+    bool hpwl_fixed = false;              // hpwl = "fixed": the schedule's HPWL as the int64 sum of hpwl_to_fixed (hpwl_CU.hpp)
+    bool uses_record_stream() const { return wa_sums_tree || grad_merge_stream || hpwl_fixed; }
 };
 // Exits with a message on a missing required key or a config outside sw_flat's scope (D6). Meow.
 PlacerConfig read_placer_config(const std::string& path);
@@ -99,12 +105,34 @@ struct SlotState {
     void resize(long n) { node_pos.assign(n, {}); probe_pos.assign(n, {}); probe_grad.assign(n, {}); }
 };
 
+// hpwl_gradient_CU's record stream, every chunk's in chunk order, in GLOBAL slots and FlatDesign pins:
+// what the device reads, decoded once at setup. A lane is one record; EMPTY lanes have pin -1. Meow.
+struct RecordStream {
+    std::vector<long> chunk_first_position;   // num_chunks + 1, into the per-position arrays
+    std::vector<int8_t> degree;               // per position: 2..16 small-net beat, LANES large-net beat, 0 bubble or pad
+    std::vector<int32_t> lane_pin;            // per position * LANES
+    std::vector<long> lane_slot;              // per position * LANES: the record's global slot, -1 EMPTY
+    std::vector<char> lane_movable;           // per position * LANES: below its chunk's first_fixed_slot (gets a gradient)
+    std::vector<long> small_positions;        // positions of small-net beats
+    std::vector<long> large_first, large_positions;   // CSR: each large net's real beats, in stream order
+    struct Fold { long pin_slot, macro_slot; bool first, last; };
+    std::vector<Fold> folds;                  // every chunk's fold list (SKIPs dropped), chunk order
+    std::vector<long> chunk_first_fold;       // num_chunks + 1
+    std::vector<long> chunk_movable_end;      // per chunk: global first_fixed_slot
+    std::vector<std::pair<long, long>> tail_merges;   // (owner slot, borrower tail slot): owners ascending, borrowers ascending
+    std::vector<int> nets;                    // FlatDesign nets the stream carries (the HPWL's)
+    long dropped_nets = 0;                    // nets of 2..96 pins the packer could not encode: no gradient, no HPWL
+};
+
 struct Placer {
     PlacerConfig cfg;
     FlatDesign design;
     std::vector<char> movable_macro;   // per node
     Fillers fillers;
     SlotLayout layout;
+    packer::Chunked chunked;           // the encoded design layout is built from
+    RecordStream stream;               // filled only when cfg.uses_record_stream()
+    std::vector<Gradient> lane_grad;   // per stream lane: its pin's WA partial
 
     // sw_only's orders (see the file comment).
     std::vector<long> movable_slots;
@@ -158,7 +186,14 @@ struct Placer {
     void initialize_density_weight();
     // wirelength.cpp
     void compute_hpwl_partials();
+    void compute_net_partials();      // wa_sums = "serial": pin_partials
     float total_wirelength(int max_net_degree, bool at_probe) const;
+    // record_stream.cpp
+    void build_record_stream();
+    void compute_stream_partials();   // wa_sums = "tree": lane_grad
+    void merge_stream_gradient();     // grad_merge = "stream": lane_grad -> probe_grad
+    float stream_wirelength(bool at_probe) const;
+    void stream_hpwl_fixed(bool at_probe, int64_t totals[2]) const;   // per axis, hpwl_to_fixed units
     // density.cpp
     void deposit_fixed_base();
     void compute_electric_fields();
@@ -183,6 +218,27 @@ struct Placer {
     void run();
     void perform_iteration();
 };
+
+// NetPin::getProbePos / getPos: the node's position plus the pin's offset. A fixed node or IO pad
+// never moves, so its position is the file's. Meow.
+inline Position pin_position(const Placer& placer, int pin, bool at_probe)
+{
+    const long slot = placer.pin_slot[pin];
+    const int node = placer.design.pin_node[pin];
+    Position node_pos = slot < 0 ? Position(placer.design.node_x[node], placer.design.node_y[node])
+                      : at_probe ? placer.next.probe_pos[slot] : placer.next.node_pos[slot];
+    return node_pos + Position(placer.design.pin_offset_x[pin], placer.design.pin_offset_y[pin]);
+}
+
+// wa_sums.hpp lut_exp_pair: exp(-d / gamma) by linear interpolation, 0 past the table. Meow.
+inline float lut_exp(const std::vector<float>& lut, float inv_lut_step, float d)
+{
+    const float idx_f = d * inv_lut_step;
+    const int   idx   = (int)idx_f;
+    if (idx >= (int)lut.size() - 1) return 0.0f;
+    const float frac  = idx_f - (float)idx;
+    return lut[idx] * (1.0f - frac) + lut[idx + 1] * frac;
+}
 
 } // namespace sw_flat
 

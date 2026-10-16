@@ -70,7 +70,7 @@ void Placer::update_precond_weights()
 void Placer::record_iteration_results()
 {
     PhaseTimer timer{time_metrics};
-    float hpwl = total_wirelength(cfg.ignore_net_degree, true);
+    float hpwl = cfg.hpwl_fixed ? stream_wirelength(true) : total_wirelength(cfg.ignore_net_degree, true);
     float overflow = cfg.overflow_snapshot ? snapshot_overflow : compute_overflow(true);
     hpwl_history.push_back(hpwl);
     ovfw_history.push_back(overflow);

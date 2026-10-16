@@ -99,6 +99,18 @@ PlacerConfig read_placer_config(const std::string& path)
     const std::string overflow_map = cfg["sw_flat"]["overflow_map"].value_or(std::string("separate"));
     if (overflow_map != "separate" && overflow_map != "snapshot") fail("[sw_flat] overflow_map must be \"separate\" or \"snapshot\"");
     c.overflow_snapshot = overflow_map == "snapshot";
+    auto pick = [&](const char* key, const char* off, const char* on) {
+        const std::string value = cfg["sw_flat"][key].value_or(std::string(off));
+        if (value != off && value != on) fail(std::string("[sw_flat] ") + key + " must be "" + off + "" or "" + on + """);
+        return value == on;
+    };
+    c.wa_sums_tree = pick("wa_sums", "serial", "tree");
+    c.grad_merge_stream = pick("grad_merge", "file", "stream");
+    c.hpwl_fixed = pick("hpwl", "float", "fixed");
+    // The stream carries nets of 2..96 pins (the packer's IGNORE_NET_DEGREE): another mask would
+    // compare two net sets, not two arithmetics. Meow.
+    if (c.uses_record_stream() && c.ignore_net_degree != packer::IGNORE_NET_DEGREE)
+        fail("[sw_flat] wa_sums / grad_merge / hpwl need ignore_net_degree = " + std::to_string(packer::IGNORE_NET_DEGREE));
     return c;
 }
 
@@ -125,7 +137,7 @@ void Placer::setup(const PlacerConfig& config)
 
     packer::Config packer_cfg;
     packer_cfg.partition_fm_passes = cfg.partition_fm_passes;
-    const packer::Chunked chunked = packer::encode_chunked(to_netlist(design, movable_macro, design.name), packer_cfg, SLOT_CAPACITY);
+    chunked = packer::encode_chunked(to_netlist(design, movable_macro, design.name), packer_cfg, SLOT_CAPACITY);
     if (!chunked.fits) fail("encode_chunked found no chunking");
     layout = build_slot_layout(design, chunked, fillers);
 
@@ -182,6 +194,7 @@ void Placer::setup(const PlacerConfig& config)
         if (layout.role[slot] == SlotRole::OWNED) is_movable_macro[slot] = movable_macro[layout.node[slot]];
     }
     pin_partials.assign(design.pin_node.size(), {});
+    if (cfg.uses_record_stream()) build_record_stream();
 
     // analyzeDesignArea: float sums in name order; this fixed area is NOT clipped to the die. Meow.
     int movable_count = 0, movable_stdcell_count = 0;
