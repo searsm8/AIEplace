@@ -281,6 +281,7 @@ struct Encoded {
     std::vector<std::vector<int>> unique_nodes;       // per net: distinct work nodes
 
     std::vector<int>  in_scope_nets;
+    std::vector<int>  shared_bank;          // per work node: its bank in every chunk (resident shared node), NO_BANK = free; empty = none
     std::vector<int>  bank;                 // per work node, NO_BANK if it has no slot
     long              colliding_nets = 0;   // nets whose own nodes share a bank: not encodable
     std::vector<Beat> beats;
@@ -388,7 +389,8 @@ inline int slot_class(NodeKind kind) { return kind == FIXED_PIN ? 0 : 1; }   // 
 // in-scope net take the least-loaded bank.
 // With cfg.large_nets, a large net packs into its minimum ceil(degree/LANES) beats only if no bank
 // holds more of its nodes than that, since a beat takes one node per bank. So each large net is a
-// soft per-bank cap: below every small-net constraint, above load balance. Meow.
+// soft per-bank cap: below every small-net constraint, above load balance.
+// Nodes with a shared_bank take it first and never move; the rest colour around them. Meow.
 inline void assign_banks(Encoded& enc, const Config& cfg) {
     const Netlist& work = enc.work;
     const int num_nodes = (int)work.movable.size();
@@ -433,7 +435,11 @@ inline void assign_banks(Encoded& enc, const Config& cfg) {
 
     enc.bank.assign(num_nodes, NO_BANK);
     std::vector<long> bank_load[2] = {std::vector<long>(BANKS, 0), std::vector<long>(BANKS, 0)};
+    auto has_shared_bank = [&](int node) { return !enc.shared_bank.empty() && enc.shared_bank[node] != NO_BANK; };
+    for (int node : order)
+        if (has_shared_bank(node)) { set_bank(node, enc.shared_bank[node]); bank_load[slot_class(enc.kind[node])][enc.bank[node]]++; }
     for (int node : order) {
+        if (has_shared_bank(node)) continue;
         auto& load = bank_load[slot_class(enc.kind[node])];
         uint64_t forbidden = 0;
         for (int net : node_nets[node])
@@ -457,7 +463,7 @@ inline void assign_banks(Encoded& enc, const Config& cfg) {
     for (int pass = 0; pass < cfg.repair_passes; pass++) {
         long moved = 0;
         for (int node : order) {
-            if (node_nets[node].empty() && node_large[node].empty()) continue;
+            if (has_shared_bank(node) || (node_nets[node].empty() && node_large[node].empty())) continue;
             auto& load = bank_load[slot_class(enc.kind[node])];
             const int current = enc.bank[node];
             std::fill(collisions.begin(), collisions.end(), 0);

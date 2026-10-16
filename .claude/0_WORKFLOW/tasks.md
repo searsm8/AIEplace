@@ -948,6 +948,19 @@ in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_202
       a row short) bites. Tier 1 PASS, 8/8 real chunked designs PASS. **Not yet re-synthesized** (struct
       grew 40 → 44 bytes). `.claude/2_ARTIFACTS/borrowed_47/` (census, `m0_1M_c8_20261016.txt`,
       `c8_real_sweep_20261016.txt`).
+- [ ] **R = resident shared region, measured (2026-10-16, Mark's idea; an alternative to B4, not
+      chosen).** Every shared node gets one slot, the same in every chunk, in rows that stay on chip
+      all iteration: no tails, no send, no merge, and `iteration_update` unchanged. Census at 1 M, 8/8
+      chunked designs, today's partition (`borrowed_census.cpp` + the new `Encoded::shared_bank`
+      in `assign_banks`, a no-op when empty; tier 1 PASS):
+      **global bank colouring costs nothing:** 0 collisions, beats within ±7 of today in every chunk
+      (control: re-encode without shared banks = today, asserted). **No dedup:** copies/unique 1.000–1.021 (≤ 2%
+      of shared nodes have 2 borrowers). **Slots:** K=2 +0.6–1.0%; K=3 +13–16.5% on the chunks
+      with small tails today, since every chunk now holds the whole region. Worst bigblue4 chunk 0 at
+      1,035,072 (98.7% of 1 M): fits, K unchanged, but only 13 K slots of headroom.
+      Not done: a cycle estimate in `chunk_model` (rough: bigblue4 1.57 M − send/merge ~0.59 M +
+      region load/drain ~17 K ≈ 1.0 M, about B4's 0.98 M); a partition that budgets the region; add
+      order becomes chunk-ascending (not bit-identical to B3). `.claude/2_ARTIFACTS/borrowed_47/resident_1M_20261016.txt`.
 → [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
 
 ---
