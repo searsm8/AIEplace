@@ -21,6 +21,8 @@ namespace plalgo {
 static void wa_gradient(hls::stream<SumBeat>& sum_beats, hls::stream<NetSum>& net_sums, int num_beats, float inv_gamma,
                         float grad_URAM[pinrec::BANKS][ROWS_PER_BANK], int first_fixed_slot) {
     NetSum large_sum = {0.0f, 0.0f, 0.0f, 0.0f};   // the current large net's: only assigned, never computed on
+    // One beat of pins per cycle: turn each pin's net sums into its WA gradient, and add it into
+    // the gradient of the node the pin belongs to. Meow.
 wa_gradient_loop:
     for (int beat = 0; beat < num_beats; beat++) {
 #pragma HLS PIPELINE II=1

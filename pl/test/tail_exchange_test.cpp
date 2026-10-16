@@ -1,14 +1,14 @@
 // Verify the #47 M2 golden (host/sw_flat/tail_fusion.hpp: the exchange as iteration_update will do it,
 // option A) against B3's device exchange (src/modules/hpwl_gradient/tail_exchange.hpp, driven exactly as
-// hpwl_gradient_CU's send and fold passes drive it). Both must agree BIT FOR BIT:
+// hpwl_gradient_CU's send_tails_pass and merge_tails_pass drive it). Both must agree BIT FOR BIT:
 //
 //   [1] SEND   every node-holding slot of every chunk image equal after all owners send; every
-//              external slot filled (no NaN left)
+//              tail slot filled (no NaN left)
 //   [2] SHORT  chunked_device_arrays(fill_tails = true), the bring-up shortcut, equals that image
 //   [3] MERGE  every owned gradient equal after all owners merge, from random tail gradients of
 //              mixed magnitude (so a different add order shows in the low bits)
-//   [4] MUTANT the golden with its consumer order reversed must differ (needs slots with >= 2
-//              consumers, counted); with one tail entry dropped must differ. Proves [3] can fail.
+//   [4] MUTANT the golden with its borrower order reversed must differ (needs slots with >= 2
+//              borrowers, counted); with one tail entry dropped must differ. Proves [3] can fail.
 //
 // Synthetic design at capacity 4096 (FM) and 2560 (bare cut, many owners per tail); `--netlist FILE
 // [CAPACITY]` runs [1]-[4] on a real design. Meow.
@@ -44,25 +44,25 @@ std::vector<float> to_floats(const std::vector<pinrec::SlotBeat>& beats) {
     return image;
 }
 
-// hpwl_gradient_CU's send pass. Meow.
+// hpwl_gradient_CU's send_tails_pass. Meow.
 std::vector<float> device_send(const packer::ChunkedDevice& dev) {
     std::vector<pinrec::SlotBeat> pos = to_beats(dev.slot_images);
     for (const pinrec::ChunkDesc& desc : dev.desc) {
         load_slot_array(pos.data() + desc.slot_beat_offset, desc.first_tail_slot / pinrec::LANES, pos_URAM);
-        for (int s = 0; s < desc.num_streams; s++)
-            send_tail_block(dev.streams[desc.stream_offset + s], dev.tail_ops.data(), pos_URAM, pos.data());
+        for (int s = 0; s < desc.num_borrowers; s++)
+            send_tail_block(dev.tail_blocks[desc.first_tail_block + s], dev.tail_ops.data(), pos_URAM, pos.data());
     }
     return to_floats(pos);
 }
 
-// hpwl_gradient_CU's fold pass. Meow.
+// hpwl_gradient_CU's merge_tails_pass. Meow.
 std::vector<float> device_merge(const packer::ChunkedDevice& dev, const std::vector<float>& partial) {
     std::vector<pinrec::SlotBeat> grad = to_beats(partial);
     for (const pinrec::ChunkDesc& desc : dev.desc) {
         const int owned_slot_beats = desc.first_tail_slot / pinrec::LANES;
         load_slot_array(grad.data() + desc.slot_beat_offset, owned_slot_beats, grad_URAM);
-        for (int s = 0; s < desc.num_streams; s++)
-            merge_tail_block(dev.streams[desc.stream_offset + s], dev.tail_ops.data(), grad.data(), grad_URAM);
+        for (int s = 0; s < desc.num_borrowers; s++)
+            merge_tail_block(dev.tail_blocks[desc.first_tail_block + s], dev.tail_ops.data(), grad.data(), grad_URAM);
         drain_slot_array(grad_URAM, owned_slot_beats, grad.data() + desc.slot_beat_offset);
     }
     return to_floats(grad);
@@ -75,7 +75,7 @@ std::vector<float> golden_merge(const packer::Chunked& ch, std::vector<std::vect
     return grad;
 }
 
-// Slots that hold a node, per chunk, in concatenated-image coordinates; tail = external. Meow.
+// Slots that hold a node, per chunk, in concatenated-image coordinates; tail = the packer's external. Meow.
 struct SlotSets { std::vector<long> node_slots, external_slots, owned_slots; };
 SlotSets slot_sets(const packer::Chunked& ch) {
     SlotSets sets;
@@ -131,7 +131,7 @@ bool run_config(const char* label, const packer::Netlist& nl, long capacity, int
         ok &= short_differ == 0;
     }
 
-    // Random partial gradients on every movable slot, tails included, as a compute pass drains them;
+    // Random partial gradients on every movable slot, tails included, as compute_pass drains them;
     // magnitudes spread over 6 decades so float addition order matters. Meow.
     const packer::ChunkedDevice dev = packer::chunked_device_arrays(ch, 0, std::vector<float>(nl.movable.size(), 0.0f));
     std::vector<float> partial(dev.slot_images.size(), NAN);
@@ -150,10 +150,10 @@ bool run_config(const char* label, const packer::Netlist& nl, long capacity, int
     ok &= merge_differ == 0;
 
     // [4] mutants of the golden. Meow.
-    std::vector<int> consumers_of(dev.slot_images.size(), 0);
-    for (const auto& owner : parcels) for (const auto& parcel : owner) for (long slot : parcel.owner_slot) consumers_of[slot]++;
+    std::vector<int> borrowers_of(dev.slot_images.size(), 0);
+    for (const auto& owner : parcels) for (const auto& parcel : owner) for (long slot : parcel.owner_slot) borrowers_of[slot]++;
     long multi = 0;
-    for (long slot : sets.owned_slots) multi += consumers_of[slot] >= 2;
+    for (long slot : sets.owned_slots) multi += borrowers_of[slot] >= 2;
     auto reversed = parcels;
     for (auto& owner : reversed) std::reverse(owner.begin(), owner.end());
     const long reversed_differ = count_differences(device, golden_merge(ch, reversed, partial), sets.owned_slots);
@@ -161,7 +161,7 @@ bool run_config(const char* label, const packer::Netlist& nl, long capacity, int
     for (auto& owner : dropped) if (!owner.empty()) { owner.back().owner_slot.pop_back(); owner.back().tail_slot.pop_back(); break; }
     const long dropped_differ = count_differences(device, golden_merge(ch, dropped, partial), sets.owned_slots);
     const bool mutants_ok = dropped_differ > 0 && (multi == 0 ? !require_mutants : reversed_differ > 0);
-    printf("%s [4] [%s] mutants: reversed consumers %ld differ (%ld slots with >= 2 consumers), one entry dropped %ld differ\n",
+    printf("%s [4] [%s] mutants: reversed borrowers %ld differ (%ld slots with >= 2 borrowers), one entry dropped %ld differ\n",
            mutants_ok ? "ok  " : "FAIL", label, reversed_differ, multi, dropped_differ);
     ok &= mutants_ok;
     return ok;

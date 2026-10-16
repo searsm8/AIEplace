@@ -30,6 +30,7 @@ constexpr int ROWS_PER_BANK    = SLOT_CAPACITY / pinrec::BANKS;   // 32K
 // banks, so a whole beat lands in one cycle. Shared by every array loaded or drained this way. Meow.
 static void load_slot_array(const pinrec::SlotBeat* src_DDR, int num_slot_beats,
                             float dst_URAM[pinrec::BANKS][ROWS_PER_BANK]) {
+    // Copy a chunk's array DDR -> URAM, one beat (16 floats, half a row) per cycle. Meow.
 load_slots:
     for (int b = 0; b < num_slot_beats; b++) {
 #pragma HLS PIPELINE II=1
@@ -41,8 +42,31 @@ load_slots:
     }
 }
 
+// load_slot_array for pos_URAM, zeroing grad_URAM's movable slots in the same cycle: separate
+// arrays, so the zeroing costs no extra cycles. Meow.
+static void load_pos_zero_grad(const pinrec::SlotBeat* pos_DDR, int num_slot_beats, int movable_slot_beats,
+                               float pos_URAM[pinrec::BANKS][ROWS_PER_BANK],
+                               float grad_URAM[pinrec::BANKS][ROWS_PER_BANK]) {
+load_pos_zero_grad:
+    for (int b = 0; b < num_slot_beats; b++) {
+#pragma HLS PIPELINE II=1
+        const pinrec::SlotBeat beat = pos_DDR[b];
+        const bool movable = b < movable_slot_beats;
+        for (int j = 0; j < pinrec::LANES; j++) {
+            if (b & 1) {
+                pos_URAM[j + pinrec::LANES][b >> 1] = beat.v[j];
+                if (movable) grad_URAM[j + pinrec::LANES][b >> 1] = 0.0f;
+            } else {
+                pos_URAM[j][b >> 1] = beat.v[j];
+                if (movable) grad_URAM[j][b >> 1] = 0.0f;
+            }
+        }
+    }
+}
+
 static void drain_slot_array(const float src_URAM[pinrec::BANKS][ROWS_PER_BANK], int num_slot_beats,
                              pinrec::SlotBeat* dst_DDR) {
+    // The reverse of load_slots: URAM -> DDR, one beat per cycle. Meow.
 drain_slots:
     for (int b = 0; b < num_slot_beats; b++) {
 #pragma HLS PIPELINE II=1
@@ -55,6 +79,8 @@ drain_slots:
 
 static void refresh_macro_pins(const pinrec::MacroPinRef* macro_pins_DDR, int num_macro_pins,
                                float pos_URAM[pinrec::BANKS][ROWS_PER_BANK]) {
+    // Set each macro pin's position to its macro's position plus the pin's offset, so the nets see
+    // the pin where the macro is now. Meow.
 refresh_macros:   // reads macro slots, writes macro-pin slots: disjoint, so no carried dependence
     for (int e = 0; e < num_macro_pins; e++) {
 #pragma HLS PIPELINE II=1
@@ -83,6 +109,7 @@ refresh_macros:   // reads macro slots, writes macro-pin slots: disjoint, so no 
 static void fold_macro_pins(const pinrec::MacroPinRef* macro_pins_DDR, int num_macro_pins,
                             float grad_URAM[pinrec::BANKS][ROWS_PER_BANK],
                             float acc_URAM[pinrec::BANKS][ROWS_PER_BANK]) {
+    // Sum each macro's pin gradients into the macro's gradient: the macro moves as one body. Meow.
 fold_macros:
     for (int e = 0; e < num_macro_pins; e++) {
 #pragma HLS PIPELINE II=1

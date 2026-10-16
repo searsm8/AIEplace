@@ -7,22 +7,31 @@
 // computeHpwlPartials_CPU (Partials.cpp): exponents shifted by the net's bbox, exp from the host
 // LUT exp(-d/gamma) with linear interpolation. Nets of 2..96 pins.
 //
-//   send pass     for each chunk j: load its owned positions, write them into every consumer's
-//                 tail block (tail_exchange.hpp)
-//   compute pass  for each chunk k: load positions, tail included (zeroing grad in the same pass),
-//                 refresh macro pins, run the gradient beat loop, fold macro pins, and drain its
-//                 movable slots, tail included, to grad_DDR
-//   fold pass     for each chunk j: reload its owned gradients, merge in what every consumer drained
-//                 into its tail block for j, drain
+// Chunks. Every movable node has one OWNER chunk (packer rule C1). Each net is homed in one chunk;
+// when it uses a node owned elsewhere, its chunk is a BORROWER of that node and keeps a copy of it
+// in a TAIL slot (the packer calls these "externals", C7). A chunk's slots, low to high:
+//
+//     [0, first_tail_slot)                   owned movable slots
+//     [first_tail_slot, first_fixed_slot)    tail: one block per owner it borrows from
+//     [first_fixed_slot, num_slots)          fixed pins: position only, never a gradient
+//
+//   send_tails_pass   for each owner: load its owned positions, write a copy into every borrower's
+//                     tail block for it (tail_exchange.hpp)
+//   compute_pass      for each chunk: load all its positions (zeroing grad in the same pass),
+//                     refresh macro pins, run the gradient beat loop, fold macro pins, and drain
+//                     owned and tail gradients to grad_DDR
+//   merge_tails_pass  for each owner: reload its owned gradients, add in what every borrower drained
+//                     into its tail block for it, drain
+// The two tail passes run only when the design is chunked. Meow.
 //
 // The beat loop is three stages in a DATAFLOW region, joined by streams (hpwl_gradient/):
 //   hpwl_CU     gather -> bbox trees -> each pin's net (max, min); HPWL total
 //   wa_sums      per-pin exp terms (Dhar Fig. 5) -> four sum trees (Fig. 6/7)
 //   wa_gradient  per-pin combiner (Fig. 8, eq. 4) -> merge -> scatter-add
 //
-// A macro pin is never external (packer rule C6): a chunk using a pin of a macro owned elsewhere
-// holds the macro as the external and the pin as a local slot. So each chunk refreshes its pins
-// after receive and folds them in the compute pass, its external macros included; a macro's
+// A macro pin is never a tail slot (packer rule C6): a chunk using a pin of a macro owned elsewhere
+// holds the macro in its tail and the pin as a local slot. So each chunk refreshes its pins
+// after receive and folds them in compute_pass, its tail macros included; a macro's
 // gradient then crosses chunks like a cell's, and only cells and macros cross (#47). Meow.
 //
 // Brought together 2026-10-06 (#45) from vck5000/bring_up/: hpwl_gradient_computer_v2 (this top,
@@ -86,9 +95,9 @@ static void hpwl_gradient_CU(
         const int32_t*                  group_ends_DDR,  // [num_chunks * NUM_GROUP_ENDS]
         int                             num_chunks,
         const pinrec::RecordBeat*       records_DDR,       // every chunk's stream, concatenated, this axis
-        pinrec::SlotBeat*               pos_DDR,           // every chunk's slot-major positions, this axis; the send pass fills the tails
+        pinrec::SlotBeat*               pos_DDR,           // every chunk's slot-major positions, this axis; send_tails_pass fills the tails
         const pinrec::MacroPinRef*      macro_pins_DDR,    // every chunk's refresh / fold list, this axis
-        const pinrec::TailStream*       streams_DDR,       // every owner's tail streams (ChunkDesc stream range)
+        const pinrec::TailBlockDesc*    tail_blocks_DDR,   // every owner's tail blocks (ChunkDesc first_tail_block, num_borrowers)
         const uint32_t*                 tail_ops_DDR,      // their send and merge ops
         const float*                    offset_table_DDR,  // [offset_table_size] shared by all chunks
         int                             offset_table_size,
@@ -122,56 +131,54 @@ static void hpwl_gradient_CU(
     load_offset_table(offset_table_DDR, offset_table_size, offset_BRAM);   // record_gather.hpp
     load_exp_lut(exp_lut_DDR, lut_size, lut_BRAM);   // wa_sums.hpp
 
-send_pass:
-    for (int j = 0; j < num_chunks && chunked; j++) {
-        const pinrec::ChunkDesc desc = chunks_DDR[j];
-        load_slot_array(pos_DDR + desc.slot_beat_offset, desc.first_tail_slot / pinrec::LANES, pos_URAM);   // slot_arrays.hpp
-        for (int s = 0; s < desc.num_streams; s++)
-            send_tail_block(streams_DDR[desc.stream_offset + s], tail_ops_DDR, pos_URAM, pos_DDR);   // tail_exchange.hpp
+    // For each owner: load the positions of the nodes it owns into URAM, then write a copy of every
+    // node another chunk borrows into that borrower's tail block in DDR. After this, every tail
+    // slot holds this iteration's position. Meow.
+    if (chunked) {
+    send_tails_pass:
+        for (int j = 0; j < num_chunks; j++) {
+            const pinrec::ChunkDesc desc = chunks_DDR[j];
+            load_slot_array(pos_DDR + desc.slot_beat_offset, desc.first_tail_slot / pinrec::LANES, pos_URAM);   // slot_arrays.hpp
+            for (int s = 0; s < desc.num_borrowers; s++)
+                send_tail_block(tail_blocks_DDR[desc.first_tail_block + s], tail_ops_DDR, pos_URAM, pos_DDR);   // tail_exchange.hpp
+        }
     }
 
     int64_t hpwl_sum = 0;
+    // For each chunk: load all its positions (owned, tail, fixed) into URAM, compute every one of
+    // its nets' gradient contributions, and write its owned and tail gradients to DDR, where
+    // merge_tails_pass picks up the tail ones. Meow.
 compute_pass:
     for (int k = 0; k < num_chunks; k++) {
         const pinrec::ChunkDesc desc = chunks_DDR[k];
         const int movable_slot_beats = desc.first_fixed_slot / pinrec::LANES;
         int64_t chunk_hpwl_fixed;
-        // Positions in with grad_URAM zeroed in the same pass (separate arrays, no extra cycles). Meow.
-        const pinrec::SlotBeat* chunk_pos_DDR = pos_DDR + desc.slot_beat_offset;
-    load_pos_zero_grad:
-        for (int b = 0; b < desc.num_slot_beats; b++) {
-#pragma HLS PIPELINE II=1
-            const pinrec::SlotBeat beat = chunk_pos_DDR[b];
-            const bool movable = b < movable_slot_beats;
-            for (int j = 0; j < pinrec::LANES; j++) {
-                if (b & 1) {
-                    pos_URAM[j + pinrec::LANES][b >> 1] = beat.v[j];
-                    if (movable) grad_URAM[j + pinrec::LANES][b >> 1] = 0.0f;
-                } else {
-                    pos_URAM[j][b >> 1] = beat.v[j];
-                    if (movable) grad_URAM[j][b >> 1] = 0.0f;
-                }
-            }
-        }
-        refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);   // slot_arrays.hpp; external macros arrived with the tail (C6)
+        load_pos_zero_grad(pos_DDR + desc.slot_beat_offset, desc.num_slot_beats, movable_slot_beats,   // slot_arrays.hpp
+                           pos_URAM, grad_URAM);
+        refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);   // slot_arrays.hpp; borrowed macros arrived with the tail (C6)
         load_group_ends(group_ends_DDR + k * pinrec::NUM_GROUP_ENDS, group_end_REG);   // record_gather.hpp
         gradient_beat_loop(records_DDR + desc.record_beat_offset, desc.num_beats, group_end_REG, pos_URAM,   // this file
                            offset_BRAM, lut_BRAM, lut_size, inv_lut_step, inv_gamma, grad_URAM,
                            desc.first_fixed_slot, offset_bits, chunk_hpwl_fixed);
         hpwl_sum += chunk_hpwl_fixed;
+        // pos_URAM is passed as the fold's scratch accumulator: positions are dead once the beat loop is done. Meow.
         fold_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, grad_URAM, pos_URAM);   // slot_arrays.hpp
         drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR + desc.slot_beat_offset);   // slot_arrays.hpp
     }
     hpwl_total_fixed = hpwl_sum;
 
-fold_pass:
-    for (int j = 0; j < num_chunks && chunked; j++) {
-        const pinrec::ChunkDesc desc = chunks_DDR[j];
-        const int owned_slot_beats = desc.first_tail_slot / pinrec::LANES;
-        load_slot_array(grad_DDR + desc.slot_beat_offset, owned_slot_beats, grad_URAM);   // slot_arrays.hpp
-        for (int s = 0; s < desc.num_streams; s++)   // consumers ascending: each slot's adds in a fixed order
-            merge_tail_block(streams_DDR[desc.stream_offset + s], tail_ops_DDR, grad_DDR, grad_URAM);   // tail_exchange.hpp
-        drain_slot_array(grad_URAM, owned_slot_beats, grad_DDR + desc.slot_beat_offset);   // slot_arrays.hpp
+    // For each owner: reload the gradients of the nodes it owns, add in what every borrower computed
+    // in its tail slots for them, and write the totals back. Meow.
+    if (chunked) {
+    merge_tails_pass:
+        for (int j = 0; j < num_chunks; j++) {
+            const pinrec::ChunkDesc desc = chunks_DDR[j];
+            const int owned_slot_beats = desc.first_tail_slot / pinrec::LANES;
+            load_slot_array(grad_DDR + desc.slot_beat_offset, owned_slot_beats, grad_URAM);   // slot_arrays.hpp
+            for (int s = 0; s < desc.num_borrowers; s++)   // borrowers ascending: each slot's adds in a fixed order
+                merge_tail_block(tail_blocks_DDR[desc.first_tail_block + s], tail_ops_DDR, grad_DDR, grad_URAM);   // tail_exchange.hpp
+            drain_slot_array(grad_URAM, owned_slot_beats, grad_DDR + desc.slot_beat_offset);   // slot_arrays.hpp
+        }
     }
 }
 

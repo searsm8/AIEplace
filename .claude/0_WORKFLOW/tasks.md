@@ -1,7 +1,7 @@
 # Tasks
 
-**Active Task (2026-10-15): #48 phase 2 — B' decided and measured in sw_flat; next the device side**
-(`density_map_CU`: filler barrier + overflow reduction). → [[REPORT_48_overflow_map_20261015.md]].
+**Active Task (2026-10-15): #48 phase 2 — B' device side landed in `density_map_CU`; next turn B' on in
+the step-6 golden config.** → [[REPORT_48_overflow_map_20261015.md]].
 (#45 steps 1-5b done; next #45 work is the rest of the PL's arithmetic in sw_flat.)
 
 Open work, one section per task. **Status lives here; evidence lives in a
@@ -899,7 +899,7 @@ in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_202
       owner block in the owner's slot order; device-transparent. Chunk counts unchanged on all 44 at
       1 M and 512 K; single-chunk designs byte-identical; 4/4 mutants.
 - [x] **B3 (2026-10-09): the tail exchange replaces the mailbox.** One tail block per owner on fresh
-      rows; `TailStream` op lists replayed through a 32 x 256 row buffer (`tail_exchange.hpp`);
+      rows; `TailStream` (renamed `TailBlockDesc` 2026-10-16) op lists replayed through a 32 x 256 row buffer (`tail_exchange.hpp`);
       compute pass has no receive / return. `check_chunked` replays every block on node ids. Tier 1,
       8/8 real designs (blocks up to 3,107 rows: the buffer wraps), 7/7 mutants, C-synth II=1
       (3.482 ns est.), **RTL co-sim PASS** (hazard-1 control FAILS). bigblue4 at 1 M: 2.49 M ->
@@ -1034,8 +1034,17 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       Trajectories (7 designs): stop ±2 it, HPWL ≤0.03%. Moves the solver away from frozen sw_only,
       toward XPlace (small fixed nodes no longer stretched; 6/44 designs affected).
       → [[REPORT_48_overflow_map_20261015.md]]
-- [ ] **Phase 2, device side: ← next.** `density_map_CU`: split the deposit at `first_filler_slot`
-      (beat alignment to check), one reduction pass over `rho_URAM`, tier-1 vs sw_flat's
-      `snapshot_overflow`. Turn B' on in the step-6 golden config. Optional: bigblue3/4 trajectory at
+- [x] **Phase 2, device side (2026-10-15).** `density_map_CU` deposits the cells (`num_cell_beats =
+      first_filler_slot / 16`; beat-aligned by construction, every chunk's `num_slots` is a multiple
+      of BANKS, and the check asserts it), reduces XPlace's overflow_fn over `rho_URAM` (out: one
+      float), then deposits the fillers. The sum is a 16-lane tree into 8 rotating partials, NOT
+      sw_flat's serial bin order (that would be bins² cycles), so it is held to a tolerance:
+      `check-density-map` [4] **44/44: CU within 3.9e-6 of a double sum of the same map** (bound 2e-5)
+      and within 9.0e-4 of `snapshot_overflow` (bound 2e-3); on the 5 MMS designs above 1e-4 the
+      double sum is exactly as far from sw_flat, so it is sw_flat's float accumulator that drifts.
+      rho still bit-equal 44/44 (now with the exact base). pl tier-1 [5] OVERFLOW vs double, 2.6e-6.
+      **C-synth passes** (new `pl/synth/density_map_CU/`): `reduce` II=1, 65.5K cycles ≈ 0.22 ms at
+      1024 (HLS infers rho_URAM cyclic-16 from it). `.claude/2_ARTIFACTS/scratch_48/density_map_check_44_overflow_20261015.txt`
+- [ ] **Phase 2: turn B' on in the step-6 golden config ← next.** Optional: bigblue3/4 trajectory at
       grid 1024 (the drift ran at 2048, where fewer fixed nodes are stretched).
 → [[_NEW_PLAN_48_density_onchip_20261014.md]]

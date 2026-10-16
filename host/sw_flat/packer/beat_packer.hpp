@@ -1060,9 +1060,9 @@ inline int check(const Netlist& nl, const Encoded& enc, const Config& cfg) {
 // (their position never changes, so they are not external).
 // Each chunk is then an ordinary Encoded stream over local slots, so node_slot bits shrink too.
 //
-// External values move through the consumers' TAIL rows (C7): the owner writes a block's positions
-// into the consumer's position image and later adds what the consumer drained into the same block of
-// the gradient image into its own (pin_record.hpp TailStream). Every DDR access is sequential; the
+// External values move through the borrowers' TAIL rows (C7): the owner writes a block's positions
+// into the borrower's position image and later adds what the borrower drained into the same block of
+// the gradient image into its own (pin_record.hpp TailBlockDesc). Every DDR access is sequential; the
 // random side is always on chip. Meow.
 
 struct Chunk {
@@ -1136,7 +1136,7 @@ inline std::vector<int> order_owner(const Encoded& g, const std::vector<int>& or
 
 // Builds every chunk from a given owner per movable work node (-1 for fixed), any partitioner's
 // (#42). A macro's pins are forced to the macro's chunk. False if a chunk does not fit. Meow.
-// C7: a consumer's tail holds one block per owner, owners ascending, each on fresh rows, and inside
+// C7: a borrower's tail holds one block per owner, owners ascending, each on fresh rows, and inside
 // a block every bank fills its rows in EMISSION order -- the owner's slot order, the order its
 // update streams them -- so a block can be assembled row by row. Owner slots exist only once every
 // chunk is encoded, so this runs last and re-encodes the records of each chunk it reorders (the
@@ -1318,7 +1318,7 @@ inline Chunked encode_chunked(const Netlist& nl, const Config& cfg, long capacit
     return ch;
 }
 
-// One tail block's op lists (pin_record.hpp TailStream), from its entries in emission order: each
+// One tail block's op lists (pin_record.hpp TailBlockDesc), from its entries in emission order: each
 // entry's bank and the owner slot it carries; its row is the next of its bank, from the block's
 // first row. Send: TAIL_BEAT writes the next half-row as soon as every bank of that half has put its
 // last entry there. Merge: TAIL_BEAT loads a half-row just before its first entry needs it. Either
@@ -1374,13 +1374,13 @@ inline std::vector<long> owner_slots_of(const Chunked& ch) {
     return owner_slot;
 }
 
-inline TailOps block_ops(const Chunked& ch, const Chunk& consumer, const Chunk::TailBlock& block, const std::vector<long>& owner_slot) {
+inline TailOps block_ops(const Chunked& ch, const Chunk& borrower, const Chunk::TailBlock& block, const std::vector<long>& owner_slot) {
     std::vector<long> slots;
     std::vector<int> banks;
     for (long i = block.first; i < block.first + block.count; i++) {
-        const int l = consumer.tail_order[i];
-        slots.push_back(owner_slot[consumer.work_node[l]]);
-        banks.push_back(consumer.enc.bank[l]);
+        const int l = borrower.tail_order[i];
+        slots.push_back(owner_slot[borrower.work_node[l]]);
+        banks.push_back(borrower.enc.bank[l]);
     }
     return tail_block_ops(slots, banks, block.rows);
 }
@@ -1388,7 +1388,7 @@ inline TailOps block_ops(const Chunked& ch, const Chunk& consumer, const Chunk::
 // Slot-major position image of chunk k, one axis. Own cells/macros carry their position, fixed
 // pins position + offset; macro pins AND external slots are NaN -- the device must refresh / receive them.
 // fill_tails (#47 bring-up shortcut, Mark 2026-10-09): external slots carry their node's real position
-// instead, as if every owner's send had already run, so a compute pass can be tested on its own. Meow.
+// instead, as if every owner's send had already run, so compute_pass can be tested on its own. Meow.
 inline std::vector<float> chunk_slot_positions(const Chunked& ch, int k, int axis, const std::vector<float>& node_pos,
                                                bool fill_tails = false) {
     const Chunk& c = ch.chunks[k];
@@ -1406,8 +1406,8 @@ struct ChunkedDevice {
     std::vector<uint32_t>         records;        // LANES per beat
     std::vector<float>            slot_images;    // slot-major, each chunk a whole number of beats
     std::vector<MacroPinRef>      macro_pins;
-    std::vector<TailStream>       streams;        // per owner, consumers ascending (ChunkDesc stream range)
-    std::vector<uint32_t>         tail_ops;       // every stream's send and merge ops
+    std::vector<TailBlockDesc>    tail_blocks;    // per owner, borrowers ascending (ChunkDesc first_tail_block, num_borrowers)
+    std::vector<uint32_t>         tail_ops;       // every tail block's send and merge ops
     std::vector<float>            offset_table;
     int                           offset_bits = 0;
 };
@@ -1434,23 +1434,23 @@ inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const st
         d.first_fixed_slot   = (int32_t)c.enc.first_fixed_slot;
         d.macro_pin_offset   = (int32_t)dev.macro_pins.size();
         d.num_macro_pins     = (int32_t)c.enc.macro_order.size();   // the scheduled list, SKIP padding included
-        d.stream_offset      = (int32_t)dev.streams.size();
-        for (int consumer = 0; consumer < ch.num_chunks; consumer++)   // this chunk as owner (C7)
-            for (const Chunk::TailBlock& block : ch.chunks[consumer].tail_blocks) {
+        d.first_tail_block   = (int32_t)dev.tail_blocks.size();
+        for (int borrower = 0; borrower < ch.num_chunks; borrower++)   // this chunk as owner (C7)
+            for (const Chunk::TailBlock& block : ch.chunks[borrower].tail_blocks) {
                 if (block.owner != k) continue;
-                const TailOps ops = block_ops(ch, ch.chunks[consumer], block, owner_slot);
-                if (!ops.feasible) { fprintf(stderr, "tail block %d -> %d needs more than %d buffer rows\n", k, consumer, TAIL_BUFFER_ROWS); exit(2); }
-                TailStream st;
-                st.send_op_offset = (int32_t)dev.tail_ops.size();
-                st.num_send_ops = (int32_t)ops.send.size();
+                const TailOps ops = block_ops(ch, ch.chunks[borrower], block, owner_slot);
+                if (!ops.feasible) { fprintf(stderr, "tail block %d -> %d needs more than %d buffer rows\n", k, borrower, TAIL_BUFFER_ROWS); exit(2); }
+                TailBlockDesc block_desc;
+                block_desc.send_op_offset = (int32_t)dev.tail_ops.size();
+                block_desc.num_send_ops = (int32_t)ops.send.size();
                 dev.tail_ops.insert(dev.tail_ops.end(), ops.send.begin(), ops.send.end());
-                st.merge_op_offset = (int32_t)dev.tail_ops.size();
-                st.num_merge_ops = (int32_t)ops.merge.size();
+                block_desc.merge_op_offset = (int32_t)dev.tail_ops.size();
+                block_desc.num_merge_ops = (int32_t)ops.merge.size();
                 dev.tail_ops.insert(dev.tail_ops.end(), ops.merge.begin(), ops.merge.end());
-                st.block_beat_offset = (int32_t)(slot_beat_offset[consumer] + block.start_row * BANKS / LANES);
-                dev.streams.push_back(st);
+                block_desc.block_beat_offset = (int32_t)(slot_beat_offset[borrower] + block.start_row * BANKS / LANES);
+                dev.tail_blocks.push_back(block_desc);
             }
-        d.num_streams        = (int32_t)dev.streams.size() - d.stream_offset;
+        d.num_borrowers      = (int32_t)dev.tail_blocks.size() - d.first_tail_block;
         dev.desc.push_back(d);
 
         dev.records.insert(dev.records.end(), c.enc.records[axis].begin(), c.enc.records[axis].end());
@@ -1470,14 +1470,14 @@ inline std::vector<int> chunked_large_nets(const Chunked& ch) {
 }
 
 // Replays one block's send and merge ops on NODE IDS, exactly as the device moves floats (row buffer,
-// per-bank row counters, half-row beats), and checks that every consumer slot of the block receives
+// per-bank row counters, half-row beats), and checks that every borrower slot of the block receives
 // its own node from the owner, and that every merge entry adds that node into its owner slot. A buffer
 // row reused too early, a wrong bank or row, or a beat out of place all show as a wrong node. Meow.
-inline bool tail_ops_deliver(const Chunked& ch, const Chunk& consumer, const Chunk::TailBlock& block, const TailOps& ops) {
+inline bool tail_ops_deliver(const Chunked& ch, const Chunk& borrower, const Chunk::TailBlock& block, const TailOps& ops) {
     const Chunk& owner = ch.chunks[block.owner];
-    std::vector<int> owner_node(owner.enc.num_slots, -1), consumer_node(consumer.enc.num_slots, -1);
+    std::vector<int> owner_node(owner.enc.num_slots, -1), borrower_node(borrower.enc.num_slots, -1);
     for (size_t l = 0; l < owner.work_node.size(); l++) if (owner.enc.node_slot[l] >= 0) owner_node[owner.enc.node_slot[l]] = owner.work_node[l];
-    for (size_t l = 0; l < consumer.work_node.size(); l++) if (consumer.enc.node_slot[l] >= 0) consumer_node[consumer.enc.node_slot[l]] = consumer.work_node[l];
+    for (size_t l = 0; l < borrower.work_node.size(); l++) if (borrower.enc.node_slot[l] >= 0) borrower_node[borrower.enc.node_slot[l]] = borrower.work_node[l];
     const long R = TAIL_BUFFER_ROWS, first_slot = block.start_row * BANKS;
     std::vector<int> buffer(BANKS * R, -1), row(BANKS, 0);
     long beat = 0;
@@ -1487,7 +1487,7 @@ inline bool tail_ops_deliver(const Chunked& ch, const Chunk& consumer, const Chu
             for (int j = 0; j < LANES; j++) {
                 const int b = (int)half * LANES + j;
                 const long slot = first_slot + beat * LANES + j;
-                const int want = slot < consumer.enc.num_slots ? consumer_node[slot] : -2;
+                const int want = slot < borrower.enc.num_slots ? borrower_node[slot] : -2;
                 if (want >= 0 && buffer[b * R + r % R] != want) return false;   // a real slot got the wrong node
             }
             beat++;
@@ -1503,7 +1503,7 @@ inline bool tail_ops_deliver(const Chunked& ch, const Chunk& consumer, const Chu
     for (uint32_t op : ops.merge) {
         if (op & TAIL_BEAT_OP) {
             const long r = beat * LANES / BANKS, half = beat % (BANKS / LANES);
-            for (int j = 0; j < LANES; j++) buffer[((int)half * LANES + j) * R + r % R] = consumer_node[first_slot + beat * LANES + j];
+            for (int j = 0; j < LANES; j++) buffer[((int)half * LANES + j) * R + r % R] = borrower_node[first_slot + beat * LANES + j];
             beat++;
         } else {
             const int b = tail_entry_bank(op);
@@ -1516,7 +1516,7 @@ inline bool tail_ops_deliver(const Chunked& ch, const Chunk& consumer, const Chu
 
 // Chunked checker: every chunk decodes on its own (local slots -> parsed geometry); the union must
 // be the in-scope netlist exactly. Plus ownership, capacity, the tail layout (C7), and the tail ops
-// replayed on node ids: every external slot receives the node its consumer expects, and every merge
+// replayed on node ids: every external slot receives the node its borrower expects, and every merge
 // adds into that node's owner slot. Meow.
 inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg) {
     Failures fail;

@@ -1,10 +1,10 @@
 // Verify hpwl_gradient_CU (src/modules/hpwl_gradient_CU.hpp) -- WA gradient for a design split into
-// chunks: external positions out, external gradients back, through the consumers' tail rows (#41, #47).
+// chunks: tail positions out, tail gradients back, through the borrowers' tail rows (#41, #47).
 // From vck5000/test/hpwl_gradient_computer_v2_test.cpp @ 41f2193 (#45). Meow.
 //
 // Golden: wa_gradient_golden.hpp (sw_only's WA partial in double from the PARSED netlist), so it
-// is independent of the partition, homes, external slots and tail layout. Each movable parsed
-// node's device gradient is read from its OWNER chunk's slot. External slots and macro-pin slots
+// is independent of the partition, homes, tail slots and tail layout. Each movable parsed
+// node's device gradient is read from its OWNER chunk's slot. Tail slots and macro-pin slots
 // start as NaN, so a missed send, refresh or fold cannot pass.
 //
 //   [1] STRUCTURE  vs same-LUT golden, rel_rms < 1e-5, max_rel < 1e-3, both axes:
@@ -14,7 +14,7 @@
 //   [3] ZERO       movable nodes with no in-scope pin get exactly 0
 //   [4] HPWL       the total-HPWL by-product, bit-exact vs the golden's integer sum; the golden's
 //                  quantization within 2^-HPWL_FRAC_BITS per net of the exact double sum
-//   [5] COVERAGE   several chunks; external cells and macros exist; external gradients carry a
+//   [5] COVERAGE   several chunks; borrowed cells and macros exist; tail gradients carry a
 //                  real share of the total (a dropped merge would be visible); tails with many
 //                  owner blocks, and blocks of several rows. Row-buffer wrap-around (a block of more
 //                  than TAIL_BUFFER_ROWS rows) appears only on real designs (--netlist).
@@ -46,7 +46,7 @@ static DeviceAxis run_axis(const packer::Chunked& ch, size_t num_parsed, int axi
     for (auto& beat : grad) for (float& v : beat.v) v = NAN;     // unwritten slots stay visibly wrong
     DeviceAxis out;
     hpwl_gradient_CU(dev.desc.data(), dev.group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(), dev.macro_pins.data(),
-                     dev.streams.data(), dev.tail_ops.data(),
+                     dev.tail_blocks.data(), dev.tail_ops.data(),
                      dev.offset_table.data(), (int)dev.offset_table.size(), lut.table.data(), lut.size,
                      grad.data(), dev.offset_bits, 1.0f / golden::GAMMA, lut.inv_step, out.hpwl_total_fixed);
 
@@ -129,25 +129,25 @@ int main(int argc, char** argv) {
     bool ok = true;
     packer::Chunked ch, tight;
     ok &= run_config("capacity=4096", nl, 4096, node_pos, lut, true, &ch);
-    // Many small chunks: a consumer's tail holds blocks from many owners (C7). Bare cut at 2560
+    // Many small chunks: a borrower's tail holds blocks from many owners (C7). Bare cut at 2560
     // (30 chunks); the per-owner blocks' row rounding means 2048 and below fit no K (scan 2026-10-09). Meow.
     ok &= run_config("capacity=2560", nl, 2560, node_pos, lut, false, &tight, 0);
     ok &= run_config("capacity=1M", nl, SLOT_CAPACITY, node_pos, lut, false);
 
     // [5] the tail exchange's corner cases are present, so [1] exercised them. Meow.
-    long streams = 0, max_blocks = 0, multi_row_blocks = 0;
+    long tail_block_count = 0, max_blocks = 0, multi_row_blocks = 0;
     for (const packer::Chunk& c : tight.chunks) {
-        streams += (long)c.tail_blocks.size();
+        tail_block_count += (long)c.tail_blocks.size();
         max_blocks = std::max(max_blocks, (long)c.tail_blocks.size());
         for (const auto& block : c.tail_blocks) multi_row_blocks += block.rows > 1;
     }
-    const bool tails_covered = streams >= 50 && max_blocks >= 5 && multi_row_blocks >= 10;
+    const bool tails_covered = tail_block_count >= 50 && max_blocks >= 5 && multi_row_blocks >= 10;
     printf("%s [5] coverage: capacity=2560 has %ld tail blocks, up to %ld per tail, %ld of several rows\n",
-           tails_covered ? "ok  " : "FAIL", streams, max_blocks, multi_row_blocks);
+           tails_covered ? "ok  " : "FAIL", tail_block_count, max_blocks, multi_row_blocks);
     ok &= tails_covered;
 
     // [5] coverage: the return path must carry real gradient. Share of |grad|^2 on nodes that are
-    // external somewhere (their total needs the mailbox) -- a dropped return path would lose it.
+    // borrowed somewhere (their total needs the tail merge) -- a dropped return path would lose it.
     // Macros cross chunks as macros: a macro gradient folded from a borrowed macro's local pins (C6). Meow.
     long external_cells = 0, external_macros = 0;
     std::vector<char> held_external(ch.global.kind.size(), 0);

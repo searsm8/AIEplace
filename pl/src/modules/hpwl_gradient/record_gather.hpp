@@ -24,6 +24,7 @@ constexpr int OFFSET_TABLE_MAX = 1 << OFFSET_BITS_MAX;           // measured nee
 // One offset table copy per lane: 16 random reads per cycle, one per copy. Meow.
 static void load_offset_table(const float* offset_table_DDR, int offset_table_size,
                               float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX]) {
+    // Copy the pin-offset table (pin position relative to its node) DDR -> BRAM, once per lane. Meow.
 load_offsets:
     for (int i = 0; i < offset_table_size; i++) {
 #pragma HLS PIPELINE II=1
@@ -37,6 +38,7 @@ load_offsets:
 // spans 2..8. Large nets are grouped by span, not degree: the packer may give a net more beats than
 // ceil(degree/16), and the device never needs a large net's degree. Meow.
 static void load_group_ends(const int32_t* group_ends_DDR, int group_end_REG[pinrec::NUM_GROUP_ENDS]) {
+    // Copy this chunk's group boundaries DDR -> registers. Meow.
 load_group_ends:
     for (int k = 0; k < pinrec::NUM_GROUP_ENDS; k++) {
 #pragma HLS PIPELINE II=1

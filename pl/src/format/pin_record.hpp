@@ -83,10 +83,11 @@ struct MacroPinRef {
 
 // ---- Chunking (a design larger than one on-chip slot space) ----
 // Each chunk is an ordinary stream over its own local slots; the per-chunk arrays are concatenated
-// in DDR and located by this descriptor. External slots (nodes owned by another chunk) are the
-// chunk's TAIL rows (packer rule C7): one block per owner, each starting on a fresh row. The owner
-// fills its block in the consumer's position image and later adds the gradients the consumer drained
-// there into its own, through a TailStream (#47). See beat_packer.hpp (encode_chunked).
+// in DDR and located by this descriptor. Tail slots (copies of nodes a chunk borrows from their
+// owner chunk; the packer's "externals") are the chunk's TAIL rows (packer rule C7): one block per
+// owner, each starting on a fresh row. The owner fills its block in the borrower's position image and
+// later adds the gradients the borrower drained there into its own, through a TailBlockDesc (#47). See
+// beat_packer.hpp (encode_chunked).
 // A chunk's group ends (degree groups, then large-net span groups) are a separate int32 table, NUM_GROUP_ENDS
 // per chunk: inside ChunkDesc they would make it 1120 bits, past the 1024-bit m_axi maximum. Meow.
 constexpr int NUM_GROUP_ENDS = NET_DEGREES_PROCESSED + SPAN_GROUPS;   // 15 degree + 7 span group ends
@@ -96,19 +97,19 @@ struct ChunkDesc {
     int32_t first_tail_slot;                        // owned movable slots below, the tail rows from here
     int32_t first_fixed_slot;
     int32_t macro_pin_offset, num_macro_pins;       // into the concatenated macro-pin lists
-    int32_t stream_offset, num_streams;             // this chunk's tail streams AS OWNER, consumers ascending
+    int32_t first_tail_block, num_borrowers;        // this chunk's tail blocks AS OWNER, borrowers ascending
 };
 
-// One owner -> consumer block of the consumer's tail, exchanged through an on-chip row buffer of
+// One owner -> borrower block of the borrower's tail, exchanged through an on-chip row buffer of
 // BANKS banks x TAIL_BUFFER_ROWS rows. Each list is replayed in order, one op per cycle; an ENTRY's
 // row is the next one of its bank (rows within a block fill bank by bank, in emission order):
-//   send  (owner's send pass) : ENTRY     buffer[bank][row] = pos[owner slot]
-//                               TAIL_BEAT the buffer's next half-row -> the block, in pos_DDR
-//   merge (owner's fold pass) : TAIL_BEAT the block's next half-row, from grad_DDR -> the buffer
-//                               ENTRY     grad[owner slot] += buffer[bank][row]
+//   send  (send_tails_pass)  : ENTRY     buffer[bank][row] = pos[owner slot]
+//                              TAIL_BEAT the buffer's next half-row -> the block, in pos_DDR
+//   merge (merge_tails_pass) : TAIL_BEAT the block's next half-row, from grad_DDR -> the buffer
+//                              ENTRY     grad[owner slot] += buffer[bank][row]
 // The host orders the ops so no buffer row is overwritten before it is written out (send) or used
 // (merge). A block's entries name distinct owner slots, ascending. Meow.
-struct TailStream {
+struct TailBlockDesc {
     int32_t send_op_offset, num_send_ops;
     int32_t merge_op_offset, num_merge_ops;         // into the concatenated tail ops
     int32_t block_beat_offset;                      // the block's first beat in the concatenated slot images

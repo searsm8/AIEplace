@@ -12,9 +12,9 @@ extern "C" void hpwl_gradient_CU_top(
         const int32_t*                  group_ends,
         int                             num_chunks,
         const pinrec::RecordBeat*       records,
-        pinrec::SlotBeat*               pos,             // read, and the send pass writes the tails
+        pinrec::SlotBeat*               pos,             // read, and send_tails_pass writes the tails
         const pinrec::MacroPinRef*      macro_pins,
-        const pinrec::TailStream*       streams,
+        const pinrec::TailBlockDesc*    tail_blocks,
         const uint32_t*                 tail_ops,
         const float*                    offset_table,
         int                             offset_table_size,
@@ -30,13 +30,13 @@ extern "C" void hpwl_gradient_CU_top(
 #pragma HLS INTERFACE m_axi port=records        bundle=gmem1 offset=slave
 #pragma HLS INTERFACE m_axi port=pos            bundle=gmem2 offset=slave
 #pragma HLS INTERFACE m_axi port=macro_pins     bundle=gmem3 offset=slave
-#pragma HLS INTERFACE m_axi port=streams        bundle=gmem0 offset=slave
+#pragma HLS INTERFACE m_axi port=tail_blocks    bundle=gmem0 offset=slave
 #pragma HLS INTERFACE m_axi port=tail_ops       bundle=gmem4 offset=slave max_widen_bitwidth=32
 #pragma HLS INTERFACE m_axi port=offset_table   bundle=gmem9 offset=slave max_widen_bitwidth=32
 #pragma HLS INTERFACE m_axi port=exp_lut        bundle=gmem9 offset=slave max_widen_bitwidth=32
 #pragma HLS INTERFACE s_axilite port=hpwl_total_fixed
 #pragma HLS INTERFACE m_axi port=grad           bundle=gmem8 offset=slave
 
-    hpwl_gradient_CU(chunks, group_ends, num_chunks, records, pos, macro_pins, streams, tail_ops, offset_table, offset_table_size, exp_lut, lut_size, grad,
+    hpwl_gradient_CU(chunks, group_ends, num_chunks, records, pos, macro_pins, tail_blocks, tail_ops, offset_table, offset_table_size, exp_lut, lut_size, grad,
                      offset_bits, inv_gamma, inv_lut_step, *hpwl_total_fixed);
 }

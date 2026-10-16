@@ -26,7 +26,7 @@ int main() {
     check(sizeof(SlotBeat) * 8 == 512, "[1] SlotBeat is one 512-bit beat");
     check(sizeof(MacroPinRef) == 16, "[1] MacroPinRef is 16 bytes (12 straddled bus words: II=2)");
     check(sizeof(ChunkDesc) * 8 <= 512, "[1] ChunkDesc fits one 512-bit port word");
-    check(sizeof(TailStream) == 20, "[1] TailStream is 20 bytes");
+    check(sizeof(TailBlockDesc) == 20, "[1] TailBlockDesc is 20 bytes");
 
     check(BANKS == 1 << BANK_BITS, "[2] BANKS == 2^BANK_BITS");
     check(NET_DEGREES_PROCESSED == 15 && MAX_NETS_PER_BEAT == 8, "[2] degrees 2..16, 8 nets per beat");

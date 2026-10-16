@@ -43,6 +43,8 @@ static inline float lut_exp_pair(const LutPair lut_BRAM[GRAD_LUT_MAX], int lut_s
 // One copy per concurrent lookup: 32 lookups per beat, one read each. Meow.
 static void load_exp_lut(const float* exp_lut_DDR, int lut_size, LutPair lut_BRAM[EXP_LOOKUPS][GRAD_LUT_MAX]) {
     float prev = 0.0f;
+    // Copy the exp table DDR -> BRAM, storing each entry with its neighbour so one read gives both
+    // points the interpolation needs. Meow.
 load_lut:
     for (int i = 0; i < lut_size; i++) {
 #pragma HLS PIPELINE II=1
@@ -83,6 +85,8 @@ static void wa_sums(hls::stream<PinBeat>& pin_beats, hls::stream<NetBbox>& net_b
 #pragma HLS ARRAY_PARTITION variable=Bm_window complete dim=0
 #pragma HLS ARRAY_PARTITION variable=Cm_window complete dim=0
     NetBbox large_bbox = {0.0f, 0.0f};   // the current large net's: only assigned, never computed on
+    // One beat of pins per cycle: compute each pin's exp terms and add them up per net, giving the
+    // four per-net sums the WA gradient needs. Meow.
 wa_sums_loop:
     for (int beat = 0; beat < num_beats; beat++) {
 #pragma HLS PIPELINE II=1
