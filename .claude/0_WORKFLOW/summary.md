@@ -118,7 +118,8 @@
   2026-10-09):** fold the exchange into `iteration_update` (modeled 0.98 M). Its golden (M2,
   `host/sw_flat/tail_fusion.hpp`) is bit-identical to B3 on 8/8 chunked designs; M3 waits on #45 step 6.
   Alternative R (2026-10-16, measured, not chosen): one resident slot per shared node removes both tail
-  passes with no `iteration_update` change; global colouring is free, slots +13–16% at K=3 (still fits).
+  passes with no `iteration_update` change; global colouring is free. Modeled 1–4 pp faster than B4 on
+  8/8 (bigblue4 58.5% of today vs 62.6%), but slots +9–14% at K=3: bigblue4 at 99.2% of 1 M.
   → [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
 - **v1 scope DECIDED (Mark, 2026-08-28; control placement 2026-10-06):** phase-1 GP, data
   device-resident, control on the CPU (#44 arm B). **No phase 2, no backtracking** (deferred until needed). **pl_algo pins to the frozen sw_only HEAD.** (Third §10

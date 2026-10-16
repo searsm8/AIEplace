@@ -958,9 +958,19 @@ in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_202
       of shared nodes have 2 borrowers). **Slots:** K=2 +0.6–1.0%; K=3 +13–16.5% on the chunks
       with small tails today, since every chunk now holds the whole region. Worst bigblue4 chunk 0 at
       1,035,072 (98.7% of 1 M): fits, K unchanged, but only 13 K slots of headroom.
-      Not done: a cycle estimate in `chunk_model` (rough: bigblue4 1.57 M − send/merge ~0.59 M +
-      region load/drain ~17 K ≈ 1.0 M, about B4's 0.98 M); a partition that budgets the region; add
-      order becomes chunk-ascending (not bit-identical to B3). `.claude/2_ARTIFACTS/borrowed_47/resident_1M_20261016.txt`.
+      **Cycle model (2026-10-16, `chunk_model` res / res+m):** layout per chunk = private | region | fixed
+      (Mark); the region starts at P_max (the largest chunk's private rows) so it sits at the same rows
+      in every chunk. res+m also puts every macro and macro pin in the region: refresh once, fold once.
+      % of today (C8), fused (B4) / res / res+m: bigblue4 62.6 / 58.5 / 58.4; mms/bigblue4 64.5 / 60.5 /
+      59.6; mms/newblue7 75.3 / 72.6 / 71.5; the other 5 1–3 pp better than fused. **R beats B4
+      everywhere** (today/fused rows byte-identical to the C8 run). Fit: bigblue4 res 1,040,192 (99.2%);
+      **mms/newblue7 res+m 1,068,352 DOES NOT FIT** (res fits at 1,034,848). Not done: a partition that
+      budgets the region; add order becomes chunk-ascending (not bit-identical to B3).
+      `.claude/2_ARTIFACTS/borrowed_47/{resident_1M_20261016.txt, m0_1M_resident_20261016.txt}`.
+      **Direction (Mark, 2026-10-16):** static regions (shared, maybe macros, maybe fixed) are the
+      strategy so long as chunks stay large. Next: (1) measure each static region's share of the 1 M
+      slots per design; (2) packer must raise K until private + regions fit (region-aware FM target),
+      so a fit is guaranteed, not lucky.
 → [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
 
 ---

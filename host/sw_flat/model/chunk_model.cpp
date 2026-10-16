@@ -1,5 +1,6 @@
 // chunk_model.cpp -- #47: device cycles per chunked gradient evaluation, today's device (B3) vs the
-// exchange fused into iteration_update (B4), per design (cycle_model.hpp). Meow.
+// exchange fused into iteration_update (B4), and a resident shared region without and with every macro
+// in it (R, R+M), per design (cycle_model.hpp). Meow.
 
 #include "cycle_model.hpp"
 
@@ -9,9 +10,9 @@ using namespace packer;
 
 static void print_phases(const char* label, const Phases& p, long today_total) {
     printf("  %-6s total %9ld (%5.1f%% of today) | send_reload %8ld send %8ld load %8ld beats %8ld drain %8ld "
-           "merge %8ld fold %8ld | update_send %7ld update_merge %7ld | exchange %5.1f%%\n",
+           "merge %8ld fold %8ld | update_send %7ld update_merge %7ld region %7ld | exchange %5.1f%%\n",
            label, p.total(), 100.0 * p.total() / today_total, p.send_reload, p.send, p.load, p.beats, p.drain,
-           p.merge, p.fold_other, p.update_send, p.update_merge, 100.0 * p.exchange() / p.total());
+           p.merge, p.fold_other, p.update_send, p.update_merge, p.region, 100.0 * p.exchange() / p.total());
 }
 
 static void usage() {
@@ -49,7 +50,16 @@ int main(int argc, char** argv) {
                ch.num_chunks, ch.externals, 100.0 * ch.externals / movable, max_slots, blocks);
         const Phases today = model_cycles(ch, Variant::TODAY);
         print_phases("today", today, today.total());
-        if (ch.num_chunks > 1) print_phases("fused", model_cycles(ch, Variant::FUSED, adders), today.total());
+        if (ch.num_chunks > 1) {
+            print_phases("fused", model_cycles(ch, Variant::FUSED, adders), today.total());
+            for (bool all_macros : {false, true}) {
+                const Resident r = build_resident(ch, cfg, all_macros);
+                print_phases(all_macros ? "res+m" : "res", model_resident(ch, r, all_macros), today.total());
+                printf("         region %ld nodes in %ld rows, private rows max %ld, max_slots %ld (%+.1f%% vs today) %s\n",
+                       r.region_nodes, r.region_rows, r.max_private_rows, r.max_slots,
+                       100.0 * (r.max_slots - max_slots) / max_slots, r.max_slots <= capacity ? "fits" : "DOES NOT FIT");
+            }
+        }
         fflush(stdout);
     }
     return 0;
