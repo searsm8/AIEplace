@@ -4,17 +4,22 @@
 //   density_map_check <config.toml> [iterations=30]
 //
 // Runs sw_flat_place for `iterations` with its deposit in slot order (the device's order; slot_order
-// "deposit" is forced on), then hands density_map_CU the same slot positions, the footprint table and
+// "deposit" is forced on) and #48 B' on (overflow_map = "snapshot", fixed_base = "exact"), then hands density_map_CU the same slot positions, the footprint table and
 // per-slot indices (density_inputs.hpp) and the fixed base map, and compares rho with sw_flat's
 // bin_overlap * inv_bin_area, every bin. Checks, each a verdict:
 //   [1] rho          bit-equal on every bin
 //   [2] table        the footprint table fits FOOTPRINT_TABLE_MAX; every OWNED / FILLER slot has an entry
 //   [3] mutant       one deposited slot set to NO_DEPOSIT must change rho (the comparison can fail)
+//   [4] overflow     the filler tail starts on a beat boundary; the CU's overflow is within
+//                    OVERFLOW_EXACT_REL_MAX of a double-precision sum over the same pre-filler map, and
+//                    within OVERFLOW_REL_MAX of Placer::snapshot_overflow
 // [info] how many bins the name-order deposit (sw_only's) would differ in: the order is visible. Meow.
 
 #include "density_inputs.hpp"
 #include "modules/density_map_CU.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -23,9 +28,20 @@ using namespace sw_flat;
 
 namespace {
 
+// The CU sums the excess as a per-beat tree into 8 rotating partials, sw_flat serially in bin order:
+// same terms (all >= 0), different rounding. The serial float sum is the inaccurate one -- one
+// accumulator over ~1M adds drifts -- so the CU is held tightly to a double sum of the same map, and
+// only loosely to sw_flat. Observed 2026-10-15, 44 designs: CU vs double <= 3.9e-6; CU vs
+// sw_flat <= 9.0e-4 (MMS at grid 1024, where macros put large excesses in many bins), and there the
+// double sum sits as far from sw_flat as the CU does. Meow.
+constexpr double OVERFLOW_EXACT_REL_MAX = 2e-5;
+constexpr double OVERFLOW_REL_MAX = 2e-3;
+
 bool same_bits(float a, float b) { return std::memcmp(&a, &b, sizeof a) == 0; }
 
-std::vector<float> device_rho(const Placer& placer, const DensityInputs& in) {
+struct DeviceOut { std::vector<float> rho; float overflow; };
+
+DeviceOut run_device(const Placer& placer, const DensityInputs& in) {
     const long num_beats = placer.layout.num_slots / pinrec::LANES;
     std::vector<pinrec::SlotBeat> pos_x(num_beats), pos_y(num_beats);
     std::vector<densrec::FootprintBeat> index(num_beats);
@@ -37,13 +53,18 @@ std::vector<float> device_rho(const Placer& placer, const DensityInputs& in) {
     const int grid_beats = placer.bins * placer.bins / pinrec::LANES;
     std::vector<pinrec::SlotBeat> base(grid_beats), rho(grid_beats);
     std::memcpy(base.data(), placer.fixed_base.data(), placer.fixed_base.size() * sizeof(float));
-    plalgo::density_map_CU(pos_x.data(), pos_y.data(), index.data(), (int)num_beats, in.footprints.data(),
+    DeviceOut out;
+    plalgo::density_map_CU(pos_x.data(), pos_y.data(), index.data(), (int)num_beats,
+                           (int)(placer.layout.first_filler_slot / pinrec::LANES), in.footprints.data(),
                            (int)in.footprints.size(), base.data(), placer.bins, placer.bin_w, placer.bin_h,
-                           1 / placer.bin_area[0], rho.data());
-    std::vector<float> out((size_t)placer.bins * placer.bins);
-    std::memcpy(out.data(), rho.data(), out.size() * sizeof(float));
+                           1 / placer.bin_area[0], placer.bin_w * placer.bin_h * placer.cfg.target_density,
+                           placer.total_movable_area + 1e-8f, rho.data(), out.overflow);
+    out.rho.resize((size_t)placer.bins * placer.bins);
+    std::memcpy(out.rho.data(), rho.data(), out.rho.size() * sizeof(float));
     return out;
 }
+
+std::vector<float> device_rho(const Placer& placer, const DensityInputs& in) { return run_device(placer, in).rho; }
 
 long count_differing(const std::vector<float>& a, const std::vector<float>& b) {
     long differ = 0;
@@ -60,6 +81,8 @@ int main(int argc, char** argv)
     PlacerConfig cfg = read_placer_config(argv[1]);
     cfg.dump_schedule_trace = false;
     cfg.slot_order_deposit = true;
+    cfg.overflow_snapshot = true;
+    cfg.fixed_base_exact = true;
     Placer placer;
     placer.setup(cfg);
     const std::string tag = placer.design.name + " (grid " + std::to_string(placer.bins) + ")";
@@ -92,7 +115,8 @@ int main(int argc, char** argv)
     ok &= table_ok;
     if (!table_ok) { printf("FAIL %s\n", tag.c_str()); return 1; }
 
-    const long rho_differ = count_differing(device_rho(placer, in), golden);
+    const DeviceOut device = run_device(placer, in);
+    const long rho_differ = count_differing(device.rho, golden);
     printf("%s [1] %s rho after %d iterations: %ld of %zu bins differ\n", rho_differ ? "FAIL" : "ok  ", tag.c_str(),
            placer.iteration, rho_differ, golden.size());
     ok &= rho_differ == 0;
@@ -102,6 +126,28 @@ int main(int argc, char** argv)
     const long mutant_differ = count_differing(device_rho(placer, mutant), golden);
     printf("%s [3] %s mutant (one slot dropped): %ld bins differ\n", mutant_differ ? "ok  " : "FAIL", tag.c_str(), mutant_differ);
     ok &= mutant_differ > 0;
+
+    // The pre-filler map again, slot order ([1] holds this deposit bit-equal), summed in double. Meow.
+    std::vector<float> cell_map = placer.fixed_base;
+    for (long slot = 0; slot < placer.layout.first_filler_slot; slot++) {
+        if (in.index[slot] == densrec::NO_DEPOSIT) continue;
+        const Position& p = placer.next.probe_pos[slot];
+        plalgo::deposit_footprint(p.x, p.y, in.footprints[in.index[slot]], placer.bins, placer.bin_w, placer.bin_h, cell_map.data());
+    }
+    const float cap = placer.bin_w * placer.bin_h * placer.cfg.target_density;
+    double excess_area = 0;
+    for (float d : cell_map) excess_area += std::max(0.0, (double)d - cap);
+    const double exact_overflow = excess_area / placer.total_movable_area;
+
+    const bool aligned = placer.layout.first_filler_slot % pinrec::LANES == 0;
+    const double exact_rel = std::fabs(device.overflow - exact_overflow) / exact_overflow;
+    const double overflow_rel = std::fabs((double)device.overflow - placer.snapshot_overflow) / placer.snapshot_overflow;
+    const double golden_rel = std::fabs(exact_overflow - placer.snapshot_overflow) / placer.snapshot_overflow;
+    const bool overflow_ok = aligned && exact_rel <= OVERFLOW_EXACT_REL_MAX && overflow_rel <= OVERFLOW_REL_MAX;
+    printf("%s [4] %s overflow: CU %.9g, double %.9g (rel %.3g, max %g), sw_flat %.9g (rel %.3g, max %g; double vs sw_flat %.3g)%s\n",
+           overflow_ok ? "ok  " : "FAIL", tag.c_str(), device.overflow, exact_overflow, exact_rel, OVERFLOW_EXACT_REL_MAX,
+           placer.snapshot_overflow, overflow_rel, OVERFLOW_REL_MAX, golden_rel, aligned ? "" : ", filler tail not beat-aligned");
+    ok &= overflow_ok;
 
     // [info] sw_only's name order over the same positions. Meow.
     std::vector<float> name_order = placer.fixed_base;

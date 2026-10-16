@@ -11,7 +11,8 @@
 #   make check-placer     sw_flat_place vs sw_only on the D6 configs (test/placer_check.sh): the
 #                         schedule traces must be identical text. Builds sw_only first. ~1 min.
 #   make check-density-map  density_map_CU (pl/src/modules) vs sw_flat's own deposit on the 44 designs at
-#                         grid <= 1024, bit for bit, 30 iterations in (test/density_map_check.sh). Use JOBS=n.
+#                         grid <= 1024, 30 iterations in, B' on: rho bit for bit, the overflow to a stated
+#                         tolerance (test/density_map_check.sh). Use JOBS=n.
 #   make check-overflow-map  #48 option B': the overflow reduced from the solver's map before the fillers,
 #                         over an exact fixed base, vs sw_only's separate metric, 44 designs
 #                         (test/overflow_map_check.sh). Use JOBS=n, ITERATIONS=n.

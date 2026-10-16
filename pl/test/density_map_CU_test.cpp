@@ -3,7 +3,7 @@
 //
 // Golden: a naive double-precision deposit written here from sw_flat density.cpp (node_footprint,
 // for_each_overlap), on a synthetic slot range: a cell library, movable macros at td < 1 (the weight
-// override), cells hanging off the die edge, one shared filler size, and NO_DEPOSIT slots (external
+// override), cells hanging off the die edge, one shared filler size, and NO_DEPOSIT slots (tail
 // copies, pins, padding) whose positions are NaN, so a wrongly read slot poisons the map.
 //
 //   [1] MATCH     rho vs golden, rel_rms < REL_RMS_MAX and worst-bin error / peak < PEAK_REL_MAX, at
@@ -12,6 +12,9 @@
 //   [2] SKIP      every bin finite: no NO_DEPOSIT slot was read
 //   [3] MASS      total deposited area == golden's, rel < MASS_REL_MAX
 //   [4] COVERAGE  a macro spans >= 8x8 bins; some cell is clipped by the die edge
+//   [5] OVERFLOW  the overflow (fixed base + cells, before the fillers; #48 B') vs golden, rel <
+//                 OVERFLOW_REL_MAX, and farther than that from the with-fillers overflow, so the
+//                 check can tell whether the CU reduced at the filler barrier
 //
 // Real designs vs sw_flat Placer::bin_overlap are the next harness step, not this one. Meow.
 
@@ -28,6 +31,7 @@ using namespace plalgo;
 constexpr double REL_RMS_MAX  = 1e-5;   // observed 2.9e-6 (float vs double golden), 2026-10-13
 constexpr double PEAK_REL_MAX = 3e-5;   // worst bin error / peak bin density; observed 8.3e-6 at 1024
 constexpr double MASS_REL_MAX = 1e-5;
+constexpr double OVERFLOW_REL_MAX = 2e-5;  // observed 2.6e-6 at 1024 (float, tree order, vs double), 2026-10-15. Meow.
 
 struct SyntheticDesign {
     float die = 2000.0f, target_density = 0.8f;
@@ -35,6 +39,7 @@ struct SyntheticDesign {
     std::vector<float> w, h;                // per slot; 0 on NO_DEPOSIT
     std::vector<char>  is_macro, deposits;
     std::vector<float> fixed_x, fixed_y, fixed_w, fixed_h;
+    long first_filler_slot = 0;
     long num_slots() const { return (long)x.size(); }
 };
 
@@ -53,10 +58,12 @@ static SyntheticDesign make_design(unsigned seed) {
     };
     const float library_w[] = {2, 3, 4, 6, 8, 10, 14, 20};
     for (int i = 0; i < 20000; i++) {
-        if (i % 7 == 3) add(0, 0, false, false);   // external copy / pin / padding
+        if (i % 7 == 3) add(0, 0, false, false);   // tail copy / pin / padding
         else            add(library_w[i % 8], row_h, false, true);
     }
     for (int i = 0; i < 6; i++) add(150.0f + 40 * i, 120.0f + 30 * i, true, true);
+    while (d.num_slots() % pinrec::LANES) add(0, 0, false, false);   // the packer's chunks end on a beat
+    d.first_filler_slot = d.num_slots();
     for (int i = 0; i < 4000; i++) add(9.0f, row_h, false, true);    // fillers: one shared size
     while (d.num_slots() % pinrec::LANES) add(0, 0, false, false);   // row padding
     for (int i = 0; i < 5; i++) {
@@ -97,10 +104,22 @@ static bool run(const SyntheticDesign& d, int bins) {
     std::vector<pinrec::SlotBeat> fixed_base(num_bins / pinrec::LANES);
     for (size_t bin = 0; bin < num_bins; bin++) fixed_base[bin / pinrec::LANES].v[bin % pinrec::LANES] = (float)golden[bin];
 
+    // XPlace's overflow_fn on the map between cells and fillers, then again with the fillers. Meow.
+    const double cap = (double)bin_w * bin_h * d.target_density;
+    double movable_area = 0;
+    for (long s = 0; s < d.first_filler_slot; s++) movable_area += (double)d.w[s] * d.h[s];
+    auto overflow_of = [&](const std::vector<double>& overlap) {
+        double area = 0;
+        for (double v : overlap) area += std::max(0.0, v - cap);
+        return area / movable_area;
+    };
+    double golden_overflow = 0;
+
     std::vector<densrec::Footprint> table;
     std::vector<pinrec::SlotBeat> pos_x(num_slots / pinrec::LANES), pos_y(num_slots / pinrec::LANES);
     std::vector<densrec::FootprintBeat> idx(num_slots / pinrec::LANES);
     for (long s = 0; s < num_slots; s++) {
+        if (s == d.first_filler_slot) golden_overflow = overflow_of(golden);
         pos_x[s / pinrec::LANES].v[s % pinrec::LANES] = d.x[s];
         pos_y[s / pinrec::LANES].v[s % pinrec::LANES] = d.y[s];
         uint32_t entry = densrec::NO_DEPOSIT;
@@ -116,8 +135,14 @@ static bool run(const SyntheticDesign& d, int bins) {
     if ((int)table.size() > densrec::FOOTPRINT_TABLE_MAX) { printf("  table %zu > max\n", table.size()); return false; }
 
     std::vector<pinrec::SlotBeat> rho(num_bins / pinrec::LANES);
-    density_map_CU(pos_x.data(), pos_y.data(), idx.data(), (int)(num_slots / pinrec::LANES), table.data(),
-                   (int)table.size(), fixed_base.data(), bins, bin_w, bin_h, 1.0f / bin_area, rho.data());
+    float overflow = 0;
+    density_map_CU(pos_x.data(), pos_y.data(), idx.data(), (int)(num_slots / pinrec::LANES),
+                   (int)(d.first_filler_slot / pinrec::LANES), table.data(), (int)table.size(), fixed_base.data(),
+                   bins, bin_w, bin_h, 1.0f / bin_area, bin_w * bin_h * d.target_density,
+                   (float)movable_area + 1e-8f, rho.data(), overflow);
+    const double overflow_rel = std::fabs(overflow - golden_overflow) / golden_overflow;
+    const double filler_rel = std::fabs(overflow_of(golden) - golden_overflow) / golden_overflow;
+    const bool overflow_ok = overflow_rel < OVERFLOW_REL_MAX && filler_rel > OVERFLOW_REL_MAX;
 
     double err_sq = 0, ref_sq = 0, max_err = 0, peak = 0, mass = 0, golden_mass = 0;
     bool finite = true;
@@ -139,10 +164,12 @@ static bool run(const SyntheticDesign& d, int bins) {
     bool clipped = false;
     for (long s = 0; s < num_slots && !clipped; s++) clipped = d.deposits[s] && (d.x[s] < 0 || d.y[s] < 0);
 
-    const bool pass = finite && rel_rms < REL_RMS_MAX && peak_rel < PEAK_REL_MAX && mass_rel < MASS_REL_MAX && coverage && clipped;
-    printf("  bins=%4d footprints=%zu  rel_rms=%.3g (<%g)  peak_rel=%.3g (<%g)  mass_rel=%.3g (<%g)  finite=%d  macro_bins=%.1f  clipped=%d  %s\n",
+    const bool pass = finite && rel_rms < REL_RMS_MAX && peak_rel < PEAK_REL_MAX && mass_rel < MASS_REL_MAX && coverage && clipped && overflow_ok;
+    printf("  bins=%4d footprints=%zu  rel_rms=%.3g (<%g)  peak_rel=%.3g (<%g)  mass_rel=%.3g (<%g)  finite=%d  macro_bins=%.1f  clipped=%d\n"
+           "            overflow=%.6g golden=%.6g rel=%.3g (<%g), with fillers rel=%.3g (>%g)  %s\n",
            bins, table.size(), rel_rms, REL_RMS_MAX, peak_rel, PEAK_REL_MAX, mass_rel, MASS_REL_MAX, finite,
-           big_macro / bin_w, clipped, pass ? "PASS" : "FAIL");
+           big_macro / bin_w, clipped, overflow, golden_overflow, overflow_rel, OVERFLOW_REL_MAX, filler_rel,
+           OVERFLOW_REL_MAX, pass ? "PASS" : "FAIL");
     return pass;
 }
 

@@ -82,16 +82,14 @@ finishes, that same file **becomes the report**: rename `HANDOFF_...` → `REPOR
 `.claude/1_REVIEW/reports/`. 
 
 - **Write a handoff only when a session ends mid-task** and the next session needs the draft.
-  Name it `[_NEW_]HANDOFF_<#n>_<desc>_<YYYYMMDD>.md`, in `reports/` (not a separate `handoffs/`).
+  Name it `HANDOFF_<#n>_<desc>_<YYYYMMDD>.md`, in `reports/` (not a separate `handoffs/`).
 - **When the task closes, convert it:** `git mv` the file to `REPORT_...` and finish the writeup.
 
 ## 📄 Naming what you hand Mark — the filename carries the metadata
 Work here is asynchronous and multi-session, so filenames are an efficient channel to communicate across different coding sessions, and when Mark reviews files.
 
 When naming new files:
-1) If Mark requested a report or other specific file, or you think he should read it, include the tag `_NEW_`.
-  **Only Mark clears this prefix to signal that he's finished reviewing it.**
-  The leading underscore is important: it sorts the unread set to the top of a listing in File Explorer, VS Code and PowerShell.
+1) If Mark requested a report or other specific file, or you think he should read it. 
 
 2)  `<TYPE>` — one of `REPORT`, `HANDOFF`, `PLAN`, `EXPLAINER`. Deliberately small; if none fits,
   default to `REPORT`. `HANDOFF` is the transient draft stage of a `REPORT` (see the policy above),
@@ -105,7 +103,7 @@ When naming new files:
   a run directory is already timestamped, and dating a file twice is worse than not at all.
 
 ```
-[_NEW_]<TYPE>_<#n>_<brief_description>[_<YYYYMMDD>].<ext>
+<TYPE>_<#n>_<brief_description>[_<YYYYMMDD>].<ext>
 ```
 
 **Report Writing**
