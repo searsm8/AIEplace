@@ -94,6 +94,7 @@ constexpr int NUM_GROUP_ENDS = NET_DEGREES_PROCESSED + SPAN_GROUPS;   // 15 degr
 struct ChunkDesc {
     int32_t record_beat_offset, num_beats;          // into the concatenated record stream
     int32_t slot_beat_offset, num_slot_beats;       // into the concatenated slot-major images
+    int32_t first_private_slot;                     // owned slots below hold every node another chunk borrows (C8)
     int32_t first_tail_slot;                        // owned movable slots below, the tail rows from here
     int32_t first_fixed_slot;
     int32_t macro_pin_offset, num_macro_pins;       // into the concatenated macro-pin lists

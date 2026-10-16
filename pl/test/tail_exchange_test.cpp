@@ -9,6 +9,8 @@
 //              mixed magnitude (so a different add order shows in the low bits)
 //   [4] MUTANT the golden with its borrower order reversed must differ (needs slots with >= 2
 //              borrowers, counted); with one tail entry dropped must differ. Proves [3] can fail.
+//   [5] MUTANT the device with one chunk's shared prefix (first_private_slot, C8) a row short must
+//              differ in both send and merge. Proves the passes' shortened reloads are checked.
 //
 // Synthetic design at capacity 4096 (FM) and 2560 (bare cut, many owners per tail); `--netlist FILE
 // [CAPACITY]` runs [1]-[4] on a real design. Meow.
@@ -48,7 +50,7 @@ std::vector<float> to_floats(const std::vector<pinrec::SlotBeat>& beats) {
 std::vector<float> device_send(const packer::ChunkedDevice& dev) {
     std::vector<pinrec::SlotBeat> pos = to_beats(dev.slot_images);
     for (const pinrec::ChunkDesc& desc : dev.desc) {
-        load_slot_array(pos.data() + desc.slot_beat_offset, desc.first_tail_slot / pinrec::LANES, pos_URAM);
+        load_slot_array(pos.data() + desc.slot_beat_offset, desc.first_private_slot / pinrec::LANES, pos_URAM);
         for (int s = 0; s < desc.num_borrowers; s++)
             send_tail_block(dev.tail_blocks[desc.first_tail_block + s], dev.tail_ops.data(), pos_URAM, pos.data());
     }
@@ -59,11 +61,11 @@ std::vector<float> device_send(const packer::ChunkedDevice& dev) {
 std::vector<float> device_merge(const packer::ChunkedDevice& dev, const std::vector<float>& partial) {
     std::vector<pinrec::SlotBeat> grad = to_beats(partial);
     for (const pinrec::ChunkDesc& desc : dev.desc) {
-        const int owned_slot_beats = desc.first_tail_slot / pinrec::LANES;
-        load_slot_array(grad.data() + desc.slot_beat_offset, owned_slot_beats, grad_URAM);
+        const int shared_slot_beats = desc.first_private_slot / pinrec::LANES;
+        load_slot_array(grad.data() + desc.slot_beat_offset, shared_slot_beats, grad_URAM);
         for (int s = 0; s < desc.num_borrowers; s++)
             merge_tail_block(dev.tail_blocks[desc.first_tail_block + s], dev.tail_ops.data(), grad.data(), grad_URAM);
-        drain_slot_array(grad_URAM, owned_slot_beats, grad.data() + desc.slot_beat_offset);
+        drain_slot_array(grad_URAM, shared_slot_beats, grad.data() + desc.slot_beat_offset);
     }
     return to_floats(grad);
 }
@@ -164,6 +166,20 @@ bool run_config(const char* label, const packer::Netlist& nl, long capacity, int
     printf("%s [4] [%s] mutants: reversed borrowers %ld differ (%ld slots with >= 2 borrowers), one entry dropped %ld differ\n",
            mutants_ok ? "ok  " : "FAIL", label, reversed_differ, multi, dropped_differ);
     ok &= mutants_ok;
+
+    // [5] the largest shared prefix, one row short: its last row holds a shared node in some bank. Meow.
+    packer::ChunkedDevice short_dev = dev;
+    auto widest = std::max_element(short_dev.desc.begin(), short_dev.desc.end(),
+        [](const pinrec::ChunkDesc& a, const pinrec::ChunkDesc& b) { return a.first_private_slot < b.first_private_slot; });
+    widest->first_private_slot -= pinrec::BANKS;
+    std::vector<float> sent = dev.slot_images;
+    for (int j = 0; j < ch.num_chunks; j++) sw_flat::fused_send(ch, j, parcels[j], sent);
+    const long short_send_differ = count_differences(device_send(short_dev), sent, sets.node_slots);
+    const long short_merge_differ = count_differences(device_merge(short_dev, partial), golden, sets.owned_slots);
+    const bool prefix_ok = short_send_differ > 0 && short_merge_differ > 0;
+    printf("%s [5] [%s] shared prefix a row short: send %ld differ, merge %ld differ\n", prefix_ok ? "ok  " : "FAIL", label,
+           short_send_differ, short_merge_differ);
+    ok &= prefix_ok;
     return ok;
 }
 

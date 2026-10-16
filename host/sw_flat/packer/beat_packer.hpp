@@ -105,6 +105,9 @@
 //      its rows in emission order (the owner's slot order). tail_order lists the externals in that
 //      order, tail_blocks the blocks. Every block's send and merge op lists fit TAIL_BUFFER_ROWS.
 //      Capacity is checked on num_slots, so it covers the tail.                [check_chunked]
+//  C8  Shared owned nodes (borrowed by another chunk) take the lowest owned rows of their bank, so
+//      every one sits below first_private_slot: the tail passes reload / drain only that prefix.
+//      Rows only -- banks, and so beats and hazards, are unchanged.            [check_chunked]
 // =================================================================================================
 
 #include "format/pin_record.hpp"   // pl/src/format: the device contract (build with -I<repo>/pl/src). Meow.
@@ -293,6 +296,8 @@ struct Encoded {
 
     std::vector<long> node_slot;            // per work node, -1 if none
     std::vector<int>  tail_owner;           // per work node: its owner chunk if an external (tail rows, C7), else -1; empty = none
+    std::vector<char> shared;               // per work node: owned here AND borrowed by another chunk (C8); empty = none
+    long              first_private_slot = 0;   // owned slots below hold every shared node (C8); 0 unchunked
     long              first_tail_slot = 0;  // owned movable slots below, external tail rows from here (C7)
     long              first_fixed_slot = 0;
     long              num_slots = 0;        // multiple of BANKS (and so of LANES)
@@ -693,9 +698,12 @@ inline void assign_node_slots(Encoded& enc) {
     };
     std::vector<long> rows[3] = {std::vector<long>(BANKS, 0), std::vector<long>(BANKS, 0), std::vector<long>(BANKS, 0)};
     std::map<int, std::vector<long>> block_bank_rows;   // owner -> rows per bank of its block
+    auto shared = [&](size_t node) { return !enc.shared.empty() && enc.shared[node]; };
+    std::vector<long> shared_rows(BANKS, 0);
     for (size_t node = 0; node < kind.size(); node++) {
         if (enc.bank[node] == NO_BANK) continue;
         rows[row_class(node)][enc.bank[node]]++;
+        if (shared(node)) shared_rows[enc.bank[node]]++;
         if (row_class(node) == TAIL_ROWS) {
             auto& counts = block_bank_rows[enc.tail_owner[node]];
             counts.resize(BANKS, 0);
@@ -711,18 +719,23 @@ inline void assign_node_slots(Encoded& enc) {
     }
     const long fixed_rows = *std::max_element(rows[FIXED_ROWS].begin(), rows[FIXED_ROWS].end());
     const long movable_rows = owned_rows + tail_rows;
+    enc.first_private_slot = *std::max_element(shared_rows.begin(), shared_rows.end()) * BANKS;
     enc.first_tail_slot  = owned_rows * BANKS;
     enc.first_fixed_slot = movable_rows * BANKS;
     enc.num_slots        = (movable_rows + fixed_rows) * BANKS;
 
-    std::vector<long> next_row[2] = {std::vector<long>(BANKS, movable_rows), std::vector<long>(BANKS, 0)};
+    // C8: a bank's shared nodes take its rows from 0, its private owned nodes follow them. Meow.
+    std::vector<long> next_row[2] = {std::vector<long>(BANKS, movable_rows), shared_rows};
+    std::vector<long> next_shared_row(BANKS, 0);
     std::map<int, std::vector<long>> block_next_row;
     for (const auto& [owner, start] : block_start) block_next_row[owner].assign(BANKS, start);
     enc.node_slot.assign(kind.size(), -1);
     for (size_t node = 0; node < kind.size(); node++) {
         const int bank = enc.bank[node];
         if (bank == NO_BANK) continue;
-        const long row = tail(node) ? block_next_row[enc.tail_owner[node]][bank]++ : next_row[row_class(node)][bank]++;
+        const long row = tail(node)   ? block_next_row[enc.tail_owner[node]][bank]++
+                       : shared(node) ? next_shared_row[bank]++
+                                      : next_row[row_class(node)][bank]++;
         enc.node_slot[node] = row * BANKS + bank;
         enc.max_slot = std::max(enc.max_slot, enc.node_slot[node]);
     }
@@ -1192,6 +1205,15 @@ inline bool build_chunks_from_owner(Chunked& ch, std::vector<int> owner, int num
         ch.home[net] = (int)(std::max_element(votes.begin(), votes.end()) - votes.begin());
     }
 
+    // C8: a node is shared when a net homed in another chunk uses it, or (C6) uses one of its macro's
+    // pins -- exactly the nodes the loop below makes external somewhere. Meow.
+    std::vector<char> shared(num_nodes, 0);
+    for (int net : homed_nets)
+        for (int node : g.unique_nodes[net]) {
+            const int unit = g.kind[node] == MACRO_PIN ? g.base_node[node] : node;
+            if (g.work.movable[unit] && ch.owner[unit] >= 0 && ch.owner[unit] != ch.home[net]) shared[unit] = 1;
+        }
+
     ch.chunks.assign(num_chunks, Chunk());
     ch.externals = 0;
     ch.large_dropped = 0;
@@ -1247,6 +1269,8 @@ inline bool build_chunks_from_owner(Chunked& ch, std::vector<int> owner, int num
             e.tail_owner.assign(c.work_node.size(), -1);
             for (size_t l = 0; l < c.work_node.size(); l++) if (c.external[l]) e.tail_owner[l] = ch.owner[c.work_node[l]];
         }
+        e.shared.assign(c.work_node.size(), 0);
+        for (size_t l = 0; l < c.work_node.size(); l++) e.shared[l] = !c.external[l] && shared[c.work_node[l]];
         encode_resolved(e, cfg);
         if (!e.fits || e.num_slots > ch.capacity) return false;
         for (char is_external : c.external) ch.externals += is_external;
@@ -1430,6 +1454,7 @@ inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const st
         dev.group_ends.insert(dev.group_ends.end(), c.enc.span_group_end.begin(), c.enc.span_group_end.end());
         d.slot_beat_offset   = (int32_t)(dev.slot_images.size() / LANES);
         d.num_slot_beats     = (int32_t)(c.enc.num_slots / LANES);
+        d.first_private_slot = (int32_t)c.enc.first_private_slot;
         d.first_tail_slot    = (int32_t)c.enc.first_tail_slot;
         d.first_fixed_slot   = (int32_t)c.enc.first_fixed_slot;
         d.macro_pin_offset   = (int32_t)dev.macro_pins.size();
@@ -1592,6 +1617,23 @@ inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg
                 covered += block.count;
             }
             if (covered != externals || row * BANKS != e.first_fixed_slot) fail("tail blocks do not cover the tail (C7)", k);
+        }
+    }
+    {   // C8: shared marks exactly the owned nodes some chunk borrows, and all of them sit below
+        // first_private_slot, a whole row count inside the owned rows. Meow.
+        std::vector<char> borrowed(ch.global.kind.size(), 0);
+        for (const Chunk& c : ch.chunks)
+            for (size_t l = 0; l < c.work_node.size(); l++) if (c.external[l]) borrowed[c.work_node[l]] = 1;
+        for (int k = 0; k < ch.num_chunks; k++) {
+            const Chunk& c = ch.chunks[k];
+            const Encoded& e = c.enc;
+            if (e.first_private_slot % BANKS || e.first_private_slot > e.first_tail_slot) fail("first_private_slot not a row inside the owned rows (C8)", k);
+            for (size_t l = 0; l < c.work_node.size(); l++) {
+                if (c.external[l]) continue;
+                const bool is_borrowed = borrowed[c.work_node[l]];
+                if ((!e.shared.empty() && e.shared[l]) != is_borrowed) { fail("shared flag differs from the borrowed set (C8)", k); break; }
+                if (is_borrowed && e.node_slot[l] >= e.first_private_slot) { fail("borrowed node above first_private_slot (C8)", k); break; }
+            }
         }
     }
     {   // The partition model (partition.hpp) must count what the builder built, C6 included. Meow.

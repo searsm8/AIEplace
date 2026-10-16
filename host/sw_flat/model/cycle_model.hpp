@@ -6,8 +6,8 @@
 // vck5000/bring_up/beat_packer/cycle_model.hpp @ ef62dba (#47 M0); rewritten for the tail exchange
 // (#47 B3, .claude/1_REVIEW/reports/_NEW_PLAN_47_mailbox_redesign_20261006.md):
 //
-//   TODAY   hpwl_gradient_CU as built (B3): send_tails_pass (owner load + send ops), compute_pass,
-//           merge_tails_pass (owned reload + merge ops + owned drain).
+//   TODAY   hpwl_gradient_CU as built (B3 + C8): send_tails_pass (shared-row load + send ops),
+//           compute_pass, merge_tails_pass (shared-row reload + merge ops + shared-row drain).
 //   FUSED   B4: send and merge ride on iteration_update's chunk-major stream, so send_tails_pass and
 //           merge_tails_pass's reload / drain disappear. Charged instead: each block's beats, written
 //           (send) and read (merge) as if DDR-bound, and merge stalls on a lane that needs more adds
@@ -67,15 +67,15 @@ inline Phases model_cycles(const Chunked& ch, Variant v, int adders_per_lane = 2
     for (int k = 0; k < ch.num_chunks; k++) {
         const Encoded& e = ch.chunks[k].enc;
         const long slot_beats = e.num_slots / LANES, movable_beats = e.first_fixed_slot / LANES;
-        const long owned_beats = e.first_tail_slot / LANES, macro_entries = (long)e.macro_order.size();
+        const long shared_beats = e.first_private_slot / LANES, macro_entries = (long)e.macro_order.size();
         p.load       += slot_beats + O + macro_entries + O;   // load + refresh
         p.beats      += (long)e.issue.size() + NUM_GROUP_ENDS + 2 * O;   // + the dataflow region's fill. Meow.
         p.fold_other += macro_entries + O;                     // the macro-pin fold, compute_pass (C6)
         p.drain      += movable_beats + O;
         if (!chunked) continue;
         if (!fused) {
-            p.send_reload += owned_beats + O;
-            p.fold_other  += owned_beats + O + owned_beats + O;   // merge_tails_pass: reload + drain owned rows
+            p.send_reload += shared_beats + O;
+            p.fold_other  += shared_beats + O + shared_beats + O;   // merge_tails_pass: reload + drain shared rows (C8)
         } else {
             p.update_merge += merge_stall_cycles(ch, k, owner_slot, adders_per_lane);
         }

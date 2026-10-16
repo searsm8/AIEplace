@@ -11,17 +11,18 @@
 // when it uses a node owned elsewhere, its chunk is a BORROWER of that node and keeps a copy of it
 // in a TAIL slot (the packer calls these "externals", C7). A chunk's slots, low to high:
 //
-//     [0, first_tail_slot)                   owned movable slots
+//     [0, first_private_slot)                owned movable slots, every shared one among them (C8)
+//     [first_private_slot, first_tail_slot)  owned movable slots no other chunk borrows
 //     [first_tail_slot, first_fixed_slot)    tail: one block per owner it borrows from
 //     [first_fixed_slot, num_slots)          fixed pins: position only, never a gradient
 //
-//   send_tails_pass   for each owner: load its owned positions, write a copy into every borrower's
-//                     tail block for it (tail_exchange.hpp)
+//   send_tails_pass   for each owner: load its shared rows' positions, write a copy into every
+//                     borrower's tail block for it (tail_exchange.hpp)
 //   compute_pass      for each chunk: load all its positions (zeroing grad in the same pass),
 //                     refresh macro pins, run the gradient beat loop, fold macro pins, and drain
 //                     owned and tail gradients to grad_DDR
-//   merge_tails_pass  for each owner: reload its owned gradients, add in what every borrower drained
-//                     into its tail block for it, drain
+//   merge_tails_pass  for each owner: reload its shared rows' gradients, add in what every borrower
+//                     drained into its tail block for it, drain those rows
 // The two tail passes run only when the design is chunked. Meow.
 //
 // The beat loop is three stages in a DATAFLOW region, joined by streams (hpwl_gradient/):
@@ -131,14 +132,14 @@ static void hpwl_gradient_CU(
     load_offset_table(offset_table_DDR, offset_table_size, offset_BRAM);   // record_gather.hpp
     load_exp_lut(exp_lut_DDR, lut_size, lut_BRAM);   // wa_sums.hpp
 
-    // For each owner: load the positions of the nodes it owns into URAM, then write a copy of every
+    // For each owner: load the positions of its shared rows into URAM, then write a copy of every
     // node another chunk borrows into that borrower's tail block in DDR. After this, every tail
     // slot holds this iteration's position. Meow.
     if (chunked) {
     send_tails_pass:
         for (int j = 0; j < num_chunks; j++) {
             const pinrec::ChunkDesc desc = chunks_DDR[j];
-            load_slot_array(pos_DDR + desc.slot_beat_offset, desc.first_tail_slot / pinrec::LANES, pos_URAM);   // slot_arrays.hpp
+            load_slot_array(pos_DDR + desc.slot_beat_offset, desc.first_private_slot / pinrec::LANES, pos_URAM);   // slot_arrays.hpp
             for (int s = 0; s < desc.num_borrowers; s++)
                 send_tail_block(tail_blocks_DDR[desc.first_tail_block + s], tail_ops_DDR, pos_URAM, pos_DDR);   // tail_exchange.hpp
         }
@@ -167,17 +168,18 @@ compute_pass:
     }
     hpwl_total_fixed = hpwl_sum;
 
-    // For each owner: reload the gradients of the nodes it owns, add in what every borrower computed
-    // in its tail slots for them, and write the totals back. Meow.
+    // For each owner: reload the gradients of its shared rows, add in what every borrower computed
+    // in its tail slots for them, and write the totals back. compute_pass already drained the
+    // private rows, which no borrower adds to. Meow.
     if (chunked) {
     merge_tails_pass:
         for (int j = 0; j < num_chunks; j++) {
             const pinrec::ChunkDesc desc = chunks_DDR[j];
-            const int owned_slot_beats = desc.first_tail_slot / pinrec::LANES;
-            load_slot_array(grad_DDR + desc.slot_beat_offset, owned_slot_beats, grad_URAM);   // slot_arrays.hpp
+            const int shared_slot_beats = desc.first_private_slot / pinrec::LANES;
+            load_slot_array(grad_DDR + desc.slot_beat_offset, shared_slot_beats, grad_URAM);   // slot_arrays.hpp
             for (int s = 0; s < desc.num_borrowers; s++)   // borrowers ascending: each slot's adds in a fixed order
                 merge_tail_block(tail_blocks_DDR[desc.first_tail_block + s], tail_ops_DDR, grad_DDR, grad_URAM);   // tail_exchange.hpp
-            drain_slot_array(grad_URAM, owned_slot_beats, grad_DDR + desc.slot_beat_offset);   // slot_arrays.hpp
+            drain_slot_array(grad_URAM, shared_slot_beats, grad_DDR + desc.slot_beat_offset);   // slot_arrays.hpp
         }
     }
 }

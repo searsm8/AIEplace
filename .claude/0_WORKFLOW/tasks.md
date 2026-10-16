@@ -938,6 +938,16 @@ in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_202
       `chunked_device_arrays(..., fill_tails = true)` writes real positions into the external tails;
       NaN stays the default. `tail_exchange_test` [2] holds it equal to the sent image.
 
+- [x] **C8 shared-first owned rows (2026-10-16, Mark): an interim before B4.** Only 1.4–17% of an
+      owner's slots are borrowed, but they were scattered over 13–69% of its owned beats. Rows inside a
+      bank are free (`assign_node_slots`; colouring fixes only the bank), so each bank's shared nodes
+      now take its lowest rows. `ChunkDesc.first_private_slot` marks the end of that prefix (≈ shared/16
+      beats; banks balance within 0.4 pp), and the send reload and merge reload/drain cover only it.
+      Cycle model, B3 → C8: bigblue4 1.93 M → 1.57 M (−18%), the other 7 −17..−31%; chunk counts,
+      externals, max_slots unchanged. `check_chunked` asserts C8; tail_exchange_test [5] mutant (prefix
+      a row short) bites. Tier 1 PASS, 8/8 real chunked designs PASS. **Not yet re-synthesized** (struct
+      grew 40 → 44 bytes). `.claude/2_ARTIFACTS/borrowed_47/` (census, `m0_1M_c8_20261016.txt`,
+      `c8_real_sweep_20261016.txt`).
 → [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
 
 ---
