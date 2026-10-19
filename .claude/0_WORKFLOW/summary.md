@@ -173,8 +173,8 @@ The hw build is running on the build server, and the card run is next ([[HANDOFF
 ## Also open
 - **#46 — nets above 96 pins are masked, not 100 (LANDED 2026-10-19, `077b4c4`).** sw_only + sw_flat +
   regress configs; registered in `CLAUDE.md`'s divergences. 28/44 designs unaffected (no 97..100-pin
-  net), regress bit-identical. **Open:** the 44-design re-score for new goldens (`results/DSE_20261019_125733/`,
-  launched 10-19; also picks up #49).
+  net), regress bit-identical. **Re-scored** (`results/DSE_20261019_125733/`): ISPD mean 1.0116 (=), MMS 1.0158 (+0.48 pp, mms/adaptec2 +5 pp from #49, not #46);
+  golden NOT archived pending a noise test on mms/adaptec2.
 - **#43 — native parser (CLOSED 2026-10-06; history.md).** `DesignReader.cpp` replaced Limbo (all 44
   parse 5.3× faster). ⚠️ Touching `DesignReader.cpp` or a `DesignSink` (`DataBase`, beat_packer's
   `native_netlist.hpp`) → run `make test-parser` AND `make -C bring_up/beat_packer check-reader`.

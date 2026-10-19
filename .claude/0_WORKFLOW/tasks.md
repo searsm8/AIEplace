@@ -898,9 +898,17 @@ that file.
       `sched_verify` fixture config (its trace was recorded at 100; adaptec1 is unaffected anyway).
 - [x] Registered in `CLAUDE.md` ("Deliberate divergences from XPlace"); `benchmarks.py` notes the
       masked-basis mismatch on the 16.
-- [ ] Re-score both suites through `make dse` → new GOLDEN dirs (ISPD 28, MMS 16), legal-vs-legal vs
-      XPlace. The current goldens also predate #49's double HPWL metric (history.md), so this re-score
-      picks that up too.
+- [x] **Re-scored 2026-10-19** at `077b4c4` (`make dse --designs all`, `vck5000/results/DSE_20261019_125733/`,
+      44/44 GP + LG/DP; compare script `.claude/2_ARTIFACTS/scratch_46/compare_golden.py`). vs the 08-25 goldens:
+      **ISPD median 1.0095 → 1.0095, mean 1.0115 → 1.0116**, within ±2% 22 → 23, better 6 → 5.
+      **MMS median 1.0139 → 1.0136, mean 1.0110 → 1.0158 (+0.48 pp)**, within ±2% 13 → 12. The MMS mean
+      is driven by **mms/adaptec2 +4.99 pp** (GP HPWL 7.365e7 → 7.754e7), adaptec1 +1.02, adaptec3 +0.55,
+      adaptec5 +0.93. **None of adaptec1/2/3 has a 97..100-pin net, so their move is #49 (double HPWL
+      sum) alone** — #49 measured only 13 large designs. Every GP moved (adaptec1 652 → 653 iterations), as
+      #49 changes the schedule's HPWL everywhere. ⚠️ **Not archived as a GOLDEN yet (Mark's call):**
+      mms/adaptec2's +5 pp exceeds #49's "0.5–2% from a 2-ULP nudge" small-design noise. Falsify by
+      noise-testing mms/adaptec2 (init_gamma ±2 ULP at HEAD): if the noise band spans ~5 pp, archive.
+- [ ] Archive new GOLDEN dirs (ISPD 28, MMS 16) once the mms/adaptec2 question is settled.
 - ⚠️ GP-vs-GP *masked* comparisons against XPlace (`benchmarks.py`, masked at 100) change basis;
   legal-vs-legal exact HPWL does not.
 
