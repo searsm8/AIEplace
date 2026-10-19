@@ -140,6 +140,8 @@ AxisResult run_xrt(const xrt::device& device, xrt::kernel& kernel, const AxisInp
 // [1] and [2] for one axis; returns the device's grad image as floats for [3]. Meow.
 std::vector<float> check_axis(const xrt::device& device, xrt::kernel& kernel, const AxisInputs& in, int axis, int& failures)
 {
+    printf("[info]        axis %d: %zu chunks, %zu record beats, %zu slot beats, %zu tail ops (the kernel's work)\n",
+           axis, in.dev.desc.size(), in.records.size(), in.pos.size(), in.dev.tail_ops.size());
     const AxisResult golden = run_gpp(in);
     const AxisResult hw = run_xrt(device, kernel, in);
 

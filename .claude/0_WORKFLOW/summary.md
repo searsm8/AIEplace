@@ -104,7 +104,7 @@
   drift within noise apart from one best-solution flip. **Step 6's golden = sw_flat `pl+Bprime`.** It also found
   sw_only's float HPWL error, fixed by #49 ([[_NEW_REPORT_45_pl_arithmetic_20261016.md]]). **Step 8 brought forward
 (10-19):** `hpwl_gradient_CU` is a Vitis kernel at 250 MHz (`make -C pl xclbin`). Through XRT
-(`make -C host/sw_flat hpwl-gradient-xrt`), sw_emu 4/4 and hw_emu (synthetic, 16 chunks) are bit-exact vs the g++ CU.
+(`make -C host/sw_flat hpwl-gradient-xrt`), sw_emu 4/4 and hw_emu 3/3 (synthetic with 16 chunks, pci_bridge32_b, fft_a) are bit-exact vs the g++ CU.
 The hw build is running on the build server, and the card run is next ([[HANDOFF_45_hpwl_gradient_hw_flow_20261019.md]]).
 **Then:** step 6, density path.
   → [[_NEW_PLAN_45_integration_20261006.md]]

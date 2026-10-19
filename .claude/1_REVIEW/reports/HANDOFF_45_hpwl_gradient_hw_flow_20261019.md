@@ -25,6 +25,14 @@ starts here. Not started: this file is the brief.*
   `hpwl_total_fixed` is equal. Each axis took ~7 min of wall-clock simulation; the whole run took 16 min,
   including the QEMU boot. The hw_emu build took ~26 min: `-c` (HLS) ~10 min, `-l` ~15 min.
   The float RTL agrees bit for bit with g++, unlike Vitis C sim (noteToSelf, FMA).
+- **hw_emu on real designs: 2/2 PASS, bit-exact.** All three checks passed on both designs ([1] image,
+  [2] HPWL, [3] owned slots = sw_flat):
+  - mgc_pci_bridge32_b: 5,533 record beats, 1,890 slot beats; ~3.6 min of simulation per axis.
+  - mgc_fft_a: 6,668 record beats, 2,162 slot beats; ~4.6 min per axis.
+
+  The whole run took 22 min. Both designs are single-chunk, so the tail exchange is covered only by the
+  synthetic run. Simulation time is roughly proportional to the work (the host prints it as `[info]`). By that
+  measure, the 44 designs other than these smallest ones are hours each.
 - **HLS at 250 MHz** (hw_emu `-c`, `pl/build/hw_emu/reports/.../hpwl_gradient_CU_top_csynth.rpt`):
   est. 3.543 ns (282 MHz) vs a 4.00 ns target. BRAM_18K 282 (14%), DSP 708 (35%), FF 270 K (14%),
   LUT 264 K (29%), URAM 64 (13%, an HLS estimate; #41 measured 128 per 1 M-slot array after implementation).
