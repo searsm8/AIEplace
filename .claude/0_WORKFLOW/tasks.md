@@ -949,12 +949,13 @@ in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_202
       Cycle model, B3 → C8: bigblue4 1.93 M → 1.57 M (−18%), the other 7 −17..−31%; chunk counts,
       externals, max_slots unchanged. `check_chunked` asserts C8; tail_exchange_test [5] mutant (prefix
       a row short) bites. Tier 1 PASS, 8/8 real chunked designs PASS. **C-synth at `a98b3fe` (build
-      server, worktree `~/AIEplace_c8`, branch `c8_synth`):** every pipelined loop II=1, Fmax est.
+      server, in a since-removed worktree):** every pipelined loop II=1, Fmax est.
       287.2 MHz, both unchanged; +222 FF / +48 LUT (ChunkDesc 40 → 44 bytes). The top-level −1.05 ns
       "Timing" flag is identical at B3's `48fb9fa`. **RTL co-sim (capacity 1536, 16 chunks): hazard 4
       PASS** (rel_rms 4.3e-7 / 3.4e-7), **hazard 1 FAILS as required** (rel_rms 2.5e2 / 1.9e2; its C-sim
-      pre-run passes, as it should). Logs: build:`~/AIEplace_c8/pl/synth/hpwl_gradient_CU/cosim/`. `.claude/2_ARTIFACTS/borrowed_47/` (census, `m0_1M_c8_20261016.txt`,
-      `c8_real_sweep_20261016.txt`).
+      pre-run passes, as it should). `.claude/2_ARTIFACTS/borrowed_47/` (census,
+      `m0_1M_c8_20261016.txt`, `c8_real_sweep_20261016.txt`, and `c8_synth_20261016/`: csynth.rpt +
+      both co-sim logs).
 - [ ] **R = resident shared region, measured (2026-10-16, Mark's idea; an alternative to B4, not
       chosen).** Every shared node gets one slot, the same in every chunk, in rows that stay on chip
       all iteration: no tails, no send, no merge, and `iteration_update` unchanged. Census at 1 M, 8/8
