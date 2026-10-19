@@ -876,7 +876,7 @@ that file.
 - [ ] Set `ignore_net_degree = 96` in `default_config.toml`; re-score both suites through `make dse`
       → new GOLDEN dirs (ISPD 28, MMS 16), legal-vs-legal vs XPlace. The current goldens also predate
       #49's double HPWL metric (history.md), so this re-score picks that up too. Run the suites
-      separately, or fix dse.py's lgdp.json key first: ISPD2005 and MMS share design names.
+      together or separately (dse.py labels carry the suite since 2026-10-19).
 - [ ] Register the divergence in `CLAUDE.md` ("Deliberate divergences from XPlace").
 - [ ] Decide whether the frozen `test/regress` configs move to 96 (regenerate with `--reason`) or
       stay at 100 as the stability tripwire.

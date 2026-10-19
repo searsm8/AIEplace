@@ -189,7 +189,10 @@ def build_runs(args):
 
                 columns = {"grid": grid if grid is not None else "auto"}
                 columns.update({k.rsplit(".", 1)[-1]: overrides[k] for k in swept})
-                label = f"{meta['name']}@{columns['grid']}"
+                # The suite is part of the label: ISPD2005 and MMS share design names (bigblue1...),
+                # and the label keys lgdp.json -- without it one suite's LG+DP overwrote the
+                # other's in a mixed sweep (#49). Meow.
+                label = f"{path.replace('/', '_')}@{columns['grid']}"
                 label += "".join(f"_{k}={columns[k]}" for k in col_keys[1:])
                 runs.append((label, overrides, columns))
     return runs, col_keys
@@ -552,6 +555,12 @@ def main():
         runs, col_keys = build_runs(args)
         if not runs:
             raise SystemExit("DSE: nothing to run")
+        # A label keys lgdp.json and names lgdp/<label>/, so two runs sharing one would silently
+        # swap LG+DP results. Meow.
+        labels = [label for label, _, _ in runs]
+        repeated = sorted({label for label in labels if labels.count(label) > 1})
+        if repeated:
+            raise SystemExit(f"dse: refusing to launch -- run labels are not unique: {repeated}")
         sweep_dir = "results/DSE_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         if args.dry_run:
             for n, (label, overrides, columns) in enumerate(runs, 1):

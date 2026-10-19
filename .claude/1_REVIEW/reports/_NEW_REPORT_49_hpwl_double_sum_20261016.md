@@ -93,6 +93,14 @@ order; run order was confirmed against `configs/run_NNN.toml`. **Any earlier swe
 and MMS designs has the same corruption.** The archived goldens ran the two suites separately, so they
 are unaffected. Needs a fix: key on `suite/name@grid`.
 
+> **Fixed 2026-10-19.** Run labels now carry the suite (`ispd2005_bigblue1@512`), and dse.py refuses to
+> launch (dry-run included) when two runs share a label. The guard was checked by restoring the old
+> label: it refuses `adaptec1@512`. A mixed sweep (`DSE_20261019_103057`: ispd2005/adaptec1 +
+> mms/adaptec1) keeps separate lgdp.json entries and the right DP on each row. An audit of the 34
+> surviving sweeps under `vck5000/results/` and `.claude/2_ARTIFACTS/` found duplicate labels **only in
+> this run** (and its archived copy, now flagged by a README). `--resume` on an old sweep reuses the
+> labels in that sweep's `sweep.json`, so old sweeps resume unchanged.
+
 ## What's next
 - The archived goldens are pre-fix. On small designs the fix moves results by noise only. A full
   re-score would fold naturally into #46's re-score, which needs both suites anyway.

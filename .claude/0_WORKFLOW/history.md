@@ -104,6 +104,9 @@ this one fix.
 - Open, not done here: the `dse.py` lgdp.json key collision (`name@grid` without the suite) that
   corrupted 4 of this run's 8 bigblue rows in `dse_results.csv` (recovered from `dse.log`). The
   archived goldens are pre-fix; a full re-score fits with #46's.
+  > *Annotation 2026-10-19:* the collision is **fixed** (labels carry the suite, and duplicate labels
+  > refuse to launch). A mixed-suite sweep was verified, and the audit found no other affected sweep.
+  > See the report's "Fixed 2026-10-19" note.
 
 → [[_NEW_REPORT_49_hpwl_double_sum_20261016.md]], `.claude/2_ARTIFACTS/results/HPWL_double_sum_20261016/`
 
