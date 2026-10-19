@@ -750,7 +750,11 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
 
 **State:** steps 1–5b done (5 bit-identical to sw_only; 5b: sw_flat's `pl+Bprime` config computes the
 gradient + HPWL bit-exact to `hpwl_gradient_CU`, drift within noise). **Next: step 6**, density path
-in slot order, each module vs sw_flat `pl+Bprime`. Done 2026-10-06 as low-hanging fruit: gradient `max_rel` 1e-3
+in slot order, each module vs sw_flat `pl+Bprime`. **Step 8 brought forward (2026-10-19, Mark: (a) 250 MHz,
+emulation first, a baseline to improve on):** `make -C pl xclbin TARGET=...` plus the XRT host
+`make -C host/sw_flat hpwl-gradient-xrt`. **sw_emu 4/4 and hw_emu (synthetic, 16 chunks) PASS bit-exact** vs
+the g++ CU. The hw build was launched on the build server 10-19, commit `3b8a1b9`; the card run is next.
+→ [[HANDOFF_45_hpwl_gradient_hw_flow_20261019.md]]. Done 2026-10-06 as low-hanging fruit: gradient `max_rel` 1e-3
 (`vck5000/test/wa_gradient_golden.hpp`; newblue3 / mms/bigblue4 / newblue7 now pass, rel_rms still
 1e-5-bounded); `make test` 21/21 PASS.
 - [x] **Decisions, second round (Mark, 2026-10-06):** D1 mailbox A now / C later / B fallback; D2

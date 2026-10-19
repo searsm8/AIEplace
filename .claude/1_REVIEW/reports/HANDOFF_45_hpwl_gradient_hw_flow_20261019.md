@@ -21,6 +21,23 @@ starts here. Not started: this file is the brief.*
   bigblue4 (3 chunks, 2.17 M owned slots). sw_emu runs the kernel as compiled C, so it checks the XRT plumbing
   (buffers, argument order, slot images, readback), not the RTL.
 - `make -C pl test` is still PASS. The kernel top is not part of tier 1.
+- **hw_emu: synthetic PASS, bit-exact** on the RTL. Both axes match: 0 of 17,344 slots differ and
+  `hpwl_total_fixed` is equal. Each axis took ~7 min of wall-clock simulation; the whole run took 16 min,
+  including the QEMU boot. The hw_emu build took ~26 min: `-c` (HLS) ~10 min, `-l` ~15 min.
+  The float RTL agrees bit for bit with g++, unlike Vitis C sim (noteToSelf, FMA).
+- **HLS at 250 MHz** (hw_emu `-c`, `pl/build/hw_emu/reports/.../hpwl_gradient_CU_top_csynth.rpt`):
+  est. 3.543 ns (282 MHz) vs a 4.00 ns target. BRAM_18K 282 (14%), DSP 708 (35%), FF 270 K (14%),
+  LUT 264 K (29%), URAM 64 (13%, an HLS estimate; #41 measured 128 per 1 M-slot array after implementation).
+- `v++ -p` writes its hw_emu boot/sim files to the cwd. `--package.out_dir $(HW_DIR)` keeps them in the
+  build dir (verified by re-packaging hw_emu).
+- **hw build LAUNCHED on the build server** at 2026-10-19 17:21 (server time), commit `3b8a1b9`, in
+  tmux session `hpwl_hw` (`pl/build/hw/run_build.sh`). Its log is `pl/build/hw/xclbin.log`. It writes
+  `pl/build/hw/done` (exit code + date) when finished. `3b8a1b9` predates the `--package.out_dir` fix, so
+  the server's `pl/` will get the package strays (untracked, harmless; delete them).
+  **Next:** read `done`, then timing and utilization from `pl/build/hw/reports/link/imp/`. On the card, the
+  XRT host has to be built on the server: its XRT is under `/opt/xilinx/xrt_*`, and `setup_env.sh`
+  assumes `/opt/xilinx/xrt`. Run `TARGET=hw make -C host/sw_flat hpwl-gradient-xrt`. The default
+  designs include bigblue4.
 
 ## The question Mark asked
 "Are we ready to build and test the full hw implementation of `hpwl_gradient_CU`?"

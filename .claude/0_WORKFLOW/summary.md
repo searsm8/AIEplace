@@ -102,7 +102,11 @@
   ([[_NEW_REPORT_45_slot_order_sums_20261014.md]]). **Step 5b part 2 (10-16):** `wa_sums`/`grad_merge`/`hpwl`
   switches make sw_flat's gradient + int64 HPWL **bit-exact to `hpwl_gradient_CU`** on 6/6 (chunked, macros);
   drift within noise apart from one best-solution flip. **Step 6's golden = sw_flat `pl+Bprime`.** It also found
-  sw_only's float HPWL error, fixed by #49 ([[_NEW_REPORT_45_pl_arithmetic_20261016.md]]). **Next:** step 6, density path.
+  sw_only's float HPWL error, fixed by #49 ([[_NEW_REPORT_45_pl_arithmetic_20261016.md]]). **Step 8 brought forward
+(10-19):** `hpwl_gradient_CU` is a Vitis kernel at 250 MHz (`make -C pl xclbin`). Through XRT
+(`make -C host/sw_flat hpwl-gradient-xrt`), sw_emu 4/4 and hw_emu (synthetic, 16 chunks) are bit-exact vs the g++ CU.
+The hw build is running on the build server, and the card run is next ([[HANDOFF_45_hpwl_gradient_hw_flow_20261019.md]]).
+**Then:** step 6, density path.
   → [[_NEW_PLAN_45_integration_20261006.md]]
 - **Building blocks (#41/#42, closed 2026-10-06; history.md):** chunked gradient tier-1 exact, II=1,
   post-route 3.955 ns vs 3.33; one axis 256 of 463 URAM; FM 1 pass 0.38× externals.
