@@ -3,6 +3,25 @@
 *2026-10-19. Branch `pl_algo`, HEAD `5340ac4`. Written at the end of a long session; the next session
 starts here. Not started: this file is the brief.*
 
+## Progress (2026-10-19, second session): flow built, sw_emu PASS
+**Mark's choice: (a), 250 MHz, emulation first.** The goal is a baseline hardware build to improve on.
+300 MHz timing comes later.
+- **`make -C pl xclbin TARGET=sw_emu|hw_emu|hw`** (after `source setup_env.sh`). It runs v++ `-c` → `-l` → `-p`
+  into `pl/build/$TARGET/`. `--hls.clock` and `--clock.freqHz` are both `KERNEL_FREQ_HZ ?= 250000000`.
+  Connectivity is v++'s default (no `--connectivity.sp`). The `/mnt/` PATH strip is inside the recipe.
+  The sw_emu build takes about 3 min.
+- **Kernel top change:** `hpwl_total_fixed` moved from `s_axilite` to `m_axi` bundle `gmem5`. On s_axilite,
+  kernel.xml listed it as a scalar `void*` register (addressQualifier 0), which XRT cannot read back.
+  It gets its own bundle because 64 bits on gmem9 would cost gmem9's 32-bit tables their bursts (noteToSelf).
+- **XRT host:** `host/sw_flat/test/hpwl_gradient_xrt.cpp` and `make -C host/sw_flat hpwl-gradient-xrt TARGET=...`
+  (`test/hpwl_gradient_xrt.sh`). Per axis there is one kernel run. Checks: [1] the whole grad image (NaN-prefilled)
+  is bit-equal to the same CU run in g++; [2] `hpwl_total_fixed` is equal; [3] every OWNED slot is bit-equal
+  to sw_flat. A `synthetic` mode runs the co-sim's design (1225 nodes, 16 chunks at capacity 1536) for hw_emu.
+- **sw_emu: 4/4 PASS, bit-exact.** The four designs are synthetic (16 chunks), mgc_fft_a, mms/adaptec1, and
+  bigblue4 (3 chunks, 2.17 M owned slots). sw_emu runs the kernel as compiled C, so it checks the XRT plumbing
+  (buffers, argument order, slot images, readback), not the RTL.
+- `make -C pl test` is still PASS. The kernel top is not part of tier 1.
+
 ## The question Mark asked
 "Are we ready to build and test the full hw implementation of `hpwl_gradient_CU`?"
 **Answer: the module is ready; the flow around it is not.** Nothing in `pl/` can produce an xclbin or

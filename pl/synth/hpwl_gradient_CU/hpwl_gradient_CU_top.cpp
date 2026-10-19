@@ -34,7 +34,9 @@ extern "C" void hpwl_gradient_CU_top(
 #pragma HLS INTERFACE m_axi port=tail_ops       bundle=gmem4 offset=slave max_widen_bitwidth=32
 #pragma HLS INTERFACE m_axi port=offset_table   bundle=gmem9 offset=slave max_widen_bitwidth=32
 #pragma HLS INTERFACE m_axi port=exp_lut        bundle=gmem9 offset=slave max_widen_bitwidth=32
-#pragma HLS INTERFACE s_axilite port=hpwl_total_fixed
+// m_axi, not s_axilite: a pointer on s_axilite becomes a write-only control register that XRT cannot
+// read back. Own bundle: 64 bits on gmem9 would cost its 32-bit tables their bursts. Meow.
+#pragma HLS INTERFACE m_axi port=hpwl_total_fixed bundle=gmem5 offset=slave
 #pragma HLS INTERFACE m_axi port=grad           bundle=gmem8 offset=slave
 
     hpwl_gradient_CU(chunks, group_ends, num_chunks, records, pos, macro_pins, tail_blocks, tail_ops, offset_table, offset_table_size, exp_lut, lut_size, grad,

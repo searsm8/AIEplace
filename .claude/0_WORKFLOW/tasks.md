@@ -1,11 +1,10 @@
 # Tasks
 
-**Active Task (2026-10-15): #48 phase 2 — B' device side landed in `density_map_CU`; next turn B' on in
-the step-6 golden config.** → [[REPORT_48_overflow_map_20261015.md]].
-(#45 steps 1-5b done 2026-10-16: sw_flat `pl+Bprime` is bit-exact to `hpwl_gradient_CU`. **Next #45
-work, handed off 2026-10-19: a v++/XRT hardware test flow for `hpwl_gradient_CU`** (step 8 brought
-forward; Mark to pick 250 MHz-first vs timing-first) → [[HANDOFF_45_hpwl_gradient_hw_flow_20261019.md]].
-Step 6, the density path, is still next on the plan.)
+**Active Task (2026-10-19): #45 step 8 brought forward — a v++/XRT hardware baseline for
+`hpwl_gradient_CU`.** Mark: 250 MHz, emulation first; a baseline to improve on, 300 MHz timing later.
+→ [[HANDOFF_45_hpwl_gradient_hw_flow_20261019.md]]. Step 6, the density path, is still next on the
+plan after this. (#48 phase 2: B' is on in step 6's golden `pl+Bprime` since 10-16; only the optional
+bigblue3/4 grid-1024 trajectory check is left.)
 
 Open work, one section per task. **Status lives here; evidence lives in a
 report.** Don't reuse task numbers, find the highest number and add one.
@@ -1125,6 +1124,9 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       rho still bit-equal 44/44 (now with the exact base). pl tier-1 [5] OVERFLOW vs double, 2.6e-6.
       **C-synth passes** (new `pl/synth/density_map_CU/`): `reduce` II=1, 65.5K cycles ≈ 0.22 ms at
       1024 (HLS infers rho_URAM cyclic-16 from it). `.claude/2_ARTIFACTS/scratch_48/density_map_check_44_overflow_20261015.txt`
-- [ ] **Phase 2: turn B' on in the step-6 golden config ← next.** Optional: bigblue3/4 trajectory at
-      grid 1024 (the drift ran at 2048, where fewer fixed nodes are stretched).
+- [x] **Phase 2: turn B' on in the step-6 golden config.** Done 2026-10-16 in #45 step 5b part 2: the
+      `pl+Bprime` variant (`host/sw_flat/test/sum_order_drift.py`) is step 6's golden, measured on 5
+      designs, all converged ([[_NEW_REPORT_45_pl_arithmetic_20261016.md]]). Box closed 2026-10-19.
+- [ ] **Optional: bigblue3/4 trajectory at grid 1024** (the drift ran at 2048, where fewer fixed nodes
+      are stretched). Before step 6 quotes numbers.
 → [[_NEW_PLAN_48_density_onchip_20261014.md]]
