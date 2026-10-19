@@ -56,6 +56,17 @@ load_lut:
     for (int copy = 0; copy < EXP_LOOKUPS; copy++) lut_BRAM[copy][lut_size - 1] = LutPair{prev, 0.0f};   // never read: idx < lut_size-1
 }
 
+// LANE_NET.of[degree_idx][i] = i / degree, lane i's net in a beat: a 15-entry ROM per lane, so stage B
+// builds no per-lane divider to read PinBeat's per-net bbox (a runtime i / degree cost +34 K LUT). Meow.
+struct LaneNetTable {
+    unsigned char of[pinrec::NET_DEGREES_PROCESSED][pinrec::LANES];
+    constexpr LaneNetTable() : of() {
+        for (int d = 0; d < pinrec::NET_DEGREES_PROCESSED; d++)
+            for (int i = 0; i < pinrec::LANES; i++) of[d][i] = (unsigned char)(i / (d + pinrec::MIN_NET_DEGREE));
+    }
+};
+static constexpr LaneNetTable LANE_NET{};
+
 struct NetSums {
     float Bp[pinrec::MAX_NETS_PER_BEAT], Cp[pinrec::MAX_NETS_PER_BEAT];
     float Bm[pinrec::MAX_NETS_PER_BEAT], Cm[pinrec::MAX_NETS_PER_BEAT];
@@ -115,8 +126,9 @@ wa_sums_loop:
             const float x = pb.x[i];
             // Each lane uses two lut_BRAM copies, one for a+ and one for a-, so the two reads can happen in one cycle.
             // Therefore, 32 lut_BRAM copies required to service 16 lanes at once.
-            const float net_max = f.large ? large_bbox.hi : pb.net_max[i];
-            const float net_min = f.large ? large_bbox.lo : pb.net_min[i];
+            const int   net     = LANE_NET.of[degree_idx][i];
+            const float net_max = f.large ? large_bbox.hi : pb.net_max[net];
+            const float net_min = f.large ? large_bbox.lo : pb.net_min[net];
             sb.a_plus[i]  = pb.empty[i] ? 0.0f : lut_exp_pair(lut_BRAM[2 * i],     lut_size, inv_lut_step, net_max - x);
             sb.a_minus[i] = pb.empty[i] ? 0.0f : lut_exp_pair(lut_BRAM[2 * i + 1], lut_size, inv_lut_step, x - net_min);
             Bp_terms[i] = sb.a_plus[i];  Cp_terms[i] = sb.a_plus[i] * x;

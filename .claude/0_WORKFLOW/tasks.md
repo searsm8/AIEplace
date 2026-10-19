@@ -768,8 +768,11 @@ mgc_fft_a) PASS bit-exact** vs the g++ CU. The hw build was launched on the buil
       `pin_record_test`: 13 checks pass; 4/4 header mutants make `make -C pl test` exit non-zero
       (`.claude/2_ARTIFACTS/scratch_45/pl_runner_mutants.sh`).
 - [x] **Step 2: `hpwl_gradient_CU` (2026-10-06).** Also `reduce_window` → `balanced_tree`,
-      `TreeOutputs` removed, calls annotated with their files (Mark). Open (Mark): de-duplicate
-      `PinBeat.net_max/net_min` (per-lane copies of per-net values, ~25% of the A→B FIFO width).
+      `TreeOutputs` removed, calls annotated with their files (Mark). **Done 2026-10-19:** `PinBeat.net_max/net_min`
+      de-duplicated to one bbox per net (8, not 16 lanes); stage B maps lane → net through a constexpr
+      ROM (`LANE_NET`, wa_sums.hpp). A runtime `i / degree` there instead cost +34 K LUT and 7 pipeline
+      stages. C-synth vs HEAD: A→B FIFO 2132 → 1620 bits, LUT 278,546 → 265,799, FF ≈ (300 K), II=1 and
+      depth unchanged; `make -C pl test` and `check-record-stream` 6/6 bit-exact. Meow.
       Step 2 detail:
       - **2a restructure** (`8e94220`): 8 bring_up headers → `pl/src/modules/hpwl_gradient_CU.hpp` +
         `hpwl_gradient/` (7 files); all 44 definitions character-identical, legacy vs new outputs

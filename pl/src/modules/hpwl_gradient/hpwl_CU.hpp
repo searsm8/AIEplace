@@ -32,12 +32,13 @@ struct BeatFlags {
     int  span;    // beats the net occupies: 1 for a small net, 2..MAX_SPAN for a large one. Meow.
 };
 
-// What one beat leaves stage A with. Per-lane bbox for small nets, so stage B needs no degree/segment
-// logic for it; a large net's bbox arrives separately (net_bboxes). Meow.
+// What one beat leaves stage A with. One bbox per small net in the beat, not per lane: stage B maps
+// lane i to net i / degree, which halves the bbox width of the A->B FIFO. A large net's bbox arrives
+// separately (net_bboxes). Meow.
 struct PinBeat {
-    float     x[pinrec::LANES];          // pin position (node position + offset)
-    float     net_max[pinrec::LANES];    // this lane's net bbox (small nets)
-    float     net_min[pinrec::LANES];
+    float     x[pinrec::LANES];                // pin position (node position + offset)
+    float     net_max[pinrec::MAX_NETS_PER_BEAT];   // bbox of the beat's k-th small net
+    float     net_min[pinrec::MAX_NETS_PER_BEAT];
     uint32_t  slot_idx[pinrec::LANES];   // for the merge and scatter in stage C
     bool      empty[pinrec::LANES];
     int       degree;                    // LANES on a large-net beat
@@ -92,9 +93,11 @@ hpwl_CU_loop:
 #pragma HLS ARRAY_PARTITION variable=net_min complete dim=0
         dhar_tree<MaxOp>(pb.x, net_max);
         dhar_tree<MinOp>(pb.x, net_min);
+        for (int k = 0; k < pinrec::MAX_NETS_PER_BEAT; k++) {
+            pb.net_max[k] = net_max[degree_idx][k];
+            pb.net_min[k] = net_min[degree_idx][k];
+        }
         for (int i = 0; i < pinrec::LANES; i++) {
-            pb.net_max[i]  = net_max[degree_idx][i / degree];
-            pb.net_min[i]  = net_min[degree_idx][i / degree];
             pb.slot_idx[i] = d.slot_idx[i];
             pb.empty[i]    = d.empty[i];
         }
