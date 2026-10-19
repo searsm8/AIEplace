@@ -48,6 +48,17 @@ starts here. Not started: this file is the brief.*
   **Timing is NOT met at 250 MHz:** post-place physopt WNS −0.615 ns (TNS −646), and early routing
   WNS −0.629 ns. If the failing clock is the 4.0 ns kernel clock, that is ~4.63 ns ≈ 216 MHz. Which clock
   fails, and whether v++ scales the clock down or refuses, is not known until route finishes.
+  **250 MHz FAILED at 20:17 (write_device_image, VPL 101-2).** The kernel clock `clkout1_primitive` is
+  "unscalable" on this platform, so v++ does not lower the clock; it refuses. Routed WNS is **−0.729 ns**,
+  TNS −5,902 over 22,902 of 438,743 endpoints, which puts Fmax at ~211 MHz. Worst path:
+  `pos_URAM_1` read → `send_tail_block` send_ops pipeline register, 3 logic levels, **65% route delay**.
+  So the tail exchange's URAM read is the first thing to pipeline when we chase the clock. Route took 57 min.
+  The reports are kept on the server in `pl/build/hw_250MHz_failed/` (dr_timing_summary.rpt, util reports, log).
+- **200 MHz build LAUNCHED 20:25** (server time), tmux `hpwl_hw`, same script with `KERNEL_FREQ_HZ=200000000`.
+  It runs at `b3d0e87`, which includes `2c9dd6b` (one bbox per net, which changes `hpwl_CU.hpp`/`wa_sums.hpp`),
+  so the `.xo` is re-synthesized at 200 MHz. On that HEAD, locally: tier 1 4/4 PASS, sw_emu 4/4 PASS
+  bit-exact, and **hw_emu re-run on the new kernel: synthetic (16 chunks) and mgc_fft_a PASS, bit-exact**
+  (all three checks).
   **Next:** read `done`, then timing and utilization from `pl/build/hw/reports/link/imp/`. On the card, the
   XRT host has to be built on the server: its XRT is under `/opt/xilinx/xrt_*`, and `setup_env.sh`
   assumes `/opt/xilinx/xrt`. Run `TARGET=hw make -C host/sw_flat hpwl-gradient-xrt`. The default
