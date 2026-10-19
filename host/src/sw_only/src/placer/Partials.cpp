@@ -95,7 +95,7 @@ void Placer::computeHpwlPartials_CPU()
     // (clock/reset/scan spanning the die) are excluded from the wirelength gradient. Their
     // WA gradient pulls hundreds of unrelated cells and is noise for placement; XPlace drops
     // them from both the gradient and the HPWL metric (see computeTotalWirelength).
-    int ignore_net_degree = cfg["params"]["ignore_net_degree"].value_or(100);
+    int ignore_net_degree = cfg["params"]["ignore_net_degree"].value_or(96);
     const auto& nets = db.getNetsVector();
     if (g_deterministic) buildPinPartialIndex();
 
@@ -291,7 +291,7 @@ void Placer::computeHpwlPartials_simple()
 
     const float range = hpwl_lut_range;
 
-    int ignore_net_degree = cfg["params"]["ignore_net_degree"].value_or(100); // XPlace net_mask
+    int ignore_net_degree = cfg["params"]["ignore_net_degree"].value_or(96); // XPlace net_mask
     const auto& nets = db.getNetsVector();
 
     #pragma omp parallel for schedule(dynamic, 256) if(!g_deterministic)

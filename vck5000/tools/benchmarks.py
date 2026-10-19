@@ -152,7 +152,7 @@ _XPLACE_MMS_MIXED_GP = {
 # per-iteration "masked_hpwl:" lines including the one in "GP Stop!", whereas get_obj_hpwl() ->
 # get_hpwl() calls hpwl_cuda.hpwl() with NO mask and produces every number in this table.
 # So compare against sw_only's "Final HPWL (exact, all nets)" (final_hpwl_exact, Output.cpp:511,
-# threshold 1e9), NOT "Final HPWL" (final_hpwl, masked at ignore_net_degree = 100). On MMS
+# threshold 1e9), NOT "Final HPWL" (final_hpwl, masked at ignore_net_degree = 96 since #46). On MMS
 # adaptec1 the two differ by 0.06% -- small, but it is 2 nets of 221142 and it is free to get right.
 #
 # Use post_dp_hpwl as the quality metric, NOT post_gp_hpwl: legalization costs 1-8% HPWL and an
@@ -272,7 +272,9 @@ def xplace_hpwl_in_sw_frame(path, hpwl):
 
 
 # XPlace GP-only MASKED HPWL -- the "GP Stop! ... masked_hpwl:" line, nets > ignore_net_degree
-# dropped. This is the reference that pairs with sw_only's masked "Best GP HPWL" (both mask), and
+# dropped. XPlace masks above 100 pins, sw_only above 96 (#46): on the 16 designs with 97..100-pin
+# nets (bigblue2/3/4, superblue*, mms adaptec5/newblue3/4/5/7) masked-vs-masked is off by those
+# nets (<= 0.27% of pins). The legal-vs-legal headline is unmasked and unaffected. Meow. This is the reference that pairs with sw_only's masked "Best GP HPWL" (both mask), and
 # it is NOT the exact post-GP number in _XPLACE_ISPD_FINAL[0] -- on mgc_superblue12 the two differ
 # 7.9% (masked 2.342e8 vs exact 2.527e8), so pairing exact-with-masked would inject that error.
 # ispd2005 values are raw DBU (bookshelf frame == ours); ispd2015 values are XPlace's SITE-UNIT

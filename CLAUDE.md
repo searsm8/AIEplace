@@ -172,6 +172,11 @@ touch one, check here first.
   canonical; Density.cpp `computeOverflow`; density_bin.hpp; density_bin_model.cpp) — they
   disagreed once and that was TODO #34. A keep-scale-and-fix-the-fixed-node-field alternative is
   recorded in #35 but not taken.
+- **Nets above 96 pins are masked, not above 100** (`ignore_net_degree = 96`, sw_only and sw_flat).
+  Landed 2026-10-19, Mark-authorized (TODO #46): 96 is the PL record stream's largest net, so the
+  golden and the device mask the same nets. 28 of 44 designs have no 97..100-pin net (bit-identical);
+  on the other 16 it is ≤ 0.27% of pins. Masked GP-vs-GP against XPlace (masked at 100) is off by
+  those nets there; the legal-vs-legal headline is unmasked. Meow.
 
 ## pl_algo current state
 **Moving (2026-10-06, #45):** integration restarts in a new top-level `/AIEplace/pl`, slot order

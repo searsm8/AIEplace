@@ -26,11 +26,12 @@ density_compute_method  = "cpu" # choose: cpu (only option in sw_only; AIE/PL of
 # Set it here (or per-run) only to force a fixed grid (ad-hoc override / AIE datapath).
 bins_per_row = 512              # EXPLICIT: bookshelf has no placement.constraints
 wirelength_method = "HPWL"      # choose: HPWL
-ignore_net_degree = 100         # XPlace net_mask: nets with more pins than this are excluded
-                                 # from BOTH the WA wirelength gradient and the HPWL metric
-                                 # (matches XPlace ignore_net_degree=100). Makes reported HPWL
-                                 # apples-to-apples with XPlace's masked numbers. Set very
-                                 # large to include all nets (legacy behavior).
+ignore_net_degree = 96          # XPlace net_mask: nets with more pins than this are excluded
+                                 # from BOTH the WA wirelength gradient and the HPWL metric.
+                                 # 96, not XPlace's 100: the PL record stream's largest net
+                                 # (#46, a deliberate divergence). 16 of 44 designs have 97..100-pin
+                                 # nets (<= 0.27% of pins); only there does the masked HPWL differ
+                                 # from XPlace's masked basis. Set very large to include all nets. Meow.
 enable_backtracking = true      # whether to use backtracking line search for step length selection
 enable_momentum     = true      # whether to use momentum in the optimization (Nesterov Accelerated Gradient)
 enable_filler       = true      # whether to include filler cells in placement (XPlace always does)

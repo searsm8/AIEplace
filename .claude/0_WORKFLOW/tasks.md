@@ -864,6 +864,12 @@ mgc_fft_a) PASS bit-exact** vs the g++ CU. The hw build was launched on the buil
       → [[_NEW_REPORT_45_slot_order_sums_20261014.md]]
 - [ ] Steps 6–9 (density path in slot order → compose → hardware → retire `/vck5000`), each with its
       verification, in the plan.
+- [ ] **sw_flat DEF / `.pl` writer, so `dse.py` can score it legal-vs-legal.** Step 5 called it
+      redundant while sw_flat was bit-identical to sw_only; the `pl+Bprime` golden (5b) no longer is,
+      so this is now needed before any quality claim for it, and before sw_flat replaces sw_only as
+      the golden (D3). It also enables the final-position hash check step 5 skipped. Meow.
+- [ ] FlatDesign has no PLACED flag (step 5 report): a no-op on all 44 (none is PLACED), a gap if
+      such a design arrives. Meow.
 - Carried in: #41's timing / NMU check / URAM-resident loop; #42's widening choice, now contested by
   #47 (producer-side duplication; touches steps 4 and 6).
 
@@ -877,14 +883,21 @@ mgc_fft_a) PASS bit-exact** vs the g++ CU. The hw build was launched on the buil
 **Already a config key, no code change:** `ignore_net_degree` in `host/src/sw_only/default_config.toml`
 (read by `Partials.cpp`, `BestSolution.cpp`, `Output.cpp`), and `dse.py` builds every config from
 that file.
-- [ ] Count the 97..100-pin nets per design (all 44) to size the effect.
-- [ ] Set `ignore_net_degree = 96` in `default_config.toml`; re-score both suites through `make dse`
-      → new GOLDEN dirs (ISPD 28, MMS 16), legal-vs-legal vs XPlace. The current goldens also predate
-      #49's double HPWL metric (history.md), so this re-score picks that up too. Run the suites
-      together or separately (dse.py labels carry the suite since 2026-10-19).
-- [ ] Register the divergence in `CLAUDE.md` ("Deliberate divergences from XPlace").
-- [ ] Decide whether the frozen `test/regress` configs move to 96 (regenerate with `--reason`) or
-      stay at 100 as the stability tripwire.
+- [x] **Counted (2026-10-19):** 28 of 44 designs have no 97..100-pin net. The other 16: bigblue2/3/4
+      (ISPD and MMS), the five superblues, mms adaptec5 / newblue3/4/5/7; worst mgc_superblue11_a,
+      79 nets = 0.27% of pins. `.claude/2_ARTIFACTS/scratch_46/net_degree_97_100.txt` (columns: live
+      nets 2..96, nets 97..100, their pins, % of pins), counter `net_degree_count.cpp` next to it.
+- [x] **96 everywhere live (2026-10-19, Mark: "96 across the board"):** `default_config.toml`, the
+      `value_or` fallbacks in Partials/BestSolution/Output.cpp, sw_flat's `placer.hpp` default, and the
+      three `test/regress` configs (all three designs have no 97..100-pin net, so `make test-regress`
+      and `test-regress-slow` PASS bit-identical, no baseline regenerated). Not touched: the legacy
+      `vck5000/pl` / `bring_up` copies (`IGNORE_NET_DEGREE = 100`, read-only until #45 step 9) and the
+      `sched_verify` fixture config (its trace was recorded at 100; adaptec1 is unaffected anyway).
+- [x] Registered in `CLAUDE.md` ("Deliberate divergences from XPlace"); `benchmarks.py` notes the
+      masked-basis mismatch on the 16.
+- [ ] Re-score both suites through `make dse` → new GOLDEN dirs (ISPD 28, MMS 16), legal-vs-legal vs
+      XPlace. The current goldens also predate #49's double HPWL metric (history.md), so this re-score
+      picks that up too.
 - ⚠️ GP-vs-GP *masked* comparisons against XPlace (`benchmarks.py`, masked at 100) change basis;
   legal-vs-legal exact HPWL does not.
 

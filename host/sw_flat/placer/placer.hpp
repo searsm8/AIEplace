@@ -52,7 +52,7 @@ struct PlacerConfig {
     bool  enable_momentum = true, enable_preconditioning = true, precond_coef_escalation = true;
     bool  enable_density_clamp = true, dct_normalize = true, enable_filler = true, enable_phase2 = true;
     int   bins_per_row = 0;                      // 0 = the ePlace formula
-    int   ignore_net_degree = 100;
+    int   ignore_net_degree = 96;                // #46: the record stream's largest net. Meow.
     int   random_seed = -1;
     int   partition_fm_passes = 1;               // slot layout only; never changes the arithmetic
     float density_weight_init_multiplier = 0, density_weight_min_step = 0, density_weight_max_step = 0;

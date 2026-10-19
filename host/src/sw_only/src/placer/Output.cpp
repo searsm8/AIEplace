@@ -382,7 +382,7 @@ Placer::FinalMetrics Placer::computeFinalMetrics()
     FinalMetrics m;
 
     algo_time = Logger::getFunctionTime("run") / 1e6; // Convert microseconds to seconds
-    m.final_hpwl = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), cfg["params"]["ignore_net_degree"].value_or(100));
+    m.final_hpwl = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), cfg["params"]["ignore_net_degree"].value_or(96));
     // Exact HPWL over ALL nets (no net-degree mask). The masked final_hpwl above drops nets with
     // > ignore_net_degree pins (matching XPlace's GP metric); this includes them, matching XPlace's
     // post-GP "exact HPWL" / published-number convention (get_obj_hpwl is unmasked). Report both:

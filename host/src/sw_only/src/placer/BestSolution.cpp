@@ -38,7 +38,7 @@ void Placer::recordIterationResults()
     // (TODO #32/7a; see snapshotBestPlacement). This is the one `hpwl` XPlace's evaluator_fn
     // produces: it feeds the recorder's delta_hpwl, convergence, AND update_best_sol alike, so all
     // three describe the same placement as the overflow computed just below.
-    float hpwl = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), cfg["params"]["ignore_net_degree"].value_or(100), true);
+    float hpwl = db.computeTotalWirelength(ConfigUtils::require<std::string>(cfg, "params", "wirelength_method"), cfg["params"]["ignore_net_degree"].value_or(96), true);
     // Drive convergence off the smoothed overflow (clamped footprints; equivalent to XPlace's
     // expand_ratio-inflated field): the smoothed density the optimizer minimizes, which descends
     // toward the stop threshold. The exact overflow is reported separately as the physical result.
