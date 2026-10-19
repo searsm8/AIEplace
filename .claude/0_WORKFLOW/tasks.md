@@ -2,8 +2,10 @@
 
 **Active Task (2026-10-15): #48 phase 2 — B' device side landed in `density_map_CU`; next turn B' on in
 the step-6 golden config.** → [[REPORT_48_overflow_map_20261015.md]].
-(#45 steps 1-5b done 2026-10-16: sw_flat `pl+Bprime` is bit-exact to `hpwl_gradient_CU`; next #45
-work is step 6, the density path. [[_NEW_REPORT_45_pl_arithmetic_20261016.md]])
+(#45 steps 1-5b done 2026-10-16: sw_flat `pl+Bprime` is bit-exact to `hpwl_gradient_CU`. **Next #45
+work, handed off 2026-10-19: a v++/XRT hardware test flow for `hpwl_gradient_CU`** (step 8 brought
+forward; Mark to pick 250 MHz-first vs timing-first) → [[HANDOFF_45_hpwl_gradient_hw_flow_20261019.md]].
+Step 6, the density path, is still next on the plan.)
 
 Open work, one section per task. **Status lives here; evidence lives in a
 report.** Don't reuse task numbers, find the highest number and add one.
