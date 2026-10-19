@@ -92,17 +92,17 @@
 // Chunking (encode_chunked, required to handle designs too big for URAM)
 //  C1  Every movable node is owned by exactly one chunk; a macro and its macro pins by the same one.
 //  C2  Every small net, and with cfg.large_nets every large net, is homed in one chunk (majority
-//      of its movable nodes); its nodes owned elsewhere are external slots there. A large net then
+//      of its movable nodes); its nodes owned elsewhere are borrowed nodes there. A large net then
 //      follows L1-L8 inside its home chunk's stream; drops sum into Chunked::large_dropped.
 //  C3, C4  retired 2026-10-09 (#47 B3) with the DDR mailbox they described; the tail exchange
 //      (C7) replaced it.                                                  [check_chunked: C1, C2]
 //  C5  Each chunk is an ordinary stream: R, S, B and M hold per chunk.   [check_chunked decodes]
-//  C6  A macro pin is never external. A chunk whose nets use a pin of a macro owned elsewhere holds
+//  C6  A macro pin is never borrowed. A chunk whose nets use a pin of a macro owned elsewhere holds
 //      the pin as a local slot (in its macro-pin list, refreshed and folded on chip) and the macro
-//      as the external: externals are cells and macros only.            [check_chunked]
-//  C7  External slots are the chunk's tail rows, [first_tail_slot, first_fixed_slot): one block per
+//      as the borrowed node: borrowed nodes are cells and macros only.  [check_chunked]
+//  C7  Borrowed nodes sit in the chunk's tail rows, [first_tail_slot, first_fixed_slot): one block per
 //      owner, owners ascending, each block starting on a fresh row; inside a block every bank fills
-//      its rows in emission order (the owner's slot order). tail_order lists the externals in that
+//      its rows in emission order (the owner's slot order). tail_order lists the borrowed nodes in that
 //      order, tail_blocks the blocks. Every block's send and merge op lists fit TAIL_BUFFER_ROWS.
 //      Capacity is checked on num_slots, so it covers the tail.                [check_chunked]
 //  C8  Shared owned nodes (borrowed by another chunk) take the lowest owned rows of their bank, so
@@ -296,10 +296,10 @@ struct Encoded {
     long              large_extra_span = 0; // large nets whose span exceeds ceil(degree / LANES)
 
     std::vector<long> node_slot;            // per work node, -1 if none
-    std::vector<int>  tail_owner;           // per work node: its owner chunk if an external (tail rows, C7), else -1; empty = none
+    std::vector<int>  tail_owner;           // per work node: its owner chunk if borrowed (tail rows, C7), else -1; empty = none
     std::vector<char> shared;               // per work node: owned here AND borrowed by another chunk (C8); empty = none
     long              first_private_slot = 0;   // owned slots below hold every shared node (C8); 0 unchunked
-    long              first_tail_slot = 0;  // owned movable slots below, external tail rows from here (C7)
+    long              first_tail_slot = 0;  // owned movable slots below, borrowed-node tail rows from here (C7)
     long              first_fixed_slot = 0;
     long              num_slots = 0;        // multiple of BANKS (and so of LANES)
     long              max_slot = 0;
@@ -690,10 +690,10 @@ inline void pack_large_nets(Encoded& enc, const Config& cfg) {
 }
 
 // Step 4: node_slot = row * BANKS + bank. Owned movable rows first in every bank, then the
-// external tail rows (C7; none unchunked), then fixed rows, so `node_slot >= first_fixed_slot` is
+// borrowed-node tail rows (C7; none unchunked), then fixed rows, so `node_slot >= first_fixed_slot` is
 // the device's "read position, skip gradient write" test. The tail is one block per owner, owners
 // ascending, each on fresh rows; a tail node's row inside its block is provisional here:
-// order_external_tails puts each block in emission order once every chunk is encoded. Meow.
+// order_borrowed_tails puts each block in emission order once every chunk is encoded. Meow.
 inline void assign_node_slots(Encoded& enc) {
     const auto& kind = enc.kind;
     enum { FIXED_ROWS, OWNED_ROWS, TAIL_ROWS };
@@ -1074,12 +1074,12 @@ inline int check(const Netlist& nl, const Encoded& enc, const Config& cfg) {
 // Every movable node is OWNED by one chunk (a macro and its macro pins share one). Every in-scope
 // net (plus every large net, with cfg.large_nets) is HOMED in the chunk that owns most of its
 // movable nodes; the chunk's stream carries its
-// homed nets. A homed net's node owned elsewhere becomes an EXTERNAL slot in the home chunk (a local
+// homed nets. A homed net's node owned elsewhere becomes a BORROWED node in the home chunk (a local
 // copy of another chunk's node); fixed pin nodes are simply copied into every chunk that uses them
-// (their position never changes, so they are not external).
+// (their position never changes, so they are not borrowed).
 // Each chunk is then an ordinary Encoded stream over local slots, so node_slot bits shrink too.
 //
-// External values move through the borrowers' TAIL rows (C7): the owner writes a block's positions
+// Borrowed nodes' values move through the borrowers' TAIL rows (C7): the owner writes a block's positions
 // into the borrower's position image and later adds what the borrower drained into the same block of
 // the gradient image into its own (pin_record.hpp TailBlockDesc). Every DDR access is sequential; the
 // random side is always on chip. Meow.
@@ -1088,10 +1088,10 @@ struct Chunk {
     Encoded enc;                             // local: enc.work node ids are chunk-local
     std::vector<int>  net_global;            // local net -> global net (= parsed net index)
     std::vector<int>  work_node;             // local node -> global work node
-    std::vector<char> external;              // per local node: owned by another chunk
-    std::vector<int>  tail_order;            // external locals in emission order: owner ascending, then owner slot (C7)
+    std::vector<char> borrowed;              // per local node: borrowed, i.e. owned by another chunk
+    std::vector<int>  tail_order;            // borrowed locals in emission order: owner ascending, then owner slot (C7)
     struct TailBlock { int owner; long first, count, start_row, rows; };   // tail_order[first, first+count)
-    std::vector<TailBlock> tail_blocks;      // one per owner with externals here, owners ascending (C7)
+    std::vector<TailBlock> tail_blocks;      // one per owner with nodes borrowed here, owners ascending (C7)
 };
 
 struct Chunked {
@@ -1101,7 +1101,7 @@ struct Chunked {
     std::vector<int> owner;                  // per global work node, -1 for fixed
     std::vector<int> home;                   // per global net, -1 if out of scope
     std::vector<Chunk> chunks;
-    long externals = 0;
+    long num_borrowed = 0;
     long large_dropped = 0;                  // summed over chunks (see Encoded::large_dropped)
     bool fits = false;
     long fm_target = 0;                      // encode_chunked: FM's slot target for this partition, 0 = the bare cut
@@ -1160,16 +1160,16 @@ inline std::vector<int> order_owner(const Encoded& g, const std::vector<int>& or
 // update streams them -- so a block can be assembled row by row. Owner slots exist only once every
 // chunk is encoded, so this runs last and re-encodes the records of each chunk it reorders (the
 // permutation stays inside each bank's rows of one block: banks, beats and hazards are unchanged). Meow.
-inline void order_external_tails(Chunked& ch) {
+inline void order_borrowed_tails(Chunked& ch) {
     std::vector<long> owner_slot(ch.global.kind.size(), -1);
     for (int j = 0; j < ch.num_chunks; j++) {
         const Chunk& c = ch.chunks[j];
         for (size_t l = 0; l < c.work_node.size(); l++)
-            if (!c.external[l] && ch.owner[c.work_node[l]] == j) owner_slot[c.work_node[l]] = c.enc.node_slot[l];
+            if (!c.borrowed[l] && ch.owner[c.work_node[l]] == j) owner_slot[c.work_node[l]] = c.enc.node_slot[l];
     }
     for (Chunk& c : ch.chunks) {
         c.tail_order.clear();
-        for (size_t l = 0; l < c.work_node.size(); l++) if (c.external[l]) c.tail_order.push_back((int)l);
+        for (size_t l = 0; l < c.work_node.size(); l++) if (c.borrowed[l]) c.tail_order.push_back((int)l);
         if (c.tail_order.empty()) continue;
         std::stable_sort(c.tail_order.begin(), c.tail_order.end(), [&](int a, int b) {
             const int na = c.work_node[a], nb = c.work_node[b];
@@ -1212,7 +1212,7 @@ inline bool build_chunks_from_owner(Chunked& ch, std::vector<int> owner, int num
     }
 
     // C8: a node is shared when a net homed in another chunk uses it, or (C6) uses one of its macro's
-    // pins -- exactly the nodes the loop below makes external somewhere. Meow.
+    // pins -- exactly the nodes the loop below makes borrowed somewhere. Meow.
     std::vector<char> shared(num_nodes, 0);
     for (int net : homed_nets)
         for (int node : g.unique_nodes[net]) {
@@ -1221,22 +1221,22 @@ inline bool build_chunks_from_owner(Chunked& ch, std::vector<int> owner, int num
         }
 
     ch.chunks.assign(num_chunks, Chunk());
-    ch.externals = 0;
+    ch.num_borrowed = 0;
     ch.large_dropped = 0;
     for (int k = 0; k < num_chunks; k++) {
         Chunk& c = ch.chunks[k];
         std::vector<int> local_of(num_nodes, -1);
-        auto add_node = [&](int node, bool is_external) {
+        auto add_node = [&](int node, bool is_borrowed) {
             local_of[node] = (int)c.work_node.size();
             c.work_node.push_back(node);
-            c.external.push_back(is_external);
+            c.borrowed.push_back(is_borrowed);
         };
         for (int node = 0; node < num_nodes; node++) if (ch.owner[node] == k) add_node(node, false);
         std::vector<int> nets;
         for (int net : homed_nets) if (ch.home[net] == k) nets.push_back(net);
         // Rule C6: a pin of a macro owned elsewhere is a local slot, refreshed on chip from its macro,
-        // and the MACRO is the external -- so externals are only cells and macros. Fixed pins are
-        // copies, not external. Meow.
+        // and the MACRO is the borrowed node -- so borrowed nodes are only cells and macros. Fixed pins are
+        // copies, not borrowed. Meow.
         for (int net : nets)
             for (int node : g.unique_nodes[net]) {
                 if (local_of[node] >= 0) continue;
@@ -1269,21 +1269,21 @@ inline bool build_chunks_from_owner(Chunked& ch, std::vector<int> owner, int num
             e.unique_nodes.push_back(std::move(local_unique));
         }
         for (const MacroPin& mp : g.macro_pins)
-            if (local_of[mp.pin_node] >= 0)   // owned macros: all pins; external macros: the pins its nets use (C6). Meow.
+            if (local_of[mp.pin_node] >= 0)   // owned macros: all pins; borrowed macros: the pins its nets use (C6). Meow.
                 e.macro_pins.push_back({local_of[mp.pin_node], local_of[mp.macro_node], {mp.offset[0], mp.offset[1]}});
-        if (std::count(c.external.begin(), c.external.end(), 1)) {   // C7
+        if (std::count(c.borrowed.begin(), c.borrowed.end(), 1)) {   // C7
             e.tail_owner.assign(c.work_node.size(), -1);
-            for (size_t l = 0; l < c.work_node.size(); l++) if (c.external[l]) e.tail_owner[l] = ch.owner[c.work_node[l]];
+            for (size_t l = 0; l < c.work_node.size(); l++) if (c.borrowed[l]) e.tail_owner[l] = ch.owner[c.work_node[l]];
         }
         e.shared.assign(c.work_node.size(), 0);
-        for (size_t l = 0; l < c.work_node.size(); l++) e.shared[l] = !c.external[l] && shared[c.work_node[l]];
+        for (size_t l = 0; l < c.work_node.size(); l++) e.shared[l] = !c.borrowed[l] && shared[c.work_node[l]];
         encode_resolved(e, cfg);
         if (!e.fits || e.num_slots > ch.capacity) return false;
-        for (char is_external : c.external) ch.externals += is_external;
+        for (char is_borrowed : c.borrowed) ch.num_borrowed += is_borrowed;
         ch.large_dropped += e.large_dropped;
     }
 
-    order_external_tails(ch);
+    order_borrowed_tails(ch);
     return true;
 }
 
@@ -1298,7 +1298,7 @@ inline bool build_chunks(Chunked& ch, const std::vector<int>& order, int num_chu
 namespace packer {
 
 // The smallest K that builds. Partition: the BFS cut refined by cfg.partition_fm_passes of k-way FM
-// (#42: 1 pass gives 0.38x the external slots for 1-8 s on the 8 chunked designs, and reaches the
+// (#42: 1 pass gives 0.38x the borrowed nodes for 1-8 s on the 8 chunked designs, and reaches the
 // minimum K where the bare cut cannot). FM's model counts slot nodes but not bank-row rounding (a
 // chunk rounds up to its busiest bank, measured 23-60 slots), so FM aims at a target below capacity;
 // a build that fails on rounding tightens the target by the measured overshoot, which carries to the
@@ -1399,7 +1399,7 @@ inline std::vector<long> owner_slots_of(const Chunked& ch) {
     std::vector<long> owner_slot(ch.global.kind.size(), -1);
     for (int j = 0; j < ch.num_chunks; j++)
         for (size_t l = 0; l < ch.chunks[j].work_node.size(); l++)
-            if (!ch.chunks[j].external[l] && ch.owner[ch.chunks[j].work_node[l]] == j)
+            if (!ch.chunks[j].borrowed[l] && ch.owner[ch.chunks[j].work_node[l]] == j)
                 owner_slot[ch.chunks[j].work_node[l]] = ch.chunks[j].enc.node_slot[l];
     return owner_slot;
 }
@@ -1416,15 +1416,15 @@ inline TailOps block_ops(const Chunked& ch, const Chunk& borrower, const Chunk::
 }
 
 // Slot-major position image of chunk k, one axis. Own cells/macros carry their position, fixed
-// pins position + offset; macro pins AND external slots are NaN -- the device must refresh / receive them.
-// fill_tails (#47 bring-up shortcut, Mark 2026-10-09): external slots carry their node's real position
+// pins position + offset; macro pins AND borrowed nodes are NaN -- the device must refresh / receive them.
+// fill_tails (#47 bring-up shortcut, Mark 2026-10-09): borrowed nodes carry their node's real position
 // instead, as if every owner's send had already run, so compute_pass can be tested on its own. Meow.
 inline std::vector<float> chunk_slot_positions(const Chunked& ch, int k, int axis, const std::vector<float>& node_pos,
                                                bool fill_tails = false) {
     const Chunk& c = ch.chunks[k];
     std::vector<float> image = slot_positions(c.enc, axis, node_pos);
     if (!fill_tails)
-        for (size_t l = 0; l < c.external.size(); l++) if (c.external[l]) image[c.enc.node_slot[l]] = NAN;
+        for (size_t l = 0; l < c.borrowed.size(); l++) if (c.borrowed[l]) image[c.enc.node_slot[l]] = NAN;
     return image;
 }
 
@@ -1547,7 +1547,7 @@ inline bool tail_ops_deliver(const Chunked& ch, const Chunk& borrower, const Chu
 
 // Chunked checker: every chunk decodes on its own (local slots -> parsed geometry); the union must
 // be the in-scope netlist exactly. Plus ownership, capacity, the tail layout (C7), and the tail ops
-// replayed on node ids: every external slot receives the node its borrower expects, and every merge
+// replayed on node ids: every borrowed node's slot receives the node its borrower expects, and every merge
 // adds into that node's owner slot. Meow.
 inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg) {
     Failures fail;
@@ -1567,39 +1567,39 @@ inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg
         for (size_t l = 0; l < c.work_node.size(); l++) {
             const int node = c.work_node[l];
             const bool pin = ch.global.kind[node] == MACRO_PIN;
-            if (!c.external[l] && ch.global.work.movable[node]) {
+            if (!c.borrowed[l] && ch.global.work.movable[node]) {
                 if (ch.owner[node] == k) own_count[node]++;
                 else if (!pin) fail("own node of another chunk", node);
-                else if (local_of[ch.global.base_node[node]] < 0 || !c.external[local_of[ch.global.base_node[node]]])
-                    fail("macro pin of another chunk without its external macro (C6)", node);
+                else if (local_of[ch.global.base_node[node]] < 0 || !c.borrowed[local_of[ch.global.base_node[node]]])
+                    fail("macro pin of another chunk without its borrowed macro (C6)", node);
             }
-            if (c.external[l] && pin) fail("external macro pin (C6)", node);
-            if (c.external[l] && ch.owner[node] == k) fail("external slot of an own node", node);
+            if (c.borrowed[l] && pin) fail("borrowed macro pin (C6)", node);
+            if (c.borrowed[l] && ch.owner[node] == k) fail("borrowed node that this chunk owns", node);
             if (pin && !refreshed[l]) fail("macro pin missing from its chunk's refresh list", node);
             if (c.enc.node_slot[l] < 0) fail("local node without a slot", node);
             slot_nodes += needs_slot(ch.global.kind[node]);
         }
         chunk_slot_nodes.push_back(slot_nodes);
     }
-    {   // C7: every external in its chunk's tail rows, each bank's tail in emission order. Meow.
+    {   // C7: every borrowed node in its chunk's tail rows, each bank's tail in emission order. Meow.
         const std::vector<long> owner_slot = owner_slots_of(ch);
         for (int k = 0; k < ch.num_chunks; k++) {
             const Chunk& c = ch.chunks[k];
             const Encoded& e = c.enc;
-            long externals = 0;
+            long num_borrowed = 0;
             for (size_t l = 0; l < c.work_node.size(); l++) {
                 const long slot = e.node_slot[l];
-                if (c.external[l]) {
-                    externals++;
-                    if (slot < e.first_tail_slot || slot >= e.first_fixed_slot) fail("external outside its chunk's tail rows (C7)", k);
+                if (c.borrowed[l]) {
+                    num_borrowed++;
+                    if (slot < e.first_tail_slot || slot >= e.first_fixed_slot) fail("borrowed node outside its chunk's tail rows (C7)", k);
                 } else if (slot_class(e.kind[l]) == 1 && slot >= e.first_tail_slot) {
                     fail("owned movable slot in the tail rows (C7)", k);
                 }
             }
-            if ((long)c.tail_order.size() != externals) { fail("tail_order does not list every external (C7)", k); continue; }
+            if ((long)c.tail_order.size() != num_borrowed) { fail("tail_order does not list every borrowed node (C7)", k); continue; }
             for (size_t i = 0; i < c.tail_order.size(); i++) {
                 const int l = c.tail_order[i];
-                if (!c.external[l]) { fail("tail_order names a non-external (C7)", k); break; }
+                if (!c.borrowed[l]) { fail("tail_order names a node that is not borrowed (C7)", k); break; }
                 if (i > 0) {
                     const int a = c.work_node[c.tail_order[i - 1]], b = c.work_node[l];
                     if (ch.owner[a] > ch.owner[b] || (ch.owner[a] == ch.owner[b] && owner_slot[a] >= owner_slot[b]))
@@ -1622,21 +1622,21 @@ inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg
                 row += block.rows;
                 covered += block.count;
             }
-            if (covered != externals || row * BANKS != e.first_fixed_slot) fail("tail blocks do not cover the tail (C7)", k);
+            if (covered != num_borrowed || row * BANKS != e.first_fixed_slot) fail("tail blocks do not cover the tail (C7)", k);
         }
     }
     {   // C8: shared marks exactly the owned nodes some chunk borrows, and all of them sit below
         // first_private_slot, a whole row count inside the owned rows. Meow.
-        std::vector<char> borrowed(ch.global.kind.size(), 0);
+        std::vector<char> borrowed_anywhere(ch.global.kind.size(), 0);
         for (const Chunk& c : ch.chunks)
-            for (size_t l = 0; l < c.work_node.size(); l++) if (c.external[l]) borrowed[c.work_node[l]] = 1;
+            for (size_t l = 0; l < c.work_node.size(); l++) if (c.borrowed[l]) borrowed_anywhere[c.work_node[l]] = 1;
         for (int k = 0; k < ch.num_chunks; k++) {
             const Chunk& c = ch.chunks[k];
             const Encoded& e = c.enc;
             if (e.first_private_slot % BANKS || e.first_private_slot > e.first_tail_slot) fail("first_private_slot not a row inside the owned rows (C8)", k);
             for (size_t l = 0; l < c.work_node.size(); l++) {
-                if (c.external[l]) continue;
-                const bool is_borrowed = borrowed[c.work_node[l]];
+                if (c.borrowed[l]) continue;
+                const bool is_borrowed = borrowed_anywhere[c.work_node[l]];
                 if ((!e.shared.empty() && e.shared[l]) != is_borrowed) { fail("shared flag differs from the borrowed set (C8)", k); break; }
                 if (is_borrowed && e.node_slot[l] >= e.first_private_slot) { fail("borrowed node above first_private_slot (C8)", k); break; }
             }
@@ -1646,7 +1646,7 @@ inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg
         const PartitionGraph G = make_partition_graph(ch.global, cfg);
         PartitionState s;
         s.init(G, ch.num_chunks, ch.owner);
-        if (s.externals != ch.externals) fail("partition model's externals differ from the builder's", s.externals - ch.externals);
+        if (s.num_borrowed != ch.num_borrowed) fail("partition model's borrowed-node count differs from the builder's", s.num_borrowed - ch.num_borrowed);
         for (int k = 0; k < ch.num_chunks; k++)
             if (s.load[k] != chunk_slot_nodes[k]) fail("partition model's load differs from the builder's", k);
     }

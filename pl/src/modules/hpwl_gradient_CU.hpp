@@ -9,7 +9,7 @@
 //
 // Chunks. Every movable node has one OWNER chunk (packer rule C1). Each net is homed in one chunk;
 // when it uses a node owned elsewhere, its chunk is a BORROWER of that node and keeps a copy of it
-// in a TAIL slot (the packer calls these "externals", C7). A chunk's slots, low to high:
+// in a TAIL slot (a borrowed node, packer rule C7). A chunk's slots, low to high:
 //
 //     [0, first_private_slot)                owned movable slots, every shared one among them (C8)
 //     [first_private_slot, first_tail_slot)  owned movable slots no other chunk borrows

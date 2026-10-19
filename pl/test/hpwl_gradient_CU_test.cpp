@@ -57,7 +57,7 @@ static DeviceAxis run_axis(const packer::Chunked& ch, size_t num_parsed, int axi
         const long base = (long)dev.desc[k].slot_beat_offset * pinrec::LANES;
         for (size_t l = 0; l < c.work_node.size(); l++) {
             const int node = c.work_node[l];
-            if (!c.external[l] && (size_t)node < num_parsed && ch.global.work.movable[node])
+            if (!c.borrowed[l] && (size_t)node < num_parsed && ch.global.work.movable[node])
                 out.node_grad[node] = grad_slots[base + c.enc.node_slot[l]];
         }
     }
@@ -78,7 +78,7 @@ static bool run_config(const char* label, const packer::Netlist& nl, long capaci
     for (int net : large_nets) for (const auto& pin : nl.nets[net]) touched[pin.node] = 1;
 
     bool ok = true;
-    printf("     [%s] %d chunks, %ld external, %zu large nets\n", label, ch.num_chunks, ch.externals, large_nets.size());
+    printf("     [%s] %d chunks, %ld borrowed, %zu large nets\n", label, ch.num_chunks, ch.num_borrowed, large_nets.size());
     for (int axis = 0; axis < 2; axis++) {
         const DeviceAxis dev = run_axis(ch, nl.movable.size(), axis, node_pos[axis], lut);
         const golden::Err s = golden::compare(nl, dev.node_grad, golden::wa_gradient(nl, axis, node_pos[axis], lut, true, large_nets));
@@ -149,25 +149,25 @@ int main(int argc, char** argv) {
     // [5] coverage: the return path must carry real gradient. Share of |grad|^2 on nodes that are
     // borrowed somewhere (their total needs the tail merge) -- a dropped return path would lose it.
     // Macros cross chunks as macros: a macro gradient folded from a borrowed macro's local pins (C6). Meow.
-    long external_cells = 0, external_macros = 0;
-    std::vector<char> held_external(ch.global.kind.size(), 0);
+    long borrowed_cells = 0, borrowed_macros = 0;
+    std::vector<char> held_borrowed(ch.global.kind.size(), 0);
     for (const packer::Chunk& c : ch.chunks)
         for (size_t l = 0; l < c.work_node.size(); l++)
-            if (c.external[l]) {
-                held_external[c.work_node[l]] = 1;
-                external_cells += ch.global.kind[c.work_node[l]] == packer::CELL;
-                external_macros += ch.global.kind[c.work_node[l]] == packer::MACRO;
+            if (c.borrowed[l]) {
+                held_borrowed[c.work_node[l]] = 1;
+                borrowed_cells += ch.global.kind[c.work_node[l]] == packer::CELL;
+                borrowed_macros += ch.global.kind[c.work_node[l]] == packer::MACRO;
             }
     const std::vector<double> gx = golden::wa_gradient(nl, 0, node_pos[0], lut, true);
-    double external_share = 0, total = 0;
+    double borrowed_share = 0, total = 0;
     for (size_t node = 0; node < nl.movable.size(); node++) {
         if (!nl.movable[node]) continue;
         total += gx[node] * gx[node];
-        if (held_external[node]) external_share += gx[node] * gx[node];
+        if (held_borrowed[node]) borrowed_share += gx[node] * gx[node];
     }
-    const bool covered = ch.num_chunks >= 3 && external_cells >= 100 && external_macros >= 2 && external_share > 0.05 * total;
-    printf("%s [5] coverage: %d chunks, %ld external cells, %ld external macros, external nodes carry %.1f%% of |grad|^2\n",
-           covered ? "ok  " : "FAIL", ch.num_chunks, external_cells, external_macros, 100.0 * external_share / total);
+    const bool covered = ch.num_chunks >= 3 && borrowed_cells >= 100 && borrowed_macros >= 2 && borrowed_share > 0.05 * total;
+    printf("%s [5] coverage: %d chunks, %ld borrowed cells, %ld borrowed macros, borrowed nodes carry %.1f%% of |grad|^2\n",
+           covered ? "ok  " : "FAIL", ch.num_chunks, borrowed_cells, borrowed_macros, 100.0 * borrowed_share / total);
     ok &= covered;
 
     printf(ok ? "PASS: hpwl_gradient_CU\n" : "FAIL: hpwl_gradient_CU\n");

@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
         for (int k = 0; k < K; k++) {
             const Chunk& c = ch.chunks[k];
             for (size_t l = 0; l < c.work_node.size(); l++)
-                if (c.external[l]) users_of[c.work_node[l]] |= (1ull << k) | (1ull << ch.owner[c.work_node[l]]);
+                if (c.borrowed[l]) users_of[c.work_node[l]] |= (1ull << k) | (1ull << ch.owner[c.work_node[l]]);
         }
         std::vector<uint64_t> users;
         for (uint64_t mask : users_of) if (mask) users.push_back(mask);
@@ -60,7 +60,7 @@ int main(int argc, char** argv) {
             long tail = 0, owned_shared = 0, private_nodes = 0;
             for (size_t l = 0; l < c.work_node.size(); l++) {
                 if (c.enc.bank[l] == NO_BANK || slot_class(c.enc.kind[l]) == 0) continue;
-                if (c.external[l]) tail++;
+                if (c.borrowed[l]) tail++;
                 else if (users_of[c.work_node[l]]) owned_shared++;
                 else private_nodes++;
             }

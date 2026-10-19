@@ -46,8 +46,8 @@ int main(int argc, char** argv) {
         long movable = 0, max_slots = 0, blocks = 0;
         for (char m : nl.movable) movable += m;
         for (const Chunk& c : ch.chunks) { max_slots = std::max(max_slots, c.enc.num_slots); blocks += (long)c.tail_blocks.size(); }
-        printf("\n%s  movable=%ld K=%d external=%ld (%.1f%%) max_slots=%ld tail_blocks=%ld\n", nl.name.c_str(), movable,
-               ch.num_chunks, ch.externals, 100.0 * ch.externals / movable, max_slots, blocks);
+        printf("\n%s  movable=%ld K=%d borrowed=%ld (%.1f%%) max_slots=%ld tail_blocks=%ld\n", nl.name.c_str(), movable,
+               ch.num_chunks, ch.num_borrowed, 100.0 * ch.num_borrowed / movable, max_slots, blocks);
         const Phases today = model_cycles(ch, Variant::TODAY);
         print_phases("today", today, today.total());
         if (ch.num_chunks > 1) {

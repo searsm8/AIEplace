@@ -1,10 +1,10 @@
-// tail_layout.cpp -- #47 M1: can each chunk's external slots form a tail that iteration_update
+// tail_layout.cpp -- #47 M1: can each chunk's borrowed nodes form a tail that iteration_update
 // writes as a plain sequential stream? (.claude/1_REVIEW/reports/_NEW_PLAN_47_mailbox_redesign_20261006.md)
 //
-// Emission order into borrower k's tail: owners j ascending, each owner's externals in its own slot
+// Emission order into borrower k's tail: owners j ascending, each owner's borrowed nodes in its own slot
 // order under the tail layout (owned movable rows only, per bank in node order -- the order the
-// update streams them). Layout (M0's): each external takes the next tail row OF ITS BANK (the bank
-// encode_chunked's colouring chose), so the tail is max_b(externals in bank b) rows. The update writes
+// update streams them). Layout (M0's): each borrowed node takes the next tail row OF ITS BANK (the bank
+// encode_chunked's colouring chose), so the tail is max_b(borrowed nodes in bank b) rows. The update writes
 // the tail row by row, holding rows in an on-chip assembly buffer until they are final (every bank
 // has filled the row, or will put nothing more there -- known statically). Reported: tail size / E
 // (1.00 = no padding), the buffer depth in rows, the most entries for one bank among 16 consecutive
@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
             const Chunk& c = ch.chunks[j];
             std::vector<long> next_row(BANKS, 0);
             for (size_t l = 0; l < c.work_node.size(); l++)
-                if (!c.external[l] && c.enc.bank[l] != NO_BANK && slot_class(c.enc.kind[l]) == 1)
+                if (!c.borrowed[l] && c.enc.bank[l] != NO_BANK && slot_class(c.enc.kind[l]) == 1)
                     owner_slot[c.work_node[l]] = next_row[c.enc.bank[l]]++ * BANKS + c.enc.bank[l];
             owned_rows[j] = *std::max_element(next_row.begin(), next_row.end());
         }
@@ -81,8 +81,8 @@ int main(int argc, char** argv) {
         std::vector<std::vector<long>> stall(NUM_RATES, std::vector<long>(K, 0));
         for (int k = 0; k < K; k++) {
             const Chunk& c = ch.chunks[k];
-            std::vector<int> order;   // k's external locals in emission order
-            for (size_t l = 0; l < c.work_node.size(); l++) if (c.external[l]) order.push_back((int)l);
+            std::vector<int> order;   // k's borrowed locals in emission order
+            for (size_t l = 0; l < c.work_node.size(); l++) if (c.borrowed[l]) order.push_back((int)l);
             std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
                 const int ja = ch.owner[c.work_node[a]], jb = ch.owner[c.work_node[b]];
                 return ja != jb ? ja < jb : owner_slot[c.work_node[a]] < owner_slot[c.work_node[b]]; });
@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
         }
         long update_beats = 0;
         for (int j = 0; j < K; j++) update_beats += owned_rows[j] * BANKS / LANES;
-        printf("\n%s  K=%d external=%ld  (update: %ld owned beats)\n", nl.name.c_str(), K, E, update_beats);
+        printf("\n%s  K=%d borrowed=%ld  (update: %ld owned beats)\n", nl.name.c_str(), K, E, update_beats);
         for (int w = 0; w < NUM_RATES; w++) {
             long stall_total = 0;
             for (int j = 0; j < K; j++) stall_total += std::max(0L, stall[w][j]);

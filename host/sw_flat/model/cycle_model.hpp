@@ -63,7 +63,7 @@ inline Resident build_resident(const Chunked& ch, const Config& cfg, bool all_ma
     const int num_global = (int)g.kind.size();
     std::vector<char> in_region(num_global, 0), shared(num_global, 0);
     for (const Chunk& c : ch.chunks)
-        for (size_t l = 0; l < c.work_node.size(); l++) if (c.external[l]) in_region[c.work_node[l]] = shared[c.work_node[l]] = 1;
+        for (size_t l = 0; l < c.work_node.size(); l++) if (c.borrowed[l]) in_region[c.work_node[l]] = shared[c.work_node[l]] = 1;
     if (all_macros)
         for (int n = 0; n < num_global; n++) if (g.kind[n] == MACRO || g.kind[n] == MACRO_PIN) in_region[n] = 1;
 

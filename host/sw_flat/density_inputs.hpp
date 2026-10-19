@@ -4,7 +4,7 @@
 // density_inputs.hpp -- density_map_CU's host-side inputs (#48), built from a set-up sw_flat Placer, so
 // the device deposits exactly what sw_flat_place does (pl/src/format/density_footprint.hpp):
 //   footprints   the distinct footprints, by (width, height, movable-macro) bits; every filler shares one
-//   index        per slot: its footprint, or NO_DEPOSIT (EXTERNAL copies, pin slots, EMPTY padding)
+//   index        per slot: its footprint, or NO_DEPOSIT (BORROWED copies, pin slots, EMPTY padding)
 // The base map is Placer::fixed_base (col-major, capped) as it stands; the positions are the placer's
 // next.probe_pos per slot, the ones its deposit reads. Meow.
 

@@ -84,7 +84,7 @@ struct MacroPinRef {
 // ---- Chunking (a design larger than one on-chip slot space) ----
 // Each chunk is an ordinary stream over its own local slots; the per-chunk arrays are concatenated
 // in DDR and located by this descriptor. Tail slots (copies of nodes a chunk borrows from their
-// owner chunk; the packer's "externals") are the chunk's TAIL rows (packer rule C7): one block per
+// owner chunk: borrowed nodes) are the chunk's TAIL rows (packer rule C7): one block per
 // owner, each starting on a fresh row. The owner fills its block in the borrower's position image and
 // later adds the gradients the borrower drained there into its own, through a TailBlockDesc (#47). See
 // beat_packer.hpp (encode_chunked).

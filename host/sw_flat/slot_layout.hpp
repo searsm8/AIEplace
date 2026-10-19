@@ -8,14 +8,14 @@
 //               | first_filler_slot + filler index               the density-only tail
 //
 // The chunk part IS the gradient's layout (encode_chunked, unchanged): owned cells and macros, the
-// external tail rows (copies of nodes owned by another chunk), macro-pin slots, fixed-pin slots, and
+// borrowed-node tail rows (copies of nodes owned by another chunk), macro-pin slots, fixed-pin slots, and
 // row-padding EMPTY slots. Every movable node owns exactly one slot there, netless ones included --
 // assign_banks gives a node on no net the least-loaded bank -- so the density-only tail holds only
 // the fillers. They have no pins, so they never enter a record beat, a bank colouring or a chunk's
 // capacity, and the gradient module never sees them.
 //
 // The density path streams the whole range and deposits only the slots with a non-zero size:
-// OWNED and FILLER. An EXTERNAL slot is a copy of a node deposited by its owner, a pin slot is a
+// OWNED and FILLER. A BORROWED slot is a copy of a node deposited by its owner, a pin slot is a
 // point. test/slot_layout_check.cpp holds these invariants on all 44 designs. Meow.
 
 #include "fillers.hpp"
@@ -30,7 +30,7 @@ namespace sw_flat {
 enum class SlotRole : uint8_t {
     EMPTY,       // row padding; no node
     OWNED,       // a movable node's own slot: position, gradient, density
-    EXTERNAL,    // a copy of a movable node another chunk owns (packer rule C7)
+    BORROWED,    // a copy of a movable node another chunk owns (packer rule C7)
     MACRO_PIN,   // one pin of a movable macro, refreshed on chip from the macro
     FIXED_PIN,   // one pin of a fixed node or IO pad, constant position
     FILLER,      // the density-only tail
@@ -79,7 +79,7 @@ inline SlotLayout build_slot_layout(const FlatDesign& design, const packer::Chun
             case packer::MACRO_PIN: layout.role[slot] = SlotRole::MACRO_PIN; break;
             case packer::FIXED_PIN: layout.role[slot] = SlotRole::FIXED_PIN; break;
             default:
-                if (chunk.external[local]) { layout.role[slot] = SlotRole::EXTERNAL; break; }
+                if (chunk.borrowed[local]) { layout.role[slot] = SlotRole::BORROWED; break; }
                 layout.role[slot] = SlotRole::OWNED;
                 layout.width[slot] = design.node_width[node];
                 layout.height[slot] = design.node_height[node];

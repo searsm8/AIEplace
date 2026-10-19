@@ -77,8 +77,8 @@ std::vector<float> golden_merge(const packer::Chunked& ch, std::vector<std::vect
     return grad;
 }
 
-// Slots that hold a node, per chunk, in concatenated-image coordinates; tail = the packer's external. Meow.
-struct SlotSets { std::vector<long> node_slots, external_slots, owned_slots; };
+// Slots that hold a node, per chunk, in concatenated-image coordinates; tail = the borrowed nodes. Meow.
+struct SlotSets { std::vector<long> node_slots, borrowed_slots, owned_slots; };
 SlotSets slot_sets(const packer::Chunked& ch) {
     SlotSets sets;
     long base = 0;
@@ -87,7 +87,7 @@ SlotSets slot_sets(const packer::Chunked& ch) {
             if (c.enc.node_slot[l] < 0) continue;
             const long slot = base + c.enc.node_slot[l];
             sets.node_slots.push_back(slot);
-            if (c.external[l]) sets.external_slots.push_back(slot);
+            if (c.borrowed[l]) sets.borrowed_slots.push_back(slot);
             else if (c.enc.node_slot[l] < c.enc.first_tail_slot) sets.owned_slots.push_back(slot);
         }
         base += c.enc.num_slots;
@@ -109,7 +109,7 @@ bool run_config(const char* label, const packer::Netlist& nl, long capacity, int
     if (ch.num_chunks < 2) { printf("FAIL [%s] one chunk: nothing to exchange\n", label); return false; }
     const auto parcels = sw_flat::tail_parcels(ch);
     const SlotSets sets = slot_sets(ch);
-    printf("     [%s] %d chunks, %ld external, %zu tail slots\n", label, ch.num_chunks, ch.externals, sets.external_slots.size());
+    printf("     [%s] %d chunks, %ld borrowed, %zu tail slots\n", label, ch.num_chunks, ch.num_borrowed, sets.borrowed_slots.size());
     bool ok = true;
 
     for (int axis = 0; axis < 2; axis++) {
@@ -119,7 +119,7 @@ bool run_config(const char* label, const packer::Netlist& nl, long capacity, int
         std::vector<float> golden = dev.slot_images;
         for (int j = 0; j < ch.num_chunks; j++) sw_flat::fused_send(ch, j, parcels[j], golden);
         long unfilled = 0;
-        for (long slot : sets.external_slots) unfilled += std::isnan(golden[slot]);
+        for (long slot : sets.borrowed_slots) unfilled += std::isnan(golden[slot]);
         const long send_differ = count_differences(device, golden, sets.node_slots);
         const bool send_ok = send_differ == 0 && unfilled == 0;
         printf("%s [1] [%s] axis %d send: %ld of %zu node slots differ, %ld tail slots unfilled\n", send_ok ? "ok  " : "FAIL",

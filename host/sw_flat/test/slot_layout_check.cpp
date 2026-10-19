@@ -9,12 +9,12 @@
 //               height and the effective target density, bit-equal.
 //   [layout]    the invariants the density path relies on, checked from the layout alone (plus the
 //               chunk ranges): every movable node owns exactly one slot and home_slot names it; every
-//               filler owns one tail slot; an EXTERNAL slot is a copy of a node owned in ANOTHER chunk
+//               filler owns one tail slot; a BORROWED slot is a copy of a node owned in ANOTHER chunk
 //               and sits in its chunk's tail rows; pin slots point at a movable macro / a fixed node or
 //               IO pad; only OWNED and FILLER slots carry a size, and it is the node's / the filler's.
 //   [self-test] six corruptions of the layout and one of the fillers; each must fail its check.
 //               Proves the checks can fail at all.
-// The "chunks, external" line is the chunking, compared with the step-3 sweep by slot_layout_check.sh.
+// The "chunks, borrowed" line is the chunking, compared with the step-3 sweep by slot_layout_check.sh.
 // Meow.
 
 #include "fillers.hpp"
@@ -121,10 +121,10 @@ std::string layout_difference(const FlatDesign& design, const std::vector<char>&
                 return at("OWNED size is not the node's", slot);
             owned_count[node]++;
             break;
-        case SlotRole::EXTERNAL:
-            if (!movable) return at("EXTERNAL slot of a fixed node or IO pad", slot);
-            if (local < enc.first_tail_slot || local >= enc.first_fixed_slot) return at("EXTERNAL slot outside its chunk's tail rows", slot);
-            if (layout.home_slot[node] < 0 || chunk_of(layout.home_slot[node]) == chunk) return at("EXTERNAL slot not owned by another chunk", slot);
+        case SlotRole::BORROWED:
+            if (!movable) return at("BORROWED slot of a fixed node or IO pad", slot);
+            if (local < enc.first_tail_slot || local >= enc.first_fixed_slot) return at("BORROWED slot outside its chunk's tail rows", slot);
+            if (layout.home_slot[node] < 0 || chunk_of(layout.home_slot[node]) == chunk) return at("BORROWED slot not owned by another chunk", slot);
             break;
         case SlotRole::MACRO_PIN:
             if (!movable || !movable_macro[node]) return at("MACRO_PIN slot of a node that is not a movable macro", slot);
@@ -157,7 +157,7 @@ int self_test(const FlatDesign& design, const std::vector<char>& movable_macro, 
         for (long slot = 0; slot < layout.num_slots; slot++) if (layout.role[slot] == role) return slot;
         return -1L;
     };
-    const long owned = first_of(SlotRole::OWNED), external = first_of(SlotRole::EXTERNAL);
+    const long owned = first_of(SlotRole::OWNED), borrowed = first_of(SlotRole::BORROWED);
     const long fixed_pin = first_of(SlotRole::FIXED_PIN), filler = first_of(SlotRole::FILLER);
     long second_owned = -1;
     for (long slot = owned + 1; owned >= 0 && slot < layout.num_slots && second_owned < 0; slot++)
@@ -172,7 +172,7 @@ int self_test(const FlatDesign& design, const std::vector<char>& movable_macro, 
     };
     if (second_owned >= 0) expect_fail("two slots own one node", [&](SlotLayout& bad) { bad.node[second_owned] = bad.node[owned]; });
     if (owned >= 0) expect_fail("an owned size zeroed", [&](SlotLayout& bad) { bad.width[owned] = 0.0f; });
-    if (external >= 0) expect_fail("an external marked owned", [&](SlotLayout& bad) { bad.role[external] = SlotRole::OWNED; });
+    if (borrowed >= 0) expect_fail("a borrowed node marked owned", [&](SlotLayout& bad) { bad.role[borrowed] = SlotRole::OWNED; });
     if (fixed_pin >= 0 && owned >= 0) expect_fail("a fixed pin names a cell", [&](SlotLayout& bad) { bad.node[fixed_pin] = bad.node[owned]; });
     if (filler >= 0) expect_fail("a filler dropped", [&](SlotLayout& bad) { bad.role[filler] = SlotRole::EMPTY; bad.width[filler] = bad.height[filler] = 0.0f; bad.node[filler] = -1; });
     if (owned >= 0) expect_fail("a pin slot given a size", [&](SlotLayout& bad) {
@@ -226,7 +226,7 @@ int main(int argc, char** argv)
         long netless = 0, movable = 0;
         for (int node = 0; node < design.num_nodes(); node++)
             if (design.node_kind[node] == NodeKind::CELL) { movable++; netless += !on_net[node]; }
-        printf("  %d chunks, %ld external\n", chunked.num_chunks, chunked.externals);
+        printf("  %d chunks, %ld borrowed\n", chunked.num_chunks, chunked.num_borrowed);
         printf("  [info] %ld slots: %ld in chunks (%ld movable nodes, %ld netless), %d fillers of %g x %g, target density %g\n",
                layout.num_slots, layout.first_filler_slot, movable, netless, fillers.count, fillers.width, fillers.height,
                fillers.target_density);

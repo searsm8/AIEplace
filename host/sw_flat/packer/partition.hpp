@@ -17,8 +17,8 @@
 //
 // The objective is EXACT, not a proxy: PartitionState tracks build_chunks' own rules -- a net is
 // homed in the chunk owning most of its distinct movable nodes (ties to the lowest chunk), a node
-// is external in every non-owner chunk that homes a net containing it -- so `externals` equals
-// Chunked::externals and `load[k]` equals chunk k's slot-node count (before bank-row rounding).
+// is borrowed by every non-owner chunk that homes a net containing it -- so `num_borrowed` equals
+// Chunked::num_borrowed and `load[k]` equals chunk k's slot-node count (before bank-row rounding).
 // tier 1: test/partition_test.cpp. Meow.
 
 #include <chrono>
@@ -38,11 +38,11 @@ struct PartitionGraph {
     std::vector<int>  node_ptr, node_net;    // per node: homed indices containing it
     std::vector<char> movable, slot;         // slot: needs a slot in a chunk that holds it
     std::vector<int>  root;                  // per node: its move unit's root (a macro for its pins), -1 fixed
-    // Rule C6: a macro pin is never external. Where its macro is owned elsewhere, the chunk holds the
-    // pin as a local slot and the MACRO as the external, so a pin's presence counts for its macro too,
-    // and only cells and macros count as externals. Meow.
+    // Rule C6: a macro pin is never borrowed. Where its macro is owned elsewhere, the chunk holds the
+    // pin as a local slot and the MACRO as the borrowed node, so a pin's presence counts for its macro too,
+    // and only cells and macros count as borrowed nodes. Meow.
     std::vector<int>  pin_macro;             // per node: its macro if a MACRO_PIN, else -1
-    bool counts_external(int v) const { return movable[v] && pin_macro[v] < 0; }
+    bool counts_as_borrowed(int v) const { return movable[v] && pin_macro[v] < 0; }
 };
 
 inline PartitionGraph make_partition_graph(const Encoded& g, const Config& cfg) {
@@ -97,7 +97,7 @@ inline Units level0_units(const PartitionGraph& G) {
     return U;
 }
 
-struct MoveDelta { long externals = 0; long load[PARTITION_MAX_K]; };   // evaluate() zeroes only load[0..K). Meow.
+struct MoveDelta { long num_borrowed = 0; long load[PARTITION_MAX_K]; };   // evaluate() zeroes only load[0..K). Meow.
 
 // The exact build_chunks model for one owner vector, with O(local) move evaluation. Meow.
 struct PartitionState {
@@ -107,8 +107,8 @@ struct PartitionState {
     std::vector<int>  count;                 // [net * K + k] distinct movable nodes of the net owned by k
     std::vector<int>  home;                  // per homed index
     std::vector<int>  presence;              // [node * K + k] homed-in-k nets containing the node
-    std::vector<long> load;                  // per chunk: slot nodes held (owned + external + fixed copies)
-    long externals = 0;
+    std::vector<long> load;                  // per chunk: slot nodes held (owned + borrowed + fixed copies)
+    long num_borrowed = 0;
 
     // scratch for evaluate()
     std::vector<int> mult, touched_nets, delta, touched_nodes;
@@ -132,7 +132,7 @@ struct PartitionState {
         home.assign(num_nets, 0);
         presence.assign((size_t)G->num_nodes * K, 0);
         load.assign(K, 0);
-        externals = 0;
+        num_borrowed = 0;
         for (int n = 0; n < num_nets; n++) {
             for (int i = G->net_ptr[n]; i < G->net_ptr[n + 1]; i++) {
                 const int v = G->net_node[i];
@@ -149,7 +149,7 @@ struct PartitionState {
             if (!G->slot[v]) continue;
             if (owner[v] >= 0) load[owner[v]]++;
             for (int k = 0; k < K; k++)
-                if (presence[(size_t)v * K + k] > 0 && owner[v] != k) { load[k]++; externals += G->counts_external(v); }
+                if (presence[(size_t)v * K + k] > 0 && owner[v] != k) { load[k]++; num_borrowed += G->counts_as_borrowed(v); }
         }
         mult.assign(num_nets, 0);
         delta.assign((size_t)G->num_nodes * K, 0);
@@ -197,7 +197,7 @@ struct PartitionState {
                 if (G->slot[v]) {
                     const int before = before_count > 0 && old_owner != k, after = after_count > 0 && new_owner != k;
                     d.load[k] += after - before;
-                    if (G->counts_external(v)) d.externals += after - before;
+                    if (G->counts_as_borrowed(v)) d.num_borrowed += after - before;
                 }
                 if (apply) presence[(size_t)v * K + k] = after_count;
                 dk = 0;
@@ -211,7 +211,7 @@ struct PartitionState {
         d.load[b] += U.weight(u);
         if (apply) {
             for (int k = 0; k < K; k++) load[k] += d.load[k];
-            externals += d.externals;
+            num_borrowed += d.num_borrowed;
         }
         return d;
     }
@@ -307,14 +307,14 @@ inline std::vector<int> balanced_cut(const PartitionGraph& G, const Units& U, co
 
 struct FmOptions {
     long   capacity = 0;          // per-chunk slot budget the model must meet
-    double overflow_weight = 100; // while over capacity: cost of one overflowing slot, in externals
+    double overflow_weight = 100; // while over capacity: cost of one overflowing slot, in borrowed nodes
     int    max_passes = 8;
-    double min_pass_gain = 0.001; // stop when a pass improves externals by less than this fraction
+    double min_pass_gain = 0.001; // stop when a pass improves borrowed nodes by less than this fraction
     double stall_fraction = 0.02; // a pass stops after this fraction of units moved without a new best
     bool   boundary_only = true;  // seed a pass with units on a cut net only
 };
 
-struct FmStats { int passes = 0; long moves = 0, kept = 0, evaluations = 0; long best_externals = 0, best_over = 0; std::vector<long> pass_externals; std::vector<double> pass_seconds; };   // best_*: the last pass's best prefix. Meow.
+struct FmStats { int passes = 0; long moves = 0, kept = 0, evaluations = 0; long best_borrowed = 0, best_over = 0; std::vector<long> pass_borrowed; std::vector<double> pass_seconds; };   // best_*: the last pass's best prefix. Meow.
 
 // One unit's best target and its key (higher is better); key = LONG_MIN if no legal target. Meow.
 inline std::pair<long, int> best_target(PartitionState& s, const Units& U, int u, const FmOptions& opt, FmStats& st) {
@@ -330,11 +330,11 @@ inline std::pair<long, int> best_target(PartitionState& s, const Units& U, int u
             bool legal = true;
             for (int k = 0; k < s.K; k++) legal &= s.load[k] + d.load[k] <= opt.capacity;
             if (!legal) continue;
-            key = -d.externals;
+            key = -d.num_borrowed;
         } else {
             long over_after = 0;
             for (int k = 0; k < s.K; k++) over_after += std::max(0L, s.load[k] + d.load[k] - opt.capacity);
-            key = (long)(-(d.externals + opt.overflow_weight * (over_after - over)));
+            key = (long)(-(d.num_borrowed + opt.overflow_weight * (over_after - over)));
         }
         if (key > best_key) { best_key = key; best = b; }
     }
@@ -354,7 +354,7 @@ inline bool on_cut(const PartitionState& s, const Units& U, int u) {
 
 // Passes of k-way FM over units U: best move first (lazy max-heap, gains re-checked when popped),
 // each unit moved at most once per pass, negative moves allowed, then roll back to the best
-// prefix -- best = least overflow, then fewest externals. Meow.
+// prefix -- best = least overflow, then fewest borrowed nodes. Meow.
 inline FmStats fm_refine(PartitionState& s, const Units& U, const FmOptions& opt) {
     FmStats st;
     const PartitionGraph& G = *s.G;
@@ -371,7 +371,7 @@ inline FmStats fm_refine(PartitionState& s, const Units& U, const FmOptions& opt
     for (int pass = 0; pass < opt.max_passes; pass++) {
         st.passes++;
         const auto pass_start = std::chrono::steady_clock::now();
-        const long start_externals = s.externals, start_over = overflow_of(s.load, opt.capacity);
+        const long start_borrowed = s.num_borrowed, start_over = overflow_of(s.load, opt.capacity);
         std::fill(locked.begin(), locked.end(), 0);
         std::priority_queue<std::tuple<long, int, int, int>> heap;   // key, -unit, target, stamp
         for (int u = 0; u < num_units; u++) {
@@ -380,7 +380,7 @@ inline FmStats fm_refine(PartitionState& s, const Units& U, const FmOptions& opt
             if (best.second >= 0) heap.emplace(best.first, -u, best.second, ++stamp[u]);
         }
         std::vector<std::pair<int, int>> moves;   // unit, from
-        long best_over = start_over, best_externals = start_externals;
+        long best_over = start_over, best_borrowed = start_borrowed;
         size_t best_prefix = 0, since_best = 0;
         const size_t stall = std::max<size_t>(500, (size_t)(opt.stall_fraction * num_units));
         int visit = 0;
@@ -399,8 +399,8 @@ inline FmStats fm_refine(PartitionState& s, const Units& U, const FmOptions& opt
             moves.emplace_back(u, from);
             st.moves++;
             const long over = overflow_of(s.load, opt.capacity);
-            if (over < best_over || (over == best_over && s.externals < best_externals)) {
-                best_over = over; best_externals = s.externals; best_prefix = moves.size(); since_best = 0;
+            if (over < best_over || (over == best_over && s.num_borrowed < best_borrowed)) {
+                best_over = over; best_borrowed = s.num_borrowed; best_prefix = moves.size(); since_best = 0;
             } else {
                 since_best++;
             }
@@ -420,12 +420,12 @@ inline FmStats fm_refine(PartitionState& s, const Units& U, const FmOptions& opt
         }
         for (size_t i = moves.size(); i > best_prefix; i--) s.evaluate(U, moves[i - 1].first, moves[i - 1].second, true);
         st.kept += best_prefix;
-        st.best_externals = best_externals; st.best_over = best_over;
-        st.pass_externals.push_back(s.externals);
+        st.best_borrowed = best_borrowed; st.best_over = best_over;
+        st.pass_borrowed.push_back(s.num_borrowed);
         st.pass_seconds.push_back(std::chrono::duration<double>(std::chrono::steady_clock::now() - pass_start).count());
         const bool improved_over = best_over < start_over;
-        const long gain = start_externals - s.externals;
-        if (!improved_over && (best_prefix == 0 || gain < opt.min_pass_gain * std::max(1L, start_externals))) break;
+        const long gain = start_borrowed - s.num_borrowed;
+        if (!improved_over && (best_prefix == 0 || gain < opt.min_pass_gain * std::max(1L, start_borrowed))) break;
     }
     return st;
 }
@@ -494,7 +494,7 @@ struct MultilevelOptions {
 struct MultilevelStats {
     int levels = 0; long coarsest = 0; FmStats fm;
     double coarsen_s = 0, initial_s = 0, refine_s = 0;
-    std::vector<long> externals_after_level;   // coarsest first
+    std::vector<long> borrowed_after_level;   // coarsest first
     std::vector<double> seconds_per_level;      // coarsest first
     std::vector<long> units_per_level;          // coarsest first
 };
@@ -524,13 +524,13 @@ inline std::vector<int> multilevel_partition(const PartitionGraph& G, int K, lon
     FmOptions level_opt = fm_opt;
     level_opt.max_passes = opt.passes_per_level;
     for (int l = (int)levels.size() - 1; l >= 0; l--) {
-        if (levels[l].size() < opt.min_refine_units) { stats.seconds_per_level.push_back(0); stats.units_per_level.push_back(levels[l].size()); stats.externals_after_level.push_back(s.externals); continue; }
+        if (levels[l].size() < opt.min_refine_units) { stats.seconds_per_level.push_back(0); stats.units_per_level.push_back(levels[l].size()); stats.borrowed_after_level.push_back(s.num_borrowed); continue; }
         const auto level_start = std::chrono::steady_clock::now();
         const FmStats st = fm_refine(s, levels[l], level_opt);
         stats.seconds_per_level.push_back(seconds_since(level_start));
         stats.units_per_level.push_back(levels[l].size());
         stats.fm.passes += st.passes; stats.fm.moves += st.moves; stats.fm.kept += st.kept; stats.fm.evaluations += st.evaluations;
-        stats.externals_after_level.push_back(s.externals);
+        stats.borrowed_after_level.push_back(s.num_borrowed);
     }
     stats.refine_s = seconds_since(t);
     return s.owner;

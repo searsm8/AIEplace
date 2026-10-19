@@ -2,7 +2,7 @@
 #define PL_HPWL_GRADIENT_TAIL_EXCHANGE_HPP
 
 // tail_exchange -- how chunks exchange tail slots (#47 B3; replaces the DDR mailbox). A borrower's
-// tail slots (the packer's "externals") are its tail rows (packer rule C7), one block per owner on
+// tail slots (its borrowed nodes) are its tail rows (packer rule C7), one block per owner on
 // fresh rows. The owner writes a block's positions straight into the borrower's position image
 // (send), and later adds the gradients the borrower drained into the same block of grad_DDR into
 // its own (merge). The block's row-major order is not the owner's emission order, so both go through

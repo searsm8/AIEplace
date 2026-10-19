@@ -69,8 +69,8 @@ int main(int argc, char** argv) {
     const std::vector<int> large_nets = packer::chunked_large_nets(ch);
     long send_pairs = 0, merge_pairs = 0;
     count_back_to_back(packer::chunked_device_arrays(ch, 0, std::vector<float>(ch.global.kind.size(), 0.0f)), send_pairs, merge_pairs);
-    printf("     capacity=%ld hazard=%d: %d chunks, %ld external, %zu large nets, back-to-back row-buffer uses: send %ld, merge %ld\n",
-           capacity, cfg.hazard, ch.num_chunks, ch.externals, large_nets.size(), send_pairs, merge_pairs);
+    printf("     capacity=%ld hazard=%d: %d chunks, %ld borrowed, %zu large nets, back-to-back row-buffer uses: send %ld, merge %ld\n",
+           capacity, cfg.hazard, ch.num_chunks, ch.num_borrowed, large_nets.size(), send_pairs, merge_pairs);
     if (!negative_control && (ch.num_chunks < 3 || send_pairs == 0 || merge_pairs == 0)) {
         printf("FAIL coverage: the run lacks several chunks or a back-to-back row-buffer use\n");
         return 1;
@@ -110,7 +110,7 @@ int main(int argc, char** argv) {
             const long base = (long)dev.desc[k].slot_beat_offset * pinrec::LANES;
             for (size_t l = 0; l < c.work_node.size(); l++) {
                 const int node = c.work_node[l];
-                if (!c.external[l] && (size_t)node < nl.movable.size() && ch.global.work.movable[node])
+                if (!c.borrowed[l] && (size_t)node < nl.movable.size() && ch.global.work.movable[node])
                     node_grad[node] = grad_slots[base + c.enc.node_slot[l]];
             }
         }
