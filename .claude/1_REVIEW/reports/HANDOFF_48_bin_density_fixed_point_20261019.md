@@ -88,7 +88,11 @@ configs, `quant_30.txt` / `quant_300.txt`). rel_rms is over all bins; overflow i
 | mgc_pci_bridge32_b | −0.312..+1.760% | +0.138% | −0.129% | −0.266% | yes |
 | adaptec1 | −0.026..+0.023% | +0.001% | −0.005% | −0.007% | yes |
 | mms/adaptec1 | −0.024..+0.011% | −0.493% | −0.359% | +0.135% | no (as pl+Bprime) |
-| bigblue4 | −0.480..+0.001% | −0.460% | *(pending)* | | |
+| bigblue4 | −0.010..+0.007% | −0.004% | −0.002% | +0.002% | yes |
+
+(bigblue4's q18 was run by hand from the same config; 758 iterations, converged, no bin left the word.
+⚠️ A first read of bigblue4 here showed −0.480..+0.001% / −0.460%: those were 10-16's files, not yet
+overwritten by this run. The row above is from today's files.)
 
 mms/adaptec1's `pl+Bprime` is already outside base's band (5b's best-solution flip, primary vs aux);
 q18 sits next to it, so the band to read it against is `pl+Bprime`'s, not base's. Signs are mixed, so

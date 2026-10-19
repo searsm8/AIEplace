@@ -1156,7 +1156,8 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       iteration 4; every peak at iteration 0–7) → 18.18 leaves 2.7× headroom. At equal positions q18's
       overflow beats float everywhere (≤ 9.3e-7 vs up to 4.8e-5); ρ beats float on dense bins (bigblue4
       3.0e-7 vs 2.3e-5) and loses on small sparse designs (pci_bridge32_b 9.7e-6 vs 3.6e-7). Drift vs
-      `pl+Bprime`: within noise on 4/4 so far (bigblue4 pending). Order-independent: fft_a's trace is
+      `pl+Bprime`: in noise on 5/5 (mms/adaptec1 read against `pl+Bprime`'s own flipped mode; bigblue4
+      +0.002%). Order-independent: fft_a's trace is
       byte-identical in name and slot order. **Next:** the CU's integer accumulator,
       `density_inputs.hpp` (w' in the table, integer base), `check-bin-density` bit-exact incl. the
       int64 excess and a shuffled-order mutant. Open for Mark: a per-iteration exponent.
