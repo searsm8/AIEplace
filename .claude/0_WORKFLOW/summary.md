@@ -167,9 +167,10 @@ The hw build is running on the build server, and the card run is next ([[HANDOFF
   free. `macro_legalization = true|false` A/B over MMS decides it. See tasks.md #38.
 
 ## Also open
-- **#46 — sw_only masks nets above 96 pins, not 100 (Mark, 2026-10-06).** Matches the PL record
-  stream; a new deliberate divergence from XPlace. Config-only (`ignore_net_degree`), but it needs a
-  re-score of both suites for a new golden. Not started.
+- **#46 — nets above 96 pins are masked, not 100 (LANDED 2026-10-19, `077b4c4`).** sw_only + sw_flat +
+  regress configs; registered in `CLAUDE.md`'s divergences. 28/44 designs unaffected (no 97..100-pin
+  net), regress bit-identical. **Open:** the 44-design re-score for new goldens (`results/DSE_20261019_125733/`,
+  launched 10-19; also picks up #49).
 - **#43 — native parser (CLOSED 2026-10-06; history.md).** `DesignReader.cpp` replaced Limbo (all 44
   parse 5.3× faster). ⚠️ Touching `DesignReader.cpp` or a `DesignSink` (`DataBase`, beat_packer's
   `native_netlist.hpp`) → run `make test-parser` AND `make -C bring_up/beat_packer check-reader`.
