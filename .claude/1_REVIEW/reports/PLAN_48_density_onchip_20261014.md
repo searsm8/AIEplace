@@ -22,6 +22,7 @@ Items marked *(added)* were not in Mark's list of four.
 
 Decide what lives on chip, when, and at what precision, before designing around a guess.
 
+> **Corrected 2026-10-16:** Versal URAM (URAM288E5) is not fixed at 4K x 72; it also runs as 8K x 36, 16K x 18 or 32K x 9 (AM007, UltraRAM Block; READ_/WRITE_WIDTH_A/B = 9/18/36/72). A 32-bit bank fits 8K x 36 at 32/36 bits used, so the measured 128 URAMs per 1M-slot array (32 banks x 4) needs no 2-floats-per-word packing, and that packing would save nothing. The counts below stand; the 4K x 72-only reasoning does not.
 - [ ] **Inventory.** Device: 463 URAM288 (4K × 72b; a 1M-float array = 128), 967 RAMB36. Measure what
       `hpwl_gradient_CU` uses today from its synthesis report (128 per array at 1M slots, from #41).
 - [ ] **Array list with sizes at 512 / 1024**, fp32 vs narrower:

@@ -173,6 +173,7 @@ exchange buffer, and the ghost-gradient read-add-write with padding. Result: rel
 | hpwl_gradient_computer_v2 | 675 (34%) | 255 K (28%) | 286 K (15%) | 160 (8%) | 82 |
 
 ⚠️ **Two numbers not to trust yet:**
+> **Corrected 2026-10-16:** Versal URAM (URAM288E5) is not fixed at 4K x 72; it also runs as 8K x 36, 16K x 18 or 32K x 9 (AM007, UltraRAM Block; READ_/WRITE_WIDTH_A/B = 9/18/36/72). A 32-bit bank fits 8K x 36 at 32/36 bits used, so the measured 128 URAMs per 1M-slot array (32 banks x 4) needs no 2-floats-per-word packing, and that packing would save nothing. The counts below stand; the 4K x 72-only reasoning does not.
 - **URAM** reads 32 / 64, one per bank. Physically 1 M floats is 4 MB per array, which needs at
   least 116 URAMs at perfect packing (4K×72 each); the estimate counts cascaded instances. Only
   implementation gives the real figure, and the 2-floats-per-word packing from Part 2 is not done yet.

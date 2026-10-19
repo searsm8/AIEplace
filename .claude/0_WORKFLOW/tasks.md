@@ -926,6 +926,10 @@ in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_202
       (3.482 ns est.), **RTL co-sim PASS** (hazard-1 control FAILS). bigblue4 at 1 M: 2.49 M ->
       1.93 M cycles per axis. Synthetic test capacities moved to 4096 / 2560 (per-owner block
       rounding).
+      **Re-verified 2026-10-16 at `48fb9fa`** (after the owner/borrower refactor `83e3719`, which also
+      moved `load_pos_zero_grad` and wrapped `send_tails_pass` in `if (chunked)`): on the build server,
+      C-synth 24/24 loops II=1, Fmax est. 287.2 MHz (unchanged); RTL co-sim capacity 1536 hazard 4
+      PASS, hazard 1 FAILS (rel_rms ~2e2). Logs: build:`~/AIEplace/pl/synth/hpwl_gradient_CU/`.
 - [ ] **B4 = A, stream fusion (Mark, 2026-10-09).** **M2 DONE:** `host/sw_flat/tail_fusion.hpp`
       (`fused_send` / `fused_merge`: one ascending pass per owner, a cursor per consumer, merge in
       ascending consumer order). Bit-identical to B3's device exchange: `pl/test/tail_exchange_test`
@@ -939,10 +943,6 @@ in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_202
       A (stream fusion in `iteration_update`, 0.98 M, waits for #45 steps 5-6) or C (widen B3's loops
       now, ~1.5 M, interim). Recommended: wait and build A.
       </details>
-- [x] **Bring-up shortcut: YES, behind an option (Mark, 2026-10-09). Done:**
-      `chunked_device_arrays(..., fill_tails = true)` writes real positions into the external tails;
-      NaN stays the default. `tail_exchange_test` [2] holds it equal to the sent image.
-
 - [x] **C8 shared-first owned rows (2026-10-16, Mark): an interim before B4.** Only 1.4–17% of an
       owner's slots are borrowed, but they were scattered over 13–69% of its owned beats. Rows inside a
       bank are free (`assign_node_slots`; colouring fixes only the bank), so each bank's shared nodes
@@ -998,6 +998,10 @@ in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_202
       shared + tail); bigblue4, mms/bigblue4, mms/newblue7 do not fit (632–710 K vs 524 K). Today's
       chunk order is already the best of all 720. Verdict: the window does not scale either; only
       per-chunk tails (B3/C8 today, B4 fused) do. `window_{1M,512K}_20261019.txt` (same folder).
+- [x] **Bring-up shortcut: YES, behind an option (Mark, 2026-10-09). Done:**
+      `chunked_device_arrays(..., fill_tails = true)` writes real positions into the external tails;
+      NaN stays the default. `tail_exchange_test` [2] holds it equal to the sent image.
+
 → [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
 
 ---

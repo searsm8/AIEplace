@@ -95,6 +95,7 @@ adds no new limit: give each movable-macro pin its own slot, refreshed per itera
 the macro position, with its gradient summed back into the macro. This is a small side pass
 over macro pins only.
 
+> **Corrected 2026-10-16:** Versal URAM (URAM288E5) is not fixed at 4K x 72; it also runs as 8K x 36, 16K x 18 or 32K x 9 (AM007, UltraRAM Block; READ_/WRITE_WIDTH_A/B = 9/18/36/72). A 32-bit bank fits 8K x 36 at 32/36 bits used, so the measured 128 URAMs per 1M-slot array (32 banks x 4) needs no 2-floats-per-word packing, and that packing would save nothing. The counts below stand; the 4K x 72-only reasoning does not.
 **URAM** (2 floats per 72-bit word, 32 banks, whole URAMs per bank): 64–192 URAMs for every
 design up to about 700 K nodes. The 8 MB budget is about 222 URAMs. Designs at 256 or more
 need chunking: adaptec5, superblue11_a, bigblue3, superblue12, newblue5/6 at 256–320, and

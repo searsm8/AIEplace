@@ -14,6 +14,11 @@ If a rule stops being true, flag it for deletion and tell Mark — a stale rule 
   ```
   Bare commands hit the Windows filesystem and fail or do the wrong thing. Other WSL/Vitis
   friction points (background-run death, tmpfs wipe, freopen hang) live in [[noteToSelf.md]].
+- **`trail` lives under nvm, which `wsl -e bash -c` does not load.** Prefix its PATH:
+  `wsl -e bash -c "cd /home/msears/phd/AIEplace && PATH=/home/msears/.nvm/versions/node/v22.23.2/bin:\$PATH trail ask '<task>'"`.
+  The trail SessionStart hook + statusline are wired the same way in `.claude/settings.local.json`
+  (the repo's `.claude/settings.json` copy runs Windows node, finds no trail, and stays silent).
+  If nvm's node version changes, update the path in both places. Meow.
 - **Build server** (`ssh build` → `hacc-build-01.inf.ethz.ch`; Vitis/XRT + the VCK5000 live there,
   repo at `~/AIEplace`). Run remote commands like this (the `--norc`/stdin script keeps the server's
   `module: command not found` `.bashrc` noise out of the output):

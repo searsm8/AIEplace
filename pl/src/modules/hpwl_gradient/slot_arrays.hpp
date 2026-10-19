@@ -54,8 +54,8 @@ load_pos_zero_grad:
         const bool movable = b < movable_slot_beats;
         for (int j = 0; j < pinrec::LANES; j++) {
             if (b & 1) {
-                pos_URAM[j + pinrec::LANES][b >> 1] = beat.v[j];
-                if (movable) grad_URAM[j + pinrec::LANES][b >> 1] = 0.0f;
+                pos_URAM[j + pinrec::LANES][b >> 1] = beat.v[j]; // load pos_URAM with chunk
+                if (movable) grad_URAM[j + pinrec::LANES][b >> 1] = 0.0f; // zero out all movable entries in grad_URAM
             } else {
                 pos_URAM[j][b >> 1] = beat.v[j];
                 if (movable) grad_URAM[j][b >> 1] = 0.0f;

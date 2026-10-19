@@ -177,6 +177,7 @@ is next touched.
   theoretical; at most 30 kernel AXI-MM managers.
 - **Device:** 28 NMU512 + 26 NMU128, 28 NSU512 + 22 NSU128, 4 DDRMC, 16 AIE NoC tiles, 463 URAM288,
   967 RAMB36.
+> **Corrected 2026-10-16:** Versal URAM (URAM288E5) is not fixed at 4K x 72; it also runs as 8K x 36, 16K x 18 or 32K x 9 (AM007, UltraRAM Block; READ_/WRITE_WIDTH_A/B = 9/18/36/72). A 32-bit bank fits 8K x 36 at 32/36 bits used, so the measured 128 URAMs per 1M-slot array (32 banks x 4) needs no 2-floats-per-word packing, and that packing would save nothing. The counts below stand; the 4K x 72-only reasoning does not.
 - **URAM banks:** each URAM is 4 K × 72 bits, two ports. A 1 M-slot array is 128 URAMs: 32 banks × 4
   cascaded URAMs, two floats per word (measured count; the packing is inferred).
 - **DATAFLOW fits *inside* the beat loop, not *between* the module's phases.** Inside: each array is
