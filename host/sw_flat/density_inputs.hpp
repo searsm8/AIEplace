@@ -1,7 +1,7 @@
 #ifndef SW_FLAT_DENSITY_INPUTS_HPP
 #define SW_FLAT_DENSITY_INPUTS_HPP
 
-// density_inputs.hpp -- density_map_CU's host-side inputs (#48), built from a set-up sw_flat Placer, so
+// density_inputs.hpp -- bin_density_CU's host-side inputs (#48), built from a set-up sw_flat Placer, so
 // the device deposits exactly what sw_flat_place does (pl/src/format/density_footprint.hpp):
 //   footprints   the distinct footprints, by (width, height, movable-macro) bits; every filler shares one
 //   index        per slot: its footprint, or NO_DEPOSIT (BORROWED copies, pin slots, EMPTY padding)

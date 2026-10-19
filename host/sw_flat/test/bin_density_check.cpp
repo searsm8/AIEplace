@@ -1,10 +1,10 @@
-// density_map_check -- #48 phase 2's real-design check: pl/src/modules/density_map_CU.hpp against
+// bin_density_check -- #48 phase 2's real-design check: pl/src/modules/bin_density_CU.hpp against
 // sw_flat_place's own deposit, on a real design part-way through placement, BIT FOR BIT.
 //
-//   density_map_check <config.toml> [iterations=30]
+//   bin_density_check <config.toml> [iterations=30]
 //
 // Runs sw_flat_place for `iterations` with its deposit in slot order (the device's order; slot_order
-// "deposit" is forced on) and #48 B' on (overflow_map = "snapshot", fixed_base = "exact"), then hands density_map_CU the same slot positions, the footprint table and
+// "deposit" is forced on) and #48 B' on (overflow_map = "snapshot", fixed_base = "exact"), then hands bin_density_CU the same slot positions, the footprint table and
 // per-slot indices (density_inputs.hpp) and the fixed base map, and compares rho with sw_flat's
 // bin_overlap * inv_bin_area, every bin. Checks, each a verdict:
 //   [1] rho          bit-equal on every bin
@@ -16,7 +16,7 @@
 // [info] how many bins the name-order deposit (sw_only's) would differ in: the order is visible. Meow.
 
 #include "density_inputs.hpp"
-#include "modules/density_map_CU.hpp"
+#include "modules/bin_density_CU.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -54,7 +54,7 @@ DeviceOut run_device(const Placer& placer, const DensityInputs& in) {
     std::vector<pinrec::SlotBeat> base(grid_beats), rho(grid_beats);
     std::memcpy(base.data(), placer.fixed_base.data(), placer.fixed_base.size() * sizeof(float));
     DeviceOut out;
-    plalgo::density_map_CU(pos_x.data(), pos_y.data(), index.data(), (int)num_beats,
+    plalgo::bin_density_CU(pos_x.data(), pos_y.data(), index.data(), (int)num_beats,
                            (int)(placer.layout.first_filler_slot / pinrec::LANES), in.footprints.data(),
                            (int)in.footprints.size(), base.data(), placer.bins, placer.bin_w, placer.bin_h,
                            1 / placer.bin_area[0], placer.bin_w * placer.bin_h * placer.cfg.target_density,
@@ -76,7 +76,7 @@ long count_differing(const std::vector<float>& a, const std::vector<float>& b) {
 
 int main(int argc, char** argv)
 {
-    if (argc < 2) { fprintf(stderr, "usage: density_map_check <config.toml> [iterations]\n"); return 2; }
+    if (argc < 2) { fprintf(stderr, "usage: bin_density_check <config.toml> [iterations]\n"); return 2; }
     const int iterations = argc > 2 ? atoi(argv[2]) : 30;
     PlacerConfig cfg = read_placer_config(argv[1]);
     cfg.dump_schedule_trace = false;
@@ -87,7 +87,7 @@ int main(int argc, char** argv)
     placer.setup(cfg);
     const std::string tag = placer.design.name + " (grid " + std::to_string(placer.bins) + ")";
     if (placer.bins > densrec::GRID_MAX || placer.bins % pinrec::LANES) {
-        printf("FAIL %s: grid outside density_map_CU's range (<= %d, a multiple of %d)\n", tag.c_str(), densrec::GRID_MAX, pinrec::LANES);
+        printf("FAIL %s: grid outside bin_density_CU's range (<= %d, a multiple of %d)\n", tag.c_str(), densrec::GRID_MAX, pinrec::LANES);
         return 1;
     }
     placer.initialize_placement();

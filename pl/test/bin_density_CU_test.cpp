@@ -1,4 +1,4 @@
-// Verify density_map_CU (src/modules/density_map_CU.hpp) -- the bin density map from slot-ordered
+// Verify bin_density_CU (src/modules/bin_density_CU.hpp) -- the bin density map from slot-ordered
 // positions, footprint indices and a fixed-node base map.
 //
 // Golden: a naive double-precision deposit written here from sw_flat density.cpp (node_footprint,
@@ -18,7 +18,7 @@
 //
 // Real designs vs sw_flat Placer::bin_overlap are the next harness step, not this one. Meow.
 
-#include "modules/density_map_CU.hpp"
+#include "modules/bin_density_CU.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -136,7 +136,7 @@ static bool run(const SyntheticDesign& d, int bins) {
 
     std::vector<pinrec::SlotBeat> rho(num_bins / pinrec::LANES);
     float overflow = 0;
-    density_map_CU(pos_x.data(), pos_y.data(), idx.data(), (int)(num_slots / pinrec::LANES),
+    bin_density_CU(pos_x.data(), pos_y.data(), idx.data(), (int)(num_slots / pinrec::LANES),
                    (int)(d.first_filler_slot / pinrec::LANES), table.data(), (int)table.size(), fixed_base.data(),
                    bins, bin_w, bin_h, 1.0f / bin_area, bin_w * bin_h * d.target_density,
                    (float)movable_area + 1e-8f, rho.data(), overflow);
@@ -177,6 +177,6 @@ int main() {
     const SyntheticDesign d = make_design(7);
     bool pass = true;
     for (int bins : {128, 1024}) pass &= run(d, bins);
-    printf(pass ? "density_map_CU_test: PASS\n" : "density_map_CU_test: FAIL\n");
+    printf(pass ? "bin_density_CU_test: PASS\n" : "bin_density_CU_test: FAIL\n");
     return pass ? 0 : 1;
 }

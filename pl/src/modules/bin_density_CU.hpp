@@ -1,7 +1,7 @@
-#ifndef PL_DENSITY_MAP_CU_HPP
-#define PL_DENSITY_MAP_CU_HPP
+#ifndef PL_BIN_DENSITY_CU_HPP
+#define PL_BIN_DENSITY_CU_HPP
 
-// density_map_CU -- the bin density map rho (the ePlace charge density, XPlace's density_map) from the
+// bin_density_CU -- the bin density map rho (the ePlace charge density, XPlace's density_map) from the
 // slot-ordered positions: every OWNED and FILLER slot deposits its clamped footprint's overlap area
 // into the bins it covers, on top of the host's capped fixed-node base map; then rho = overlap / bin
 // area. Same math as sw_flat Placer::compute_electric_fields' deposit (density.cpp), which is
@@ -9,7 +9,7 @@
 //
 // PROTOTYPE SKELETON (2026-10-13): the contract (inputs, outputs, layouts) is the deliverable; the
 // body is the plain golden loop, one slot at a time, so the harness has something to pass. C-synthesizes
-// (pl/synth/density_map_CU). The optimizations it is the starting point for: 4x4-interleaved banking so a cell's
+// (pl/synth/bin_density_CU). The optimizations it is the starting point for: 4x4-interleaved banking so a cell's
 // <=3x3 window lands in one cycle, a fixed-point accumulator to remove the float RMW hazard,
 // multiple lanes, a slow path for macros, and a reciprocal for the bin-index divide.
 //
@@ -93,7 +93,7 @@ deposit:
 // movable area. Not sw_flat's serial bin-order sum: one bin per cycle would cost bins^2 cycles (~3.5 ms
 // at 1024), so each beat's 16 excesses meet in a pairwise tree and the beat sums rotate through
 // OVERFLOW_PARTIALS accumulators. The order differs, so the result agrees to a tolerance, not bit for
-// bit (host/sw_flat/test/density_map_check.cpp states it). Meow.
+// bit (host/sw_flat/test/bin_density_check.cpp states it). Meow.
 static float overflow_ratio(const float rho_URAM[densrec::GRID_MAX * densrec::GRID_MAX], int grid_beats,
                             float overflow_cap, float overflow_norm) {
     float partial[OVERFLOW_PARTIALS];
@@ -121,7 +121,7 @@ reduce:
     return overflow_area / overflow_norm;   // one divide per call, as the golden divides
 }
 
-static void density_map_CU(
+static void bin_density_CU(
         const pinrec::SlotBeat*        pos_x_DDR,        // [num_slot_beats] slot-major, lower-left x, die frame
         const pinrec::SlotBeat*        pos_y_DDR,        // [num_slot_beats] same for y
         const densrec::FootprintBeat*  footprint_idx_DDR, // [num_slot_beats] per slot: table index or NO_DEPOSIT
@@ -174,4 +174,4 @@ drain:
 
 } // namespace plalgo
 
-#endif // PL_DENSITY_MAP_CU_HPP
+#endif // PL_BIN_DENSITY_CU_HPP

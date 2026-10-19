@@ -40,10 +40,10 @@ Decide what lives on chip, when, and at what precision, before designing around 
 (utilization report, not arithmetic). **Falsified if** no scenario fits 1024 with headroom. Then the
 density path streams the field from DDR, and the gather design changes.
 
-## 2. Bin density compute unit (`density_map_CU`)
+## 2. Bin density compute unit (`bin_density_CU`)
 
 - [x] **Skeleton (2026-10-13, `2dad68f`):** contract, plain loop, tier-1 harness vs a double golden
-      (rel_rms 2.9e-6 at 1024). [[_NEW_EXPLAINER_density_map_CU_brief_20261013.md]]
+      (rel_rms 2.9e-6 at 1024). [[_NEW_EXPLAINER_bin_density_CU_brief_20261013.md]]
 - [ ] **Real-design harness** vs sw_flat `Placer::bin_overlap`, and count the footprint table on all
       44 designs (4096 is assumed; MMS movable macros are the risk).
 - [ ] **Overflow map decision:** the stop test needs the map without fillers, every step (XPlace

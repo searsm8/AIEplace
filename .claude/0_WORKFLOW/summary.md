@@ -114,7 +114,7 @@ The hw build is running on the build server, and the card run is next ([[HANDOFF
   from its own solver map after the cells, before the fillers, over an EXACT-size fixed base (XPlace's one
   deposit, no extra URAM). sw_flat switches `overflow_map`/`fixed_base`; B' == sw_only's metric (38/44
   bit-equal, rest rounding); B without the exact base reads 1.3-6.7% low on bigblue2/3/4. Trajectories
-  within noise. **Device side landed 10-15:** `density_map_CU` reduces between cells and fillers (tree
+  within noise. **Device side landed 10-15:** `bin_density_CU` reduces between cells and fillers (tree
   sum, so within 3.9e-6 of a double sum, 44/44; C-synth `reduce` II=1, ~0.22 ms at 1024). Next: B' on
   in the step-6 golden config. → [[REPORT_48_overflow_map_20261015.md]]
 - **#47 — the tail exchange replaced the chunk mailbox (2026-10-09).** Rule C6: a macro pin is never

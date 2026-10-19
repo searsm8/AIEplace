@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# density_map_check.sh -- run build/density_map_check on the designs in vck5000/tools/benchmarks.py (or
-# the ones named), each from its D6 config with the grid capped at density_map_CU's 1024, JOBS at a
+# bin_density_check.sh -- run build/bin_density_check on the designs in vck5000/tools/benchmarks.py (or
+# the ones named), each from its D6 config with the grid capped at bin_density_CU's 1024, JOBS at a
 # time (default 4). One log per design in build/density_map_logs/. Exits non-zero unless every design
 # printed PASS. Meow.
 set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
-CHECK=${CHECK:-$HERE/../build/density_map_check}
+CHECK=${CHECK:-$HERE/../build/bin_density_check}
 LOGS=$(realpath -m "${LOGS:-$HERE/../build/density_map_logs}")
 JOBS=${JOBS:-4}
 ITERATIONS=${ITERATIONS:-30}
@@ -30,5 +30,5 @@ for log in "$LOGS"/*.txt; do
     grep -v '^ok' "$log"
     grep -q '^PASS ' "$log" && passed=$((passed + 1))
 done
-echo "density_map_check: $passed of ${#DESIGNS[@]} designs PASS"
+echo "bin_density_check: $passed of ${#DESIGNS[@]} designs PASS"
 [[ $passed -eq ${#DESIGNS[@]} ]]

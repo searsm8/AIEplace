@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # overflow_map_check.sh -- run build/overflow_map_check on the designs in vck5000/tools/benchmarks.py (or
-# the ones named), each from its D6 config with the grid capped at density_map_CU's 1024, JOBS at a time
+# the ones named), each from its D6 config with the grid capped at bin_density_CU's 1024, JOBS at a time
 # (default 4), ITERATIONS in (default 30; a large value runs to the stop). One log per design in
 # build/overflow_map_logs/. Exits non-zero unless every design printed PASS. Meow.
 set -uo pipefail

@@ -84,7 +84,7 @@ void Placer::deposit_fixed_base()
 }
 
 // computeOverlaps + computeElectricFields_DCT: the fixed base, then one serial pass over deposit_slots
-// (sw_only's order unless [sw_flat] slot_order has "deposit"; then it is density_map_CU's). The fillers
+// (sw_only's order unless [sw_flat] slot_order has "deposit"; then it is bin_density_CU's). The fillers
 // are deposit_slots' tail, so with overflow_map = "snapshot" the map between cells and fillers is
 // XPlace's mov_density_map, and the overflow is reduced from it there. Meow.
 void Placer::compute_electric_fields()

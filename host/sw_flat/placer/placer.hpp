@@ -156,7 +156,7 @@ struct Placer {
     int   bins = 0, die_w = 0, die_h = 0;   // die_w / die_h: Grid::getDieWidth, an int on purpose
     float bin_w = 0, bin_h = 0;
     std::vector<float> bin_area, bin_overlap;
-    std::vector<float> fixed_base;     // the fixed nodes' deposit, capped: constant, so built once (density_map_CU's base map)
+    std::vector<float> fixed_base;     // the fixed nodes' deposit, capped: constant, so built once (bin_density_CU's base map)
     std::vector<Gradient> efield;
     float snapshot_overflow = 0;       // overflow_map = "snapshot": the last compute_electric_fields' reduction
     int   num_movable_macros = 0, formula_bins_per_row = 0;

@@ -8,7 +8,7 @@ The base is the design's frozen regress config (vck5000/test/regress/configs/<na
 exists, else mgc_fft_a's with the benchmark, target density and grid from tools/benchmarks.py (a
 bare config silently gets those wrong). Then D6: no backtracking, no phase 2, nets <= 96 pins, and
 the schedule trace on. The benchmark path is made absolute so either placer can run from anywhere.
-max_grid caps bins_per_row (density_map_CU takes at most 1024); it is set only when it binds.
+max_grid caps bins_per_row (bin_density_CU takes at most 1024); it is set only when it binds.
 Meow.
 """
 import re

@@ -1113,17 +1113,17 @@ Open questions worth measuring, not yet scoped into a task.
 grid on chip and run density alongside the WL gradient. Bar: the paper's 3090, bigblue4 10.0 ms/step
 (Table IV), ~12 ms deterministic. v1 grid 1024; 2048 is a planned extension.
 
-**State (2026-10-14):** plan written; `density_map_CU` skeleton + tier-1 harness landed (`2dad68f`).
+**State (2026-10-14):** plan written; `bin_density_CU` skeleton + tier-1 harness landed (`2dad68f`).
 Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE FFT, 4 evaluation.
 - [x] **Phase 2, real-design harness + footprint count (2026-10-14).** `host/sw_flat/density_inputs.hpp`
       builds the module's inputs from a placer (footprint table by (w, h, macro) bits, per-slot index,
       fixed base map, now built once in setup: check-placer still bit-identical).
-      `make -C host/sw_flat check-density-map`: `density_map_CU` vs sw_flat's slot-order deposit after
+      `make -C host/sw_flat check-bin-density`: `bin_density_CU` vs sw_flat's slot-order deposit after
       30 iterations, **rho BIT-EQUAL on 44/44 designs** (grid capped at 1024; the 7 grid-2048 designs
       run at 1024); a dropped-slot mutant is caught on every design. Name order differs from slot order
       in hundreds to thousands of bins ([info]), so the check sees order. **Footprint table: 4-105
       entries** (max mms/bigblue4; MMS 40-105, ISPD 4-49), against an assumed 4096: a 128-entry table
-      would do. `.claude/2_ARTIFACTS/scratch_48/density_map_check_44_20261014.txt`
+      would do. `.claude/2_ARTIFACTS/scratch_48/bin_density_check_44_20261014.txt`
 - [x] **Phase 2, overflow map: B' (Mark, 2026-10-14: "XPlace as gospel, URAM is precious").** The
       overflow is reduced from the solver's map after the cells, before the fillers, over an EXACT-size
       fixed base (XPlace's one deposit; no second accumulator). sw_flat `[sw_flat] overflow_map =
@@ -1133,17 +1133,17 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       Trajectories (7 designs): stop ±2 it, HPWL ≤0.03%. Moves the solver away from frozen sw_only,
       toward XPlace (small fixed nodes no longer stretched; 6/44 designs affected).
       → [[REPORT_48_overflow_map_20261015.md]]
-- [x] **Phase 2, device side (2026-10-15).** `density_map_CU` deposits the cells (`num_cell_beats =
+- [x] **Phase 2, device side (2026-10-15).** `bin_density_CU` deposits the cells (`num_cell_beats =
       first_filler_slot / 16`; beat-aligned by construction, every chunk's `num_slots` is a multiple
       of BANKS, and the check asserts it), reduces XPlace's overflow_fn over `rho_URAM` (out: one
       float), then deposits the fillers. The sum is a 16-lane tree into 8 rotating partials, NOT
       sw_flat's serial bin order (that would be bins² cycles), so it is held to a tolerance:
-      `check-density-map` [4] **44/44: CU within 3.9e-6 of a double sum of the same map** (bound 2e-5)
+      `check-bin-density` [4] **44/44: CU within 3.9e-6 of a double sum of the same map** (bound 2e-5)
       and within 9.0e-4 of `snapshot_overflow` (bound 2e-3); on the 5 MMS designs above 1e-4 the
       double sum is exactly as far from sw_flat, so it is sw_flat's float accumulator that drifts.
       rho still bit-equal 44/44 (now with the exact base). pl tier-1 [5] OVERFLOW vs double, 2.6e-6.
-      **C-synth passes** (new `pl/synth/density_map_CU/`): `reduce` II=1, 65.5K cycles ≈ 0.22 ms at
-      1024 (HLS infers rho_URAM cyclic-16 from it). `.claude/2_ARTIFACTS/scratch_48/density_map_check_44_overflow_20261015.txt`
+      **C-synth passes** (new `pl/synth/bin_density_CU/`): `reduce` II=1, 65.5K cycles ≈ 0.22 ms at
+      1024 (HLS infers rho_URAM cyclic-16 from it). `.claude/2_ARTIFACTS/scratch_48/bin_density_check_44_overflow_20261015.txt`
 - [x] **Phase 2: turn B' on in the step-6 golden config.** Done 2026-10-16 in #45 step 5b part 2: the
       `pl+Bprime` variant (`host/sw_flat/test/sum_order_drift.py`) is step 6's golden, measured on 5
       designs, all converged ([[_NEW_REPORT_45_pl_arithmetic_20261016.md]]). Box closed 2026-10-19.

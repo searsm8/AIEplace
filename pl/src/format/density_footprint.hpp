@@ -1,7 +1,7 @@
 #ifndef DENSITY_FOOTPRINT_HPP
 #define DENSITY_FOOTPRINT_HPP
 
-// density_footprint.hpp -- the host->device contract for density_map_CU. Shared by the host packer and
+// density_footprint.hpp -- the host->device contract for bin_density_CU. Shared by the host packer and
 // the device, so neither side can drift. Plain C++ with fixed-width types: g++ and Vitis HLS alike.
 //
 // Per slot, the device reads its position (the gradient's slot-major pos arrays, lower-left corner,
