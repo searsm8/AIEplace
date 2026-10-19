@@ -42,6 +42,12 @@ starts here. Not started: this file is the brief.*
   tmux session `hpwl_hw` (`pl/build/hw/run_build.sh`). Its log is `pl/build/hw/xclbin.log`. It writes
   `pl/build/hw/done` (exit code + date) when finished. `3b8a1b9` predates the `--package.out_dir` fix, so
   the server's `pl/` will get the package strays (untracked, harmless; delete them).
+  **Checked 19:38 (still routing):** synth 34 min, opt 6 min, place 39 min, route started 19:13.
+  Kernel after placement (`kernel_util_placed.rpt`): URAM **256 (55%)**, BRAM 236 (25%), LUT 139 K (16%),
+  REG 171 K (10%). This matches #41's "one axis = 256 of 463 URAM"; HLS's 64 was an undercount.
+  **Timing is NOT met at 250 MHz:** post-place physopt WNS −0.615 ns (TNS −646), and early routing
+  WNS −0.629 ns. If the failing clock is the 4.0 ns kernel clock, that is ~4.63 ns ≈ 216 MHz. Which clock
+  fails, and whether v++ scales the clock down or refuses, is not known until route finishes.
   **Next:** read `done`, then timing and utilization from `pl/build/hw/reports/link/imp/`. On the card, the
   XRT host has to be built on the server: its XRT is under `/opt/xilinx/xrt_*`, and `setup_env.sh`
   assumes `/opt/xilinx/xrt`. Run `TARGET=hw make -C host/sw_flat hpwl-gradient-xrt`. The default
