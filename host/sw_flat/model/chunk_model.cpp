@@ -55,8 +55,10 @@ int main(int argc, char** argv) {
             for (bool all_macros : {false, true}) {
                 const Resident r = build_resident(ch, cfg, all_macros);
                 print_phases(all_macros ? "res+m" : "res", model_resident(ch, r, all_macros), today.total());
-                printf("         region %ld nodes in %ld rows, private rows max %ld, max_slots %ld (%+.1f%% vs today) %s\n",
-                       r.region_nodes, r.region_rows, r.max_private_rows, r.max_slots,
+                printf("         region %ld nodes in %ld rows (%.1f%% of capacity; shared cells %ld, shared macros %ld, "
+                       "other macros %ld, macro pins %ld), private rows max %ld, max_slots %ld (%+.1f%% vs today) %s\n",
+                       r.region_nodes, r.region_rows, 100.0 * r.region_rows * BANKS / capacity, r.shared_cells,
+                       r.shared_macros, r.other_macros, r.macro_pins, r.max_private_rows, r.max_slots,
                        100.0 * (r.max_slots - max_slots) / max_slots, r.max_slots <= capacity ? "fits" : "DOES NOT FIT");
             }
         }

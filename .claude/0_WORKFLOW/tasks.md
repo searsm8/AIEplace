@@ -956,8 +956,10 @@ in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_202
       pre-run passes, as it should). `.claude/2_ARTIFACTS/borrowed_47/` (census,
       `m0_1M_c8_20261016.txt`, `c8_real_sweep_20261016.txt`, and `c8_synth_20261016/`: csynth.rpt +
       both co-sim logs).
-- [ ] **R = resident shared region, measured (2026-10-16, Mark's idea; an alternative to B4, not
-      chosen).** Every shared node gets one slot, the same in every chunk, in rows that stay on chip
+- [x] **R = resident shared region: CLOSED 2026-10-19 (Mark), measured, not chosen; B4 stays the
+      plan.** It does not scale to K=6, and neither does a sliding window (below); only per-chunk
+      tails do. Kept: `Encoded::shared_bank`, `chunk_model` res/res+m, `window_model`.
+      (Opened 2026-10-16 as Mark's alternative to B4.) Every shared node gets one slot, the same in every chunk, in rows that stay on chip
       all iteration: no tails, no send, no merge, and `iteration_update` unchanged. Census at 1 M, 8/8
       chunked designs, today's partition (`borrowed_census.cpp` + the new `Encoded::shared_bank`
       in `assign_banks`, a no-op when empty; tier 1 PASS):
@@ -978,7 +980,22 @@ in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_202
       **Direction (Mark, 2026-10-16):** static regions (shared, maybe macros, maybe fixed) are the
       strategy so long as chunks stay large. Next: (1) measure each static region's share of the 1 M
       slots per design; (2) packer must raise K until private + regions fit (region-aware FM target),
-      so a fit is guaranteed, not lucky.
+      so a fit is guaranteed, not lucky. Fixed pins stay per chunk (Mark: not a static region).
+      **(1) measured (2026-10-16, `chunk_model` region breakdown; today's FM partition):** region as % of
+      capacity. **1 M:** shared region 3–8% at K=2, 17.5–26.4% at K=3 (bigblue4 25.2%). Macro region
+      adds +2.0–5.5 pp, almost all macro pins (21–58 K; macros themselves ≤ 200), and buys only
+      0.1–1.1 pp of cycles. **512 K (stand-in for a 2x bigger design at 1 M):** K=2 2–16%, K=3 8–34%;
+      K=6 bigblue4 **101.7%**, mms/bigblue4 103.8%, mms/newblue7 83.7% -- the region alone fills the
+      capacity, and raising K only grows it, so (2) cannot rescue these. 5 of 17 chunked designs do not
+      fit under res. The region is ~24% of the design at K=6 (bigblue4 527 K of 2.17 M): R's ceiling
+      is near K=3-4. `.claude/2_ARTIFACTS/borrowed_47/m0_{1M,512K}_regions_20261016.txt`.
+      **Sliding window measured (2026-10-19, `model/window_model`):** a shared node resident only from
+      its first to its last user chunk; size = peak live set (node counts, no bank rounding). **K ≤ 3:
+      window = global region exactly** (every interval covers the middle chunk). **K=6 (512 K):
+      0.47–0.58x global but still 39–58% of capacity**, 1.1–1.2x what today's chunk holds (owned
+      shared + tail); bigblue4, mms/bigblue4, mms/newblue7 do not fit (632–710 K vs 524 K). Today's
+      chunk order is already the best of all 720. Verdict: the window does not scale either; only
+      per-chunk tails (B3/C8 today, B4 fused) do. `window_{1M,512K}_20261019.txt` (same folder).
 → [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
 
 ---

@@ -26,6 +26,9 @@ ARGS    ?=
 chunk_model: chunk_model.cpp cycle_model.hpp ../packer/beat_packer.hpp ../packer/partition.hpp
 	$(CXX) $(CXXFLAGS) -o $@ $<
 
+window_model: window_model.cpp cycle_model.hpp ../packer/beat_packer.hpp ../packer/partition.hpp
+	$(CXX) $(CXXFLAGS) -o $@ $<
+
 tail_layout: tail_layout.cpp cycle_model.hpp ../packer/beat_packer.hpp ../packer/partition.hpp
 	$(CXX) $(CXXFLAGS) -o $@ $<
 
@@ -36,4 +39,4 @@ $(NETLISTS)/%.netlist:
 	$(MAKE) -C .. build/netlists/$*.netlist
 
 clean:
-	rm -f chunk_model tail_layout today.txt legacy.txt
+	rm -f chunk_model tail_layout window_model today.txt legacy.txt

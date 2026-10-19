@@ -52,6 +52,7 @@ struct Phases {
 // colouring, and each chunk re-encoded around those banks. Meow.
 struct Resident {
     long region_nodes = 0, region_rows = 0, max_private_rows = 0;
+    long shared_cells = 0, shared_macros = 0, other_macros = 0, macro_pins = 0;   // region_nodes by kind
     long region_macro_entries = 0;               // R+M: the global refresh / fold list, hazard padding included
     std::vector<long> private_rows, fixed_rows, issue_beats, macro_entries;   // per chunk
     long max_slots = 0;
@@ -60,9 +61,9 @@ struct Resident {
 inline Resident build_resident(const Chunked& ch, const Config& cfg, bool all_macros) {
     const Encoded& g = ch.global;
     const int num_global = (int)g.kind.size();
-    std::vector<char> in_region(num_global, 0);
+    std::vector<char> in_region(num_global, 0), shared(num_global, 0);
     for (const Chunk& c : ch.chunks)
-        for (size_t l = 0; l < c.work_node.size(); l++) if (c.external[l]) in_region[c.work_node[l]] = 1;
+        for (size_t l = 0; l < c.work_node.size(); l++) if (c.external[l]) in_region[c.work_node[l]] = shared[c.work_node[l]] = 1;
     if (all_macros)
         for (int n = 0; n < num_global; n++) if (g.kind[n] == MACRO || g.kind[n] == MACRO_PIN) in_region[n] = 1;
 
@@ -70,8 +71,14 @@ inline Resident build_resident(const Chunked& ch, const Config& cfg, bool all_ma
     assign_banks(colour, cfg);
     Resident r;
     std::vector<long> region_per_bank(BANKS, 0);
-    for (int n = 0; n < num_global; n++)
-        if (in_region[n]) { region_per_bank[colour.bank[n]]++; r.region_nodes++; }
+    for (int n = 0; n < num_global; n++) {
+        if (!in_region[n]) continue;
+        region_per_bank[colour.bank[n]]++;
+        r.region_nodes++;
+        if (g.kind[n] == MACRO_PIN) r.macro_pins++;
+        else if (g.kind[n] == MACRO) (shared[n] ? r.shared_macros : r.other_macros)++;
+        else r.shared_cells++;
+    }
     r.region_rows = *std::max_element(region_per_bank.begin(), region_per_bank.end());
     if (all_macros) { schedule_macro_pins(colour, cfg); r.region_macro_entries = (long)colour.macro_order.size(); }
 
