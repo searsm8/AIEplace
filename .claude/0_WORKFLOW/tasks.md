@@ -1,10 +1,10 @@
 # Tasks
 
-**Active Task (2026-10-19): #45 step 8 brought forward — a v++/XRT hardware baseline for
-`hpwl_gradient_CU`.** Mark: 250 MHz, emulation first; a baseline to improve on, 300 MHz timing later.
-→ [[HANDOFF_45_hpwl_gradient_hw_flow_20261019.md]]. Step 6, the density path, is still next on the
-plan after this. (#48 phase 2: B' is on in step 6's golden `pl+Bprime` since 10-16; only the optional
-bigblue3/4 grid-1024 trajectory check is left.)
+**Active Task (2026-10-19): #45 step 6 / #48 — `bin_density_CU` in fixed point.** sw_flat models it
+(`deposit = "fixed"`, 18.18 in a 36-bit word); next is the CU's integer accumulator and a bit-exact
+harness. → [[HANDOFF_48_bin_density_fixed_point_20261019.md]]. Parked alongside: #45 step 8's
+`hpwl_gradient_CU` card run ([[HANDOFF_45_hpwl_gradient_hw_flow_20261019.md]]); #46's 44-design
+re-score, running in `vck5000/results/DSE_20261019_125733/`.
 
 Open work, one section per task. **Status lives here; evidence lives in a
 report.** Don't reuse task numbers, find the highest number and add one.
@@ -1149,4 +1149,16 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       designs, all converged ([[_NEW_REPORT_45_pl_arithmetic_20261016.md]]). Box closed 2026-10-19.
 - [ ] **Optional: bigblue3/4 trajectory at grid 1024** (the drift ran at 2048, where fewer fixed nodes
       are stretched). Before step 6 quotes numbers.
+- [ ] **Phase 2, fixed-point accumulator (Mark, 2026-10-19: rename to `bin_density_CU`, whole chip for
+      now, 1024 only, ~half the URAMs, accumulate in fixed point).** **sw_flat side DONE:** `[sw_flat]
+      deposit = "fixed"`, `deposit_frac_bits = 18` (default off; check-placer bit-identical). One 36-bit
+      URAM word per bin (8K × 36): 128 URAMs. Peak ρ over 44 designs = 95,408 bins (mms/newblue4,
+      iteration 4; every peak at iteration 0–7) → 18.18 leaves 2.7× headroom. At equal positions q18's
+      overflow beats float everywhere (≤ 9.3e-7 vs up to 4.8e-5); ρ beats float on dense bins (bigblue4
+      3.0e-7 vs 2.3e-5) and loses on small sparse designs (pci_bridge32_b 9.7e-6 vs 3.6e-7). Drift vs
+      `pl+Bprime`: within noise on 4/4 so far (bigblue4 pending). Order-independent: fft_a's trace is
+      byte-identical in name and slot order. **Next:** the CU's integer accumulator,
+      `density_inputs.hpp` (w' in the table, integer base), `check-bin-density` bit-exact incl. the
+      int64 excess and a shuffled-order mutant. Open for Mark: a per-iteration exponent.
+      → [[HANDOFF_48_bin_density_fixed_point_20261019.md]]
 → [[_NEW_PLAN_48_density_onchip_20261014.md]]

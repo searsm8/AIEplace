@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # bin_density_check.sh -- run build/bin_density_check on the designs in vck5000/tools/benchmarks.py (or
 # the ones named), each from its D6 config with the grid capped at bin_density_CU's 1024, JOBS at a
-# time (default 4). One log per design in build/density_map_logs/. Exits non-zero unless every design
+# time (default 4). One log per design in build/bin_density_logs/. Exits non-zero unless every design
 # printed PASS. Meow.
 set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
 CHECK=${CHECK:-$HERE/../build/bin_density_check}
-LOGS=$(realpath -m "${LOGS:-$HERE/../build/density_map_logs}")
+LOGS=$(realpath -m "${LOGS:-$HERE/../build/bin_density_logs}")
 JOBS=${JOBS:-4}
 ITERATIONS=${ITERATIONS:-30}
 rm -rf "$LOGS" && mkdir -p "$LOGS"

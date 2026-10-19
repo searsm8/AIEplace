@@ -4,6 +4,7 @@
 #include "placer.hpp"
 #include "flat_database.hpp"
 #include "flat_netlist.hpp"
+#include "format/density_footprint.hpp"   // densrec::RHO_WORD_BITS
 
 #include "toml.hpp"
 
@@ -107,6 +108,10 @@ PlacerConfig read_placer_config(const std::string& path)
     c.wa_sums_tree = pick("wa_sums", "serial", "tree");
     c.grad_merge_stream = pick("grad_merge", "file", "stream");
     c.hpwl_fixed = pick("hpwl", "float", "fixed");
+    c.deposit_fixed = pick("deposit", "float", "fixed");
+    c.deposit_frac_bits = cfg["sw_flat"]["deposit_frac_bits"].value_or(0);
+    if (c.deposit_fixed && (c.deposit_frac_bits < 1 || c.deposit_frac_bits >= densrec::RHO_WORD_BITS))
+        fail("[sw_flat] deposit = \"fixed\" needs 1 <= deposit_frac_bits < " + std::to_string(densrec::RHO_WORD_BITS));
     // The stream carries nets of 2..96 pins (the packer's IGNORE_NET_DEGREE): another mask would
     // compare two net sets, not two arithmetics. Meow.
     if (c.uses_record_stream() && c.ignore_net_degree != packer::IGNORE_NET_DEGREE)

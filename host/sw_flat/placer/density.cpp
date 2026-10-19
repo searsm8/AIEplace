@@ -4,9 +4,12 @@
 #include "placer.hpp"
 
 #include "DCT.h"
+#include "format/density_footprint.hpp"   // densrec::RHO_WORD_BITS
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 namespace sw_flat {
 
@@ -61,6 +64,10 @@ inline Footprint slot_footprint(const Placer& placer, long slot, bool clamp)
                           placer.is_movable_macro[slot], clamp);
 }
 
+// deposit = "fixed": a float count of fixed units (>= 0) rounded to the nearest integer, by the float
+// add and float -> unsigned conversion the device does. Meow.
+inline uint64_t to_fixed(float units) { return (uint64_t)(units + 0.5f); }
+
 inline Footprint fixed_footprint(const Placer& placer, int node, bool clamp)
 {
     const FlatDesign& d = placer.design;
@@ -81,15 +88,65 @@ void Placer::deposit_fixed_base()
     for (int node : fixed_nodes) for_each_overlap(*this, fixed_footprint(*this, node, clamp_fixed), deposit);
     for (size_t bin = 0; bin < fixed_base.size(); bin++)
         fixed_base[bin] = std::min(fixed_base[bin], bin_area[bin] * cfg.target_density);
+    if (cfg.deposit_fixed) {
+        fixed_scale = std::ldexp(1.0f, cfg.deposit_frac_bits) / bin_area[0];
+        fixed_base_q.resize(fixed_base.size());
+        for (size_t bin = 0; bin < fixed_base.size(); bin++) fixed_base_q[bin] = to_fixed(fixed_base[bin] * fixed_scale);
+    }
+}
+
+// deposit = "fixed" (#48): bin_density_CU's integer accumulator. Each overlap is computed as the float
+// deposit computes it, with the footprint weight pre-scaled by fixed_scale (the host's table entry), and
+// rounded once to an integer count of 2^-F bin areas. Integer adds make the map independent of the
+// deposit order, so the device matches it bit for bit at any parallelism. The overflow's excess sum is
+// an exact int64 (what the device will return); only its conversion to a ratio is float. Meow.
+void Placer::deposit_fixed_point(std::vector<std::vector<float>>& density)
+{
+    bin_fixed = fixed_base_q;
+    auto deposit = [&](size_t bin, float units) { bin_fixed[bin] += to_fixed(units); };
+    auto scaled_footprint = [&](long slot) {
+        Footprint fp = slot_footprint(*this, slot, cfg.enable_density_clamp);
+        fp.weight *= fixed_scale;
+        return fp;
+    };
+    for (int i = 0; i < filler_start; i++) for_each_overlap(*this, scaled_footprint(deposit_slots[i]), deposit);
+    if (cfg.overflow_snapshot) {
+        const uint64_t cap = to_fixed(bin_w * bin_h * cfg.target_density * fixed_scale);
+        uint64_t excess = 0;
+        for (uint64_t q : bin_fixed) excess += q > cap ? q - cap : 0;
+        const float overflow_area = (float)std::ldexp((double)excess, -cfg.deposit_frac_bits) * bin_area[0];
+        snapshot_overflow = overflow_area / (total_movable_area + 1e-8f);
+    }
+    for (size_t i = filler_start; i < deposit_slots.size(); i++) for_each_overlap(*this, scaled_footprint(deposit_slots[i]), deposit);
+
+    // The device's word is RHO_WORD_BITS wide and would wrap silently; here a bin that does not fit is fatal. Meow.
+    const uint64_t peak = *std::max_element(bin_fixed.begin(), bin_fixed.end());
+    if (peak >> densrec::RHO_WORD_BITS) {
+        fprintf(stderr, "sw_flat: deposit = \"fixed\": a bin holds %.6g bin areas at iteration %d, over the %d-bit word "
+                        "with deposit_frac_bits = %d\n", std::ldexp((double)peak, -cfg.deposit_frac_bits), iteration,
+                densrec::RHO_WORD_BITS, cfg.deposit_frac_bits);
+        exit(1);
+    }
+    for (int col = 0; col < bins; col++)
+        for (int row = 0; row < bins; row++)
+            density[col][row] = std::ldexp((float)bin_fixed[(size_t)col * bins + row], -cfg.deposit_frac_bits);
+}
+
+void Placer::compute_electric_fields()
+{
+    PhaseTimer timer{time_field};
+    std::vector<std::vector<float>> density(bins, std::vector<float>(bins));
+    if (cfg.deposit_fixed) deposit_fixed_point(density);
+    else deposit_float(density);
+    field_solve(density);
 }
 
 // computeOverlaps + computeElectricFields_DCT: the fixed base, then one serial pass over deposit_slots
 // (sw_only's order unless [sw_flat] slot_order has "deposit"; then it is bin_density_CU's). The fillers
 // are deposit_slots' tail, so with overflow_map = "snapshot" the map between cells and fillers is
 // XPlace's mov_density_map, and the overflow is reduced from it there. Meow.
-void Placer::compute_electric_fields()
+void Placer::deposit_float(std::vector<std::vector<float>>& density)
 {
-    PhaseTimer timer{time_field};
     bin_overlap = fixed_base;
     auto deposit = [&](size_t bin, float overlap_area) { bin_overlap[bin] += overlap_area; };
     for (int i = 0; i < filler_start; i++)
@@ -104,13 +161,17 @@ void Placer::compute_electric_fields()
     for (size_t i = filler_start; i < deposit_slots.size(); i++)
         for_each_overlap(*this, slot_footprint(*this, deposit_slots[i], cfg.enable_density_clamp), deposit);
 
-    // compute_a_uv_DCT, verbatim: Grid::getBinDensities is [col][row], scaled by bin [0][0]'s area. Meow.
-    const int num_rows = bins, num_cols = bins;
-    std::vector<std::vector<float>> density(bins, std::vector<float>(bins));
+    // Grid::getBinDensities is [col][row], scaled by bin [0][0]'s area. Meow.
     float bin_area_inv = 1 / bin_area[0];
     #pragma omp parallel for schedule(static)
     for (int col = 0; col < bins; col++)
         for (int row = 0; row < bins; row++) density[col][row] = bin_overlap[(size_t)col * bins + row] * bin_area_inv;
+}
+
+// compute_a_uv_DCT + compute_eField_DCT on the bin density map. Meow.
+void Placer::field_solve(std::vector<std::vector<float>>& density)
+{
+    const int num_rows = bins, num_cols = bins;
 
     std::vector<std::vector<float>> temp(num_rows, std::vector<float>(num_cols));
     std::vector<std::vector<float>> a_uv(num_rows, std::vector<float>(num_cols));

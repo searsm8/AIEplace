@@ -74,6 +74,9 @@ struct PlacerConfig {
     bool wa_sums_tree = false;            // wa_sums = "tree": B/C sums over the record lanes by the Dhar trees (wa_sums.hpp)
     bool grad_merge_stream = false;       // grad_merge = "stream": scatter-add in stream order, macro fold, tail merge
     bool hpwl_fixed = false;              // hpwl = "fixed": the schedule's HPWL as the int64 sum of hpwl_to_fixed (hpwl_CU.hpp)
+    // #48 (Mark, 2026-10-19): bin_density_CU accumulates in fixed point, one RHO_WORD_BITS word per bin. Meow.
+    bool deposit_fixed = false;           // deposit = "fixed": each bin counts units of 2^-deposit_frac_bits bin areas
+    int  deposit_frac_bits = 0;
     bool uses_record_stream() const { return wa_sums_tree || grad_merge_stream || hpwl_fixed; }
 };
 // Exits with a message on a missing required key or a config outside sw_flat's scope (D6). Meow.
@@ -157,6 +160,8 @@ struct Placer {
     float bin_w = 0, bin_h = 0;
     std::vector<float> bin_area, bin_overlap;
     std::vector<float> fixed_base;     // the fixed nodes' deposit, capped: constant, so built once (bin_density_CU's base map)
+    std::vector<uint64_t> fixed_base_q, bin_fixed;   // deposit = "fixed": fixed_base and the accumulator, in fixed units
+    float fixed_scale = 0;             // deposit = "fixed": 2^F / bin_area[0], die-frame area -> fixed units
     std::vector<Gradient> efield;
     float snapshot_overflow = 0;       // overflow_map = "snapshot": the last compute_electric_fields' reduction
     int   num_movable_macros = 0, formula_bins_per_row = 0;
@@ -196,6 +201,9 @@ struct Placer {
     void stream_hpwl_fixed(bool at_probe, int64_t totals[2]) const;   // per axis, hpwl_to_fixed units
     // density.cpp
     void deposit_fixed_base();
+    void deposit_float(std::vector<std::vector<float>>& density);         // compute_electric_fields' deposit -> rho
+    void deposit_fixed_point(std::vector<std::vector<float>>& density);   // the same, deposit = "fixed"
+    void field_solve(std::vector<std::vector<float>>& density);           // rho -> efield
     void compute_electric_fields();
     Gradient electrostatic_force(long slot) const;
     float compute_overflow(bool smooth) const;

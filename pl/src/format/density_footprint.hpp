@@ -21,6 +21,7 @@ namespace densrec {
 constexpr int      GRID_MAX            = 1024;          // v1 hardware grid; 2048 is the planned extension
 constexpr int      FOOTPRINT_TABLE_MAX = 4096;          // assumed, not yet measured on the 44 designs
 constexpr uint32_t NO_DEPOSIT          = 0xFFFFFFFFu;
+constexpr int      RHO_WORD_BITS       = 36;            // one bin's fixed-point accumulator: a URAM word in 8K x 36 mode
 
 struct FootprintBeat { uint32_t idx[pinrec::LANES]; };  // one 512-bit DDR beat of footprint indices
 

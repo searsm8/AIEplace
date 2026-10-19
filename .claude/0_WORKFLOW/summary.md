@@ -115,8 +115,12 @@ The hw build is running on the build server, and the card run is next ([[HANDOFF
   deposit, no extra URAM). sw_flat switches `overflow_map`/`fixed_base`; B' == sw_only's metric (38/44
   bit-equal, rest rounding); B without the exact base reads 1.3-6.7% low on bigblue2/3/4. Trajectories
   within noise. **Device side landed 10-15:** `bin_density_CU` reduces between cells and fillers (tree
-  sum, so within 3.9e-6 of a double sum, 44/44; C-synth `reduce` II=1, ~0.22 ms at 1024). Next: B' on
-  in the step-6 golden config. → [[REPORT_48_overflow_map_20261015.md]]
+  sum, so within 3.9e-6 of a double sum, 44/44; C-synth `reduce` II=1, ~0.22 ms at 1024).
+  → [[REPORT_48_overflow_map_20261015.md]]
+- **#48 — `bin_density_CU` (renamed 10-19) accumulates in fixed point (Mark).** sw_flat models it:
+  18.18 in one 36-bit URAM word per bin (8K × 36, 128 URAMs at 1024). Peak ρ 95,408 bins (mms/newblue4,
+  iteration 4). Exact integer sums, so the map is order-independent and the overflow beats float; drift
+  in noise so far. Next: the CU side. → [[HANDOFF_48_bin_density_fixed_point_20261019.md]]
 - **#47 — the tail exchange replaced the chunk mailbox (2026-10-09).** Rule C6: a macro pin is never
   external (the macro is). Rule C7: a chunk's externals are its tail rows, one block per owner;
   owners write / read them through a 32 x 256 row buffer replaying host-scheduled ops. Tier 1, 8/8
