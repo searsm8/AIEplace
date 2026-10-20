@@ -19,7 +19,8 @@ If a rule stops being true, flag it for deletion and tell Mark — a stale rule 
   The trail SessionStart hook + statusline are wired the same way in `.claude/settings.local.json`
   (the repo's `.claude/settings.json` copy runs Windows node, finds no trail, and stays silent).
   If nvm's node version changes, update the path in both places. Meow.
-- **Build server** (`ssh build` → `hacc-build-01.inf.ethz.ch`; Vitis/XRT + the VCK5000 live there,
+- **Build server** (`ssh build` → `hacc-build-01.inf.ethz.ch`; Vitis lives there, but **no VCK5000** (no Xilinx device in `lspci`,
+  checked 2026-10-20 — build only, not card runs. Meow.),
   repo at `~/AIEplace`). Run remote commands like this (the `--norc`/stdin script keeps the server's
   `module: command not found` `.bashrc` noise out of the output):
   ```bash

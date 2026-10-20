@@ -59,7 +59,20 @@ starts here. Not started: this file is the brief.*
   so the `.xo` is re-synthesized at 200 MHz. On that HEAD, locally: tier 1 4/4 PASS, sw_emu 4/4 PASS
   bit-exact, and **hw_emu re-run on the new kernel: synthetic (16 chunks) and mgc_fft_a PASS, bit-exact**
   (all three checks).
-  **Next:** read `done`, then timing and utilization from `pl/build/hw/reports/link/imp/`. On the card, the
+- **200 MHz hw build SUCCEEDED (xclbin 23:47, 3 h 22 min in total).** Kernel clock `clkout1_primitive`, 5.000 ns:
+  routed **WNS +0.031 ns**, 0 failing endpoints; WHS +0.010 ns. Stage times: link + synth ~56 min, opt 6 min,
+  place 35 min, route 38 min, bitstream 22 min, packaging 29 min. Kernel after routing: **URAM 256 (55%)**,
+  BRAM 228 (24%), LUT 122 K (14%), REG 159 K (9%). The slack is thin: re-scheduling the HLS at 200 MHz
+  removed pipeline stages, so the margin did not grow by the full 1 ns.
+  Copied locally: `pl/build/hw/hpwl_gradient_CU_top.xclbin` (md5 `00db5b39…`, from `b3d0e87`) and the routed
+  timing/util reports, plus the failed 250 MHz timing report, in
+  `.claude/2_ARTIFACTS/scratch_45/hw_200MHz_20261020/`.
+- ⚠️ **There is NO VCK5000 on `hacc-build-01`** (no Xilinx device in `lspci`, no `xbutil`; the XRT installs
+  are `/opt/xilinx/xrt_2023.2/2024.1/2024.2`, none of them 2.14). rules.md said the card lived there; it is a
+  build host only. **The card run needs Mark: which machine has the card** (Geert's?), and its shell must be
+  `xilinx_vck5000_gen4x8_qdma_2_202220_1` with matching XRT. The host is built there with
+  `make -C host/sw_flat hpwl-gradient-xrt TARGET=hw XILINX_XRT=<its xrt>`.
+  **Superseded next step:** read `done`, then timing and utilization from `pl/build/hw/reports/link/imp/`. On the card, the
   XRT host has to be built on the server: its XRT is under `/opt/xilinx/xrt_*`, and `setup_env.sh`
   assumes `/opt/xilinx/xrt`. Run `TARGET=hw make -C host/sw_flat hpwl-gradient-xrt`. The default
   designs include bigblue4.

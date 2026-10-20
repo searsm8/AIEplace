@@ -753,7 +753,9 @@ gradient + HPWL bit-exact to `hpwl_gradient_CU`, drift within noise). **Next: st
 in slot order, each module vs sw_flat `pl+Bprime`. **Step 8 brought forward (2026-10-19, Mark: (a) 250 MHz,
 emulation first, a baseline to improve on):** `make -C pl xclbin TARGET=...` plus the XRT host
 `make -C host/sw_flat hpwl-gradient-xrt`. **sw_emu 4/4 and hw_emu 3/3 (synthetic with 16 chunks, mgc_pci_bridge32_b,
-mgc_fft_a) PASS bit-exact** vs the g++ CU. The hw build was launched on the build server 10-19, commit `3b8a1b9`; the card run is next.
+mgc_fft_a) PASS bit-exact** vs the g++ CU. **hw: 250 MHz failed timing** (WNS −0.729 ns, the tail
+exchange's URAM read); **200 MHz met timing** (WNS +0.031 ns; URAM 256, LUT 122 K) and built an xclbin at `b3d0e87`.
+The card run waits on Mark: there is no VCK5000 on the build server.
 → [[HANDOFF_45_hpwl_gradient_hw_flow_20261019.md]]. Done 2026-10-06 as low-hanging fruit: gradient `max_rel` 1e-3
 (`vck5000/test/wa_gradient_golden.hpp`; newblue3 / mms/bigblue4 / newblue7 now pass, rel_rms still
 1e-5-bounded); `make test` 21/21 PASS.
