@@ -1,36 +1,33 @@
-// lane_model -- #48: how well LANES lanes of bin_density_CU would share the deposit, on real positions,
-// at every iteration of a sw_flat run.
+// lane_model -- #48: how well 8 lanes of bin_density_CU would share the deposit, on real positions, at
+// every iteration of a sw_flat run.
 //
-//   lane_model <config.toml> [max_iterations, 0 = to the stop]
+//   lane_model <config.toml> [max_iterations, 0 = to the stop] [stride: simulate every Nth iteration]
 //
-// Each lane owns some grid rows and deposits only into them (with its own 16 banks), so a slot goes to
-// every lane whose rows its footprint touches. Two ways to give out the rows:
-//   bands    lane = row / (bins / LANES): contiguous row bands
-//   stripN   lane = (row / N) % LANES: N-row strips dealt round-robin, so a spatial cluster spreads out;
-//            N = 4, 8, 16, 32 (taller strips: fewer footprints straddle two lanes, but less spreading)
-// A fast footprint spans <= 4 rows, so it touches at most 2 lanes either way.
+// Each lane owns some grid rows, with its own 16 banks (bank = 4*(col%4) + row%4), and deposits only into
+// them, so a slot becomes one work item per lane whose rows its footprint touches (one or two). Row maps:
+//   bands     lane = row / (bins/8): equal contiguous bands
+//   strip4/8  lane = (row/N) % 8: N-row strips dealt round-robin
+//   graded    contiguous bands, thinner in the middle (Mark): heights 3 : 2.5 : 1.5 : 1 : 1 : 1.5 : 2.5 : 3
+//   mid-strip the outer quarters as contiguous bands (2 lanes each), the middle half dealt in 4-row
+//             strips over the 4 middle lanes
+// URAMs: each lane's 16 banks hold (bins/4) * (its rows / 4) words; a URAM holds 8K x 36 b. At 1024.
 //
-// Cycles per evaluation (the fast deposit only; the slow list, load, reduce and drain are separate):
-//   single   today's CU: one slot per cycle, empty slots included (num_slot_beats * 16)
-//   beat     a dispatcher that hands one 16-slot beat to the lanes and waits until every lane has taken
-//            its share, one per cycle: sum over beats of max(1, busiest lane)
-//   fifo     each lane has a FIFO of FIFO_DEPTH; the dispatcher writes at most FIFO_WRITES entries into
-//            one FIFO per cycle and moves on to the next beat once its share is written; lanes pop one
-//            per cycle. The overflow barrier (cells, then fillers) drains the lanes once. Simulated.
-//   bound    the busiest lane's total work: what perfect buffering would give
-// Then two remedies for the FIFO's shortfall, on strip4 and strip8 only (the fifo sweep is the slow part):
-//   deep     FIFO depth 128 instead of 32
-//   readN    the dispatcher reads the stream at READ_POINTS places at once, one beat from each in turn,
-//            so consecutive beats come from different parts of the die (cells and fillers separately)
-//   both     deep + read4
-// Printed per checkpoint iteration, and summed over the whole run (the number that matters).
-// Positions are sw_flat's own (pl+Bprime+fixed config), so this is the stream the CU would see. Meow.
+// Cycles per evaluation (the fast deposit; slow list, load, reduce and drain are separate), simulated:
+//   fifo      a FIFO per lane (depth 32); the dispatcher writes <= 4 items into a FIFO per cycle and moves
+//             on to the next beat once its items are written; a lane takes one item per cycle
+//   read4     the same, FIFO depth 128, the dispatcher reading the stream at 4 places in turn
+//   +pair     read4, and a lane takes the NEXT item too when its banks do not overlap the first's: two
+//             cells deposited in one cycle, each bank still doing one read-add-write
+//   bound     the busiest lane's total items (perfect buffering, one item per lane per cycle)
+// Speedup = (slots, one per cycle, as the CU is today) / cycles. The overflow barrier (cells, then
+// fillers) drains the lanes once. Positions are sw_flat's own, so this is the stream the CU would see. Meow.
 
 #include "density_inputs.hpp"
 #include "modules/bin_density_CU.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -39,73 +36,98 @@ using namespace sw_flat;
 
 namespace {
 
-constexpr int LANES = 8;
-constexpr int FIFO_DEPTH = 32, DEEP_FIFO_DEPTH = 128, READ_POINTS = 4;
-constexpr int FIFO_WRITES = 4;   // entries one lane's FIFO can accept per cycle
+constexpr int LANES = 8, FIFO_WRITES = 4, READ_POINTS = 4;
 constexpr int NUM_MAPS = 5;
-const char* MAP_NAME[NUM_MAPS] = {"bands", "strip4", "strip8", "strip16", "strip32"};
-constexpr int STRIP_ROWS[NUM_MAPS] = {0, 4, 8, 16, 32};   // 0: contiguous bands
+const char* MAP_NAME[NUM_MAPS] = {"bands", "strip4", "strip8", "graded", "mid-strip"};
+const double GRADED[LANES] = {3, 2.5, 1.5, 1, 1, 1.5, 2.5, 3};   // relative band heights, sum 16
 
-int lane_of(int map, int row, int bins) {
-    return STRIP_ROWS[map] == 0 ? row / (bins / LANES) : (row / STRIP_ROWS[map]) % LANES;
+// lane_of[map][row] for one grid size. Meow.
+std::vector<std::vector<int>> make_lane_maps(int bins) {
+    std::vector<std::vector<int>> lane(NUM_MAPS, std::vector<int>(bins));
+    std::vector<int> graded_end(LANES);
+    double cum = 0;
+    for (int l = 0; l < LANES; l++) { cum += GRADED[l]; graded_end[l] = (int)std::lround(cum / 16.0 * bins / 4) * 4; }
+    for (int r = 0; r < bins; r++) {
+        lane[0][r] = r / (bins / LANES);
+        lane[1][r] = (r / 4) % LANES;
+        lane[2][r] = (r / 8) % LANES;
+        lane[3][r] = (int)(std::upper_bound(graded_end.begin(), graded_end.end(), r) - graded_end.begin());
+        const int q = bins / 4;
+        lane[4][r] = r < q ? r / (q / 2) : r >= 3 * q ? 6 + (r - 3 * q) / (q / 2) : 2 + ((r - q) / 4) % 4;
+    }
+    return lane;
 }
 
-struct Cycles { double beat = 0, fifo = 0, bound = 0; };
-
-// One beat's share per lane, for every beat of the stream. Meow.
-using BeatShares = std::vector<std::array<uint8_t, LANES>>;
-
-double beat_sync(const BeatShares& shares) {
-    double cycles = 0;
-    for (const auto& s : shares) cycles += std::max<int>(1, *std::max_element(s.begin(), s.end()));
-    return cycles;
+int urams_at_1024(const std::vector<int>& lane_of_row) {   // the map scaled to 1024 rows
+    std::array<int, LANES> rows{};
+    const int bins = (int)lane_of_row.size();
+    for (int r = 0; r < bins; r++) rows[lane_of_row[r]]++;
+    int urams = 0;
+    for (int l = 0; l < LANES; l++) {
+        const long words = (1024L / 4) * (rows[l] * (1024L / bins) / 4);
+        urams += 16 * (int)((words + 8191) / 8192);
+    }
+    return urams;
 }
 
-// The FIFO dispatcher, cycle by cycle, over beats [first, last); returns when every lane has drained. Meow.
-double fifo_sim(const BeatShares& shares, size_t first, size_t last, int depth = FIFO_DEPTH) {
-    std::array<int, LANES> occupancy{}, pending{};
+struct Item { uint8_t lane; uint16_t banks; };
+using BeatItems = std::vector<std::vector<Item>>;   // per beat, its items in slot order
+
+// Beats [first, last) in the order the dispatcher reads them: one reader, or READ_POINTS in turn. Meow.
+std::vector<size_t> read_order(size_t first, size_t last, int readers) {
+    std::vector<size_t> order;
+    const size_t n = last - first, per = (n + readers - 1) / readers;
+    for (size_t k = 0; k < per; k++)
+        for (int r = 0; r < readers; r++)
+            if (r * per + k < n) order.push_back(first + r * per + k);
+    return order;
+}
+
+// The FIFO dispatcher and the lanes, cycle by cycle, over the beats in `order`. Meow.
+double simulate(const BeatItems& beats, const std::vector<size_t>& order, int depth, bool pair) {
+    std::array<std::vector<uint16_t>, LANES> queue;   // every item a lane will get, in arrival order
+    for (size_t b : order) for (const Item& it : beats[b]) queue[it.lane].push_back(it.banks);
+    std::array<size_t, LANES> pushed{}, popped{};
+    std::array<int, LANES> pending{};
     long cycles = 0;
-    size_t beat = first;
+    size_t next = 0;
     bool loaded = false;
     while (true) {
-        for (int l = 0; l < LANES; l++) if (occupancy[l] > 0) occupancy[l]--;   // each lane pops one
-        if (beat < last) {
-            if (!loaded) { for (int l = 0; l < LANES; l++) pending[l] = shares[beat][l]; loaded = true; }
+        for (int l = 0; l < LANES; l++) {
+            if (popped[l] == pushed[l]) continue;
+            const uint16_t first = queue[l][popped[l]++];
+            if (pair && popped[l] < pushed[l] && (queue[l][popped[l]] & first) == 0) popped[l]++;
+        }
+        if (next < order.size()) {
+            if (!loaded) {
+                pending.fill(0);
+                for (const Item& it : beats[order[next]]) pending[it.lane]++;
+                loaded = true;
+            }
             bool done = true;
             for (int l = 0; l < LANES; l++) {
-                const int room = depth - occupancy[l];
+                const int room = depth - (int)(pushed[l] - popped[l]);
                 const int write = std::min({pending[l], FIFO_WRITES, room});
-                occupancy[l] += write;
+                pushed[l] += write;
                 pending[l] -= write;
                 done &= pending[l] == 0;
             }
-            if (done) { beat++; loaded = false; }
+            if (done) { next++; loaded = false; }
         }
         cycles++;
-        bool idle = beat == last;
-        for (int l = 0; l < LANES; l++) idle &= occupancy[l] == 0;
+        bool idle = next == order.size();
+        for (int l = 0; l < LANES; l++) idle &= popped[l] == pushed[l];
         if (idle) return (double)cycles;
     }
-}
-
-// Beats [first, last) as READ_POINTS readers see them: reader r starts r/READ_POINTS of the way in, and
-// the dispatcher takes one beat from each reader in turn. Meow.
-BeatShares interleaved(const BeatShares& shares, size_t first, size_t last) {
-    BeatShares out;
-    const size_t n = last - first, per = (n + READ_POINTS - 1) / READ_POINTS;
-    for (size_t k = 0; k < per; k++)
-        for (int r = 0; r < READ_POINTS; r++)
-            if (r * per + k < n) out.push_back(shares[first + r * per + k]);
-    return out;
 }
 
 } // namespace
 
 int main(int argc, char** argv)
 {
-    if (argc < 2) { fprintf(stderr, "usage: lane_model <config.toml> [max_iterations]\n"); return 2; }
+    if (argc < 2) { fprintf(stderr, "usage: lane_model <config.toml> [max_iterations] [stride]\n"); return 2; }
     const int max_iterations = argc > 2 ? atoi(argv[2]) : 0;
-    const int remedy_stride = argc > 3 ? atoi(argv[3]) : 1;   // run the remedy sims every Nth iteration
+    const int stride = argc > 3 ? atoi(argv[3]) : 1;
     PlacerConfig cfg = read_placer_config(argv[1]);
     cfg.dump_schedule_trace = false;
     cfg.deposit_fixed = true;
@@ -117,85 +139,64 @@ int main(int argc, char** argv)
     placer.initialize_density_weight();
 
     const DensityInputs in = make_density_inputs(placer);
+    const int bins = placer.bins;
     const long num_slots = placer.layout.num_slots, num_beats = num_slots / pinrec::LANES;
     const size_t filler_beat = (size_t)(placer.layout.first_filler_slot / pinrec::LANES);
+    const auto lane_of = make_lane_maps(bins);
     long fast_slots = 0;
     for (uint32_t idx : in.index) fast_slots += idx != densrec::NO_DEPOSIT;
-    printf("%s grid %d lanes %d: %ld slots in %ld beats, %ld fast, %zu slow; fifo depth %d, %d writes/cycle\n",
-           placer.design.name.c_str(), placer.bins, LANES, num_slots, num_beats, fast_slots, in.slow.size(), FIFO_DEPTH, FIFO_WRITES);
-    printf("%5s %10s", "iter", "single");
-    for (int m = 0; m < NUM_MAPS; m++) printf("  %7s: 2lane  fifo bound", MAP_NAME[m]);
-    printf("   (fifo, bound: speedup over single)\n");
+    printf("%s grid %d, 8 lanes: %ld slots in %ld beats, %ld fast, %zu slow; simulated every %d iterations\n",
+           placer.design.name.c_str(), bins, num_slots, num_beats, fast_slots, in.slow.size(), stride);
 
-    double run_single = 0, run_two_lane = 0, sampled_single = 0;
-    constexpr int REMEDY_MAPS[2] = {1, 2};   // strip4, strip8
-    const char* REMEDY_NAME[4] = {"fifo32", "deep", "read4", "both"};
-    double run_remedy[2][4] = {};
-    Cycles run[NUM_MAPS];
-    BeatShares shares[NUM_MAPS];
-    for (int m = 0; m < NUM_MAPS; m++) shares[m].assign(num_beats, {});
-    int evaluations = 0;
+    const std::vector<size_t> one_reader_cells = read_order(0, filler_beat, 1), one_reader_fill = read_order(filler_beat, num_beats, 1);
+    const std::vector<size_t> four_cells = read_order(0, filler_beat, READ_POINTS), four_fill = read_order(filler_beat, num_beats, READ_POINTS);
+    double total_single = 0, items_total[NUM_MAPS] = {}, fifo[NUM_MAPS] = {}, read4[NUM_MAPS] = {}, paired[NUM_MAPS] = {}, bound[NUM_MAPS] = {};
+    double early_single = 0, early_paired[NUM_MAPS] = {}, early_bound[NUM_MAPS] = {};
+    BeatItems beats(num_beats);
+    int simulated = 0;
     while (true) {
-        // The positions bin_density_CU would see now: the deposit just done read probe_pos. Meow.
-        long two_lane[NUM_MAPS] = {};
-        for (int m = 0; m < NUM_MAPS; m++) std::fill(shares[m].begin(), shares[m].end(), std::array<uint8_t, LANES>{});
-        for (long slot = 0; slot < num_slots; slot++) {
-            const uint32_t idx = in.index[slot];
-            if (idx == densrec::NO_DEPOSIT) continue;
-            const Position& p = placer.next.probe_pos[slot];
-            const plalgo::Window w = plalgo::footprint_window(p.x, p.y, in.footprints[idx], placer.bins, placer.bin_w, placer.bin_h);
+        if (placer.iteration % stride == 0) {
+            const bool early = placer.iteration < 16;
             for (int m = 0; m < NUM_MAPS; m++) {
-                const int lo = lane_of(m, w.row_lo, placer.bins), hi = lane_of(m, w.row_hi, placer.bins);
-                shares[m][slot / pinrec::LANES][lo]++;
-                if (hi != lo) { shares[m][slot / pinrec::LANES][hi]++; two_lane[m]++; }
+                for (auto& b : beats) b.clear();
+                std::array<long, LANES> load{};
+                for (long slot = 0; slot < num_slots; slot++) {
+                    const uint32_t idx = in.index[slot];
+                    if (idx == densrec::NO_DEPOSIT) continue;
+                    const Position& p = placer.next.probe_pos[slot];
+                    const plalgo::Window w = plalgo::footprint_window(p.x, p.y, in.footprints[idx], bins, placer.bin_w, placer.bin_h);
+                    // One item per lane touched; its banks are the window's (col, row) pairs in that lane's rows. Meow.
+                    std::array<uint16_t, LANES> banks{};
+                    for (int row = w.row_lo; row <= w.row_hi; row++)
+                        for (int col = w.col_lo; col <= w.col_hi; col++)
+                            banks[lane_of[m][row]] |= (uint16_t)(1u << (4 * (col % 4) + row % 4));
+                    for (int l = 0; l < LANES; l++)
+                        if (banks[l]) { beats[slot / pinrec::LANES].push_back(Item{(uint8_t)l, banks[l]}); load[l]++; }
+                }
+                long items = 0;
+                for (long n : load) items += n;
+                items_total[m] += (double)items / fast_slots;
+                const double b = (double)*std::max_element(load.begin(), load.end());
+                const double f = simulate(beats, one_reader_cells, 32, false) + simulate(beats, one_reader_fill, 32, false);
+                const double r = simulate(beats, four_cells, 128, false) + simulate(beats, four_fill, 128, false);
+                const double pr = simulate(beats, four_cells, 128, true) + simulate(beats, four_fill, 128, true);
+                bound[m] += b; fifo[m] += f; read4[m] += r; paired[m] += pr;
+                if (early) { early_paired[m] += pr; early_bound[m] += b; }
             }
-        }
-        const double single = (double)num_slots;
-        Cycles now[NUM_MAPS];
-        for (int m = 0; m < NUM_MAPS; m++) {
-            std::array<long, LANES> load{};
-            for (const auto& s : shares[m]) for (int l = 0; l < LANES; l++) load[l] += s[l];
-            now[m].bound = (double)*std::max_element(load.begin(), load.end());
-            now[m].beat = beat_sync(shares[m]);
-            now[m].fifo = fifo_sim(shares[m], 0, filler_beat) + fifo_sim(shares[m], filler_beat, shares[m].size());
-            run[m].beat += now[m].beat; run[m].fifo += now[m].fifo; run[m].bound += now[m].bound;
-        }
-        run_single += single;
-        if (placer.iteration % remedy_stride == 0) {
-            sampled_single += single;
-            for (int k = 0; k < 2; k++) {
-                const BeatShares& sh = shares[REMEDY_MAPS[k]];
-                const BeatShares cells = interleaved(sh, 0, filler_beat), fill = interleaved(sh, filler_beat, sh.size());
-                run_remedy[k][0] += fifo_sim(sh, 0, filler_beat) + fifo_sim(sh, filler_beat, sh.size());
-                run_remedy[k][1] += fifo_sim(sh, 0, filler_beat, DEEP_FIFO_DEPTH) + fifo_sim(sh, filler_beat, sh.size(), DEEP_FIFO_DEPTH);
-                run_remedy[k][2] += fifo_sim(cells, 0, cells.size()) + fifo_sim(fill, 0, fill.size());
-                run_remedy[k][3] += fifo_sim(cells, 0, cells.size(), DEEP_FIFO_DEPTH) + fifo_sim(fill, 0, fill.size(), DEEP_FIFO_DEPTH);
-            }
-        }
-        run_two_lane += (double)two_lane[1];
-        evaluations++;
-
-        const int it = placer.iteration;
-        if (it <= 8 || (it & (it - 1)) == 0 || it % 100 == 0) {
-            printf("%5d %10.0f", it, single);
-            for (int m = 0; m < NUM_MAPS; m++)
-                printf("  %7s: %4.0f%% %5.2f %5.2f", "", 100.0 * two_lane[m] / fast_slots, single / now[m].fifo, single / now[m].bound);
-            printf("\n");
+            total_single += (double)num_slots;
+            if (placer.iteration < 16) early_single += (double)num_slots;
+            simulated++;
         }
         if (max_iterations && placer.iteration >= max_iterations) break;
         placer.perform_iteration();
         if (placer.check_convergence()) break;
     }
 
-    printf("whole run, %d evaluations (strip4 put %.1f%% of fast slots in two lanes):\n", evaluations, 100.0 * run_two_lane / (fast_slots * (double)evaluations));
+    printf("whole run, %d iterations simulated; speedup over one slot per cycle (iterations 0-15 alone in brackets):\n", simulated);
+    printf("  %-9s %6s %7s %6s %6s %13s %13s\n", "map", "URAMs", "items", "fifo", "read4", "+pair", "bound");
     for (int m = 0; m < NUM_MAPS; m++)
-        printf("  %-7s speedup over single: beat %.2f  fifo %.2f  bound %.2f\n", MAP_NAME[m], run_single / run[m].beat,
-               run_single / run[m].fifo, run_single / run[m].bound);
-    printf("remedies (every %d-th iteration), speedup over single:\n", remedy_stride);
-    for (int k = 0; k < 2; k++) {
-        printf("  %-7s", MAP_NAME[REMEDY_MAPS[k]]);
-        for (int v = 0; v < 4; v++) printf("  %s %.2f", REMEDY_NAME[v], sampled_single / run_remedy[k][v]);
-        printf("\n");
-    }
+        printf("  %-9s %6d %6.2fx %6.2f %6.2f %6.2f (%4.2f) %6.2f (%4.2f)\n", MAP_NAME[m], urams_at_1024(lane_of[m]),
+               items_total[m] / simulated, total_single / fifo[m], total_single / read4[m], total_single / paired[m],
+               early_single / early_paired[m], total_single / bound[m], early_single / early_bound[m]);
     return 0;
 }

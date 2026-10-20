@@ -76,10 +76,35 @@ What limits it, in order:
 bigblue4 at 5.2x: ~5.5 M slots / 5.2 ≈ 1.06 M cycles ≈ 3.5 ms per deposit at 300 MHz, against XPlace's
 ~4 ms scatter (3090). The load, reduce and drain add ~0.6 M cycles until the DDR format moves to 4 x 4 tiles.
 
+## Round 2 (2026-10-20): centre-weighted maps and two cells per cycle
+
+Mark asked for (a) maps that put more lanes on the busy middle and (b) a model of a lane depositing two
+cells in one cycle when their banks do not overlap ("pairing": the lane looks one item ahead in its queue).
+Whole run, read4 + FIFO 128 + pairing, speedup over one slot per cycle; iterations 0-15 alone in brackets
+(`.claude/2_ARTIFACTS/scratch_48/lane_model_*.txt`, every 4th iteration simulated):
+
+| map | URAMs | mgc_fft_a | adaptec1 | mms/newblue4 | superblue12 | bigblue4 |
+|---|---|---|---|---|---|---|
+| bands | 128 | 6.15 | 3.43 | 2.39 | 2.74 | 4.59 |
+| **strip4** | 128 | **7.02** (4.3) | **5.72** (2.2) | **4.79** (1.6) | **4.58** (1.6) | **7.16** (3.2) |
+| strip8 | 128 | 5.67 | 5.23 | 4.39 | 4.27 | 6.66 |
+| graded (thin middle) | 192 | 5.38 | 3.47 | 2.54 | 2.66 | 4.16 |
+| mid-strip | 128 | 6.57 | 4.13 | 3.35 | 3.40 | 5.40 |
+
+- **Pairing is the biggest single gain**: strip4 on bigblue4 5.17 → 7.16, past the one-item-per-cycle
+  bound (6.0). Straddler halves use one or two bank rows, so they pair easily: the strip4 straddle cost
+  turns into an advantage.
+- **The centre-weighted maps did not help.** Graded bands cost 192 URAMs and land with plain bands; the
+  striped middle sits between bands and strips. Their problem is the same as bands': any contiguous block
+  of rows sees long runs of the stream.
+- **The first 16 iterations stay at 1.5-3x on every map.** The pile is a few rows tall, smaller than any
+  lane's share however it is cut. It is ~2% of the run's iterations, but costs more cycles per iteration.
+- bigblue4 at 7.2x: ~0.77 M cycles ≈ 2.6 ms per deposit at 300 MHz.
+
 ## Recommendation
-Strips of 4 rows (or 8: equal after read4), a FIFO of 128 per lane, and a dispatcher that reads the cell
-stream and then the filler stream at 4 places each. Next: confirm the routing choice below in the model
-(count the extra sends of the multiply-plus-margin route), then build it.
+**Strips of 4 rows, a FIFO of 128 per lane, a dispatcher reading at 4 places, and pairing in each lane.**
+No divide at dispatch: change the golden's row index to a multiply by `1/bin_h` (sw_flat first, drift
+measured), then the dispatcher and lanes copy it exactly. Explainer: [[EXPLAINER_48_lane_dispatcher_20261020.md]].
 
 ## Open questions for Mark
 - Map: strips of 4 or 8 rows (equal after read4; 4 keeps clusters spread, 8 halves straddlers).

@@ -1152,7 +1152,16 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       (`check-bin-density`, incl. shuffled order); tier-1 PASS. **RTL co-sim** (`pl/synth/bin_density_CU/cosim/
       run_depths.sh`): depth 0 and 4 FAIL, 5 and 6 PASS — the scheduled read→write distance is 5. C-synth
       3.33 ns met, LUT 11%. Drift of per-design F: in noise on 3/4, mms/adaptec1 +0.12% (its two-outcome
-      flip); bigblue4 (2048, F ≈ 12) −0.013%, 0.003 pp past its ±0.01% band. ~21 ms per evaluation on bigblue4 at 1 cell/cycle → lanes next.
+      flip); bigblue4 (2048, F ≈ 12) −0.013%, 0.003 pp past its ±0.01% band.
+- [ ] **Phase 2b, 8 lanes (Mark, 2026-10-20; modelled, not built).** Each lane owns grid rows with its own
+      16 banks (8 lanes = 128 URAMs, no extra). Lane model on real positions (`make -C host/sw_flat
+      lane-model`): **4-row strips + FIFO 128 + 4 read points + pairing** (two cells per cycle when their banks
+      don't overlap) gives 4.6–7.2× over one cell per cycle on 5 designs (bigblue4 7.2×, ~2.6 ms); bands
+      and Mark's centre-weighted maps lose (graded bands: 192 URAMs, ≤ bands). The first ~16 iterations stay
+      1.5–3× on every map. **Next:** golden's row index by multiply (no dividers; sw_flat first, drift
+      measured), then build. Real-design fixtures for the tests: branch `bin-density-real-fixtures`
+      (`0994f7a`), not merged. → [[PLAN_48_bin_density_lanes_20261020.md]],
+      [[EXPLAINER_48_lane_dispatcher_20261020.md]] ~21 ms per evaluation on bigblue4 at 1 cell/cycle → lanes next.
       → [[REPORT_48_bin_density_fixed_point_20261019.md]] One 36-bit
       URAM word per bin (8K × 36): 128 URAMs. Peak ρ over 44 designs = 95,408 bins (mms/newblue4,
       iteration 4; every peak at iteration 0–7) → 18.18 leaves 2.7× headroom. At equal positions q18's
