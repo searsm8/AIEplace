@@ -18,6 +18,7 @@
 #                         over an exact fixed base, vs sw_only's separate metric, 44 designs
 #                         (test/overflow_map_check.sh). Use JOBS=n, ITERATIONS=n.
 #   make lane-model       build/lane_model: #48's lane load-balance model (bands vs strips) on a real run.
+#   make bank-fifo-model  build/bank_fifo_model: #48, a FIFO in front of every bank (Mark), on a real run.
 #   make gradient-bench   build/gradient_bench: the WA gradient with std::exp vs the PL's table, timed.
 #   make check-record-stream  sw_flat's record-stream gradient and HPWL (placer/record_stream.cpp) vs
 #                         hpwl_gradient_CU on the same positions, bit for bit, 6 designs
@@ -53,7 +54,7 @@ NETLIST_DIR  = $(BUILD)/netlists
 NETLISTS     = $(foreach d,$(DESIGNS),$(NETLIST_DIR)/$(subst /,_,$(d)).netlist)
 suite_of     = $(firstword $(subst _, ,$(1)))
 
-.PHONY: check-database check-layout netlists placer check-placer check-bin-density check-overflow-map gradient-bench lane-model check-record-stream hpwl-gradient-xrt clean
+.PHONY: check-database check-layout netlists placer check-placer check-bin-density check-overflow-map gradient-bench lane-model bank-fifo-model check-record-stream hpwl-gradient-xrt clean
 check-database: $(BUILD)/flat_database_check
 	bash test/flat_database_check.sh
 
@@ -67,6 +68,11 @@ placer: $(BUILD)/sw_flat_place
 gradient-bench: $(BUILD)/gradient_bench
 
 lane-model: $(BUILD)/lane_model
+
+bank-fifo-model: $(BUILD)/bank_fifo_model
+
+$(BUILD)/bank_fifo_model: $(BUILD)/flat_database.o $(BUILD)/bank_fifo_model.o $(PLACER_LIB) $(COMMON_OBJS)
+	$(CXX) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 $(BUILD)/lane_model: $(BUILD)/flat_database.o $(BUILD)/lane_model.o $(PLACER_LIB) $(COMMON_OBJS)
 	$(CXX) $(LDFLAGS) $^ -o $@ $(LDLIBS)

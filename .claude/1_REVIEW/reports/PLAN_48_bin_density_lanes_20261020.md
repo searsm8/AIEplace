@@ -101,6 +101,35 @@ Whole run, read4 + FIFO 128 + pairing, speedup over one slot per cycle; iteratio
   lane's share however it is cut. It is ~2% of the run's iterations, but costs more cycles per iteration.
 - bigblue4 at 7.2x: ~0.77 M cycles ≈ 2.6 ms per deposit at 300 MHz.
 
+## Round 3 (2026-10-20): a FIFO in front of every bank (Mark)
+
+No row ownership at all. P producers each compute one cell's footprint per cycle and push one update per
+covered bin into that bin's bank FIFO; every bank pops one update per cycle and does its read-add-write
+(with forwarding, as today). A FIFO accepts at most W pushes per cycle; the first cell that does not fit
+stalls the producers. The 4 × 4 (or 8 × 8) interleave spreads any cluster wider than the interleave evenly
+over the banks, so balance no longer depends on the stream order. 64 banks (8 × 8 interleave) are 16K
+words each, 2 URAMs: still 128. A cell averages ~5.8 updates, so 64 banks could take ~11 cells per cycle.
+
+Whole run, speedup over one slot per cycle (iterations 0-15 alone in brackets;
+`.claude/2_ARTIFACTS/scratch_48/bank_model_*.txt`, `make -C host/sw_flat bank-fifo-model`), FIFO depth 32,
+stream read at 4 places:
+
+| design | lanes best (strip4, read4, pair) | 64 banks P=8 W=2 | **P=8 W=4** | **P=16 W=4** |
+|---|---|---|---|---|
+| mgc_fft_a | 7.02 (4.3) | 6.21 | **8.26** | **9.72** (4.9) |
+| adaptec1 | 5.72 (2.2) | 5.37 | **6.49** | **7.20** (2.4) |
+| mms/newblue4 | 4.79 (1.6) | 4.79 | **5.53** | **5.94** (1.8) |
+| mgc_superblue12 | 4.58 (1.6) | 4.56 | **5.18** | **5.49** (1.7) |
+| bigblue4 | 7.16 (3.2) | 6.25 | **7.99** | **9.33** (4.2) |
+
+- **W, the pushes a FIFO takes per cycle, is the key knob.** W = 1 serializes (two cells in one cycle
+  nearly always share a bank): 2.0-2.6x however many producers. W = 2 matches the lanes; W = 4 beats them.
+- **16 banks are too few** (2.2-2.7x at best: 16 banks / 5.8 updates = 2.75 cells per cycle ceiling).
+- bigblue4 at 9.3x: ~0.59 M cycles ≈ 2.0 ms per deposit at 300 MHz.
+- **Cost moves to the producers and the fill network:** P copies of the footprint arithmetic, and a
+  network steering up to 16 updates per producer into 64 FIFOs that each take W per cycle (e.g. W
+  sub-FIFOs per bank, drained round-robin). Not yet estimated: synthesize one producer before choosing P.
+
 ## Recommendation
 **Strips of 4 rows, a FIFO of 128 per lane, a dispatcher reading at 4 places, and pairing in each lane.**
 No divide at dispatch: change the golden's row index to a multiply by `1/bin_h` (sw_flat first, drift

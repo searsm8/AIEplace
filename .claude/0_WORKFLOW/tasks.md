@@ -1158,7 +1158,9 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       lane-model`): **4-row strips + FIFO 128 + 4 read points + pairing** (two cells per cycle when their banks
       don't overlap) gives 4.6–7.2× over one cell per cycle on 5 designs (bigblue4 7.2×, ~2.6 ms); bands
       and Mark's centre-weighted maps lose (graded bands: 192 URAMs, ≤ bands). The first ~16 iterations stay
-      1.5–3× on every map. **Next:** golden's row index by multiply (no dividers; sw_flat first, drift
+      1.5–3× on every map. **Round 3 (Mark's FIFO per bank, 64 banks, 8 producers, 4 pushes/FIFO/cycle):
+      5.2–8.3× and better early too; 16 producers 5.5–9.7× (bigblue4 9.3×) — beats lanes everywhere.**
+      **Next:** synthesize one producer to choose P; golden's row index by multiply (no dividers; sw_flat first, drift
       measured), then build. Real-design fixtures for the tests: branch `bin-density-real-fixtures`
       (`0994f7a`), not merged. → [[PLAN_48_bin_density_lanes_20261020.md]],
       [[EXPLAINER_48_lane_dispatcher_20261020.md]] ~21 ms per evaluation on bigblue4 at 1 cell/cycle → lanes next.
