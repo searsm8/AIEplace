@@ -17,6 +17,23 @@ status. **Never rewrite an entry; annotate.** The retraction trail is the point.
 
 ---
 
+## 2026-10-19 — evicted from summary.md: the 2026-08-25 golden headline, superseded by #46's re-score
+
+New goldens `GOLDEN_sw_only_frozen_20261019` / `GOLDEN_mms_sw_only_frozen_20261019` (`077b4c4`: nets ≤ 96
+pins, #49's double HPWL). ISPD 1.0115 → 1.0116 mean (net-neutral). MMS 1.0110 → 1.0158 mean, all from
+noise on mms/adaptec2 (1.0179 → 1.0678; six 1-ULP `init_gamma` nudges span 1.0274..1.0799, so 08-25's
+value was a lucky draw). The bullet as it stood, verbatim:
+
+> - 🏆 **GOLDEN (ISPD) — median 1.0096, mean 1.0115, over ALL 28 ISPD designs**, legal-vs-legal,
+>   2026-08-25, 28/28. 22/28 within ±2%, better than XPlace on 6. Nothing unscored (#26).
+>   Archived: `.claude/2_ARTIFACTS/results/GOLDEN_sw_only_frozen_20260825/` — **read its README
+>   before quoting it**. Frozen commit `271d024` (the #35 cap landing). Supersedes the 2026-08-21
+>   golden (`GOLDEN_sw_only_frozen_20260821/`, banner added), built before the cap; the cap moved
+>   ISPD only +0.03 pp (net-neutral — it is a no-op except on macro-bearing td<1 designs, where
+>   gains and losses cancel), while winning −2.38 pp on MMS.
+
+---
+
 ## 2026-10-09 — #47: the DDR mailbox is replaced by the tail exchange
 
 Evicted from summary.md (superseded the same day):

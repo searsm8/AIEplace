@@ -17,13 +17,12 @@
   algorithm is pinned to sw_only, so every further sw_only change was another port.
 
 ## Where sw_only stands (frozen — this is the final state, not a waypoint)
-- 🏆 **GOLDEN (ISPD) — median 1.0096, mean 1.0115, over ALL 28 ISPD designs**, legal-vs-legal,
-  2026-08-25, 28/28. 22/28 within ±2%, better than XPlace on 6. Nothing unscored (#26).
-  Archived: `.claude/2_ARTIFACTS/results/GOLDEN_sw_only_frozen_20260825/` — **read its README
-  before quoting it**. Frozen commit `271d024` (the #35 cap landing). Supersedes the 2026-08-21
-  golden (`GOLDEN_sw_only_frozen_20260821/`, banner added), built before the cap; the cap moved
-  ISPD only +0.03 pp (net-neutral — it is a no-op except on macro-bearing td<1 designs, where
-  gains and losses cancel), while winning −2.38 pp on MMS.
+- 🏆 **GOLDEN (2026-10-19, `077b4c4`, nets ≤ 96 pins + #49's double HPWL) — ISPD median 1.0095 /
+  mean 1.0116** (28/28, 23 within ±2%, better on 5); **MMS median 1.0136 / mean 1.0158** (16/16).
+  `.claude/2_ARTIFACTS/results/GOLDEN_sw_only_frozen_20261019/` and `GOLDEN_mms_sw_only_frozen_20261019/`:
+  **read the READMEs before quoting.** ISPD is net-neutral vs 08-25. MMS +0.48 pp is mms/adaptec2
+  (+5 pp), which is noise: 1-ULP `init_gamma` nudges span 1.0274..1.0799 there. The 08-25 goldens
+  (bannered) are in journal.md.
 - **MMS (16 designs) — #35 CLOSED 2026-08-25, regression fixed.** Root cause was `#3`'s faithful
   scale (`Grid::clampFixedDensity`, `min(ρ,1)·td`) hurting macro/mixed-size convergence. Fixed by
   **landing experiment D**: reverted the fixed-density formula to the cap `min(ρ,td)` in all four
@@ -173,10 +172,6 @@ hw xclbin built at **200 MHz** (WNS +0.031 ns; 250 MHz failed at −0.729 ns on 
   free. `macro_legalization = true|false` A/B over MMS decides it. See tasks.md #38.
 
 ## Also open
-- **#46 — nets above 96 pins are masked, not 100 (LANDED 2026-10-19, `077b4c4`).** sw_only + sw_flat +
-  regress configs; registered in `CLAUDE.md`'s divergences. 28/44 designs unaffected (no 97..100-pin
-  net), regress bit-identical. **Re-scored** (`results/DSE_20261019_125733/`): ISPD mean 1.0116 (=), MMS 1.0158 (+0.48 pp, mms/adaptec2 +5 pp from #49, not #46);
-  golden NOT archived pending a noise test on mms/adaptec2.
 - **#43 — native parser (CLOSED 2026-10-06; history.md).** `DesignReader.cpp` replaced Limbo (all 44
   parse 5.3× faster). ⚠️ Touching `DesignReader.cpp` or a `DesignSink` (`DataBase`, beat_packer's
   `native_netlist.hpp`) → run `make test-parser` AND `make -C bring_up/beat_packer check-reader`.

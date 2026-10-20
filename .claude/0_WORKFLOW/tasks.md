@@ -4,13 +4,16 @@
 (`deposit = "fixed"`, 18.18 in a 36-bit word); next is the CU's integer accumulator and a bit-exact
 harness. → [[HANDOFF_48_bin_density_fixed_point_20261019.md]]. Done alongside (2026-10-20): #45 step 8's
 `hpwl_gradient_CU` hardware baseline, **PASS bit-exact on the VCK5000 at 200 MHz** ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
-Still running alongside: #46's 44-design
-re-score, running in `vck5000/results/DSE_20261019_125733/`.
+#46 closed 2026-10-19 (re-scored, new goldens archived; history.md).
 
 Open work, one section per task. **Status lives here; evidence lives in a
 report.** Don't reuse task numbers, find the highest number and add one.
 
 ## ⚠️ sw_only functionality is FROZEN — called 2026-08-17, EFFECTIVE 2026-08-18 (Mark)
+
+**Current golden (2026-10-19, `077b4c4`, after the authorized #46 and #49): ISPD 1.0095 / 1.0116,
+MMS 1.0136 / 1.0158 (mms/adaptec2 noise), in `GOLDEN_sw_only_frozen_20261019/` and
+`GOLDEN_mms_sw_only_frozen_20261019/`.** The freeze-time numbers below stand as the record. Meow.
 
 sw_only is at parity with XPlace on **both** tiers, at commit `271d024`:
 - **ISPD — median 1.0096 / mean 1.0115** legal-vs-legal over all 28 designs, 22/28 within ±2%,
@@ -881,40 +884,6 @@ are the improvements. → [[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]. Done 
   #47 (producer-side duplication; touches steps 4 and 6).
 
 → [[_NEW_PLAN_45_integration_20261006.md]]
-
-## #46 — sw_only: mask nets above 96 pins, not 100 (opened 2026-10-06, Mark)
-
-**Why:** the record stream (#41) takes nets of 2..96 pins; sw_only takes 2..100 (XPlace's
-`ignore_net_degree`). Mark: change sw_only to 96 so the golden and the PL mask the same nets. This
-**unfreezes one sw_only knob by decision** and is a new deliberate divergence from XPlace.
-**Already a config key, no code change:** `ignore_net_degree` in `host/src/sw_only/default_config.toml`
-(read by `Partials.cpp`, `BestSolution.cpp`, `Output.cpp`), and `dse.py` builds every config from
-that file.
-- [x] **Counted (2026-10-19):** 28 of 44 designs have no 97..100-pin net. The other 16: bigblue2/3/4
-      (ISPD and MMS), the five superblues, mms adaptec5 / newblue3/4/5/7; worst mgc_superblue11_a,
-      79 nets = 0.27% of pins. `.claude/2_ARTIFACTS/scratch_46/net_degree_97_100.txt` (columns: live
-      nets 2..96, nets 97..100, their pins, % of pins), counter `net_degree_count.cpp` next to it.
-- [x] **96 everywhere live (2026-10-19, Mark: "96 across the board"):** `default_config.toml`, the
-      `value_or` fallbacks in Partials/BestSolution/Output.cpp, sw_flat's `placer.hpp` default, and the
-      three `test/regress` configs (all three designs have no 97..100-pin net, so `make test-regress`
-      and `test-regress-slow` PASS bit-identical, no baseline regenerated). Not touched: the legacy
-      `vck5000/pl` / `bring_up` copies (`IGNORE_NET_DEGREE = 100`, read-only until #45 step 9) and the
-      `sched_verify` fixture config (its trace was recorded at 100; adaptec1 is unaffected anyway).
-- [x] Registered in `CLAUDE.md` ("Deliberate divergences from XPlace"); `benchmarks.py` notes the
-      masked-basis mismatch on the 16.
-- [x] **Re-scored 2026-10-19** at `077b4c4` (`make dse --designs all`, `vck5000/results/DSE_20261019_125733/`,
-      44/44 GP + LG/DP; compare script `.claude/2_ARTIFACTS/scratch_46/compare_golden.py`). vs the 08-25 goldens:
-      **ISPD median 1.0095 → 1.0095, mean 1.0115 → 1.0116**, within ±2% 22 → 23, better 6 → 5.
-      **MMS median 1.0139 → 1.0136, mean 1.0110 → 1.0158 (+0.48 pp)**, within ±2% 13 → 12. The MMS mean
-      is driven by **mms/adaptec2 +4.99 pp** (GP HPWL 7.365e7 → 7.754e7), adaptec1 +1.02, adaptec3 +0.55,
-      adaptec5 +0.93. **None of adaptec1/2/3 has a 97..100-pin net, so their move is #49 (double HPWL
-      sum) alone** — #49 measured only 13 large designs. Every GP moved (adaptec1 652 → 653 iterations), as
-      #49 changes the schedule's HPWL everywhere. ⚠️ **Not archived as a GOLDEN yet (Mark's call):**
-      mms/adaptec2's +5 pp exceeds #49's "0.5–2% from a 2-ULP nudge" small-design noise. Falsify by
-      noise-testing mms/adaptec2 (init_gamma ±2 ULP at HEAD): if the noise band spans ~5 pp, archive.
-- [ ] Archive new GOLDEN dirs (ISPD 28, MMS 16) once the mms/adaptec2 question is settled.
-- ⚠️ GP-vs-GP *masked* comparisons against XPlace (`benchmarks.py`, masked at 100) change basis;
-  legal-vs-legal exact HPWL does not.
 
 ## #47 — Mailbox redesign: exchange external slots where each chunk is already streamed (opened 2026-10-06, Mark)
 
