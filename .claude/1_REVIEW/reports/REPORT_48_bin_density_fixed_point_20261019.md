@@ -181,7 +181,7 @@ Drift, `pl+Bprime+fixed` (per-design F) against `pl+Bprime` and base's noise ban
 | mgc_pci_bridge32_b (128) | 23 | −0.017% | −0.155% | yes |
 | adaptec1 (512) | 17 | +0.004% | +0.002% | yes |
 | mms/adaptec1 (512) | 17 | +0.115% | +0.611% | no: just outside, on base's side of the design's known two outcomes (overflow 0.076 vs 0.089) |
-| bigblue4 (2048: its D6 grid, past the CU's 1024; the model runs at any grid) | ~12 | *(running)* | | |
+| bigblue4 (2048: its D6 grid, past the CU's 1024; the model runs at any grid) | ~12 | −0.013% | −0.009% | no: 0.003 pp past a ±0.01% band (q14 at 2048 read −0.011%); 759 iterations, converged |
 
 ## The banked deposit and its forwarding (2026-10-20)
 

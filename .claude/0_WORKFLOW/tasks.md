@@ -1152,7 +1152,7 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       (`check-bin-density`, incl. shuffled order); tier-1 PASS. **RTL co-sim** (`pl/synth/bin_density_CU/cosim/
       run_depths.sh`): depth 0 and 4 FAIL, 5 and 6 PASS — the scheduled read→write distance is 5. C-synth
       3.33 ns met, LUT 11%. Drift of per-design F: in noise on 3/4, mms/adaptec1 +0.12% (its two-outcome
-      flip); bigblue4 (2048, F ≈ 12) running. ~21 ms per evaluation on bigblue4 at 1 cell/cycle → lanes next.
+      flip); bigblue4 (2048, F ≈ 12) −0.013%, 0.003 pp past its ±0.01% band. ~21 ms per evaluation on bigblue4 at 1 cell/cycle → lanes next.
       → [[REPORT_48_bin_density_fixed_point_20261019.md]] One 36-bit
       URAM word per bin (8K × 36): 128 URAMs. Peak ρ over 44 designs = 95,408 bins (mms/newblue4,
       iteration 4; every peak at iteration 0–7) → 18.18 leaves 2.7× headroom. At equal positions q18's
