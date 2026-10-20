@@ -4,9 +4,12 @@
 // density_inputs.hpp -- bin_density_CU's host-side inputs (#48), built from a set-up sw_flat Placer, so
 // the device deposits exactly what sw_flat_place does (pl/src/format/density_footprint.hpp):
 //   footprints   the distinct footprints, by (width, height, movable-macro) bits; every filler shares one
-//   index        per slot: its footprint, or NO_DEPOSIT (BORROWED copies, pin slots, EMPTY padding)
+//   index        per slot: its footprint, or NO_DEPOSIT (BORROWED copies, pin slots, EMPTY padding, and
+//                the slow slots below)
+//   slow         slots whose footprint may span more than WINDOW_BINS bins (densrec::fits_window), with
+//                their footprint, ascending; num_slow_cells of them precede the filler tail
 //   fixed_base   Placer::fixed_base_q (col-major, capped, fixed units), 16 bins per beat
-// with the scalars fixed_scale and overflow_cap as the placer computed them; needs [sw_flat] deposit =
+// with the scalars fixed_scale, rho_unit and overflow_cap as the placer computed them; needs [sw_flat] deposit =
 // "fixed". The positions are the placer's next.probe_pos per slot, the ones its deposit reads. Meow.
 
 #include "format/density_footprint.hpp"
@@ -22,8 +25,10 @@ namespace sw_flat {
 struct DensityInputs {
     std::vector<densrec::Footprint> footprints;
     std::vector<uint32_t> index;   // per slot
+    std::vector<densrec::SlowSlot> slow;
+    int num_slow_cells = 0;
     std::vector<densrec::FixedBeat> fixed_base;
-    float fixed_scale = 0;
+    float fixed_scale = 0, rho_unit = 0;
     uint32_t overflow_cap = 0;
 };
 
@@ -45,12 +50,18 @@ inline DensityInputs make_density_inputs(const Placer& placer)
             in.footprints.push_back(densrec::make_footprint(w, h, macro, placer.bin_w, placer.bin_h,
                                                             placer.cfg.target_density, placer.cfg.enable_density_clamp));
         }
-        in.index[slot] = it->second;
+        if (densrec::fits_window(in.footprints[it->second], placer.bin_w, placer.bin_h)) {
+            in.index[slot] = it->second;
+        } else {
+            in.slow.push_back(densrec::SlowSlot{(uint32_t)slot, it->second});
+            in.num_slow_cells += slot < placer.layout.first_filler_slot;
+        }
     }
     in.fixed_base.resize(placer.fixed_base_q.size() / pinrec::LANES);
     for (size_t bin = 0; bin < placer.fixed_base_q.size(); bin++)
         in.fixed_base[bin / pinrec::LANES].q[bin % pinrec::LANES] = (uint32_t)placer.fixed_base_q[bin];
     in.fixed_scale = placer.fixed_scale;
+    in.rho_unit = placer.fixed_unit;
     in.overflow_cap = placer.fixed_overflow_cap;
     return in;
 }

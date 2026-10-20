@@ -1,8 +1,10 @@
 # Tasks
 
-**Active Task (2026-10-20): #45 step 6 / #48 — `bin_density_CU`.** Fixed point is in, bit-exact to sw_flat
-on 44/44 ([[REPORT_48_bin_density_fixed_point_20261019.md]]). Next on the CU: 4×4 banking + lanes (the
-`rows` RMW is II=4), the macro slow path, the bin-index reciprocal. Done alongside (2026-10-20): #45 step 8's
+**Active Task (2026-10-20): #45 step 6 / #48 — `bin_density_CU`.** One cell per cycle is in: 4×4 banks +
+forwarding, II = 1, bit-exact to sw_flat on 44/44, forwarding proven in RTL co-sim; F per design from the
+total-area bound ([[REPORT_48_bin_density_fixed_point_20261019.md]]). Next: lanes (row-band ownership,
+8 lanes = no extra URAM) — Mark's call. XPlace's own scatter/gather is being read in
+[[REPORT_48_xplace_density_scatter_gather_20261020.md]] (separate session). Done alongside (2026-10-20): #45 step 8's
 `hpwl_gradient_CU` hardware baseline, **PASS bit-exact on the VCK5000 at 200 MHz** ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
 #46 closed 2026-10-19 (re-scored, new goldens archived; history.md).
 
@@ -1141,7 +1143,17 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       C-synth: `reduce` and `drain` II=1, `rows` II=4 (the prototype's RMW; banking is next), DSP 58 → 24;
       URAM reads 37 in csynth, which cannot hold 1M × 36 b (8 per bank = 128 expected): confirm at link.
       **Step 6's golden is now `pl+Bprime+fixed`.** → [[REPORT_48_bin_density_fixed_point_20261019.md]]
-      **sw_flat side (10-19):** `[sw_flat] deposit = "fixed"` (default off; check-placer bit-identical). One 36-bit
+      **sw_flat side (10-19):** `[sw_flat] deposit = "fixed"` (default off; check-placer bit-identical).
+- [x] **Phase 2, total-area F + banked deposit + forwarding (Mark, 2026-10-20).** F per design:
+      `densrec::rho_frac_bits(Σ)`, Σ = base + every footprint's area in bin areas, integer bits ⌊log2 Σ⌋ + 2,
+      so no bin can overflow; F = 14 (7 large designs at 1024) .. 23. The CU: 16 URAM banks, bank =
+      4·(col%4) + row%4, one cell per cycle (**`deposit_fast_loop` II = 1**, depth 117), footprints > 2.99 bins
+      on a slow list (≤ 0.5% of slots), 6-deep per-bank forwarding (`BIN_FORWARD_DEPTH`). **44/44 bit-exact**
+      (`check-bin-density`, incl. shuffled order); tier-1 PASS. **RTL co-sim** (`pl/synth/bin_density_CU/cosim/
+      run_depths.sh`): depth 0 and 4 FAIL, 5 and 6 PASS — the scheduled read→write distance is 5. C-synth
+      3.33 ns met, LUT 11%. Drift of per-design F: in noise on 3/4, mms/adaptec1 +0.12% (its two-outcome
+      flip); bigblue4 (2048, F ≈ 12) running. ~21 ms per evaluation on bigblue4 at 1 cell/cycle → lanes next.
+      → [[REPORT_48_bin_density_fixed_point_20261019.md]] One 36-bit
       URAM word per bin (8K × 36): 128 URAMs. Peak ρ over 44 designs = 95,408 bins (mms/newblue4,
       iteration 4; every peak at iteration 0–7) → 18.18 leaves 2.7× headroom. At equal positions q18's
       overflow beats float everywhere (≤ 9.3e-7 vs up to 4.8e-5); ρ beats float on dense bins (bigblue4

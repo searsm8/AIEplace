@@ -4,11 +4,12 @@
 //   bin_density_check <config.toml> [iterations=30]
 //
 // Runs sw_flat_place for `iterations` with bin_density_CU's arithmetic on ([sw_flat] deposit = "fixed",
-// 18.18) and #48 B' (overflow_map = "snapshot", fixed_base = "exact"), then hands bin_density_CU the same
+// F from the total-area bound) and #48 B' (overflow_map = "snapshot", fixed_base = "exact"), then hands bin_density_CU the same
 // slot positions, footprint table, per-slot indices, fixed base and scalars (density_inputs.hpp).
 // Checks, each a verdict:
-//   [1] rho          bit-equal to sw_flat's (float)acc * RHO_UNIT on every bin
-//   [2] table        the footprint table fits FOOTPRINT_TABLE_MAX; every OWNED / FILLER slot has an entry
+//   [1] rho          bit-equal to sw_flat's (float)acc * 2^-F on every bin
+//   [2] table        the footprint table fits FOOTPRINT_TABLE_MAX; every OWNED / FILLER slot deposits,
+//                    on the fast stream or the slow list
 //   [3] mutant       one deposited slot set to NO_DEPOSIT must change rho (the comparison can fail)
 //   [4] overflow     the filler tail starts on a beat boundary; the CU's excess equals sw_flat's
 //                    snapshot_excess, and the overflow formed from it equals snapshot_overflow, bit for bit
@@ -36,7 +37,8 @@ bool same_bits(float a, float b) { return std::memcmp(&a, &b, sizeof a) == 0; }
 
 struct DeviceOut { std::vector<float> rho; uint64_t excess = 0; };
 
-// `order[i]` is the slot that goes to stream position i; identity is the device's own order. Meow.
+// `order[i]` is the slot that goes to stream position i; identity is the device's own order. The slow
+// list names slots, so it is renumbered to the new positions. Meow.
 DeviceOut run_device(const Placer& placer, const DensityInputs& in, const std::vector<long>& order) {
     const long num_beats = placer.layout.num_slots / pinrec::LANES;
     std::vector<pinrec::SlotBeat> pos_x(num_beats), pos_y(num_beats);
@@ -47,13 +49,18 @@ DeviceOut run_device(const Placer& placer, const DensityInputs& in, const std::v
         pos_y[i / pinrec::LANES].v[i % pinrec::LANES] = placer.next.probe_pos[slot].y;
         index[i / pinrec::LANES].idx[i % pinrec::LANES] = in.index[slot];
     }
+    std::vector<long> position_of(placer.layout.num_slots);
+    for (long i = 0; i < placer.layout.num_slots; i++) position_of[order[i]] = i;
+    std::vector<densrec::SlowSlot> slow = in.slow;
+    for (densrec::SlowSlot& entry : slow) entry.slot = (uint32_t)position_of[entry.slot];
     const int grid_beats = placer.bins * placer.bins / pinrec::LANES;
     std::vector<pinrec::SlotBeat> rho(grid_beats);
     DeviceOut out;
     plalgo::bin_density_CU(pos_x.data(), pos_y.data(), index.data(), (int)num_beats,
-                           (int)(placer.layout.first_filler_slot / pinrec::LANES), in.footprints.data(),
-                           (int)in.footprints.size(), in.fixed_base.data(), placer.bins, placer.bin_w, placer.bin_h,
-                           in.fixed_scale, in.overflow_cap, rho.data(), out.excess);
+                           (int)(placer.layout.first_filler_slot / pinrec::LANES), slow.data(), in.num_slow_cells,
+                           (int)slow.size(), in.footprints.data(), (int)in.footprints.size(), in.fixed_base.data(),
+                           placer.bins, placer.bin_w, placer.bin_h, in.fixed_scale, in.rho_unit, in.overflow_cap,
+                           rho.data(), out.excess);
     out.rho.resize((size_t)placer.bins * placer.bins);
     std::memcpy(out.rho.data(), rho.data(), out.rho.size() * sizeof(float));
     return out;
@@ -97,18 +104,20 @@ int main(int argc, char** argv)
     std::vector<float> golden(placer.bin_fixed.size());
     uint64_t golden_peak = 0;
     for (size_t bin = 0; bin < golden.size(); bin++) {
-        golden[bin] = (float)placer.bin_fixed[bin] * densrec::RHO_UNIT;
+        golden[bin] = (float)placer.bin_fixed[bin] * placer.fixed_unit;
         golden_peak = std::max(golden_peak, placer.bin_fixed[bin]);
     }
 
     const DensityInputs in = make_density_inputs(placer);
     bool ok = true;
 
-    long deposited = 0;
+    long deposited = (long)in.slow.size();
     for (uint32_t idx : in.index) deposited += idx != densrec::NO_DEPOSIT;
     const bool table_ok = (int)in.footprints.size() <= densrec::FOOTPRINT_TABLE_MAX && deposited == (long)placer.movable_slots.size();
-    printf("%s [2] %s table: %zu footprints (max %d), %ld of %zu movable slots deposit\n", table_ok ? "ok  " : "FAIL",
-           tag.c_str(), in.footprints.size(), densrec::FOOTPRINT_TABLE_MAX, deposited, placer.movable_slots.size());
+    printf("%s [2] %s table: %zu footprints (max %d), %ld of %zu movable slots deposit, %zu on the slow path "
+           "(%d cells); F = %d\n", table_ok ? "ok  " : "FAIL", tag.c_str(), in.footprints.size(),
+           densrec::FOOTPRINT_TABLE_MAX, deposited, placer.movable_slots.size(), in.slow.size(), in.num_slow_cells,
+           placer.fixed_frac_bits);
     ok &= table_ok;
     if (!table_ok) { printf("FAIL %s\n", tag.c_str()); return 1; }
 
@@ -121,7 +130,9 @@ int main(int argc, char** argv)
     ok &= rho_differ == 0;
 
     DensityInputs mutant = in;
-    mutant.index[placer.movable_slots[0]] = densrec::NO_DEPOSIT;
+    long fast_slot = 0;
+    while (mutant.index[fast_slot] == densrec::NO_DEPOSIT) fast_slot++;
+    mutant.index[fast_slot] = densrec::NO_DEPOSIT;
     const long mutant_differ = count_differing(run_device(placer, mutant, identity).rho, golden);
     printf("%s [3] %s mutant (one slot dropped): %ld bins differ\n", mutant_differ ? "ok  " : "FAIL", tag.c_str(), mutant_differ);
     ok &= mutant_differ > 0;
@@ -147,7 +158,7 @@ int main(int argc, char** argv)
 
     const bool word_ok = (golden_peak >> densrec::RHO_WORD_BITS) == 0;
     printf("%s [6] %s densest bin %.6g bin areas (word holds < %g)\n", word_ok ? "ok  " : "FAIL", tag.c_str(),
-           (double)golden_peak * densrec::RHO_UNIT, std::ldexp(1.0, densrec::RHO_WORD_BITS - densrec::RHO_FRAC_BITS));
+           (double)golden_peak * placer.fixed_unit, std::ldexp(1.0, densrec::RHO_WORD_BITS - placer.fixed_frac_bits));
     ok &= word_ok;
 
     printf("%s %s\n", ok ? "PASS" : "FAIL", tag.c_str());

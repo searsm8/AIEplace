@@ -75,7 +75,7 @@ struct PlacerConfig {
     bool grad_merge_stream = false;       // grad_merge = "stream": scatter-add in stream order, macro fold, tail merge
     bool hpwl_fixed = false;              // hpwl = "fixed": the schedule's HPWL as the int64 sum of hpwl_to_fixed (hpwl_CU.hpp)
     // #48 (Mark, 2026-10-19): bin_density_CU accumulates in fixed point, one RHO_WORD_BITS word per bin. Meow.
-    bool deposit_fixed = false;           // deposit = "fixed": each bin counts units of 2^-RHO_FRAC_BITS bin areas
+    bool deposit_fixed = false;           // deposit = "fixed": each bin counts units of 2^-fixed_frac_bits bin areas
     bool uses_record_stream() const { return wa_sums_tree || grad_merge_stream || hpwl_fixed; }
 };
 // Exits with a message on a missing required key or a config outside sw_flat's scope (D6). Meow.
@@ -160,7 +160,9 @@ struct Placer {
     std::vector<float> bin_area, bin_overlap;
     std::vector<float> fixed_base;     // the fixed nodes' deposit, capped: constant, so built once (bin_density_CU's base map)
     std::vector<uint64_t> fixed_base_q, bin_fixed;   // deposit = "fixed": fixed_base and the accumulator, in fixed units
-    float fixed_scale = 0;             // deposit = "fixed": 2^RHO_FRAC_BITS / bin_area[0], die-frame area -> fixed units
+    int   fixed_frac_bits = 0;         // deposit = "fixed": F, from the total-area bound (densrec::rho_frac_bits)
+    float fixed_unit = 0;              // 2^-F: bin areas per fixed unit
+    float fixed_scale = 0;             // 2^F / bin_area[0], die-frame area -> fixed units
     uint32_t fixed_overflow_cap = 0;   // deposit = "fixed": the overflow cap bin_w * bin_h * td, in fixed units
     uint64_t snapshot_excess = 0;      // deposit = "fixed": the last deposit's B' excess, what the device returns
     std::vector<Gradient> efield;

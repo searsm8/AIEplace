@@ -3,10 +3,16 @@
 *2026-10-19 (sw_flat model) and 2026-10-20 (CU side). Branch `pl_algo`. Was
 `HANDOFF_48_bin_density_fixed_point_20261019.md`.*
 
-**Result:** `bin_density_CU` accumulates each bin as an 18.18 unsigned count in one 36-bit URAM word, and
-equals sw_flat's model **bit for bit on 44/44 designs** (ρ, the overflow excess and the overflow), in
-the device's slot order and in a shuffled one. Drift against the float deposit is within noise on 5
-designs. Mark kept F = 18 fixed (2026-10-20); the per-iteration exponent below was not taken.
+**Result:** `bin_density_CU` accumulates each bin as an unsigned fixed-point count in one 36-bit URAM
+word, with the fraction bits F set per design from a proven bound, so no bin can overflow. It deposits one
+cell per cycle (II = 1) through a 4 × 4-banked grid with forwarding, and equals sw_flat's model **bit for
+bit on 44/44 designs** (ρ, the overflow excess and the overflow), in the device's slot order and in a
+shuffled one. RTL co-simulation shows the forwarding working: without it, or one register short, the
+RTL is wrong; with it, bit-exact.
+
+> **Superseded 2026-10-20:** the format below started as a fixed 18.18 (Mark kept F = 18 on 10-20 a.m.),
+> then became the per-design total-area bound the same day (Mark, after asking what happens on much larger
+> designs). The 18.18 sections are kept as the measurement record.
 
 **Mark's frame (2026-10-19):** `bin_density_CU` (renamed from `density_map_CU`) gets the whole chip for
 now, 1024 × 1024 only, budgeted at about half the URAMs; it accumulates in **fixed point**. Its inputs
@@ -146,6 +152,87 @@ Verification:
 physical count should be **128**. csynth under-counts deep URAM cascades (the float version read 21).
 **Not yet confirmed:** read it from a `v++ -l` utilization report.
 
+## The total-area bound: F per design (2026-10-20)
+
+18 integer bits was sized from the 44 designs' measured peak, not guaranteed. A guarantee costs nothing
+to compute: every bin holds a share of the total deposit, so no bin exceeds
+
+    Σ = (fixed base + Σ_slots weight · cw · ch) / bin_area       (fillers top up to td; the clamp keeps area)
+
+The host computes Σ once (sw_flat `deposit_fixed_base`, the tier-1 and co-sim benches likewise) and sets
+`integer bits = ⌊log2 Σ⌋ + 2` (the ceiling plus one guard bit, which absorbs the ≤ ½-unit round-up of
+each deposit), `F = min(36 − integer bits, 31)` (`densrec::rho_frac_bits`). The CU takes `fixed_scale =
+2^F / bin_area` and `rho_unit = 2^-F` as arguments, so F costs it nothing.
+
+Σ ≈ td · bins², so F follows the grid more than the design: on the 44 at grid ≤ 1024, **F = 14 on 7
+designs** (the large ones at 1024), 15 on 11, 16–17 on 14, 19–23 on the small ISPD2015 designs at coarse
+grids (`bin_density_check_44_banked_20261020.txt`). Bigger industrial designs at a finer grid get fewer
+fraction bits, never an overflow (2048: Σ ≲ 2^22, F ≈ 12).
+
+Precision vs the double golden at fixed positions (tier-1, 128 bins): rel_rms 6.3e-5 at F = 14, 1.6e-5 at
+16, 4.9e-6 at 18, then **a floor of 2.8e-6 from F ≈ 20 up**: what remains is the float geometry, which sw_flat
+shares. The overflow floors at ~2e-6 the same way (F = 18's 5.7e-7 was a lucky cancellation).
+
+Drift, `pl+Bprime+fixed` (per-design F) against `pl+Bprime` and base's noise band (`drift_totalarea_F.md`):
+
+| design | F | vs base | vs pl+Bprime | in base's noise |
+|---|---|---|---|---|
+| mgc_fft_a (256) | 19 | +0.011% | +0.462% | yes |
+| mgc_pci_bridge32_b (128) | 23 | −0.017% | −0.155% | yes |
+| adaptec1 (512) | 17 | +0.004% | +0.002% | yes |
+| mms/adaptec1 (512) | 17 | +0.115% | +0.611% | no: just outside, on base's side of the design's known two outcomes (overflow 0.076 vs 0.089) |
+| bigblue4 (2048: its D6 grid, past the CU's 1024; the model runs at any grid) | ~12 | *(running)* | | |
+
+## The banked deposit and its forwarding (2026-10-20)
+
+**Banks.** The grid is split over 16 URAM banks, `bank = 4·(col mod 4) + (row mod 4)`, address
+`(col / 4, row / 4)`. Any window of up to 4 × 4 bins touches 16 different banks, so a footprint that spans
+≤ 4 bins per axis is deposited in one cycle, every bank doing at most one read-add-write. Powers of two
+make the mod and divide free (the low and high address bits). Each bank is 256 × 256 words at 1024:
+64K × 36 b = 8 URAMs, 128 in all. (Bank count does not change the total; capacity does.)
+
+**The fast path** (`deposit_fast`) takes one slot per cycle. For each of the 16 banks, unrolled: which
+window column/row it owns is `(bank_col − col_lo) mod 4` and `(bank_row − row_lo) mod 4`, so the 4 column
+overlaps and 4 row overlaps are computed once and each bank multiplies its pair. Footprints wider than
+2.99 bins (`densrec::fits_window`) leave the stream for a slow list, deposited bin by bin after the fast
+pass: ≤ 4,933 slots (0.5%) on any of the 44, none on 19 designs, never a filler.
+
+**Forwarding.** A bank's read-add-write is spread over the pipeline: csynth issues the URAM read at stage
+112 and the write at stage 117. Cell t writes at absolute cycle t + 116; cell t + k reads at t + k + 111.
+So any cell within 5 cycles of the previous cell that touched the same bin reads a stale value from the
+URAM. Each bank keeps its last `BIN_FORWARD_DEPTH` writes (address, new value) in registers; a read whose
+address matches takes the newest such value instead. `#pragma HLS DEPENDENCE variable=rho_URAM inter
+false` tells HLS not to stall for the URAM, which is only correct because of those registers.
+
+C simulation runs the pipeline one iteration at a time, so it is correct at any depth and cannot test
+this. RTL co-simulation can (`pl/synth/bin_density_CU/cosim/`, `run_depths.sh`), on a stream built to
+collide: 128 cells at one position (distance 1), then cells cycling through k far-apart positions for
+k = 2..5, then random cells, NO_DEPOSIT slots, a macro on the slow path and a filler tail. Golden: the
+plain deposit in the bench, one bin at a time, no banks, no forwarding. Grid shrunk to 64 for RTL speed:
+
+| BIN_FORWARD_DEPTH | C simulation | RTL co-simulation |
+|---|---|---|
+| 0 (no forwarding) | PASS | **FAIL**: 79 of 4096 bins wrong, excess 2.95e9 vs 7.82e9 |
+| 4 | PASS | **FAIL**: 32 bins wrong, all in the distance-5 section |
+| 5 | PASS | **PASS**, bit-exact |
+| 6 (default) | PASS | **PASS**, bit-exact |
+
+The predicted distance was 5 and the RTL agrees: depth 4 loses exactly the cells 5 apart. The default is 6
+(one spare). The depth is tied to the schedule, so `run_depths.sh` must be re-run whenever `deposit_fast`
+changes.
+
+**Two co-sim traps hit on the way:** a C parameter named `bins` becomes an RTL port named `bins`, a
+SystemVerilog keyword, and the simulator wrapper does not compile (the CU's parameter is `grid_bins`
+now); and HLS could not prove `load_base`'s four stores hit four banks while the bank was computed as
+`bank_of(col, row + k)` (II = 4), so it is written as `4·(col mod 4) + k`.
+
+**Synthesis** (full size, 1024, 3.33 ns): `deposit_fast_loop` **II = 1** (depth 117), `load_base`, `reduce`
+and `drain` II = 1 (4, 16 and 4 bins per cycle), `slow_rows` II = 4. LUT 100,608 (11%), FF 79 K, DSP 114.
+csynth reports 37 URAMs; the arrays need 128 (see above), confirm at link. One evaluation at 1024 is
+about load 262 K + deposit (one cycle per slot) + reduce 65 K + drain 262 K cycles: bigblue4's 5.8 M
+slots make it ~6.4 M cycles, ~21 ms at 300 MHz. XPlace's scatter on bigblue4 is 4 ms on a 3090: one cell
+per cycle is not enough (Next, 1).
+
 ## Not taken: a per-iteration exponent
 The 18 integer bits are bought for iterations 0–7 only; from about iteration 20 the peak is < 6 K
 (13 bits), and on the small designs it is < 12 (4 bits). A per-iteration F (the host picks F_k from the
@@ -155,11 +242,14 @@ deterministic integer data), and would put the small designs below float's error
 q18's drift is already in noise.
 
 ## Next
-1. **Throughput:** the deposit is one slot at a time and its RMW runs at II=4. Next come 4×4-interleaved
-   banking (a cell's ≤ 3×3 window in one cycle) and lanes. The integer format makes both free of
-   arithmetic consequences: [5] shows that order doesn't matter.
-2. **Macro slow path:** footprints larger than the window.
-3. **Bin-index divide:** `(int)(xl / bin_w)` wants a reciprocal multiply on the device, which can move a
+1. **Lanes.** One cell per cycle is ~21 ms on bigblue4. Row-band ownership: L lanes, each owning
+   1024 / L rows with its own 16 banks, cells routed by row (a straddler goes to both lanes). At L = 8 each
+   band's banks are 8K words, exactly one URAM in 8K × 36 mode, so **8 lanes cost no extra URAM** (still
+   128); 16 would double it. Costs: a routing network from the 16-slot beats, boundary duplicates, and load
+   imbalance in the early clustered iterations. Integer adds make lane order irrelevant (check [5]).
+2. **Bin-index divide:** `(int)(xl / bin_w)` wants a reciprocal multiply on the device, which can move a
    boundary bin. That would be a change to the model (sw_flat first), not just the CU.
-4. **URAM count:** confirm 128 at link.
-5. **Step 6's golden is `pl+Bprime+fixed`** (`sum_order_drift.py`); `pl+Bprime` stays as the float reference.
+3. **URAM count:** confirm 128 at link. **DDR format:** 16 bins per cycle for load/drain needs 4 × 4
+   tiles per beat (parked by Mark).
+4. **Step 6's golden is `pl+Bprime+fixed`** (`sum_order_drift.py`); `pl+Bprime` stays as the float reference.
+5. XPlace's own scatter/gather structure: [[REPORT_48_xplace_density_scatter_gather_20261020.md]] (in progress).

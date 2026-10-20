@@ -14,22 +14,35 @@
 
 #include "format/pin_record.hpp"
 
+#include <cmath>
 #include <cstdint>
 
 namespace densrec {
 
-constexpr int      GRID_MAX            = 1024;          // v1 hardware grid; 2048 is the planned extension
+#ifndef PL_DENSITY_GRID_MAX
+#define PL_DENSITY_GRID_MAX 1024   // override (-D) only to shrink RTL co-simulation
+#endif
+constexpr int      GRID_MAX            = PL_DENSITY_GRID_MAX;   // v1 hardware grid; 2048 is the planned extension
 constexpr int      FOOTPRINT_TABLE_MAX = 4096;          // assumed, not yet measured on the 44 designs
 constexpr uint32_t NO_DEPOSIT          = 0xFFFFFFFFu;
 constexpr int      RHO_WORD_BITS       = 36;            // one bin's fixed-point accumulator: a URAM word in 8K x 36 mode
-// 18.18 (Mark, 2026-10-19): the densest bin over the 44 designs holds 95,408 bin areas (mms/newblue4,
-// iteration 4; peaks are the initial pile, iterations 0-7), which needs 17 integer bits; 18 leaves 2.7x.
-// REPORT_48_bin_density_fixed_point_20261019.md. Meow.
-constexpr int      RHO_FRAC_BITS       = 18;
-constexpr float    RHO_UNIT            = 1.0f / (1 << RHO_FRAC_BITS);   // bin areas per fixed unit, exact
+constexpr int      WINDOW_BINS         = 4;             // bins per axis a fast-path footprint may span (4x4 banks)
 
 struct FootprintBeat { uint32_t idx[pinrec::LANES]; };  // one 512-bit DDR beat of footprint indices
 struct FixedBeat     { uint32_t q[pinrec::LANES]; };    // one 512-bit DDR beat of a fixed-point map (the base)
+struct SlowSlot      { uint32_t slot, footprint; };     // a slot whose footprint may span > WINDOW_BINS bins
+
+// The fraction bits F for one design (Mark, 2026-10-20: the total-area bound). Every bin holds part of
+// the total deposit, so no bin can exceed it: integer bits = floor(log2 total) + 2 is ceil plus one
+// guard bit, which absorbs the <= 1/2-unit round-up of each deposit. Capped at 31 so one deposit
+// (<= one bin area) still fits to_fixed's uint32. Host-side only.
+// REPORT_48_bin_density_fixed_point_20261019.md. Meow.
+inline int rho_frac_bits(double total_bin_areas) {
+    int integer_bits = 1;
+    while (integer_bits < RHO_WORD_BITS && std::ldexp(1.0, integer_bits - 1) <= total_bin_areas) integer_bits++;
+    const int frac_bits = RHO_WORD_BITS - integer_bits;
+    return frac_bits < 31 ? frac_bits : 31;
+}
 
 // A count of fixed units (>= 0, < 2^32) to the nearest integer: the float add rounds, the conversion
 // truncates. The ONE rounding the host and bin_density_CU both use, so their maps agree bit for bit. Meow.
@@ -52,6 +65,12 @@ inline Footprint make_footprint(float w, float h, bool is_macro, float bin_w, fl
         if (target_density < 1.0f && is_macro) weight = target_density;
     }
     return Footprint{0.5f * w, 0.5f * h, 0.5f * cw, 0.5f * ch, weight};
+}
+
+// A footprint the banked fast path can take: at most 2.99 bins wide on both axes, so it spans at most
+// WINDOW_BINS bins wherever it sits (the 0.01-bin margin covers the bin-index rounding). Host-side only. Meow.
+inline bool fits_window(const Footprint& fp, float bin_w, float bin_h) {
+    return 2.0f * fp.half_cw <= 2.99f * bin_w && 2.0f * fp.half_ch <= 2.99f * bin_h;
 }
 
 } // namespace densrec

@@ -1,5 +1,6 @@
 // Verify bin_density_CU (src/modules/bin_density_CU.hpp) -- the bin density map from slot-ordered
-// positions, footprint indices and a fixed-node base map, accumulated in 18.18 fixed point (#48).
+// positions, footprint indices and a fixed-node base map, accumulated in fixed point (#48) with F from
+// the total-area bound, over 16 banks (4 x 4 interleaved) with forwarding; wide footprints take the slow path.
 //
 // Golden: a naive double-precision deposit written here from sw_flat density.cpp (node_footprint,
 // for_each_overlap), on a synthetic slot range: a cell library, movable macros at td < 1 (the weight
@@ -19,6 +20,9 @@
 //                 accumulator over the same two orders must differ in some bin, or the shuffle proved nothing.
 //   [7] WORD      the densest bin fits RHO_WORD_BITS (off-synthesis the accumulator is wider, so a
 //                 bin the URAM word would wrap shows up here)
+//   [8] PATHS     both the fast (banked) and the slow path deposit something, cells and fillers alike
+// C simulation runs the pipeline sequentially, so it cannot test the forwarding; RTL co-simulation
+// does (pl/synth/bin_density_CU/cosim).
 //
 // Real designs vs sw_flat are host/sw_flat's `make check-bin-density` (bit-exact). Meow.
 
@@ -34,12 +38,14 @@
 
 using namespace plalgo;
 
-// Observed 2026-10-20, 18.18 fixed point vs the double golden (128 / 1024 bins): rel_rms 4.9e-6 / 3.0e-6,
-// peak_rel 6.2e-6 / 8.8e-6, mass 1.2e-6 / 2.8e-7, overflow 5.7e-7 / 9.1e-7. Bounds keep ~3x. Meow.
-constexpr double REL_RMS_MAX  = 1.5e-5;
-constexpr double PEAK_REL_MAX = 3e-5;
-constexpr double MASS_REL_MAX = 5e-6;
-constexpr double OVERFLOW_REL_MAX = 3e-6;
+// vs the double golden, per grid. Past F ~ 20 the error stops falling with F: what is left is the float
+// geometry, which sw_flat shares (so the real-design check is bit-exact, not this). 128 bins, die 2000:
+// floor rho rel_rms 2.8e-6, overflow ~2e-6 (F = 14 would give 6.3e-5 / 1.4e-5). 1024 bins, die 16000
+// (float ulp 1/1024 there): rho 3.55e-5, peak 4.9e-5, mass 1.3e-5, overflow 1.0e-5, the same at F = 18..30.
+// Bounds keep ~3x over the observed values at the F each grid gets. Meow.
+struct Bounds { double rel_rms, peak_rel, mass_rel, overflow_rel; };
+constexpr Bounds BOUNDS_128  = {1.5e-5, 3e-5, 5e-6, 1e-5};
+constexpr Bounds BOUNDS_1024 = {1e-4, 1.5e-4, 4e-5, 3e-5};
 
 struct SyntheticDesign {
     float die = 2000.0f, target_density = 0.8f;
@@ -51,8 +57,11 @@ struct SyntheticDesign {
     long num_slots() const { return (long)x.size(); }
 };
 
-static SyntheticDesign make_design(unsigned seed) {
+// die scales with the grid, so a 12-unit row is about one bin tall at 1024 as on real designs (and the
+// fast path is exercised); the macros still span 10+ bins. Meow.
+static SyntheticDesign make_design(unsigned seed, float die) {
     SyntheticDesign d;
+    d.die = die;
     std::mt19937 rng(seed);
     std::uniform_real_distribution<float> unit(0.0f, 1.0f);
     const float row_h = 12.0f;
@@ -136,14 +145,25 @@ static std::vector<float> float_deposit(const SyntheticDesign& d, int bins) {
     return map;
 }
 
-struct DeviceRun { std::vector<pinrec::SlotBeat> rho; uint64_t excess = 0; };
+struct DeviceRun { std::vector<pinrec::SlotBeat> rho; uint64_t excess = 0; int frac_bits = 0; long fast = 0, slow = 0, slow_cells = 0; };
 
 // Host side (base map in fixed units, footprint table, per-slot indices), then the CU. Meow.
 static DeviceRun run_device(const SyntheticDesign& d, int bins, const std::vector<double>& base_area) {
     const float bin_w = d.die / bins, bin_h = d.die / bins, bin_area = bin_w * bin_h;
-    const float fixed_scale = (float)(1 << densrec::RHO_FRAC_BITS) / bin_area;
     const size_t num_bins = (size_t)bins * bins;
     const long num_slots = d.num_slots();
+
+    // The total-area bound (sw_flat Placer::deposit_fixed_base): base + every footprint's whole area. Meow.
+    double total_area = 0;
+    for (double area : base_area) total_area += area;
+    for (long s = 0; s < num_slots; s++)
+        if (d.deposits[s]) {
+            const densrec::Footprint fp = densrec::make_footprint(d.w[s], d.h[s], d.is_macro[s], bin_w, bin_h, d.target_density, true);
+            total_area += (double)fp.weight * (2.0f * fp.half_cw) * (2.0f * fp.half_ch);
+        }
+    DeviceRun out;
+    out.frac_bits = densrec::rho_frac_bits(total_area / bin_area);
+    const float fixed_scale = std::ldexp(1.0f, out.frac_bits) / bin_area;
     std::vector<densrec::FixedBeat> fixed_base(num_bins / pinrec::LANES);
     for (size_t bin = 0; bin < num_bins; bin++)
         fixed_base[bin / pinrec::LANES].q[bin % pinrec::LANES] = densrec::to_fixed((float)base_area[bin] * fixed_scale);
@@ -151,6 +171,8 @@ static DeviceRun run_device(const SyntheticDesign& d, int bins, const std::vecto
     std::vector<densrec::Footprint> table;
     std::vector<pinrec::SlotBeat> pos_x(num_slots / pinrec::LANES), pos_y(num_slots / pinrec::LANES);
     std::vector<densrec::FootprintBeat> idx(num_slots / pinrec::LANES);
+    std::vector<densrec::SlowSlot> slow;
+    int num_slow_cells = 0;
     for (long s = 0; s < num_slots; s++) {
         pos_x[s / pinrec::LANES].v[s % pinrec::LANES] = d.x[s];
         pos_y[s / pinrec::LANES].v[s % pinrec::LANES] = d.y[s];
@@ -160,19 +182,30 @@ static DeviceRun run_device(const SyntheticDesign& d, int bins, const std::vecto
             entry = 0;
             while (entry < table.size() && std::memcmp(&table[entry], &fp, sizeof fp)) entry++;
             if (entry == table.size()) table.push_back(fp);
+            if (!densrec::fits_window(fp, bin_w, bin_h)) {
+                slow.push_back(densrec::SlowSlot{(uint32_t)s, entry});
+                num_slow_cells += s < d.first_filler_slot;
+                entry = densrec::NO_DEPOSIT;
+            } else {
+                out.fast++;
+            }
         }
         idx[s / pinrec::LANES].idx[s % pinrec::LANES] = entry;
     }
-    DeviceRun out;
+    out.slow = (long)slow.size();
+    out.slow_cells = num_slow_cells;
     out.rho.resize(num_bins / pinrec::LANES);
     bin_density_CU(pos_x.data(), pos_y.data(), idx.data(), (int)(num_slots / pinrec::LANES),
-                   (int)(d.first_filler_slot / pinrec::LANES), table.data(), (int)table.size(), fixed_base.data(),
-                   bins, bin_w, bin_h, fixed_scale, densrec::to_fixed(bin_w * bin_h * d.target_density * fixed_scale),
+                   (int)(d.first_filler_slot / pinrec::LANES), slow.data(), num_slow_cells, (int)slow.size(),
+                   table.data(), (int)table.size(), fixed_base.data(), bins, bin_w, bin_h, fixed_scale,
+                   std::ldexp(1.0f, -out.frac_bits), densrec::to_fixed(bin_w * bin_h * d.target_density * fixed_scale),
                    out.rho.data(), out.excess);
     return out;
 }
 
-static bool run(const SyntheticDesign& d, int bins) {
+static bool run(const SyntheticDesign& d, int bins, const Bounds& bound) {
+    const double REL_RMS_MAX = bound.rel_rms, PEAK_REL_MAX = bound.peak_rel, MASS_REL_MAX = bound.mass_rel,
+                 OVERFLOW_REL_MAX = bound.overflow_rel;
     const float bin_w = d.die / bins, bin_h = d.die / bins, bin_area = bin_w * bin_h;
     const size_t num_bins = (size_t)bins * bins;
     const long num_slots = d.num_slots();
@@ -200,7 +233,7 @@ static bool run(const SyntheticDesign& d, int bins) {
 
     const DeviceRun device = run_device(d, bins, base_area);
     // sw_flat Placer::overflow_from_excess, the host's half of the overflow. Meow.
-    const float overflow = (float)std::ldexp((double)device.excess, -densrec::RHO_FRAC_BITS) * bin_area / ((float)movable_area + 1e-8f);
+    const float overflow = (float)std::ldexp((double)device.excess, -device.frac_bits) * bin_area / ((float)movable_area + 1e-8f);
     const double overflow_rel = std::fabs(overflow - golden_overflow) / golden_overflow;
     const double filler_rel = std::fabs(overflow_of(golden) - golden_overflow) / golden_overflow;
     const bool overflow_ok = overflow_rel < OVERFLOW_REL_MAX && filler_rel > OVERFLOW_REL_MAX;
@@ -220,7 +253,8 @@ static bool run(const SyntheticDesign& d, int bins) {
         golden_mass += golden[bin];
     }
     const double rel_rms = std::sqrt(err_sq / ref_sq), peak_rel = max_err / peak, mass_rel = std::fabs(mass - golden_mass) / golden_mass;
-    const bool word_ok = device_peak < std::ldexp(1.0, densrec::RHO_WORD_BITS - densrec::RHO_FRAC_BITS);
+    const bool word_ok = device_peak < std::ldexp(1.0, densrec::RHO_WORD_BITS - device.frac_bits);
+    const bool paths_ok = device.fast > 0 && device.slow_cells > 0;
 
     const SyntheticDesign other_order = shuffled(d, 11);
     const DeviceRun reordered = run_device(other_order, bins, base_area);
@@ -236,20 +270,22 @@ static bool run(const SyntheticDesign& d, int bins) {
     for (long s = 0; s < num_slots && !clipped; s++) clipped = d.deposits[s] && (d.x[s] < 0 || d.y[s] < 0);
 
     const bool pass = finite && rel_rms < REL_RMS_MAX && peak_rel < PEAK_REL_MAX && mass_rel < MASS_REL_MAX && coverage &&
-                      clipped && overflow_ok && order_ok && word_ok;
+                      clipped && overflow_ok && order_ok && word_ok && paths_ok;
     printf("  bins=%4d  rel_rms=%.3g (<%g)  peak_rel=%.3g (<%g)  mass_rel=%.3g (<%g)  finite=%d  macro_bins=%.1f  clipped=%d\n"
            "            overflow=%.6g golden=%.6g rel=%.3g (<%g), with fillers rel=%.3g (>%g)\n"
-           "            order: shuffled slots %s (a float accumulator differs in %ld bins)  word: peak %.4g bin areas (< 2^%d)  %s\n",
+           "            order: shuffled slots %s (a float accumulator differs in %ld bins)  word: peak %.4g bin areas (< 2^%d)\n"
+           "            paths: %ld fast, %ld slow (%ld cells), F = %d  %s\n",
            bins, rel_rms, REL_RMS_MAX, peak_rel, PEAK_REL_MAX, mass_rel, MASS_REL_MAX, finite, big_macro / bin_w, clipped,
            overflow, golden_overflow, overflow_rel, OVERFLOW_REL_MAX, filler_rel, OVERFLOW_REL_MAX,
-           order_ok ? "bit-identical" : "DIFFER", float_differ, device_peak, densrec::RHO_WORD_BITS - densrec::RHO_FRAC_BITS, pass ? "PASS" : "FAIL");
+           order_ok ? "bit-identical" : "DIFFER", float_differ, device_peak, densrec::RHO_WORD_BITS - device.frac_bits,
+           device.fast, device.slow, device.slow_cells, device.frac_bits, pass ? "PASS" : "FAIL");
     return pass;
 }
 
 int main() {
-    const SyntheticDesign d = make_design(7);
     bool pass = true;
-    for (int bins : {128, 1024}) pass &= run(d, bins);
+    pass &= run(make_design(7, 2000.0f), 128, BOUNDS_128);
+    pass &= run(make_design(7, 16000.0f), 1024, BOUNDS_1024);
     printf(pass ? "bin_density_CU_test: PASS\n" : "bin_density_CU_test: FAIL\n");
     return pass ? 0 : 1;
 }
