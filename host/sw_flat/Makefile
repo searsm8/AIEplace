@@ -17,6 +17,7 @@
 #   make check-overflow-map  #48 option B': the overflow reduced from the solver's map before the fillers,
 #                         over an exact fixed base, vs sw_only's separate metric, 44 designs
 #                         (test/overflow_map_check.sh). Use JOBS=n, ITERATIONS=n.
+#   make lane-model       build/lane_model: #48's lane load-balance model (bands vs strips) on a real run.
 #   make gradient-bench   build/gradient_bench: the WA gradient with std::exp vs the PL's table, timed.
 #   make check-record-stream  sw_flat's record-stream gradient and HPWL (placer/record_stream.cpp) vs
 #                         hpwl_gradient_CU on the same positions, bit for bit, 6 designs
@@ -39,7 +40,7 @@ LDLIBS    = -lstdc++fs -ldl
 
 COMMON_SRCS = DataBase.cpp DesignReader.cpp Grid.cpp Net.cpp Logger.cpp Common.cpp
 COMMON_OBJS = $(addprefix $(BUILD)/, $(COMMON_SRCS:.cpp=.o))
-vpath %.cpp . test $(COMMON)/src placer $(REPO)/host/src/sw_only/src
+vpath %.cpp . test model $(COMMON)/src placer $(REPO)/host/src/sw_only/src
 
 # DCT.cpp is sw_only's own transform, linked rather than copied: the field must round the same. Meow.
 PLACER_SRCS = placer.cpp setup.cpp wirelength.cpp record_stream.cpp density.cpp step.cpp schedule.cpp main.cpp DCT.cpp
@@ -52,7 +53,7 @@ NETLIST_DIR  = $(BUILD)/netlists
 NETLISTS     = $(foreach d,$(DESIGNS),$(NETLIST_DIR)/$(subst /,_,$(d)).netlist)
 suite_of     = $(firstword $(subst _, ,$(1)))
 
-.PHONY: check-database check-layout netlists placer check-placer check-bin-density check-overflow-map gradient-bench check-record-stream hpwl-gradient-xrt clean
+.PHONY: check-database check-layout netlists placer check-placer check-bin-density check-overflow-map gradient-bench lane-model check-record-stream hpwl-gradient-xrt clean
 check-database: $(BUILD)/flat_database_check
 	bash test/flat_database_check.sh
 
@@ -64,6 +65,11 @@ netlists: $(NETLISTS)
 placer: $(BUILD)/sw_flat_place
 
 gradient-bench: $(BUILD)/gradient_bench
+
+lane-model: $(BUILD)/lane_model
+
+$(BUILD)/lane_model: $(BUILD)/flat_database.o $(BUILD)/lane_model.o $(PLACER_LIB) $(COMMON_OBJS)
+	$(CXX) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 check-bin-density: $(BUILD)/bin_density_check
 	bash test/bin_density_check.sh
