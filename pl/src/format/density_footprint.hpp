@@ -25,7 +25,7 @@ namespace densrec {
 constexpr int      GRID_MAX            = PL_DENSITY_GRID_MAX;   // v1 hardware grid; 2048 is the planned extension
 constexpr int      FOOTPRINT_TABLE_MAX = 4096;          // assumed, not yet measured on the 44 designs
 constexpr uint32_t NO_DEPOSIT          = 0xFFFFFFFFu;
-constexpr int      RHO_WORD_BITS       = 36;            // one bin's fixed-point accumulator: a URAM word in 8K x 36 mode
+constexpr int      URAM_WORD_WIDTH     = 36;            // a URAM word in 8K x 36 mode: one bin's fixed-point accumulator
 constexpr int      WINDOW_BINS         = 4;             // bins per axis a fast-path footprint may span (4x4 banks)
 
 struct FootprintBeat { uint32_t idx[pinrec::LANES]; };  // one 512-bit DDR beat of footprint indices
@@ -39,8 +39,8 @@ struct SlowSlot      { uint32_t slot, footprint; };     // a slot whose footprin
 // REPORT_48_bin_density_fixed_point_20261019.md. Meow.
 inline int rho_frac_bits(double total_bin_areas) {
     int integer_bits = 1;
-    while (integer_bits < RHO_WORD_BITS && std::ldexp(1.0, integer_bits - 1) <= total_bin_areas) integer_bits++;
-    const int frac_bits = RHO_WORD_BITS - integer_bits;
+    while (integer_bits < URAM_WORD_WIDTH && std::ldexp(1.0, integer_bits - 1) <= total_bin_areas) integer_bits++;
+    const int frac_bits = URAM_WORD_WIDTH - integer_bits;
     return frac_bits < 31 ? frac_bits : 31;
 }
 

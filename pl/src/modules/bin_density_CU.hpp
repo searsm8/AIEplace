@@ -6,14 +6,15 @@
 // into the bins it covers, on top of the host's capped fixed-node base map; then rho = overlap / bin
 // area. Same math as sw_flat Placer::deposit_fixed_point (density.cpp, [sw_flat] deposit = "fixed").
 //
-// FIXED POINT (#48): each bin is one RHO_WORD_BITS (36) word counting 2^-F bin areas, F chosen per
+// FIXED POINT (#48): each bin is one URAM_WORD_WIDTH (36) word counting 2^-F bin areas, F chosen per
 // design by the host from the total-area bound (densrec::rho_frac_bits), so no bin can overflow. Each
 // overlap is computed in float exactly as sw_flat computes it, with the footprint weight pre-scaled by
 // fixed_scale = 2^F / bin_area, and rounded once (densrec::to_fixed). The adds are integer, so the map
 // and the overflow excess do not depend on the deposit order.
 //
-// BANKS (#48, 2026-10-20): the grid is split over 16 banks, bank = 4 * (col % 4) + (row % 4), address
-// (col / 4, row / 4). Any window of up to 4 x 4 bins then touches 16 different banks, so a footprint of
+// BANKS (#48, 2026-10-20): the grid is split over 16 banks. 
+// For a node area that lands in bin@(row, col), the bin accumulation occurs in bank = 4 * (col % 4) + (row % 4), 
+// with address (col / 4, row / 4). Any window of up to 4 x 4 bins then touches 16 different banks, so a footprint of
 // at most WINDOW_BINS bins per axis is deposited in ONE cycle: every bank does at most one
 // read-add-write. Each bank is a (bins/4)^2 = 64K x 36 b URAM array at 1024: 8 URAMs, 128 in all.
 //
@@ -63,10 +64,10 @@ namespace plalgo {
 #endif
 #endif
 
-// One bin's accumulator. Off-synthesis it is a wider integer, so a bin past RHO_WORD_BITS is visible
+// One bin's accumulator. Off-synthesis it is a wider integer, so a bin past URAM_WORD_WIDTH is visible
 // to the harnesses (bin_density_CU_test, sw_flat bin_density_check) instead of wrapping as the URAM would. Meow.
 #ifdef __SYNTHESIS__
-typedef ap_uint<densrec::RHO_WORD_BITS> rho_word;
+typedef ap_uint<densrec::URAM_WORD_WIDTH> rho_word;
 #else
 typedef uint64_t rho_word;
 #endif

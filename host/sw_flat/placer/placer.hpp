@@ -74,7 +74,7 @@ struct PlacerConfig {
     bool wa_sums_tree = false;            // wa_sums = "tree": B/C sums over the record lanes by the Dhar trees (wa_sums.hpp)
     bool grad_merge_stream = false;       // grad_merge = "stream": scatter-add in stream order, macro fold, tail merge
     bool hpwl_fixed = false;              // hpwl = "fixed": the schedule's HPWL as the int64 sum of hpwl_to_fixed (hpwl_CU.hpp)
-    // #48 (Mark, 2026-10-19): bin_density_CU accumulates in fixed point, one RHO_WORD_BITS word per bin. Meow.
+    // #48 (Mark, 2026-10-19): bin_density_CU accumulates in fixed point, one URAM_WORD_WIDTH word per bin. Meow.
     bool deposit_fixed = false;           // deposit = "fixed": each bin counts units of 2^-fixed_frac_bits bin areas
     bool uses_record_stream() const { return wa_sums_tree || grad_merge_stream || hpwl_fixed; }
 };

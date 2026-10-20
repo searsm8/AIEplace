@@ -18,7 +18,7 @@
 //   [6] ORDER     the same slots shuffled (cells among cells, fillers among fillers): rho and the excess
 //                 BIT-IDENTICAL. The point of the integer accumulator. Negative control: a float
 //                 accumulator over the same two orders must differ in some bin, or the shuffle proved nothing.
-//   [7] WORD      the densest bin fits RHO_WORD_BITS (off-synthesis the accumulator is wider, so a
+//   [7] WORD      the densest bin fits URAM_WORD_WIDTH (off-synthesis the accumulator is wider, so a
 //                 bin the URAM word would wrap shows up here)
 //   [8] PATHS     both the fast (banked) and the slow path deposit something, cells and fillers alike
 // C simulation runs the pipeline sequentially, so it cannot test the forwarding; RTL co-simulation
@@ -253,7 +253,7 @@ static bool run(const SyntheticDesign& d, int bins, const Bounds& bound) {
         golden_mass += golden[bin];
     }
     const double rel_rms = std::sqrt(err_sq / ref_sq), peak_rel = max_err / peak, mass_rel = std::fabs(mass - golden_mass) / golden_mass;
-    const bool word_ok = device_peak < std::ldexp(1.0, densrec::RHO_WORD_BITS - device.frac_bits);
+    const bool word_ok = device_peak < std::ldexp(1.0, densrec::URAM_WORD_WIDTH - device.frac_bits);
     const bool paths_ok = device.fast > 0 && device.slow_cells > 0;
 
     const SyntheticDesign other_order = shuffled(d, 11);
@@ -277,7 +277,7 @@ static bool run(const SyntheticDesign& d, int bins, const Bounds& bound) {
            "            paths: %ld fast, %ld slow (%ld cells), F = %d  %s\n",
            bins, rel_rms, REL_RMS_MAX, peak_rel, PEAK_REL_MAX, mass_rel, MASS_REL_MAX, finite, big_macro / bin_w, clipped,
            overflow, golden_overflow, overflow_rel, OVERFLOW_REL_MAX, filler_rel, OVERFLOW_REL_MAX,
-           order_ok ? "bit-identical" : "DIFFER", float_differ, device_peak, densrec::RHO_WORD_BITS - device.frac_bits,
+           order_ok ? "bit-identical" : "DIFFER", float_differ, device_peak, densrec::URAM_WORD_WIDTH - device.frac_bits,
            device.fast, device.slow, device.slow_cells, device.frac_bits, pass ? "PASS" : "FAIL");
     return pass;
 }

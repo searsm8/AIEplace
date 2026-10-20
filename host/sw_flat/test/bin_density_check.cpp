@@ -15,7 +15,7 @@
 //                    snapshot_excess, and the overflow formed from it equals snapshot_overflow, bit for bit
 //   [5] order        the CU fed the slots shuffled (cells among cells, fillers among fillers): rho and the
 //                    excess bit-identical to [1] / [4], so any lane count or banking is safe
-//   [6] word         the densest bin fits RHO_WORD_BITS (sw_flat would also have exited)
+//   [6] word         the densest bin fits URAM_WORD_WIDTH (sw_flat would also have exited)
 // Meow.
 
 #include "density_inputs.hpp"
@@ -156,9 +156,9 @@ int main(int argc, char** argv)
            reordered.excess == device.excess ? "equal" : "DIFFERS");
     ok &= order_ok;
 
-    const bool word_ok = (golden_peak >> densrec::RHO_WORD_BITS) == 0;
+    const bool word_ok = (golden_peak >> densrec::URAM_WORD_WIDTH) == 0;
     printf("%s [6] %s densest bin %.6g bin areas (word holds < %g)\n", word_ok ? "ok  " : "FAIL", tag.c_str(),
-           (double)golden_peak * placer.fixed_unit, std::ldexp(1.0, densrec::RHO_WORD_BITS - placer.fixed_frac_bits));
+           (double)golden_peak * placer.fixed_unit, std::ldexp(1.0, densrec::URAM_WORD_WIDTH - placer.fixed_frac_bits));
     ok &= word_ok;
 
     printf("%s %s\n", ok ? "PASS" : "FAIL", tag.c_str());

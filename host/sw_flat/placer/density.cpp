@@ -125,12 +125,12 @@ void Placer::deposit_fixed_point(std::vector<std::vector<float>>& density)
     }
     for (size_t i = filler_start; i < deposit_slots.size(); i++) for_each_overlap(*this, scaled_footprint(deposit_slots[i]), deposit);
 
-    // The device's word is RHO_WORD_BITS wide and would wrap silently; here a bin that does not fit is fatal. Meow.
+    // The device's word is URAM_WORD_WIDTH wide and would wrap silently; here a bin that does not fit is fatal. Meow.
     const uint64_t peak = *std::max_element(bin_fixed.begin(), bin_fixed.end());
-    if (peak >> densrec::RHO_WORD_BITS) {
+    if (peak >> densrec::URAM_WORD_WIDTH) {
         fprintf(stderr, "sw_flat: deposit = \"fixed\": a bin holds %.6g bin areas at iteration %d, over the %d-bit word "
                         "at %d fraction bits\n", std::ldexp((double)peak, -fixed_frac_bits), iteration,
-                densrec::RHO_WORD_BITS, fixed_frac_bits);
+                densrec::URAM_WORD_WIDTH, fixed_frac_bits);
         exit(1);
     }
     for (int col = 0; col < bins; col++)

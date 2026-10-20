@@ -23,7 +23,7 @@ footprint index into a small table, and the host's fixed base map. Its outputs a
 
 URAM288 runs as 8K × 36 (AM007; [[PLAN_48_density_onchip_20261014.md]]'s 10-16 correction), so one bin
 per 36-bit word puts the 1024² accumulator in **128 URAMs (28% of 463)**, within the half-chip budget.
-`densrec::RHO_WORD_BITS = 36` (`pl/src/format/density_footprint.hpp`).
+`densrec::URAM_WORD_WIDTH = 36` (`pl/src/format/density_footprint.hpp`).
 
 The bin unit is one bin area. A bin holds an unsigned count of 2^-F bin areas, F = `deposit_frac_bits`.
 
