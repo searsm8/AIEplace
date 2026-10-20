@@ -22,8 +22,18 @@ constexpr int      GRID_MAX            = 1024;          // v1 hardware grid; 204
 constexpr int      FOOTPRINT_TABLE_MAX = 4096;          // assumed, not yet measured on the 44 designs
 constexpr uint32_t NO_DEPOSIT          = 0xFFFFFFFFu;
 constexpr int      RHO_WORD_BITS       = 36;            // one bin's fixed-point accumulator: a URAM word in 8K x 36 mode
+// 18.18 (Mark, 2026-10-19): the densest bin over the 44 designs holds 95,408 bin areas (mms/newblue4,
+// iteration 4; peaks are the initial pile, iterations 0-7), which needs 17 integer bits; 18 leaves 2.7x.
+// REPORT_48_bin_density_fixed_point_20261019.md. Meow.
+constexpr int      RHO_FRAC_BITS       = 18;
+constexpr float    RHO_UNIT            = 1.0f / (1 << RHO_FRAC_BITS);   // bin areas per fixed unit, exact
 
 struct FootprintBeat { uint32_t idx[pinrec::LANES]; };  // one 512-bit DDR beat of footprint indices
+struct FixedBeat     { uint32_t q[pinrec::LANES]; };    // one 512-bit DDR beat of a fixed-point map (the base)
+
+// A count of fixed units (>= 0, < 2^32) to the nearest integer: the float add rounds, the conversion
+// truncates. The ONE rounding the host and bin_density_CU both use, so their maps agree bit for bit. Meow.
+inline uint32_t to_fixed(float units) { return (uint32_t)(units + 0.5f); }
 
 // One distinct footprint: half the real size and half the clamped size, kept separate so that
 // xl = x + half_w - half_cw is the golden's float expression (sw_flat density.cpp node_footprint).

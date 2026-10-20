@@ -1,19 +1,21 @@
 // bin_density_check -- #48 phase 2's real-design check: pl/src/modules/bin_density_CU.hpp against
-// sw_flat_place's own deposit, on a real design part-way through placement, BIT FOR BIT.
+// sw_flat_place's own fixed-point deposit, on a real design part-way through placement, BIT FOR BIT.
 //
 //   bin_density_check <config.toml> [iterations=30]
 //
-// Runs sw_flat_place for `iterations` with its deposit in slot order (the device's order; slot_order
-// "deposit" is forced on) and #48 B' on (overflow_map = "snapshot", fixed_base = "exact"), then hands bin_density_CU the same slot positions, the footprint table and
-// per-slot indices (density_inputs.hpp) and the fixed base map, and compares rho with sw_flat's
-// bin_overlap * inv_bin_area, every bin. Checks, each a verdict:
-//   [1] rho          bit-equal on every bin
+// Runs sw_flat_place for `iterations` with bin_density_CU's arithmetic on ([sw_flat] deposit = "fixed",
+// 18.18) and #48 B' (overflow_map = "snapshot", fixed_base = "exact"), then hands bin_density_CU the same
+// slot positions, footprint table, per-slot indices, fixed base and scalars (density_inputs.hpp).
+// Checks, each a verdict:
+//   [1] rho          bit-equal to sw_flat's (float)acc * RHO_UNIT on every bin
 //   [2] table        the footprint table fits FOOTPRINT_TABLE_MAX; every OWNED / FILLER slot has an entry
 //   [3] mutant       one deposited slot set to NO_DEPOSIT must change rho (the comparison can fail)
-//   [4] overflow     the filler tail starts on a beat boundary; the CU's overflow is within
-//                    OVERFLOW_EXACT_REL_MAX of a double-precision sum over the same pre-filler map, and
-//                    within OVERFLOW_REL_MAX of Placer::snapshot_overflow
-// [info] how many bins the name-order deposit (sw_only's) would differ in: the order is visible. Meow.
+//   [4] overflow     the filler tail starts on a beat boundary; the CU's excess equals sw_flat's
+//                    snapshot_excess, and the overflow formed from it equals snapshot_overflow, bit for bit
+//   [5] order        the CU fed the slots shuffled (cells among cells, fillers among fillers): rho and the
+//                    excess bit-identical to [1] / [4], so any lane count or banking is safe
+//   [6] word         the densest bin fits RHO_WORD_BITS (sw_flat would also have exited)
+// Meow.
 
 #include "density_inputs.hpp"
 #include "modules/bin_density_CU.hpp"
@@ -23,48 +25,39 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <numeric>
+#include <random>
 
 using namespace sw_flat;
 
 namespace {
 
-// The CU sums the excess as a per-beat tree into 8 rotating partials, sw_flat serially in bin order:
-// same terms (all >= 0), different rounding. The serial float sum is the inaccurate one -- one
-// accumulator over ~1M adds drifts -- so the CU is held tightly to a double sum of the same map, and
-// only loosely to sw_flat. Observed 2026-10-15, 44 designs: CU vs double <= 3.9e-6; CU vs
-// sw_flat <= 9.0e-4 (MMS at grid 1024, where macros put large excesses in many bins), and there the
-// double sum sits as far from sw_flat as the CU does. Meow.
-constexpr double OVERFLOW_EXACT_REL_MAX = 2e-5;
-constexpr double OVERFLOW_REL_MAX = 2e-3;
-
 bool same_bits(float a, float b) { return std::memcmp(&a, &b, sizeof a) == 0; }
 
-struct DeviceOut { std::vector<float> rho; float overflow; };
+struct DeviceOut { std::vector<float> rho; uint64_t excess = 0; };
 
-DeviceOut run_device(const Placer& placer, const DensityInputs& in) {
+// `order[i]` is the slot that goes to stream position i; identity is the device's own order. Meow.
+DeviceOut run_device(const Placer& placer, const DensityInputs& in, const std::vector<long>& order) {
     const long num_beats = placer.layout.num_slots / pinrec::LANES;
     std::vector<pinrec::SlotBeat> pos_x(num_beats), pos_y(num_beats);
     std::vector<densrec::FootprintBeat> index(num_beats);
-    for (long slot = 0; slot < placer.layout.num_slots; slot++) {
-        pos_x[slot / pinrec::LANES].v[slot % pinrec::LANES] = placer.next.probe_pos[slot].x;
-        pos_y[slot / pinrec::LANES].v[slot % pinrec::LANES] = placer.next.probe_pos[slot].y;
-        index[slot / pinrec::LANES].idx[slot % pinrec::LANES] = in.index[slot];
+    for (long i = 0; i < placer.layout.num_slots; i++) {
+        const long slot = order[i];
+        pos_x[i / pinrec::LANES].v[i % pinrec::LANES] = placer.next.probe_pos[slot].x;
+        pos_y[i / pinrec::LANES].v[i % pinrec::LANES] = placer.next.probe_pos[slot].y;
+        index[i / pinrec::LANES].idx[i % pinrec::LANES] = in.index[slot];
     }
     const int grid_beats = placer.bins * placer.bins / pinrec::LANES;
-    std::vector<pinrec::SlotBeat> base(grid_beats), rho(grid_beats);
-    std::memcpy(base.data(), placer.fixed_base.data(), placer.fixed_base.size() * sizeof(float));
+    std::vector<pinrec::SlotBeat> rho(grid_beats);
     DeviceOut out;
     plalgo::bin_density_CU(pos_x.data(), pos_y.data(), index.data(), (int)num_beats,
                            (int)(placer.layout.first_filler_slot / pinrec::LANES), in.footprints.data(),
-                           (int)in.footprints.size(), base.data(), placer.bins, placer.bin_w, placer.bin_h,
-                           1 / placer.bin_area[0], placer.bin_w * placer.bin_h * placer.cfg.target_density,
-                           placer.total_movable_area + 1e-8f, rho.data(), out.overflow);
+                           (int)in.footprints.size(), in.fixed_base.data(), placer.bins, placer.bin_w, placer.bin_h,
+                           in.fixed_scale, in.overflow_cap, rho.data(), out.excess);
     out.rho.resize((size_t)placer.bins * placer.bins);
     std::memcpy(out.rho.data(), rho.data(), out.rho.size() * sizeof(float));
     return out;
 }
-
-std::vector<float> device_rho(const Placer& placer, const DensityInputs& in) { return run_device(placer, in).rho; }
 
 long count_differing(const std::vector<float>& a, const std::vector<float>& b) {
     long differ = 0;
@@ -83,6 +76,7 @@ int main(int argc, char** argv)
     cfg.slot_order_deposit = true;
     cfg.overflow_snapshot = true;
     cfg.fixed_base_exact = true;
+    cfg.deposit_fixed = true;
     Placer placer;
     placer.setup(cfg);
     const std::string tag = placer.design.name + " (grid " + std::to_string(placer.bins) + ")";
@@ -99,10 +93,13 @@ int main(int argc, char** argv)
         if (placer.check_convergence()) break;
     }
 
-    // sw_flat's rho: Grid::getBinDensities' scaling of the deposit it just did. Meow.
-    const float inv_bin_area = 1 / placer.bin_area[0];
-    std::vector<float> golden(placer.bin_overlap.size());
-    for (size_t bin = 0; bin < golden.size(); bin++) golden[bin] = placer.bin_overlap[bin] * inv_bin_area;
+    // sw_flat's rho: deposit_fixed_point's drain of the deposit it just did. Meow.
+    std::vector<float> golden(placer.bin_fixed.size());
+    uint64_t golden_peak = 0;
+    for (size_t bin = 0; bin < golden.size(); bin++) {
+        golden[bin] = (float)placer.bin_fixed[bin] * densrec::RHO_UNIT;
+        golden_peak = std::max(golden_peak, placer.bin_fixed[bin]);
+    }
 
     const DensityInputs in = make_density_inputs(placer);
     bool ok = true;
@@ -115,7 +112,9 @@ int main(int argc, char** argv)
     ok &= table_ok;
     if (!table_ok) { printf("FAIL %s\n", tag.c_str()); return 1; }
 
-    const DeviceOut device = run_device(placer, in);
+    std::vector<long> identity(placer.layout.num_slots);
+    std::iota(identity.begin(), identity.end(), 0L);
+    const DeviceOut device = run_device(placer, in, identity);
     const long rho_differ = count_differing(device.rho, golden);
     printf("%s [1] %s rho after %d iterations: %ld of %zu bins differ\n", rho_differ ? "FAIL" : "ok  ", tag.c_str(),
            placer.iteration, rho_differ, golden.size());
@@ -123,41 +122,33 @@ int main(int argc, char** argv)
 
     DensityInputs mutant = in;
     mutant.index[placer.movable_slots[0]] = densrec::NO_DEPOSIT;
-    const long mutant_differ = count_differing(device_rho(placer, mutant), golden);
+    const long mutant_differ = count_differing(run_device(placer, mutant, identity).rho, golden);
     printf("%s [3] %s mutant (one slot dropped): %ld bins differ\n", mutant_differ ? "ok  " : "FAIL", tag.c_str(), mutant_differ);
     ok &= mutant_differ > 0;
 
-    // The pre-filler map again, slot order ([1] holds this deposit bit-equal), summed in double. Meow.
-    std::vector<float> cell_map = placer.fixed_base;
-    for (long slot = 0; slot < placer.layout.first_filler_slot; slot++) {
-        if (in.index[slot] == densrec::NO_DEPOSIT) continue;
-        const Position& p = placer.next.probe_pos[slot];
-        plalgo::deposit_footprint(p.x, p.y, in.footprints[in.index[slot]], placer.bins, placer.bin_w, placer.bin_h, cell_map.data());
-    }
-    const float cap = placer.bin_w * placer.bin_h * placer.cfg.target_density;
-    double excess_area = 0;
-    for (float d : cell_map) excess_area += std::max(0.0, (double)d - cap);
-    const double exact_overflow = excess_area / placer.total_movable_area;
-
     const bool aligned = placer.layout.first_filler_slot % pinrec::LANES == 0;
-    const double exact_rel = std::fabs(device.overflow - exact_overflow) / exact_overflow;
-    const double overflow_rel = std::fabs((double)device.overflow - placer.snapshot_overflow) / placer.snapshot_overflow;
-    const double golden_rel = std::fabs(exact_overflow - placer.snapshot_overflow) / placer.snapshot_overflow;
-    const bool overflow_ok = aligned && exact_rel <= OVERFLOW_EXACT_REL_MAX && overflow_rel <= OVERFLOW_REL_MAX;
-    printf("%s [4] %s overflow: CU %.9g, double %.9g (rel %.3g, max %g), sw_flat %.9g (rel %.3g, max %g; double vs sw_flat %.3g)%s\n",
-           overflow_ok ? "ok  " : "FAIL", tag.c_str(), device.overflow, exact_overflow, exact_rel, OVERFLOW_EXACT_REL_MAX,
-           placer.snapshot_overflow, overflow_rel, OVERFLOW_REL_MAX, golden_rel, aligned ? "" : ", filler tail not beat-aligned");
+    const float device_overflow = placer.overflow_from_excess(device.excess);
+    const bool overflow_ok = aligned && device.excess == placer.snapshot_excess && same_bits(device_overflow, placer.snapshot_overflow);
+    printf("%s [4] %s overflow: excess CU %llu, sw_flat %llu; overflow CU %.9g, sw_flat %.9g%s\n", overflow_ok ? "ok  " : "FAIL",
+           tag.c_str(), (unsigned long long)device.excess, (unsigned long long)placer.snapshot_excess, device_overflow,
+           placer.snapshot_overflow, aligned ? "" : ", filler tail not beat-aligned");
     ok &= overflow_ok;
 
-    // [info] sw_only's name order over the same positions. Meow.
-    std::vector<float> name_order = placer.fixed_base;
-    for (long slot : placer.movable_slots) {
-        const Position& p = placer.next.probe_pos[slot];
-        const densrec::Footprint& fp = in.footprints[in.index[slot]];
-        plalgo::deposit_footprint(p.x, p.y, fp, placer.bins, placer.bin_w, placer.bin_h, name_order.data());
-    }
-    for (float& v : name_order) v *= inv_bin_area;
-    printf("[info] %s name-order deposit differs from slot order in %ld bins\n", tag.c_str(), count_differing(name_order, golden));
+    std::vector<long> shuffled = identity;
+    std::mt19937 rng(11);
+    std::shuffle(shuffled.begin(), shuffled.begin() + placer.layout.first_filler_slot, rng);
+    std::shuffle(shuffled.begin() + placer.layout.first_filler_slot, shuffled.end(), rng);
+    const DeviceOut reordered = run_device(placer, in, shuffled);
+    const long order_differ = count_differing(reordered.rho, golden);
+    const bool order_ok = order_differ == 0 && reordered.excess == device.excess;
+    printf("%s [5] %s shuffled slot order: %ld bins differ, excess %s\n", order_ok ? "ok  " : "FAIL", tag.c_str(), order_differ,
+           reordered.excess == device.excess ? "equal" : "DIFFERS");
+    ok &= order_ok;
+
+    const bool word_ok = (golden_peak >> densrec::RHO_WORD_BITS) == 0;
+    printf("%s [6] %s densest bin %.6g bin areas (word holds < %g)\n", word_ok ? "ok  " : "FAIL", tag.c_str(),
+           (double)golden_peak * densrec::RHO_UNIT, std::ldexp(1.0, densrec::RHO_WORD_BITS - densrec::RHO_FRAC_BITS));
+    ok &= word_ok;
 
     printf("%s %s\n", ok ? "PASS" : "FAIL", tag.c_str());
     return ok ? 0 : 1;

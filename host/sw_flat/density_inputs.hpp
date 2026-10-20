@@ -5,8 +5,9 @@
 // the device deposits exactly what sw_flat_place does (pl/src/format/density_footprint.hpp):
 //   footprints   the distinct footprints, by (width, height, movable-macro) bits; every filler shares one
 //   index        per slot: its footprint, or NO_DEPOSIT (BORROWED copies, pin slots, EMPTY padding)
-// The base map is Placer::fixed_base (col-major, capped) as it stands; the positions are the placer's
-// next.probe_pos per slot, the ones its deposit reads. Meow.
+//   fixed_base   Placer::fixed_base_q (col-major, capped, fixed units), 16 bins per beat
+// with the scalars fixed_scale and overflow_cap as the placer computed them; needs [sw_flat] deposit =
+// "fixed". The positions are the placer's next.probe_pos per slot, the ones its deposit reads. Meow.
 
 #include "format/density_footprint.hpp"
 #include "placer/placer.hpp"
@@ -21,6 +22,9 @@ namespace sw_flat {
 struct DensityInputs {
     std::vector<densrec::Footprint> footprints;
     std::vector<uint32_t> index;   // per slot
+    std::vector<densrec::FixedBeat> fixed_base;
+    float fixed_scale = 0;
+    uint32_t overflow_cap = 0;
 };
 
 inline DensityInputs make_density_inputs(const Placer& placer)
@@ -43,6 +47,11 @@ inline DensityInputs make_density_inputs(const Placer& placer)
         }
         in.index[slot] = it->second;
     }
+    in.fixed_base.resize(placer.fixed_base_q.size() / pinrec::LANES);
+    for (size_t bin = 0; bin < placer.fixed_base_q.size(); bin++)
+        in.fixed_base[bin / pinrec::LANES].q[bin % pinrec::LANES] = (uint32_t)placer.fixed_base_q[bin];
+    in.fixed_scale = placer.fixed_scale;
+    in.overflow_cap = placer.fixed_overflow_cap;
     return in;
 }
 

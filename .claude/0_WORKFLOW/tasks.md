@@ -1,8 +1,8 @@
 # Tasks
 
-**Active Task (2026-10-19): #45 step 6 / #48 — `bin_density_CU` in fixed point.** sw_flat models it
-(`deposit = "fixed"`, 18.18 in a 36-bit word); next is the CU's integer accumulator and a bit-exact
-harness. → [[HANDOFF_48_bin_density_fixed_point_20261019.md]]. Done alongside (2026-10-20): #45 step 8's
+**Active Task (2026-10-20): #45 step 6 / #48 — `bin_density_CU`.** Fixed point is in, bit-exact to sw_flat
+on 44/44 ([[REPORT_48_bin_density_fixed_point_20261019.md]]). Next on the CU: 4×4 banking + lanes (the
+`rows` RMW is II=4), the macro slow path, the bin-index reciprocal. Done alongside (2026-10-20): #45 step 8's
 `hpwl_gradient_CU` hardware baseline, **PASS bit-exact on the VCK5000 at 200 MHz** ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
 #46 closed 2026-10-19 (re-scored, new goldens archived; history.md).
 
@@ -1130,17 +1130,23 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       designs, all converged ([[_NEW_REPORT_45_pl_arithmetic_20261016.md]]). Box closed 2026-10-19.
 - [ ] **Optional: bigblue3/4 trajectory at grid 1024** (the drift ran at 2048, where fewer fixed nodes
       are stretched). Before step 6 quotes numbers.
-- [ ] **Phase 2, fixed-point accumulator (Mark, 2026-10-19: rename to `bin_density_CU`, whole chip for
-      now, 1024 only, ~half the URAMs, accumulate in fixed point).** **sw_flat side DONE:** `[sw_flat]
-      deposit = "fixed"`, `deposit_frac_bits = 18` (default off; check-placer bit-identical). One 36-bit
+- [x] **Phase 2, fixed-point accumulator (Mark, 2026-10-19: rename to `bin_density_CU`, whole chip for
+      now, 1024 only, ~half the URAMs, accumulate in fixed point; 10-20: keep F = 18 fixed).**
+      **CU side DONE 2026-10-20:** `bin_density_CU` accumulates `ap_uint<36>` per bin, scales the table
+      weight at load, takes the base as integers (`densrec::FixedBeat`), returns the uint64 excess (host:
+      `Placer::overflow_from_excess`), drains `(float)acc * RHO_UNIT`; `to_fixed` and `RHO_FRAC_BITS` live
+      in the contract. `make -C host/sw_flat check-bin-density`: **44/44 BIT-EXACT** — rho, excess and
+      overflow, and again with the slots shuffled (`scratch_48/bin_density_check_44_fixed_20261020.txt`).
+      pl tier-1 [6]: shuffled order bit-identical, while a float accumulator differs in 5,219 / 1,153 bins.
+      C-synth: `reduce` and `drain` II=1, `rows` II=4 (the prototype's RMW; banking is next), DSP 58 → 24;
+      URAM reads 37 in csynth, which cannot hold 1M × 36 b (8 per bank = 128 expected): confirm at link.
+      **Step 6's golden is now `pl+Bprime+fixed`.** → [[REPORT_48_bin_density_fixed_point_20261019.md]]
+      **sw_flat side (10-19):** `[sw_flat] deposit = "fixed"` (default off; check-placer bit-identical). One 36-bit
       URAM word per bin (8K × 36): 128 URAMs. Peak ρ over 44 designs = 95,408 bins (mms/newblue4,
       iteration 4; every peak at iteration 0–7) → 18.18 leaves 2.7× headroom. At equal positions q18's
       overflow beats float everywhere (≤ 9.3e-7 vs up to 4.8e-5); ρ beats float on dense bins (bigblue4
       3.0e-7 vs 2.3e-5) and loses on small sparse designs (pci_bridge32_b 9.7e-6 vs 3.6e-7). Drift vs
       `pl+Bprime`: in noise on 5/5 (mms/adaptec1 read against `pl+Bprime`'s own flipped mode; bigblue4
       +0.002%). Order-independent: fft_a's trace is
-      byte-identical in name and slot order. **Next:** the CU's integer accumulator,
-      `density_inputs.hpp` (w' in the table, integer base), `check-bin-density` bit-exact incl. the
-      int64 excess and a shuffled-order mutant. Open for Mark: a per-iteration exponent.
-      → [[HANDOFF_48_bin_density_fixed_point_20261019.md]]
+      byte-identical in name and slot order. Per-iteration exponent: not taken (Mark, 10-20).
 → [[_NEW_PLAN_48_density_onchip_20261014.md]]

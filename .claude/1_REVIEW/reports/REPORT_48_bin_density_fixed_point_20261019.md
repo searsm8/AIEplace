@@ -1,6 +1,12 @@
-# HANDOFF #48: `bin_density_CU`'s fixed-point accumulator, modeled in sw_flat
+# REPORT #48: `bin_density_CU`'s fixed-point accumulator, in sw_flat and on the CU
 
-*2026-10-19. Branch `pl_algo`. Draft report: becomes `REPORT_48_...` when the CU side lands.*
+*2026-10-19 (sw_flat model) and 2026-10-20 (CU side). Branch `pl_algo`. Was
+`HANDOFF_48_bin_density_fixed_point_20261019.md`.*
+
+**Result:** `bin_density_CU` accumulates each bin as an 18.18 unsigned count in one 36-bit URAM word, and
+equals sw_flat's model **bit for bit on 44/44 designs** (ρ, the overflow excess and the overflow), in
+the device's slot order and in a shuffled one. Drift against the float deposit is within noise on 5
+designs. Mark kept F = 18 fixed (2026-10-20); the per-iteration exponent below was not taken.
 
 **Mark's frame (2026-10-19):** `bin_density_CU` (renamed from `density_map_CU`) gets the whole chip for
 now, 1024 × 1024 only, budgeted at about half the URAMs; it accumulates in **fixed point**. Its inputs
@@ -108,7 +114,39 @@ two orders diverge (#45 step 5b). This is what lets the CU use lanes and any ban
 - `deposit = "float"` (default) is untouched: `make -C host/sw_flat check-placer` PASS bit-identical.
 - `deposit = "fixed"`, F = 18: no bin left the 36-bit word on any full run above (sw_flat would exit).
 
-## Open choice for Mark: a per-iteration exponent
+## The CU side (2026-10-20)
+
+F is now a contract constant: `densrec::RHO_FRAC_BITS = 18`, `RHO_UNIT = 2^-18`, and the rounding itself,
+`densrec::to_fixed`, sits in `pl/src/format/density_footprint.hpp`, so host and device cannot round
+differently. sw_flat's `deposit_frac_bits` knob is gone (the q14/q16 rows above were measured with it).
+
+`bin_density_CU` (`pl/src/modules/bin_density_CU.hpp`):
+- `rho_URAM` is `ap_uint<36>` in synthesis (a `uint64_t` off-synthesis, so a bin past 36 bits is visible
+  to the harnesses instead of wrapping).
+- `load_table` scales each footprint's weight by `fixed_scale`: sw_flat's `fp.weight *= fixed_scale`, once
+  per table entry, not per overlap.
+- Deposit: `rho += to_fixed(overlap_w * overlap_h * weight)`, the float geometry unchanged.
+- The base arrives as `densrec::FixedBeat` (16 × uint32 per beat), from sw_flat's `fixed_base_q`.
+- Overflow: `excess = Σ max(0, rho − overflow_cap)` as a uint64 tree per beat into one accumulator. It is
+  exact, so the 8 rotating partials and the 2e-5 tolerance are gone. The device returns the integer; the
+  host forms the ratio with `Placer::overflow_from_excess`.
+- Drain: `(float)acc * RHO_UNIT`, exact after the conversion's rounding.
+
+Verification:
+
+| check | result |
+|---|---|
+| `make -C pl test`, `bin_density_CU_test` vs a double golden | rel_rms 4.9e-6 / 3.0e-6 (128 / 1024 bins), overflow 5.7e-7 / 9.1e-7 |
+| tier-1 [6] ORDER: slots shuffled, cells and fillers separately | ρ and excess bit-identical; a float accumulator over the same two orders differs in 5,219 / 1,153 bins |
+| `make -C host/sw_flat check-bin-density`, 44 designs, grid ≤ 1024, iteration 30 | **44/44 PASS**: ρ bit-equal, excess equal, overflow bit-equal, shuffled order bit-identical, mutant caught (`.claude/2_ARTIFACTS/scratch_48/bin_density_check_44_fixed_20261020.txt`) |
+| `check-placer` (float default) | PASS, bit-identical to sw_only |
+| C-synth (`pl/synth/bin_density_CU`) | `reduce` II=1, `drain` II=1, `load_base` II=1; `rows` (the deposit RMW) II=4; DSP 58 → 24 |
+
+⚠️ csynth reports 37 URAMs (2 per bank). A 64K × 36-bit bank needs 8 URAMs in 8K × 36 mode, so the
+physical count should be **128**. csynth under-counts deep URAM cascades (the float version read 21).
+**Not yet confirmed:** read it from a `v++ -l` utilization report.
+
+## Not taken: a per-iteration exponent
 The 18 integer bits are bought for iterations 0–7 only; from about iteration 20 the peak is < 6 K
 (13 bits), and on the small designs it is < 12 (4 bits). A per-iteration F (the host picks F_k from the
 previous evaluation's peak, with 2 bits of margin; the device returns the peak from its drain pass)
@@ -117,11 +155,11 @@ deterministic integer data), and would put the small designs below float's error
 q18's drift is already in noise.
 
 ## Next
-1. `bin_density_CU`: the integer accumulator (`ap_uint<36>` per bin), w' in the footprint table, the
-   fixed base sent as integers, excess returned as int64, drain `rho = acc * 2^-F`.
-2. `density_inputs.hpp`: the table carries w'; the base goes over as `base_q`.
-3. `bin_density_check`: rho and excess bit-equal to sw_flat with `deposit = "fixed"`, in any order (a
-   shuffled-order mutant must still match: that is the point of the format).
-4. Still open in the model, not touched here: the bin-index divide (`(int)(xl / bin_w)`) wants a
-   reciprocal multiply on the device, which can move a boundary bin; the 4×4 banking and lanes change
-   no arithmetic.
+1. **Throughput:** the deposit is one slot at a time and its RMW runs at II=4. Next come 4×4-interleaved
+   banking (a cell's ≤ 3×3 window in one cycle) and lanes. The integer format makes both free of
+   arithmetic consequences: [5] shows that order doesn't matter.
+2. **Macro slow path:** footprints larger than the window.
+3. **Bin-index divide:** `(int)(xl / bin_w)` wants a reciprocal multiply on the device, which can move a
+   boundary bin. That would be a change to the model (sw_flat first), not just the CU.
+4. **URAM count:** confirm 128 at link.
+5. **Step 6's golden is `pl+Bprime+fixed`** (`sum_order_drift.py`); `pl+Bprime` stays as the float reference.

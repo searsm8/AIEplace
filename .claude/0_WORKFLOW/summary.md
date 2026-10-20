@@ -121,7 +121,8 @@ hw xclbin built at **200 MHz** (WNS +0.031 ns; 250 MHz failed at −0.729 ns on 
 - **#48 — `bin_density_CU` (renamed 10-19) accumulates in fixed point (Mark).** sw_flat models it:
   18.18 in one 36-bit URAM word per bin (8K × 36, 128 URAMs at 1024). Peak ρ 95,408 bins (mms/newblue4,
   iteration 4). Exact integer sums, so the map is order-independent and the overflow beats float; drift
-  in noise on 5/5 (bigblue4 +0.002%). Next: the CU side. → [[HANDOFF_48_bin_density_fixed_point_20261019.md]]
+  in noise on 5/5 (bigblue4 +0.002%). **CU side landed 10-20: bit-exact to sw_flat on 44/44**, in any slot
+  order. Next: banking + lanes. → [[REPORT_48_bin_density_fixed_point_20261019.md]]
 - **#47 — the tail exchange replaced the chunk mailbox (2026-10-09).** Rule C6: a macro pin is never
   external (the macro is). Rule C7: a chunk's externals are its tail rows, one block per owner;
   owners write / read them through a 32 x 256 row buffer replaying host-scheduled ops. Tier 1, 8/8

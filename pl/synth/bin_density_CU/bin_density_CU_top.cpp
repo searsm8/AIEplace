@@ -1,5 +1,5 @@
 // bin_density_CU_top.cpp -- standalone kernel top for bin_density_CU's C-synthesis check (#48). One
-// m_axi bundle per sequential DDR stream; scalars and the overflow out on control. Meow.
+// m_axi bundle per sequential DDR stream; scalars and the overflow excess on control. Meow.
 
 #include "modules/bin_density_CU.hpp"
 
@@ -13,23 +13,24 @@ extern "C" void bin_density_CU_top(
         int                            num_cell_beats,
         const densrec::Footprint*      footprints,
         int                            num_footprints,
-        const pinrec::SlotBeat*        fixed_base,
+        const densrec::FixedBeat*      fixed_base,
         int                            bins,
         float                          bin_w,
         float                          bin_h,
-        float                          inv_bin_area,
-        float                          overflow_cap,
-        float                          overflow_norm,
+        float                          fixed_scale,
+        unsigned int                   overflow_cap,
         pinrec::SlotBeat*              rho,
-        float*                         overflow) {
+        unsigned long long*            overflow_excess) {
 #pragma HLS INTERFACE m_axi port=pos_x         bundle=gmem0 offset=slave
 #pragma HLS INTERFACE m_axi port=pos_y         bundle=gmem1 offset=slave
 #pragma HLS INTERFACE m_axi port=footprint_idx bundle=gmem2 offset=slave
 #pragma HLS INTERFACE m_axi port=footprints    bundle=gmem3 offset=slave
 #pragma HLS INTERFACE m_axi port=fixed_base    bundle=gmem4 offset=slave
 #pragma HLS INTERFACE m_axi port=rho           bundle=gmem5 offset=slave
-#pragma HLS INTERFACE s_axilite port=overflow
+#pragma HLS INTERFACE s_axilite port=overflow_excess
 
+    uint64_t excess = 0;
     bin_density_CU(pos_x, pos_y, footprint_idx, num_slot_beats, num_cell_beats, footprints, num_footprints, fixed_base,
-                   bins, bin_w, bin_h, inv_bin_area, overflow_cap, overflow_norm, rho, *overflow);
+                   bins, bin_w, bin_h, fixed_scale, overflow_cap, rho, excess);
+    *overflow_excess = excess;
 }

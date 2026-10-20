@@ -1,5 +1,5 @@
 // Verify bin_density_CU (src/modules/bin_density_CU.hpp) -- the bin density map from slot-ordered
-// positions, footprint indices and a fixed-node base map.
+// positions, footprint indices and a fixed-node base map, accumulated in 18.18 fixed point (#48).
 //
 // Golden: a naive double-precision deposit written here from sw_flat density.cpp (node_footprint,
 // for_each_overlap), on a synthetic slot range: a cell library, movable macros at td < 1 (the weight
@@ -7,31 +7,39 @@
 // copies, pins, padding) whose positions are NaN, so a wrongly read slot poisons the map.
 //
 //   [1] MATCH     rho vs golden, rel_rms < REL_RMS_MAX and worst-bin error / peak < PEAK_REL_MAX, at
-//                 128 and 1024 bins. Not a per-bin max_rel: a float corner at x ~ 2000 is off by ~1e-4,
-//                 a real 2% of a 1024-grid bin that the footprint only grazes.
+//                 128 and 1024 bins. The error is the fixed point's: each overlap rounds to 2^-19 of a bin.
 //   [2] SKIP      every bin finite: no NO_DEPOSIT slot was read
 //   [3] MASS      total deposited area == golden's, rel < MASS_REL_MAX
 //   [4] COVERAGE  a macro spans >= 8x8 bins; some cell is clipped by the die edge
-//   [5] OVERFLOW  the overflow (fixed base + cells, before the fillers; #48 B') vs golden, rel <
-//                 OVERFLOW_REL_MAX, and farther than that from the with-fillers overflow, so the
-//                 check can tell whether the CU reduced at the filler barrier
+//   [5] OVERFLOW  the overflow formed from the CU's integer excess (fixed base + cells, before the
+//                 fillers; #48 B') vs golden, rel < OVERFLOW_REL_MAX, and farther than that from the
+//                 with-fillers overflow, so the check can tell whether the CU reduced at the filler barrier
+//   [6] ORDER     the same slots shuffled (cells among cells, fillers among fillers): rho and the excess
+//                 BIT-IDENTICAL. The point of the integer accumulator. Negative control: a float
+//                 accumulator over the same two orders must differ in some bin, or the shuffle proved nothing.
+//   [7] WORD      the densest bin fits RHO_WORD_BITS (off-synthesis the accumulator is wider, so a
+//                 bin the URAM word would wrap shows up here)
 //
-// Real designs vs sw_flat Placer::bin_overlap are the next harness step, not this one. Meow.
+// Real designs vs sw_flat are host/sw_flat's `make check-bin-density` (bit-exact). Meow.
 
 #include "modules/bin_density_CU.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <numeric>
 #include <random>
 #include <vector>
 
 using namespace plalgo;
 
-constexpr double REL_RMS_MAX  = 1e-5;   // observed 2.9e-6 (float vs double golden), 2026-10-13
-constexpr double PEAK_REL_MAX = 3e-5;   // worst bin error / peak bin density; observed 8.3e-6 at 1024
-constexpr double MASS_REL_MAX = 1e-5;
-constexpr double OVERFLOW_REL_MAX = 2e-5;  // observed 2.6e-6 at 1024 (float, tree order, vs double), 2026-10-15. Meow.
+// Observed 2026-10-20, 18.18 fixed point vs the double golden (128 / 1024 bins): rel_rms 4.9e-6 / 3.0e-6,
+// peak_rel 6.2e-6 / 8.8e-6, mass 1.2e-6 / 2.8e-7, overflow 5.7e-7 / 9.1e-7. Bounds keep ~3x. Meow.
+constexpr double REL_RMS_MAX  = 1.5e-5;
+constexpr double PEAK_REL_MAX = 3e-5;
+constexpr double MASS_REL_MAX = 5e-6;
+constexpr double OVERFLOW_REL_MAX = 3e-6;
 
 struct SyntheticDesign {
     float die = 2000.0f, target_density = 0.8f;
@@ -73,6 +81,22 @@ static SyntheticDesign make_design(unsigned seed) {
     return d;
 }
 
+// The same slots in another order: cells permuted among the cell range, fillers among the filler tail. Meow.
+static SyntheticDesign shuffled(const SyntheticDesign& d, unsigned seed) {
+    std::vector<long> order(d.num_slots());
+    std::iota(order.begin(), order.end(), 0L);
+    std::mt19937 rng(seed);
+    std::shuffle(order.begin(), order.begin() + d.first_filler_slot, rng);
+    std::shuffle(order.begin() + d.first_filler_slot, order.end(), rng);
+    SyntheticDesign s = d;
+    for (long i = 0; i < d.num_slots(); i++) {
+        const long from = order[i];
+        s.x[i] = d.x[from]; s.y[i] = d.y[from]; s.w[i] = d.w[from]; s.h[i] = d.h[from];
+        s.is_macro[i] = d.is_macro[from]; s.deposits[i] = d.deposits[from];
+    }
+    return s;
+}
+
 // sw_flat density.cpp node_footprint + for_each_overlap, in double. Meow.
 static void golden_deposit(double x, double y, double w, double h, bool macro, double td, int bins,
                            double bin_w, double bin_h, std::vector<double>& overlap) {
@@ -91,20 +115,75 @@ static void golden_deposit(double x, double y, double w, double h, bool macro, d
     }
 }
 
+// The negative control for [6]: the same deposit with a float accumulator, in slot order. Meow.
+static std::vector<float> float_deposit(const SyntheticDesign& d, int bins) {
+    const float bin_w = d.die / bins, bin_h = d.die / bins;
+    std::vector<float> map((size_t)bins * bins, 0.0f);
+    for (long s = 0; s < d.num_slots(); s++) {
+        if (!d.deposits[s]) continue;
+        const densrec::Footprint fp = densrec::make_footprint(d.w[s], d.h[s], d.is_macro[s], bin_w, bin_h, d.target_density, true);
+        const float xl = d.x[s] + fp.half_w - fp.half_cw, yl = d.y[s] + fp.half_h - fp.half_ch;
+        const float xh = xl + 2.0f * fp.half_cw, yh = yl + 2.0f * fp.half_ch;
+        for (int col = std::max(0, (int)(xl / bin_w)); col <= std::min(bins - 1, (int)(xh / bin_w)); col++) {
+            const float ow = std::min(xh, col * bin_w + bin_w) - std::max(xl, col * bin_w);
+            if (ow <= 0.0f) continue;
+            for (int row = std::max(0, (int)(yl / bin_h)); row <= std::min(bins - 1, (int)(yh / bin_h)); row++) {
+                const float oh = std::min(yh, row * bin_h + bin_h) - std::max(yl, row * bin_h);
+                if (oh > 0.0f) map[(size_t)col * bins + row] += ow * oh * fp.weight;
+            }
+        }
+    }
+    return map;
+}
+
+struct DeviceRun { std::vector<pinrec::SlotBeat> rho; uint64_t excess = 0; };
+
+// Host side (base map in fixed units, footprint table, per-slot indices), then the CU. Meow.
+static DeviceRun run_device(const SyntheticDesign& d, int bins, const std::vector<double>& base_area) {
+    const float bin_w = d.die / bins, bin_h = d.die / bins, bin_area = bin_w * bin_h;
+    const float fixed_scale = (float)(1 << densrec::RHO_FRAC_BITS) / bin_area;
+    const size_t num_bins = (size_t)bins * bins;
+    const long num_slots = d.num_slots();
+    std::vector<densrec::FixedBeat> fixed_base(num_bins / pinrec::LANES);
+    for (size_t bin = 0; bin < num_bins; bin++)
+        fixed_base[bin / pinrec::LANES].q[bin % pinrec::LANES] = densrec::to_fixed((float)base_area[bin] * fixed_scale);
+
+    std::vector<densrec::Footprint> table;
+    std::vector<pinrec::SlotBeat> pos_x(num_slots / pinrec::LANES), pos_y(num_slots / pinrec::LANES);
+    std::vector<densrec::FootprintBeat> idx(num_slots / pinrec::LANES);
+    for (long s = 0; s < num_slots; s++) {
+        pos_x[s / pinrec::LANES].v[s % pinrec::LANES] = d.x[s];
+        pos_y[s / pinrec::LANES].v[s % pinrec::LANES] = d.y[s];
+        uint32_t entry = densrec::NO_DEPOSIT;
+        if (d.deposits[s]) {
+            const densrec::Footprint fp = densrec::make_footprint(d.w[s], d.h[s], d.is_macro[s], bin_w, bin_h, d.target_density, true);
+            entry = 0;
+            while (entry < table.size() && std::memcmp(&table[entry], &fp, sizeof fp)) entry++;
+            if (entry == table.size()) table.push_back(fp);
+        }
+        idx[s / pinrec::LANES].idx[s % pinrec::LANES] = entry;
+    }
+    DeviceRun out;
+    out.rho.resize(num_bins / pinrec::LANES);
+    bin_density_CU(pos_x.data(), pos_y.data(), idx.data(), (int)(num_slots / pinrec::LANES),
+                   (int)(d.first_filler_slot / pinrec::LANES), table.data(), (int)table.size(), fixed_base.data(),
+                   bins, bin_w, bin_h, fixed_scale, densrec::to_fixed(bin_w * bin_h * d.target_density * fixed_scale),
+                   out.rho.data(), out.excess);
+    return out;
+}
+
 static bool run(const SyntheticDesign& d, int bins) {
     const float bin_w = d.die / bins, bin_h = d.die / bins, bin_area = bin_w * bin_h;
     const size_t num_bins = (size_t)bins * bins;
     const long num_slots = d.num_slots();
 
-    // Host side: fixed base map (deposited, then capped), footprint table, per-slot indices.
+    // Golden: fixed base map (deposited, then capped), the cells, the overflow there, the fillers. Meow.
     std::vector<double> golden(num_bins, 0.0);
     for (size_t i = 0; i < d.fixed_x.size(); i++)
         golden_deposit(d.fixed_x[i], d.fixed_y[i], d.fixed_w[i], d.fixed_h[i], false, d.target_density, bins, bin_w, bin_h, golden);
     for (double& v : golden) v = std::min(v, (double)bin_area * d.target_density);
-    std::vector<pinrec::SlotBeat> fixed_base(num_bins / pinrec::LANES);
-    for (size_t bin = 0; bin < num_bins; bin++) fixed_base[bin / pinrec::LANES].v[bin % pinrec::LANES] = (float)golden[bin];
+    const std::vector<double> base_area = golden;
 
-    // XPlace's overflow_fn on the map between cells and fillers, then again with the fillers. Meow.
     const double cap = (double)bin_w * bin_h * d.target_density;
     double movable_area = 0;
     for (long s = 0; s < d.first_filler_slot; s++) movable_area += (double)d.w[s] * d.h[s];
@@ -114,62 +193,56 @@ static bool run(const SyntheticDesign& d, int bins) {
         return area / movable_area;
     };
     double golden_overflow = 0;
-
-    std::vector<densrec::Footprint> table;
-    std::vector<pinrec::SlotBeat> pos_x(num_slots / pinrec::LANES), pos_y(num_slots / pinrec::LANES);
-    std::vector<densrec::FootprintBeat> idx(num_slots / pinrec::LANES);
     for (long s = 0; s < num_slots; s++) {
         if (s == d.first_filler_slot) golden_overflow = overflow_of(golden);
-        pos_x[s / pinrec::LANES].v[s % pinrec::LANES] = d.x[s];
-        pos_y[s / pinrec::LANES].v[s % pinrec::LANES] = d.y[s];
-        uint32_t entry = densrec::NO_DEPOSIT;
-        if (d.deposits[s]) {
-            const densrec::Footprint fp = densrec::make_footprint(d.w[s], d.h[s], d.is_macro[s], bin_w, bin_h, d.target_density, true);
-            entry = 0;
-            while (entry < table.size() && std::memcmp(&table[entry], &fp, sizeof fp)) entry++;
-            if (entry == table.size()) table.push_back(fp);
-            golden_deposit(d.x[s], d.y[s], d.w[s], d.h[s], d.is_macro[s], d.target_density, bins, bin_w, bin_h, golden);
-        }
-        idx[s / pinrec::LANES].idx[s % pinrec::LANES] = entry;
+        if (d.deposits[s]) golden_deposit(d.x[s], d.y[s], d.w[s], d.h[s], d.is_macro[s], d.target_density, bins, bin_w, bin_h, golden);
     }
-    if ((int)table.size() > densrec::FOOTPRINT_TABLE_MAX) { printf("  table %zu > max\n", table.size()); return false; }
 
-    std::vector<pinrec::SlotBeat> rho(num_bins / pinrec::LANES);
-    float overflow = 0;
-    bin_density_CU(pos_x.data(), pos_y.data(), idx.data(), (int)(num_slots / pinrec::LANES),
-                   (int)(d.first_filler_slot / pinrec::LANES), table.data(), (int)table.size(), fixed_base.data(),
-                   bins, bin_w, bin_h, 1.0f / bin_area, bin_w * bin_h * d.target_density,
-                   (float)movable_area + 1e-8f, rho.data(), overflow);
+    const DeviceRun device = run_device(d, bins, base_area);
+    // sw_flat Placer::overflow_from_excess, the host's half of the overflow. Meow.
+    const float overflow = (float)std::ldexp((double)device.excess, -densrec::RHO_FRAC_BITS) * bin_area / ((float)movable_area + 1e-8f);
     const double overflow_rel = std::fabs(overflow - golden_overflow) / golden_overflow;
     const double filler_rel = std::fabs(overflow_of(golden) - golden_overflow) / golden_overflow;
     const bool overflow_ok = overflow_rel < OVERFLOW_REL_MAX && filler_rel > OVERFLOW_REL_MAX;
 
-    double err_sq = 0, ref_sq = 0, max_err = 0, peak = 0, mass = 0, golden_mass = 0;
+    double err_sq = 0, ref_sq = 0, max_err = 0, peak = 0, device_peak = 0, mass = 0, golden_mass = 0;
     bool finite = true;
     for (size_t bin = 0; bin < num_bins; bin++) {
-        const double device = rho[bin / pinrec::LANES].v[bin % pinrec::LANES];
+        const double value = device.rho[bin / pinrec::LANES].v[bin % pinrec::LANES];
         const double expect = golden[bin] / bin_area;
-        finite &= std::isfinite(device);
-        err_sq += (device - expect) * (device - expect);
+        finite &= std::isfinite(value);
+        err_sq += (value - expect) * (value - expect);
         ref_sq += expect * expect;
-        max_err = std::max(max_err, std::fabs(device - expect));
+        max_err = std::max(max_err, std::fabs(value - expect));
         peak = std::max(peak, expect);
-        mass += device * bin_area;
+        device_peak = std::max(device_peak, value);
+        mass += value * bin_area;
         golden_mass += golden[bin];
     }
     const double rel_rms = std::sqrt(err_sq / ref_sq), peak_rel = max_err / peak, mass_rel = std::fabs(mass - golden_mass) / golden_mass;
+    const bool word_ok = device_peak < std::ldexp(1.0, densrec::RHO_WORD_BITS - densrec::RHO_FRAC_BITS);
+
+    const SyntheticDesign other_order = shuffled(d, 11);
+    const DeviceRun reordered = run_device(other_order, bins, base_area);
+    const std::vector<float> float_a = float_deposit(d, bins), float_b = float_deposit(other_order, bins);
+    long float_differ = 0;
+    for (size_t bin = 0; bin < num_bins; bin++) float_differ += std::memcmp(&float_a[bin], &float_b[bin], sizeof(float)) != 0;
+    const bool order_ok = reordered.excess == device.excess && float_differ > 0 &&
+                          std::memcmp(reordered.rho.data(), device.rho.data(), device.rho.size() * sizeof(pinrec::SlotBeat)) == 0;
 
     const float big_macro = d.w[20000 + 5];   // the largest macro
     const bool coverage = big_macro / bin_w >= 8.0f;
     bool clipped = false;
     for (long s = 0; s < num_slots && !clipped; s++) clipped = d.deposits[s] && (d.x[s] < 0 || d.y[s] < 0);
 
-    const bool pass = finite && rel_rms < REL_RMS_MAX && peak_rel < PEAK_REL_MAX && mass_rel < MASS_REL_MAX && coverage && clipped && overflow_ok;
-    printf("  bins=%4d footprints=%zu  rel_rms=%.3g (<%g)  peak_rel=%.3g (<%g)  mass_rel=%.3g (<%g)  finite=%d  macro_bins=%.1f  clipped=%d\n"
-           "            overflow=%.6g golden=%.6g rel=%.3g (<%g), with fillers rel=%.3g (>%g)  %s\n",
-           bins, table.size(), rel_rms, REL_RMS_MAX, peak_rel, PEAK_REL_MAX, mass_rel, MASS_REL_MAX, finite,
-           big_macro / bin_w, clipped, overflow, golden_overflow, overflow_rel, OVERFLOW_REL_MAX, filler_rel,
-           OVERFLOW_REL_MAX, pass ? "PASS" : "FAIL");
+    const bool pass = finite && rel_rms < REL_RMS_MAX && peak_rel < PEAK_REL_MAX && mass_rel < MASS_REL_MAX && coverage &&
+                      clipped && overflow_ok && order_ok && word_ok;
+    printf("  bins=%4d  rel_rms=%.3g (<%g)  peak_rel=%.3g (<%g)  mass_rel=%.3g (<%g)  finite=%d  macro_bins=%.1f  clipped=%d\n"
+           "            overflow=%.6g golden=%.6g rel=%.3g (<%g), with fillers rel=%.3g (>%g)\n"
+           "            order: shuffled slots %s (a float accumulator differs in %ld bins)  word: peak %.4g bin areas (< 2^%d)  %s\n",
+           bins, rel_rms, REL_RMS_MAX, peak_rel, PEAK_REL_MAX, mass_rel, MASS_REL_MAX, finite, big_macro / bin_w, clipped,
+           overflow, golden_overflow, overflow_rel, OVERFLOW_REL_MAX, filler_rel, OVERFLOW_REL_MAX,
+           order_ok ? "bit-identical" : "DIFFER", float_differ, device_peak, densrec::RHO_WORD_BITS - densrec::RHO_FRAC_BITS, pass ? "PASS" : "FAIL");
     return pass;
 }
 
