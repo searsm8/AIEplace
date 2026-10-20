@@ -2,8 +2,9 @@
 
 **Active Task (2026-10-19): #45 step 6 / #48 — `bin_density_CU` in fixed point.** sw_flat models it
 (`deposit = "fixed"`, 18.18 in a 36-bit word); next is the CU's integer accumulator and a bit-exact
-harness. → [[HANDOFF_48_bin_density_fixed_point_20261019.md]]. Parked alongside: #45 step 8's
-`hpwl_gradient_CU` card run ([[HANDOFF_45_hpwl_gradient_hw_flow_20261019.md]]); #46's 44-design
+harness. → [[HANDOFF_48_bin_density_fixed_point_20261019.md]]. Done alongside (2026-10-20): #45 step 8's
+`hpwl_gradient_CU` hardware baseline, **PASS bit-exact on the VCK5000 at 200 MHz** ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
+Still running alongside: #46's 44-design
 re-score, running in `vck5000/results/DSE_20261019_125733/`.
 
 Open work, one section per task. **Status lives here; evidence lives in a
@@ -755,8 +756,9 @@ emulation first, a baseline to improve on):** `make -C pl xclbin TARGET=...` plu
 `make -C host/sw_flat hpwl-gradient-xrt`. **sw_emu 4/4 and hw_emu 3/3 (synthetic with 16 chunks, mgc_pci_bridge32_b,
 mgc_fft_a) PASS bit-exact** vs the g++ CU. **hw: 250 MHz failed timing** (WNS −0.729 ns, the tail
 exchange's URAM read); **200 MHz met timing** (WNS +0.031 ns; URAM 256, LUT 122 K) and built an xclbin at `b3d0e87`.
-The card run waits on Mark: there is no VCK5000 on the build server.
-→ [[HANDOFF_45_hpwl_gradient_hw_flow_20261019.md]]. Done 2026-10-06 as low-hanging fruit: gradient `max_rel` 1e-3
+**Card run 2026-10-20 on `vck` (booked): PASS bit-exact** on synthetic, mgc_fft_a, mms/adaptec1 and
+bigblue4 (3 chunks; ~8.4 ms wall-clock per axis, WL gradient only). Baseline done; clock, profiling and DDR mapping
+are the improvements. → [[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]. Done 2026-10-06 as low-hanging fruit: gradient `max_rel` 1e-3
 (`vck5000/test/wa_gradient_golden.hpp`; newblue3 / mms/bigblue4 / newblue7 now pass, rel_rms still
 1e-5-bounded); `make test` 21/21 PASS.
 - [x] **Decisions, second round (Mark, 2026-10-06):** D1 mailbox A now / C later / B fallback; D2

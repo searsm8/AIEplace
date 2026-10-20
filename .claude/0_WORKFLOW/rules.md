@@ -20,7 +20,9 @@ If a rule stops being true, flag it for deletion and tell Mark — a stale rule 
   (the repo's `.claude/settings.json` copy runs Windows node, finds no trail, and stays silent).
   If nvm's node version changes, update the path in both places. Meow.
 - **Build server** (`ssh build` → `hacc-build-01.inf.ethz.ch`; Vitis lives there, but **no VCK5000** (no Xilinx device in `lspci`,
-  checked 2026-10-20 — build only, not card runs. Meow.),
+  checked 2026-10-20 — build only, not card runs. **The cards are on `ssh vck`** = `hacc-gpu-u55c-01`: two
+  VCK5000s, XRT 2.18 at `/opt/xilinx/xrt`, same NFS home, so `~/AIEplace` is the same checkout. Access
+  is **booked by Mark** and temporary: ask, don't retry. Meow.),
   repo at `~/AIEplace`). Run remote commands like this (the `--norc`/stdin script keeps the server's
   `module: command not found` `.bashrc` noise out of the output):
   ```bash

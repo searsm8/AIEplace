@@ -106,7 +106,8 @@
 (10-19):** `hpwl_gradient_CU` is a Vitis kernel at 250 MHz (`make -C pl xclbin`). Through XRT
 (`make -C host/sw_flat hpwl-gradient-xrt`), sw_emu 4/4 and hw_emu 3/3 (synthetic with 16 chunks, pci_bridge32_b, fft_a) are bit-exact vs the g++ CU.
 hw xclbin built at **200 MHz** (WNS +0.031 ns; 250 MHz failed at −0.729 ns on the tail exchange's URAM read).
-The card run waits on locating the card: the build server has none ([[HANDOFF_45_hpwl_gradient_hw_flow_20261019.md]]).
+**On the VCK5000 (2026-10-20, host `vck`): PASS bit-exact** on synthetic, fft_a, mms/adaptec1 and bigblue4 (3 chunks,
+~8.4 ms wall-clock per axis) ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
 **Then:** step 6, density path.
   → [[_NEW_PLAN_45_integration_20261006.md]]
 - **Building blocks (#41/#42, closed 2026-10-06; history.md):** chunked gradient tier-1 exact, II=1,

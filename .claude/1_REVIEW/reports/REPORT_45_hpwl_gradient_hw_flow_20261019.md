@@ -1,7 +1,41 @@
-# HANDOFF #45: a hardware test flow for `hpwl_gradient_CU` (v++ → sw_emu → hw_emu → card)
+# REPORT #45: a hardware baseline for `hpwl_gradient_CU` (v++ → sw_emu → hw_emu → card)
 
-*2026-10-19. Branch `pl_algo`, HEAD `5340ac4`. Written at the end of a long session; the next session
-starts here. Not started: this file is the brief.*
+*Opened 2026-10-19 as a handoff (HEAD `5340ac4`); closed 2026-10-20 as this report. The sections below are in
+reverse order: the result first, then the progress log, then the original brief.*
+
+## Result (2026-10-20): the card run passes, bit-exact
+**`hpwl_gradient_CU` runs on a real VCK5000 at 200 MHz and matches the g++ CU bit for bit on every design
+tried.** That makes it the baseline Mark asked for. The xclbin was built at `b3d0e87` (includes `2c9dd6b`,
+one bbox per net); md5 `00db5b39…`; routed WNS +0.031 ns.
+
+| design | chunks | record beats | slot beats | tail ops | kernel run, per axis | [1] image | [2] HPWL | [3] vs sw_flat |
+|---|---|---|---|---|---|---|---|---|
+| synthetic | 16 | 835 | 1,084 | 7,561 | 9.3 / 0.8 ms | 0 differ | equal | n/a |
+| mgc_fft_a | 1 | 6,666 | 2,162 | 0 | 0.2 / 0.1 ms | 0 / 34,592 | equal | 0 / 30,625 |
+| mms/adaptec1 | 1 | 68,577 | 14,232 | 0 | 0.9 / 0.8 ms | 0 / 227,712 | equal | 0 / 210,967 |
+| ispd2005/bigblue4 | 3 | 629,454 | 163,552 | 567,312 | **8.4 / 8.3 ms** | 0 / 2,616,832 | equal | 0 / 2,169,183 |
+
+- **Kernel run** is host wall-clock from `kernel(...)` to `run.wait()`. It includes launch overhead and
+  excludes buffer transfers; it is not a profiled device time. The first launch pays a one-time warm-up
+  (synthetic axis 0: 9.3 ms against 0.8 ms). bigblue4's 8.4 ms is close to its work at 200 MHz
+  (≈1.36 M beats + ops ≈ 6.8 ms). It is for **one axis of the WL gradient only**, so it is not yet comparable
+  with the 3090's 10.0 ms for a whole step. Timing it properly (XRT profiling, both axes, transfers) is
+  separate work.
+- Machine: **`vck`** = `hacc-gpu-u55c-01` (ssh `vck`, **booked** access via the jump host; the home dir is
+  NFS-shared with `build`). It has two VCK5000s (`c1:00.1`, `e1:00.1`), shell `xilinx_vck5000_gen4x8_qdma_base_2`,
+  XRT 2.18.179 at `/opt/xilinx/xrt`. The 2022.2-built xclbin loads under that newer XRT unchanged.
+- To run it there: `source /opt/xilinx/xrt/setup.sh && cd ~/AIEplace/host/sw_flat && make build/hpwl_gradient_xrt
+  XILINX_XRT=/opt/xilinx/xrt && TARGET=hw bash test/hpwl_gradient_xrt.sh`. The server checkout needed
+  `third_party/tabulate/include`, because the shared parser's `Logger.h` uses it, plus the three benchmark
+  folders, which were copied over by hand (tar over ssh).
+- The real designs' inputs differ slightly from the local runs (fft_a: 6,666 record beats against 6,668
+  locally), because the server tree is `b3d0e87` without this checkout's uncommitted placer edits. Each
+  check compares the device with the g++ CU on identical inputs, so this does not affect the verdict.
+
+**What would improve it, in order:** (1) the clock. 250 MHz failed on the tail exchange's `pos_URAM` read
+into `send_tail_block` (65% route delay), so that path gets pipelined first. (2) A real device timing
+(XRT profile) to compare against the bar. (3) Explicit `--connectivity.sp` DDR mapping, which today is
+v++'s default.
 
 ## Progress (2026-10-19, second session): flow built, sw_emu PASS
 **Mark's choice: (a), 250 MHz, emulation first.** The goal is a baseline hardware build to improve on.
