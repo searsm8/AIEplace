@@ -3,14 +3,14 @@
 > **Closed 2026-10-06; converted from HANDOFF.** Decision 1 below is resolved: the structural
 > `max_rel` bound is now 1e-3 (rel_rms stays 1e-5; newblue3 / mms/bigblue4 / newblue7 pass). Steps
 > still open — the NMU check (§1) and timing (§2, after integration) — carry into #45
-> ([[_NEW_PLAN_45_integration_20261006.md]]), where `hpwl_gradient_computer_v2` becomes `hpwl_gradient_CU`.
+> ([[PLAN_45_integration_20261006.md]]), where `hpwl_gradient_computer_v2` becomes `hpwl_gradient_CU`.
 
 Where `hpwl_gradient_computer` (the WA-gradient PL module on the static pin-record stream) stands,
 and the ranked next steps. Background:
-[[_NEW_EXPLAINER_41_hpwl_gradient_computer_20261001.md]] (what the module is),
-[[_NEW_REPORT_41_ddr_bundles_20261001.md]] (DDR / NoC / URAM findings),
-[[_NEW_REPORT_41_record_datapath_20260922.md]] (how it was built and verified),
-[[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]] (**the large-net plan: all four steps done;
+[[EXPLAINER_41_hpwl_gradient_computer_20261001.md]] (what the module is),
+[[REPORT_41_ddr_bundles_20261001.md]] (DDR / NoC / URAM findings),
+[[REPORT_41_record_datapath_20260922.md]] (how it was built and verified),
+[[PLAN_41_large_net_gradient_fifo_20261002.md]] (**the large-net plan: all four steps done;
 the evidence for this handoff is there**).
 
 ## State
@@ -56,7 +56,7 @@ the evidence for this handoff is there**).
      - (c) leave it as is.
 
    Tier 1 is unaffected. I left the tolerance unchanged.
-2. **RESOLVED 2026-10-02 (Mark): yes, `large_nets` is the default**, chunked designs included → [[_NEW_REPORT_41_large_nets_in_chunks_20261002.md]]. Original question: **Should `large_nets` become the default?** Every consumer handles it now; the exception is
+2. **RESOLVED 2026-10-02 (Mark): yes, `large_nets` is the default**, chunked designs included → [[REPORT_41_large_nets_in_chunks_20261002.md]]. Original question: **Should `large_nets` become the default?** Every consumer handles it now; the exception is
    chunked designs, which still drop large nets (rule C2).
 
 ## Next steps, ranked
@@ -77,7 +77,7 @@ the evidence for this handoff is there**).
 ### 2. Close timing (needs the build server)
 - **Status:** post-route 4.335 ns vs 3.33 ns target (about 231 MHz), worst slack −1.0 ns, 20 K
   failing endpoints, measured on the **fused** loop, before the DATAFLOW split and large nets.
-  Continue [[_NEW_REPORT_41_pnr_timing_20260923.md]]; don't restart.
+  Continue [[REPORT_41_pnr_timing_20260923.md]]; don't restart.
 - **Re-measure first** on today's design: the HLS-estimated worst path is now C's combiner (stage
   slack −0.39 ns, top −0.53 ns). A fresh post-route run comes before any fix.
   (Superseded: we skipped the fix-free re-measure, since Sep 23 had already identified the top path.)
@@ -147,7 +147,7 @@ is next touched.
     doc block explains the export / compute / fold passes);
   - `hpwl_computer_v3.hpp`;
   - `vck5000/bring_up/beat_packer/README.md` (protocol, `encode_chunked`);
-  - Part 2 of [[_NEW_REPORT_41_record_datapath_20260922.md]].
+  - Part 2 of [[REPORT_41_record_datapath_20260922.md]].
 
 ### Later, optional
 - **Fold `hpwl_computer_v2`'s beat loop onto `pin_bbox`.** They now carry the same large-net logic

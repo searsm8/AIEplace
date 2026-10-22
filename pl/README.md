@@ -5,7 +5,7 @@ the kernel top, and the tier-1 harnesses that check each module against its soft
 software — parser sink, packer, partitioner, the CPU placer `sw_flat`, the driver — lives in
 [`host/sw_flat/`](../host/sw_flat/README.md).
 
-Built up under #45 (plan: `.claude/1_REVIEW/reports/_NEW_PLAN_45_integration_20261006.md`) from the
+Built up under #45 (plan: `.claude/1_REVIEW/reports/PLAN_45_integration_20261006.md`) from the
 verified pieces in `vck5000/`, which is legacy and goes away once everything has moved.
 
 ## Layout

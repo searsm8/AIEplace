@@ -11,7 +11,7 @@ as its golden until `sw_flat` has been scored.
 
 Device-side layouts come from `pl/src/format/`; this tree includes them, never the reverse.
 
-Plan: `.claude/1_REVIEW/reports/_NEW_PLAN_45_integration_20261006.md`. So far:
+Plan: `.claude/1_REVIEW/reports/PLAN_45_integration_20261006.md`. So far:
 
 | file | what |
 |---|---|

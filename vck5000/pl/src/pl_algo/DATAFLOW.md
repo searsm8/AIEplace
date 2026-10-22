@@ -5,7 +5,7 @@
 > record-stream gradient `hpwl_gradient_CU` (from `bring_up/hpwl_gradient_computer_v2`) replacing
 > `hpwl_gradient.hpp` + `MODE_REFRESH_PINS`. Modules here are copied over one at a time; after a
 > copy, fix bugs in `pl/` only. Until `pl/` has its own DATAFLOW.md, this file stays authoritative
-> for the modules not yet moved. → `.claude/1_REVIEW/reports/_NEW_PLAN_45_integration_20261006.md`
+> for the modules not yet moved. → `.claude/1_REVIEW/reports/PLAN_45_integration_20261006.md`
 
 > **Block diagrams** now live in `.claude/2_ARTIFACTS/diagrams/`:
 > [[DIAGRAM_pl_overview.md]] (the whole PL region, simplified), [[DIAGRAM_iteration.md]]
@@ -44,7 +44,7 @@ ports HLS could infer no burst for). All four loops now stream and burst; `sweep
 depth halved 146 → 73. The one remaining random gather is inside `refresh_net_pins`, deliberately
 concentrated there because it has no float datapath behind it and can be tuned on its own. The
 node-major refresh is monotone and much cheaper. Full evidence:
-[[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]].
+[[REPORT_20_hpwl_gradient_opt_20260828.md]].
 
 **Wired (`3a26da1`):** `eval_gradients` issues `MODE_REFRESH_PINS` before `MODE_HPWL_GRAD` at
 every probe, so the `--place` path folds v_k into the pin arrays on the device each iteration.
@@ -198,7 +198,7 @@ constraints, none decided:
   stay, so the Big Fix applies fully only to unchunked designs.
 - **Overlap belongs between modules, through streams.** DATAFLOW between phases that share a URAM
   array does not work: it would ping-pong the array (2x URAM), and `pos_URAM` has several writers.
--> [[_NEW_REPORT_41_ddr_bundles_20261001.md]]
+-> [[REPORT_41_ddr_bundles_20261001.md]]
 
 ## Open format decisions (to finalize as modules are implemented)
 - AoS vs SoA and 1-vs-2 nodes per beat for the coord/gradient buffers.

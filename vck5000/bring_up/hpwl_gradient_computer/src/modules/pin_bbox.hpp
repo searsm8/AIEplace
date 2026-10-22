@@ -9,7 +9,7 @@
 // Large nets (17..96 pins) are hpwl_computer_v2's path: a window of the last MAX_SPAN beats'
 // degree-16 max/min, reduced on the net's last real beat. That bbox is known only then, so it goes
 // to stage B on its own stream (net_bboxes), once per net; B pops it on the net's first beat and
-// stalls until it arrives (_NEW_PLAN_41_large_net_gradient_fifo_20261002.md).
+// stalls until it arrives (PLAN_41_large_net_gradient_fifo_20261002.md).
 //
 // Owns pos_URAM and offset_BRAM inside the beat-loop DATAFLOW region (read only). Meow.
 

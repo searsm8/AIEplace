@@ -2,7 +2,7 @@
 
 *2026-10-20. Measurement only; XPlace source untouched (monkeypatched driver), no AIEplace code changed.
 Companion to [[REPORT_48_xplace_density_scatter_gather_20261020.md]] (how the two kernels work) and an
-extension of [[_NEW_REPORT_xplace_gpu_iteration_breakdown_20261013.md]] (which profiled a 100-iteration
+extension of [[REPORT_xplace_gpu_iteration_breakdown_20261013.md]] (which profiled a 100-iteration
 window of adaptec1 and bigblue4 only).*
 
 ## Bottom line

@@ -3,8 +3,8 @@
 Plain g++, no Vitis, no XRT. Encodes a netlist as the **static per-axis record stream** that the
 gradient datapath consumes. The stream carries no positions: the device reads node positions
 from on-chip URAM (gather) and accumulates gradients back into URAM (scatter-add), both
-addressed by the record. Evidence and numbers: [[_NEW_REPORT_41_beat_packer_20260922.md]] (design,
-Parts 1–2) and [[_NEW_REPORT_41_record_datapath_20260922.md]] (the device modules and chunking).
+addressed by the record. Evidence and numbers: [[REPORT_41_beat_packer_20260922.md]] (design,
+Parts 1–2) and [[REPORT_41_record_datapath_20260922.md]] (the device modules and chunking).
 
 | file | what |
 |---|---|
@@ -60,7 +60,7 @@ short version.
   K equal runs of a breadth-first locality order, refined by **one pass of k-way FM**
   (`partition.hpp`, `Config::partition_fm_passes`, default since 2026-10-06). On the 8 chunked designs
   FM leaves ~0.38× the external slots, takes 1-8 s, and reaches the smallest K the capacity allows.
-  `partition_fm_passes = 0` gives the bare cut. Study: [[_NEW_REPORT_42_partitioning_20261005.md]].
+  `partition_fm_passes = 0` gives the bare cut. Study: [[REPORT_42_partitioning_20261005.md]].
 - Every net is **homed** in the chunk owning most of its nodes.
 - A homed net's nodes owned by other chunks become **external** slots there, and fixed pins are
   copied (they never move, so they are not external).

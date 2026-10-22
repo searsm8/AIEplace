@@ -21,15 +21,15 @@ removed — it had been sitting in both files since 2026-07-30).
 
 **Closed 2026-10-06 (superseded by #45, Mark):** **#40** — `hpwl_gradient_dhar` failed on real hardware from timing (WNS −0.71 ns, 22% of endpoints, 85% route delay in the fully unrolled 16-lane `net_loop`), not logic. Its successor line — `hpwl_gradient_dhar_v2` → `hpwl_computer` (II=1, 2026-09-22) → #41's record-stream `hpwl_gradient_computer` — replaced it; the partial-unroll restructure was never needed. #45 carries the gradient forward as `hpwl_gradient_CU`.
 
-**Closed 2026-10-06 (superseded by #45, Mark):** **#20** — pl_algo Stage 5, the resident loop in `vck5000/pl`. Done before closing: `dumpScheduleTrace()` restored and `sched_verify` fed from the frozen sw_only (step 1); schedule + convergence bit-exact (step 2 core); the `formats.hpp` wall broken so all modules are tier-1-covered (step 3); the `node_footprint` / `iteration_update` geometry pair (step 4); `hpwl_gradient` de-gathered (P1b+P2). Not done: the sw_emu geometry A/B, step 5 (fillers + movable-macro weight) and step 6 (compose the loop). Those, re-planned in slot order with control on the CPU (#44 arm B), are #45 steps 4-7; the verified modules and `sched_verify` are #45's starting material. → [[_NEW_PLAN_45_integration_20261006.md]]
+**Closed 2026-10-06 (superseded by #45, Mark):** **#20** — pl_algo Stage 5, the resident loop in `vck5000/pl`. Done before closing: `dumpScheduleTrace()` restored and `sched_verify` fed from the frozen sw_only (step 1); schedule + convergence bit-exact (step 2 core); the `formats.hpp` wall broken so all modules are tier-1-covered (step 3); the `node_footprint` / `iteration_update` geometry pair (step 4); `hpwl_gradient` de-gathered (P1b+P2). Not done: the sw_emu geometry A/B, step 5 (fillers + movable-macro weight) and step 6 (compose the loop). Those, re-planned in slot order with control on the CPU (#44 arm B), are #45 steps 4-7; the verified modules and `sched_verify` are #45's starting material. → [[PLAN_45_integration_20261006.md]]
 
-**Closed 2026-10-06:** **#42** — partition quality for chunked designs, judged end to end. The mailbox, not the partition, was the bottleneck (49–85% of a chunked gradient eval; its send/collect were not bursts). Widening prototyped (bit-identical, II=1, ~128 K LUT); `build_chunks` O(n²) erase fixed (start-up 70 → 15 s). FM 1 pass: 0.38× externals, fits K_min on 8/8, −32% end to end with the 1-float mailbox, +8% once widened; it is `encode_chunked`'s default, and both partitioners stay behind `partition_fm_passes` (Mark). Multilevel / KaHyPar too slow to pay. The widening choice (options A–D) carried into **#45** (D1). → [[_NEW_REPORT_42_mailbox_widening_20261002.md]], [[_NEW_REPORT_42_partitioning_20261005.md]]
+**Closed 2026-10-06:** **#42** — partition quality for chunked designs, judged end to end. The mailbox, not the partition, was the bottleneck (49–85% of a chunked gradient eval; its send/collect were not bursts). Widening prototyped (bit-identical, II=1, ~128 K LUT); `build_chunks` O(n²) erase fixed (start-up 70 → 15 s). FM 1 pass: 0.38× externals, fits K_min on 8/8, −32% end to end with the 1-float mailbox, +8% once widened; it is `encode_chunked`'s default, and both partitioners stay behind `partition_fm_passes` (Mark). Multilevel / KaHyPar too slow to pay. The widening choice (options A–D) carried into **#45** (D1). → [[REPORT_42_mailbox_widening_20261002.md]], [[REPORT_42_partitioning_20261005.md]]
 
-**Closed 2026-10-06:** **#41** — `hpwl_gradient_computer`: the WA gradient on a static 32-bit pin-record stream (`node_slot | offset_idx`, 16 lanes/beat), positions and gradients in 32-bank URAM, all random access on chip; chunked `hpwl_gradient_computer_v2` for the 8/44 designs over 1 M slots (external slots through a DDR mailbox). Nets of 2..96 pins, large nets on by default, 97..100 dropped (→ #46). Tier-1 rel_rms ~4e-7; `max_rel` bound relaxed 1e-4 → 1e-3 (Mark, 2026-10-06; newblue3 4.2e-4 is float conditioning on a 14 K-pin node). II=1 everywhere, RTL co-sim PASS (hazard 4, FIFO depth ≥ extent − 1 + skew). Post-route 3.453 ns / chunked 3.955 ns vs 3.33 — deferred until integration. Open items (timing, NMU bandwidth, URAM-resident loop) carried into **#45**, where the chunked module becomes `hpwl_gradient_CU`. → [[_NEW_REPORT_41_record_datapath_20260922.md]], [[_NEW_REPORT_41_large_nets_in_chunks_20261002.md]], [[_NEW_REPORT_41_next_steps_20261002.md]]
+**Closed 2026-10-06:** **#41** — `hpwl_gradient_computer`: the WA gradient on a static 32-bit pin-record stream (`node_slot | offset_idx`, 16 lanes/beat), positions and gradients in 32-bank URAM, all random access on chip; chunked `hpwl_gradient_computer_v2` for the 8/44 designs over 1 M slots (external slots through a DDR mailbox). Nets of 2..96 pins, large nets on by default, 97..100 dropped (→ #46). Tier-1 rel_rms ~4e-7; `max_rel` bound relaxed 1e-4 → 1e-3 (Mark, 2026-10-06; newblue3 4.2e-4 is float conditioning on a 14 K-pin node). II=1 everywhere, RTL co-sim PASS (hazard 4, FIFO depth ≥ extent − 1 + skew). Post-route 3.453 ns / chunked 3.955 ns vs 3.33 — deferred until integration. Open items (timing, NMU bandwidth, URAM-resident loop) carried into **#45**, where the chunked module becomes `hpwl_gradient_CU`. → [[REPORT_41_record_datapath_20260922.md]], [[REPORT_41_large_nets_in_chunks_20261002.md]], [[REPORT_41_next_steps_20261002.md]]
 
-**Closed 2026-10-06:** **#43** — native LEF/DEF/Bookshelf reader (`host/src/common/src/DesignReader.cpp`) replaces Limbo in the host: byte-identical parsed state on 86 inputs (`make test-parser`), all 44 designs parse 115.5 → 21.9 s (5.3×), and the host drops Limbo/Boost/zlib and the old string ABI. beat_packer's tools read through it too (`make check-reader`: 44/44 identical `Netlist`s, 3.7× faster). Limbo kept as the test-only reference (Mark). → [[_NEW_REPORT_43_native_parser_20261006.md]]
+**Closed 2026-10-06:** **#43** — native LEF/DEF/Bookshelf reader (`host/src/common/src/DesignReader.cpp`) replaces Limbo in the host: byte-identical parsed state on 86 inputs (`make test-parser`), all 44 designs parse 115.5 → 21.9 s (5.3×), and the host drops Limbo/Boost/zlib and the old string ABI. beat_packer's tools read through it too (`make check-reader`: 44/44 identical `Netlist`s, 3.7× faster). Limbo kept as the test-only reference (Mark). → [[REPORT_43_native_parser_20261006.md]]
 
-**Closed 2026-08-27:** **#39** — position-dump **format v2**: the channels that make a placement GIF a diagnostic rather than a movie. **Started by checking the premise, and half of it was already built** — `default_config.toml` described the dump as "positions only", but the static record already carried x/y/w/h and a **six**-way kind byte, `names_gen<N>.txt` already gave stable cross-frame IDs (#14, 08-17), the manifest already indexed frame → iteration, `generate_viz.py` already burned HPWL/overflow/α/λ into every frame, and `BkSteps` (rejected backtracking trials) was already column 6 of `iterations.dat`. That stale comment is now corrected. **Four channels were genuinely missing** and landed, each its own file per generation, in lockstep with the frame stream: `u4 net_degree` on the static record; `probe_gen<N>.bin` (Nesterov **v_k**, where HPWL/overflow/best-solution are all actually measured — #32); `density_gen<N>.bin` (+ opt-in `field_gen<N>.bin`) read from the solver's OWN `Bin::total_overlap`/`eField`, box-averaged by an integer factor to ≤256×256; and `forces_gen<N>.bin`, the per-node wirelength/density gradient split + preconditioner. The force split is captured **inside `combineGradients()` and nowhere else** — `g -= electro` is destructive, so that one expression is the only point in the run where the two terms exist separately; both are stored as gradient contributions so `wl + den == next.probe_grad` is an exact checkable invariant. Three frames per run (`legalized`, `reseeded`, `best_solution`) sit where the map or the gradients describe a *different* placement, so their records are zero-filled and flagged in a new per-frame `frame_valid` bitmask rather than omitted — omitting would break the lockstep that makes frame index a seek key. **Bit-identical with every channel ON**, which is the claim that mattered and is stronger than `make test-regress` alone (the frozen configs dump nothing): `mgc_fft_a` (126 frames, all 5 channels) and `mms/adaptec1` (131 frames, **3 generations**, grid 512→256 box-average) both reproduce their committed `iterations.dat` row-for-row and their `.def` sha256 exactly. New tracked **`tools/check_viz_dump.py`** asserts stream lockstep from the reader's side plus four structural invariants that catch a misaligned record (fillers have net degree 0; fillers have zero wirelength gradient; precond ≥ 1.0; density mass constant within a generation) and the `frame_valid` table exactly — **negative-tested**: a 4-byte truncation and a one-float stride shift both exit 1. `generate_viz.py` gains `--underlay density`, `--color-by force|precond`, `--positions probe`, and now builds the static dtype **from the manifest**, so one reader opens both v1 and v2. One defect found by looking at the output: the channel label was appended to a caption line already ~99 chars on MMS and ran off the canvas, clipping `color=force=stale` to `color=force` — captioning a stale frame as measured, the exact failure the label exists to prevent; it now takes its own header line. **Disk is the live constraint**: forces are 20 B/node/frame and dominate, so the 14-design suite at cadence 5 is **32.2 GB all-channels vs 9.6 GB with `dump_forces = false`**, against 40 GB free — each run now prints its own MB/frame at startup. Instrumentation, not behaviour, so within the freeze. → [[_NEW_REPORT_39_dump_v2_channels_20260827.md]]
+**Closed 2026-08-27:** **#39** — position-dump **format v2**: the channels that make a placement GIF a diagnostic rather than a movie. **Started by checking the premise, and half of it was already built** — `default_config.toml` described the dump as "positions only", but the static record already carried x/y/w/h and a **six**-way kind byte, `names_gen<N>.txt` already gave stable cross-frame IDs (#14, 08-17), the manifest already indexed frame → iteration, `generate_viz.py` already burned HPWL/overflow/α/λ into every frame, and `BkSteps` (rejected backtracking trials) was already column 6 of `iterations.dat`. That stale comment is now corrected. **Four channels were genuinely missing** and landed, each its own file per generation, in lockstep with the frame stream: `u4 net_degree` on the static record; `probe_gen<N>.bin` (Nesterov **v_k**, where HPWL/overflow/best-solution are all actually measured — #32); `density_gen<N>.bin` (+ opt-in `field_gen<N>.bin`) read from the solver's OWN `Bin::total_overlap`/`eField`, box-averaged by an integer factor to ≤256×256; and `forces_gen<N>.bin`, the per-node wirelength/density gradient split + preconditioner. The force split is captured **inside `combineGradients()` and nowhere else** — `g -= electro` is destructive, so that one expression is the only point in the run where the two terms exist separately; both are stored as gradient contributions so `wl + den == next.probe_grad` is an exact checkable invariant. Three frames per run (`legalized`, `reseeded`, `best_solution`) sit where the map or the gradients describe a *different* placement, so their records are zero-filled and flagged in a new per-frame `frame_valid` bitmask rather than omitted — omitting would break the lockstep that makes frame index a seek key. **Bit-identical with every channel ON**, which is the claim that mattered and is stronger than `make test-regress` alone (the frozen configs dump nothing): `mgc_fft_a` (126 frames, all 5 channels) and `mms/adaptec1` (131 frames, **3 generations**, grid 512→256 box-average) both reproduce their committed `iterations.dat` row-for-row and their `.def` sha256 exactly. New tracked **`tools/check_viz_dump.py`** asserts stream lockstep from the reader's side plus four structural invariants that catch a misaligned record (fillers have net degree 0; fillers have zero wirelength gradient; precond ≥ 1.0; density mass constant within a generation) and the `frame_valid` table exactly — **negative-tested**: a 4-byte truncation and a one-float stride shift both exit 1. `generate_viz.py` gains `--underlay density`, `--color-by force|precond`, `--positions probe`, and now builds the static dtype **from the manifest**, so one reader opens both v1 and v2. One defect found by looking at the output: the channel label was appended to a caption line already ~99 chars on MMS and ran off the canvas, clipping `color=force=stale` to `color=force` — captioning a stale frame as measured, the exact failure the label exists to prevent; it now takes its own header line. **Disk is the live constraint**: forces are 20 B/node/frame and dominate, so the 14-design suite at cadence 5 is **32.2 GB all-channels vs 9.6 GB with `dump_forces = false`**, against 40 GB free — each run now prints its own MB/frame at startup. Instrumentation, not behaviour, so within the freeze. → [[REPORT_39_dump_v2_channels_20260827.md]]
 
 **Closed 2026-08-26:** **#30** — legalization + detailed placement folded into `dse.py`, and the standing scoring pipeline collapsed onto it. All four items done: LG+DP runs in `dse.py` by default (`--gp-only` opts out) via a new per-design `lgdp.py::legalize`; DP columns land in the same `dse_results.csv`; the full-suite cross-check reproduced the committed tier1+tier2 numbers **exactly** to 4 decimals (`DSE_20260814_133037`); and the final item — **collapse the two suite runners** — landed here. The two "last bits" the task flagged were already in `dse.py`/`lgdp.py` (smallest-first ordering `dse.py:176`; the MMS `--mixed_size` arm `lgdp.py:93`), so this was verification + deletion, not new code. Tier-3/MMS was spot-checked first (`DSE_20260826_110926`, mms/adaptec1·newblue1·bigblue1 through the full GP+LG+DP path: all `bookshelf`/`done`, DP ratios 0.9835 / 1.0242 / 1.0036 vs `_XPLACE_MMS_FINAL` — frame-correct and consistent with the +0.2…+3.6% MMS reference). Then the seven-script pipeline was retired (`gen_suite_configs.py`, `run_suite.sh`, `run_lgdp44.sh`, `run_lgdp_suite.sh`, `gen_lgdp_inputs.py`, `analyze_full44.py`, `analyze_lgdp_suite.py`), recorded in `tools/README.md`'s *Removed 2026-08-26* with what each folded into. Kept: `def_patch_placement.py`/`def_to_bookshelf_pl.py` (called by `lgdp.py`), `run_xplace_ref*.sh` (populate the reference dicts by hand). One judgment call: `analyze_fence_cost.py` (#26, closed) is **not** deleted but marked **dormant** — its input generator `run_lgdp44.sh` is gone, so it now needs hand-built TSVs (or a re-derivation from `dse_results.csv`) to run.
 
@@ -148,7 +148,7 @@ this one fix.
   > refuse to launch). A mixed-suite sweep was verified, and the audit found no other affected sweep.
   > See the report's "Fixed 2026-10-19" note.
 
-→ [[_NEW_REPORT_49_hpwl_double_sum_20261016.md]], `.claude/2_ARTIFACTS/results/HPWL_double_sum_20261016/`
+→ [[REPORT_49_hpwl_double_sum_20261016.md]], `.claude/2_ARTIFACTS/results/HPWL_double_sum_20261016/`
 
 ## #20 — pl_algo Stage 5: wire the full device design (opened 2026-08-06, CLOSED 2026-10-06 — superseded by #45)
 
@@ -217,7 +217,7 @@ Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
       already has), `sweep_bbox` II=2 / `sweep_sums` II=3, and pin streams running the 512-bit
       bus at 128 bits. Seven ranked proposals with costs and per-proposal verification —
       including Mark's absolute-position `NodePin` contract (**verdict: yes, and better than the
-      24-byte variant**) — in [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]]. Suggested order
+      24-byte variant**) — in [[REPORT_20_hpwl_gradient_opt_20260828.md]]. Suggested order
       **P5a → P1b → P1 → P2 → P3 → P4 → P5b → P6**, then spatial replication. P1b's prerequisite
       HPWL assertion **landed 2026-08-28 as `[6]`** (`aa007a7`); it reduces the `bb_DDR` boxes
       phase 1 already writes and matches the double golden exactly, and two mutations (perturbed
@@ -280,7 +280,7 @@ Steps — cheap and load-bearing first; 1–4 need no Vitis and no free CPU:
       before/after λ-schedule + HPWL-history change needs a `sw_emu` `run-place` A/B (built xclbin).
       Next lever after that is **P3 (II fixes)** — re-read the P1b lesson first: HLS cannot see a
       rotating array index, partial accumulators need STATIC indices via unrolling.
-      → [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]]
+      → [[REPORT_20_hpwl_gradient_opt_20260828.md]]
 - [x] **4. Close the datapath divergences** under that coverage — CLOSED for v1 scope 2026-08-29
       (geometry pair done; macro-weight deferred to step 5). **Geometry pair DONE 2026-08-29
       (`d095a9f`):** `node_footprint.hpp` no longer does the in-die shift #11a deleted (centered box,
@@ -511,15 +511,15 @@ math in ⌈d/16⌉ blocks, net-level B/C sums accumulated across blocks): +6–9
 quality experiment needed, and it is the SAME restructure as the lane-narrowing above — do together.
 - [ ] Fold arbitrary-degree support (chunked, ≤100 pins) into the partial-unroll restructure; switch
       `hpwl_dhar_test` to the uncapped golden and add 17/32/33/100-pin nets. Drop phase Z after.
-→ [[_NEW_REPORT_40_net_degree_cap16_20260918.md]] (measurement) ·
-[[_NEW_PLAN_40_dhar_large_net_chunking_20260918.md]] (design; NOT yet built, Mark 2026-09-18)
+→ [[REPORT_40_net_degree_cap16_20260918.md]] (measurement) ·
+[[PLAN_40_dhar_large_net_chunking_20260918.md]] (design; NOT yet built, Mark 2026-09-18)
 
-→ [[_NEW_HANDOFF_40_hpwl_gradient_dhar_hw_grad_bug_20260910.md]]
+→ [[HANDOFF_40_hpwl_gradient_dhar_hw_grad_bug_20260910.md]]
 
 **2026-09-18: v1 is being REBUILT, not patched** — a new `bring_up/hpwl_gradient_dhar_v2/` (one axis per
 call, structure-of-arrays data, loop structure ready for chunking; Mark places the pragmas and reviews
 10–20-line chunks). The checklist items above are superseded by its lessons list and its D1–D9
-design questions. → [[_NEW_HANDOFF_40_dhar_v2_rewrite_20260918.md]]
+design questions. → [[HANDOFF_40_dhar_v2_rewrite_20260918.md]]
 
 **2026-09-21: v2's bbox/HPWL milestone hit II=1 on `compute`, II=8 on `input_controller`** — the
 remaining II=8 is `pin_x`'s single `m_axi` port serving 8 simultaneous reads/net, a DDR-bandwidth-
@@ -587,7 +587,7 @@ code.
       precomputes a conflict-free beat packing. Prototype `vck5000/bring_up/beat_packer/`:
       **32 banks + pre-crossbar merge of same-node lanes = ≥99.69% of ideal beats on all 44
       designs**; 16 banks + merge reaches ≥94.3%. The dominant obstacle was a cell with 2+ pins on
-      one net (~10% of ISPD2005 nets). → [[_NEW_REPORT_41_beat_packer_20260922.md]]
+      one net (~10% of ISPD2005 nets). → [[REPORT_41_beat_packer_20260922.md]]
       URAM budget vs density's bin scatter deferred until the whole-iteration dataflow is clearer.
 - [x] **Host→device record designed + prototyped 2026-09-22.** Positions go on chip too, so the
       refresh gather disappears. The DDR stream is static:
@@ -611,7 +611,7 @@ code.
       - C-synthesis: v2 / v3 are II=1 at full capacity. The gather needed a masked-readout
         rewrite: a dynamic index hung the HLS front end (bisected).
 
-      → [[_NEW_REPORT_41_record_datapath_20260922.md]]. (The old "module boundary / port Dhar
+      → [[REPORT_41_record_datapath_20260922.md]]. (The old "module boundary / port Dhar
       stages / tier-1 golden" boxes are what this delivered: new modules, not an in-place
       extension.)
 - [x] **`HAZARD_DISTANCE`=4 confirmed in RTL co-simulation (2026-09-23).** Spacing 4 passes;
@@ -636,7 +636,7 @@ code.
         2026-10-02: now measurable chunked, mms/bigblue4 (1.2–1.6e-4) and mms/newblue7 (1.5e-4,
         axis 0) fail the same way. Identical in one chunk and in four, so not chunking.
 
-      → [[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]] steps 3–4
+      → [[PLAN_41_large_net_gradient_fifo_20261002.md]] steps 3–4
 
       <details><summary>Before the gradient landed (2026-10-02, afternoon)</summary>
 
@@ -663,8 +663,8 @@ code.
         **Step 2 DONE:** the large-net hazard schedule with transparent pads (rules L6/L7), checker
         enforced. 4,035 pads over 44 designs, 4,002 of them on newblue3.
         **Next:** step 3, the large-net paths in the three stages.
-        → [[_NEW_PLAN_41_large_net_gradient_fifo_20261002.md]]
-      → [[_NEW_REPORT_41_next_steps_20261002.md]] step 1
+        → [[PLAN_41_large_net_gradient_fifo_20261002.md]]
+      → [[REPORT_41_next_steps_20261002.md]] step 1
       <details><summary>Before 2026-10-02</summary>
 
       Still dropped; they are 20–29% of ISPD2005 pins (+12.4% HPWL when
@@ -672,7 +672,7 @@ code.
       (bbox / sums / combine) on the existing engine. A chunk beat is a degree-16 beat, plus a small
       net-state table. It costs about 2× gradient cycles on ISPD2005 and 1.04–1.5× on ISPD2015. L2
       (online rescale, about 1.7×) is a deliberate divergence from sw_only.
-      → [[_NEW_PLAN_41_large_nets_on_records_20260923.md]]
+      → [[PLAN_41_large_nets_on_records_20260923.md]]
       </details>
       </details>
 - [x] **Large nets in chunked designs + `large_nets` on by default (2026-10-02, Mark).** A large net
@@ -684,10 +684,10 @@ code.
       (bigblue4 19% → 40%, K 3 → 4; newblue7 13% → 27%, K 3 → 4) → #42.
       mms/bigblue4 and newblue7 fail gradient `max_rel` (≤1.6e-4 vs 1e-4) identically in one chunk
       and in four, so it is the newblue3 conditioning question, not chunking.
-      → [[_NEW_REPORT_41_large_nets_in_chunks_20261002.md]]
+      → [[REPORT_41_large_nets_in_chunks_20261002.md]]
 - (The old "optional min-cut partitioner" line is now #42.)
-- Slide-deck source for this module (2026-10-01): [[_NEW_EXPLAINER_41_hpwl_gradient_computer_20261001.md]]
-- m_axi bundle experiment (2026-10-01): merging bundles keeps II=1 but loses bursts on every pointer narrower than the port (incl. per-beat `out_beats`) and saves no LUTs; keep bundles grouped by width. DATAFLOW does not fit (URAM ping-pong would need 512/463); setup+drain is ≥40 K cycles vs 51.5 K beat loop on adaptec1, to be removed by the resident iteration. → [[_NEW_REPORT_41_ddr_bundles_20261001.md]]
+- Slide-deck source for this module (2026-10-01): [[EXPLAINER_41_hpwl_gradient_computer_20261001.md]]
+- m_axi bundle experiment (2026-10-01): merging bundles keeps II=1 but loses bursts on every pointer narrower than the port (incl. per-beat `out_beats`) and saves no LUTs; keep bundles grouped by width. DATAFLOW does not fit (URAM ping-pong would need 512/463); setup+drain is ≥40 K cycles vs 51.5 K beat loop on adaptec1, to be removed by the resident iteration. → [[REPORT_41_ddr_bundles_20261001.md]]
 - [x] **Gradient zeroing fused into the position load (2026-10-01, Mark).** Inline loop
       `load_pos_zero_grad` in `hpwl_gradient_computer` and, per chunk, in `hpwl_gradient_computer_v2`;
       `fill_slot_array` deleted. Saves movable_slot_beats cycles per call (13.2 K on adaptec1, ~20% of
@@ -715,7 +715,7 @@ code.
       per-phase model fitted to two v2 RTL co-sims; per chunk is not printed). It also found that
       `send_parcel`'s mailbox write and `collect_parcel`'s mailbox read are not bursts (~4.3
       cycles/entry): fix by skipping padding segments in the outer loop. Widening is now the
-      obvious bottleneck → [[_NEW_REPORT_42_mailbox_widening_20261002.md]]
+      obvious bottleneck → [[REPORT_42_mailbox_widening_20261002.md]]
 
 ## #42 — Partition quality for chunked designs, judged on end-to-end host runtime (opened 2026-10-02, CLOSED 2026-10-06)
 
@@ -738,7 +738,7 @@ to those 8 designs only.
 computed once per design.
 
 **State (2026-10-02): plan steps 1-4 done, falsifier FAILS, widening prototyped. Waiting on Mark: which
-widening option (LUT cost).** → [[_NEW_REPORT_42_mailbox_widening_20261002.md]]
+widening option (LUT cost).** → [[REPORT_42_mailbox_widening_20261002.md]]
 - **The mailbox is 49-85% of a chunked gradient eval** on today's v2. That is worse than estimated,
   because the 1-float send write and collect read are NOT bursts (4.26 cycles/entry, fitted to two
   RTL co-sims; a floor, since real DDR latency is higher). Widened to 16 entries/beat it is 2.4-12.2%,
@@ -783,7 +783,7 @@ iteration (well under 10%), partition quality cannot matter. Then close #42 and 
 </details>
 
 **Partitioning deep dive (2026-10-05) — done. FM 1 pass is `encode_chunked`'s default since
-2026-10-06 (Mark).** → [[_NEW_REPORT_42_partitioning_20261005.md]] (see its addendum)
+2026-10-06 (Mark).** → [[REPORT_42_partitioning_20261005.md]] (see its addendum)
 - 2026-10-06: wired via `Config::partition_fm_passes = 1`; the bare cut is still tried at every K,
   and the result never needs more chunks. A split-macro bug in `order_owner` corrupted FM's start
   state (synthetic design only; the 8 real designs gave identical results) and is fixed. `make test`
@@ -826,7 +826,7 @@ stay for the header-only tier-1 harnesses and HLS testbenches.
 **Constraint kept (Mark):** a new circuit every run — no caching across runs; this is all parse.
 **Decided (Mark, 2026-10-06):** Limbo stays as the test-only reference until we are confident it is
 not needed (`bootstrap_third_party.sh --with-limbo`).
-→ [[_NEW_REPORT_43_native_parser_20261006.md]], `vck5000/test/parser/README.md`
+→ [[REPORT_43_native_parser_20261006.md]], `vck5000/test/parser/README.md`
 <details><summary>Original entry (2026-10-05)</summary>
 
 **Why (Mark):** long term, a native parser instead of the prebuilt Limbo libs in
@@ -841,7 +841,7 @@ real `host/src/common` parse on the 44 designs next to the device-time estimate.
 ## #39 — Position dump v2: mechanism channels (opened+CLOSED 2026-08-27)
 
 Extends #16 (rendering moved offline) and #14 (per-generation `names_gen<N>.txt`). Evidence and
-the full rationale: [[_NEW_REPORT_39_dump_v2_channels_20260827.md]]. Artifacts (4 PNGs + a
+the full rationale: [[REPORT_39_dump_v2_channels_20260827.md]]. Artifacts (4 PNGs + a
 3-generation manifest): `.claude/2_ARTIFACTS/dump_v2_20260827/`.
 
 **Verify the premise before building** — the request was written against

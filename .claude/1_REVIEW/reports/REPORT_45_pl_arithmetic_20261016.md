@@ -1,6 +1,6 @@
 # REPORT #45 step 5b (part 2): the rest of the PL's arithmetic in `sw_flat_place`
 
-*2026-10-16. Branch `pl_algo`. Follows [[_NEW_REPORT_45_slot_order_sums_20261014.md]] (part 1: slot-order
+*2026-10-16. Branch `pl_algo`. Follows [[REPORT_45_slot_order_sums_20261014.md]] (part 1: slot-order
 sums and the exp table). Closes step 5b.*
 
 ## Result
@@ -102,7 +102,7 @@ B' (step 6's golden config). Full table: `.claude/2_ARTIFACTS/scratch_45/sum_ord
 
 ## Found on the way: sw_only's float HPWL metric reads 0.4% low on bigblue4
 > **Fixed 2026-10-16 by #49** (Mark un-froze sw_only for it): the metric now sums in double. Placement
-> quality is unchanged; see [[_NEW_REPORT_49_hpwl_double_sum_20261016.md]].
+> quality is unchanged; see [[REPORT_49_hpwl_double_sum_20261016.md]].
 
 At the same iterate, the schedule's HPWL under `hpwl = "fixed"` was 0.46% above the float metric on
 bigblue4, and within 1e-5 of it on the other four designs. `record_stream_check` now prints both

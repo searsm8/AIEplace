@@ -1,6 +1,6 @@
 # REPORT #45 step 4: the whole-design slot layout
 
-*2026-10-09. Branch `pl_algo`. Plan: [[_NEW_PLAN_45_integration_20261006.md]] step 4. Status: [[tasks.md]] #45.*
+*2026-10-09. Branch `pl_algo`. Plan: [[PLAN_45_integration_20261006.md]] step 4. Status: [[tasks.md]] #45.*
 
 ## What landed (all in `host/sw_flat/`)
 

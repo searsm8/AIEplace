@@ -6,7 +6,7 @@ gradient. The bar is the paper's 3090 numbers: bigblue4 **10.0 ms/step** non-det
 IV), about **12 ms** deterministic (14.26 s GP, Table II), not our 3080.
 
 **Why this path:** on the GPU, bigblue4's density scatter and force gather are **54%** of kernel time
-and the DCTs **3.6%** ([[_NEW_REPORT_xplace_gpu_iteration_breakdown_20261013.md]]). Fixing
+and the DCTs **3.6%** ([[REPORT_xplace_gpu_iteration_breakdown_20261013.md]]). Fixing
 scatter/gather is necessary, not sufficient: the whole step has to fit.
 
 **Scope:** v1 targets the **1024 grid**. 2048 (needed for modern designs, 7 of our 44 use it) is a

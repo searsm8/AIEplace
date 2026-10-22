@@ -1,7 +1,7 @@
 # REPORT #49: sw_only's HPWL metric now sums in double
 
 *2026-10-16. Branch `pl_algo`. Mark's call: un-freeze sw_only for this one fix. Found in #45 step 5b
-([[_NEW_REPORT_45_pl_arithmetic_20261016.md]]).*
+([[REPORT_45_pl_arithmetic_20261016.md]]).*
 
 ## Result
 - **The metric is now accurate.** The float accumulator drops low bits once the total gets large.

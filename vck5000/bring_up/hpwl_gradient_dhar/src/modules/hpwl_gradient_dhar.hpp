@@ -56,7 +56,7 @@ namespace plalgo {
 // ISPD designs worse, since 17..100-pin nets carry 20-27% of ISPD2005 pins. Planned fix, not yet
 // built: exact chunking -- buffer the net, accumulate the net-level B/C sums over ceil(deg/16)
 // chunks, then run the combiners per chunk with those totals. Fold it into #40's lane-narrowing.
-// See .claude/1_REVIEW/reports/_NEW_PLAN_40_dhar_large_net_chunking_20260918.md. Meow.
+// See .claude/1_REVIEW/reports/PLAN_40_dhar_large_net_chunking_20260918.md. Meow.
 constexpr int MAX_NET_DEGREE = 16;
 
 // Depth-4 balanced adder tree over 16 inputs -- Dhar's Fig. 6 in the single-net form. Fully

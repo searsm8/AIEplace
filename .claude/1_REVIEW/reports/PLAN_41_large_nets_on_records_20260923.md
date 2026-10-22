@@ -1,7 +1,7 @@
 # PLAN #41 — nets of 17..100 pins on the record pipeline (2026-09-23, not built)
 
 *Proposal for discussion, per the working agreement: dataflow before datapath code. It supersedes
-the mechanics (not the motivation) of [[_NEW_PLAN_40_dhar_large_net_chunking_20260918.md]], which was
+the mechanics (not the motivation) of [[PLAN_40_dhar_large_net_chunking_20260918.md]], which was
 written for v1's one-net-per-pass loop. Cost model: `vck5000/bring_up/beat_packer/large_net_stats.cpp`;
 output in `.claude/2_ARTIFACTS/beat_packer/large_net_cost_model.txt`.*
 

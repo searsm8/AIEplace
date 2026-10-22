@@ -3,7 +3,7 @@
 *2026-10-20. Read-only analysis of XPlace @ `~/phd/Xplace` (no code changed here or there). Feeds the
 `bin_density_CU` structure decision in [[PLAN_48_density_onchip_20261014.md]] and
 [[REPORT_48_bin_density_fixed_point_20261019.md]]; cost numbers come from
-[[_NEW_REPORT_xplace_gpu_iteration_breakdown_20261013.md]] (RTX 3080, bigblue4, `--deterministic True`).*
+[[REPORT_xplace_gpu_iteration_breakdown_20261013.md]] (RTX 3080, bigblue4, `--deterministic True`).*
 
 Paths below: `cu/` = `~/phd/Xplace/cpp_to_py/density_map_cuda/`, `src/` = `~/phd/Xplace/src/`.
 

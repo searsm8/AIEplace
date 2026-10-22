@@ -45,7 +45,7 @@ Those mailbox shares were for the baseline partition. With FM 1 pass and the bur
 removed the mailbox rather than widening it: macro pins never external (C6), externals as each
 chunk's tail rows in per-owner blocks (C7), and the exchange as host-scheduled op lists through an
 on-chip row buffer. bigblue4: 2.49 M -> 1.93 M cycles per axis built (B3); 0.98 M modeled once the
-exchange rides on iteration_update (B4). [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
+exchange rides on iteration_update (B4). [[PLAN_47_mailbox_redesign_20261006.md]]
 
 ---
 
@@ -123,7 +123,7 @@ first version by ~2×, because of the fmuls and float→int64 conversions.
 >   ⚠️ **Not yet load-bearing on device**: `Driver.cpp`'s `eval_gradients` does not yet issue
 >   `MODE_REFRESH_PINS` before `MODE_HPWL_GRAD`/`MODE_METRICS` — until it does, an on-device run
 >   silently evaluates the gradient at stale pin positions. Small fix, do it before any sw_emu run of
->   the HPWL path. → [[_NEW_REPORT_20_hpwl_gradient_opt_20260828.md]]
+>   the HPWL path. → [[REPORT_20_hpwl_gradient_opt_20260828.md]]
 > - `top.cpp` is still a mode-switch bring-up scaffold; the host owns the γ/λ schedule, one
 >   round-trip per iteration.
 > - `make host HOST=pl_algo` needs one `make clean HOST=pl_algo` first (stale `.d`, not a source break).
@@ -142,26 +142,26 @@ first version by ~2×, because of the fmuls and float→int64 conversions.
 >   - 17..96-pin nets, **on by default** (2026-10-02): HPWL and gradient done, chunked designs too
 >     (external slots double on bigblue4 / newblue7). Per-net bbox/sums travel A→B→C on side streams;
 >     RTL co-sim proves the FIFO bound, depth ≥ extent − 1 + skew (32). 97..100 dropped by decision.
->     Open: MMS `max_rel` (Mark's call). → [[_NEW_REPORT_41_large_nets_in_chunks_20261002.md]]
+>     Open: MMS `max_rel` (Mark's call). → [[REPORT_41_large_nets_in_chunks_20261002.md]]
 >   - Post-route (2026-10-03, `a31e950`, macro adders unshared): gradient 3.453 ns (WNS −0.12,
 >     1.5 K failing endpoints), chunked v2 3.955 ns (WNS −0.63); 256 URAM. Target 3.33; remaining
->     paths are route-bound URAM address/enable fanout, spread across stages. → [[_NEW_REPORT_41_next_steps_20261002.md]] §2
->   → [[_NEW_REPORT_41_record_datapath_20260922.md]], protocol in `vck5000/bring_up/beat_packer/README.md`.
+>     paths are route-bound URAM address/enable fanout, spread across stages. → [[REPORT_41_next_steps_20261002.md]] §2
+>   → [[REPORT_41_record_datapath_20260922.md]], protocol in `vck5000/bring_up/beat_packer/README.md`.
 > - **#41 — keep in mind for the resident loop (2026-10-01):** standalone, loading positions and
 >   draining gradients is >=26 K cycles vs a 51.5 K-cycle beat loop per axis (adaptec1); the resident
 >   loop must keep both in URAM (256 of 463 URAMs per axis). Chunked designs (8/44) keep per-chunk DDR
->   traffic. m_axi bundles are grouped by width. → DATAFLOW.md, [[_NEW_REPORT_41_ddr_bundles_20261001.md]]
+>   traffic. m_axi bundles are grouped by width. → DATAFLOW.md, [[REPORT_41_ddr_bundles_20261001.md]]
 > - **#42 — mailbox, not partition, is the chunked bottleneck (2026-10-02). Waiting on Mark: which
 >   widening option.** The 1-float mailbox is 49–85% of a chunked gradient eval: its send/collect are
 >   not bursts (4.26 cycles/entry, fitted to two co-sims). Widened 16/beat it is 2.4–12%; prototype
 >   bit-identical (tier 1), II=1 (tier 2), but ~128 K LUT for four loops. bigblue4 end to end:
 >   86.7 → 48.9 s (burst fix) → 28.7 s (widened). The `build_chunks` O(n²) erase is fixed: start-up
->   70 → 15 s. → [[_NEW_REPORT_42_mailbox_widening_20261002.md]]
+>   70 → 15 s. → [[REPORT_42_mailbox_widening_20261002.md]]
 >   **Partitioning (2026-10-05):** FM 1 pass gives 0.38× externals in 1–8 s and fits K_min on 8/8 (the
 >   baseline misses it on 3/8). End to end: −32% with the 1-float mailbox, neutral once widened.
 >   Multilevel (0.062×) and KaHyPar (0.026×) are too slow to pay off. **FM 1 pass has been
 >   `encode_chunked`'s default since 2026-10-06** (`Config::partition_fm_passes`; the bare cut is the
->   fallback at each K). → [[_NEW_REPORT_42_partitioning_20261005.md]]
+>   fallback at each K). → [[REPORT_42_partitioning_20261005.md]]
 >   `make test` now runs every harness in `HARNESSES` (21). It had silently skipped two.
 
 ## 2026-10-02 — evicted from summary.md: #40's DONE bullet (closed; record in history.md), to make room for #42
@@ -194,9 +194,9 @@ session this snapshot was written in — see summary.md's current #40 line and
 
 > - **#40 — `hpwl_gradient_dhar` fails P&R timing, AND its 16-pin net cap costs +12.4% post-DP HPWL**
 >   (28/28 worse, ISPD2005 +30.6%; 2026-09-18). Plan: exact ⌈d/16⌉-block chunking, folded into the
->   lane-narrowing timing fix. → [[_NEW_REPORT_40_net_degree_cap16_20260918.md]]
+>   lane-narrowing timing fix. → [[REPORT_40_net_degree_cap16_20260918.md]]
 
-Superseded by the 2026-09-18 v2 rewrite ([[_NEW_HANDOFF_40_dhar_v2_rewrite_20260918.md]]), which
+Superseded by the 2026-09-18 v2 rewrite ([[HANDOFF_40_dhar_v2_rewrite_20260918.md]]), which
 replaced the timing-closure/16-pin-cap problem this snapshot describes with a from-scratch module;
 that milestone in turn spawned `hpwl_computer` (2026-09-21, see summary.md's current #40 line).
 
@@ -257,7 +257,7 @@ the still-open #20 step 6.
 >   so the 14-design suite at cadence 5 is **32 GB all-channels vs 9.6 GB with `dump_forces = false`**
 >   against ~40 GB free. ⚠️ **Half of the original request was already built** — the "positions only"
 >   comment in `default_config.toml` was three weeks stale (now fixed); check `PositionDump.cpp`
->   before scoping dump work. → [[_NEW_REPORT_39_dump_v2_channels_20260827.md]]
+>   before scoping dump work. → [[REPORT_39_dump_v2_channels_20260827.md]]
 
 ## 2026-08-27 — evicted from summary.md: the `#3` cap→scale entry, WRONG since 2026-08-25
 

@@ -18,7 +18,7 @@ a note on the visual. Numbers carry their basis in the speaker notes.
 
 *Notes:* torch.profiler kernel time, 300 iterations, XPlace deterministic kernels, one GPU under
 WSL2; bigblue4 18.16 ms per iteration of kernel time. Source:
-[[_NEW_REPORT_xplace_gpu_iteration_breakdown_20261013.md]]. On small designs (adaptec1) the GPU is
+[[REPORT_xplace_gpu_iteration_breakdown_20261013.md]]. On small designs (adaptec1) the GPU is
 launch-bound and the gradient dominates instead.
 
 ---

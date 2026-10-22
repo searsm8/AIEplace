@@ -4,7 +4,7 @@
 // cycle_model.hpp -- device cycles per chunked gradient evaluation (one axis), per phase, from a
 // Chunked design's static trip counts and its tail op lists. Started as a copy of
 // vck5000/bring_up/beat_packer/cycle_model.hpp @ ef62dba (#47 M0); rewritten for the tail exchange
-// (#47 B3, .claude/1_REVIEW/reports/_NEW_PLAN_47_mailbox_redesign_20261006.md):
+// (#47 B3, .claude/1_REVIEW/reports/PLAN_47_mailbox_redesign_20261006.md):
 //
 //   TODAY   hpwl_gradient_CU as built (B3 + C8): send_tails_pass (shared-row load + send ops),
 //           compute_pass, merge_tails_pass (shared-row reload + merge ops + shared-row drain).

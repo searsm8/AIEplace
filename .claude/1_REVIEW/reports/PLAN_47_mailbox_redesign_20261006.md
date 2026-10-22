@@ -2,8 +2,8 @@
 
 **Question (Mark):** the external slots are static, so why does the chunked gradient spend whole passes
 moving them? Can an external slot just be loaded with the chunk, leaving only a combine pass for the
-gradients? Opened from that discussion. Builds on [[_NEW_REPORT_42_mailbox_widening_20261002.md]],
-[[_NEW_REPORT_42_partitioning_20261005.md]] and [[_NEW_PLAN_45_integration_20261006.md]] (D1, D6, steps 4–7).
+gradients? Opened from that discussion. Builds on [[REPORT_42_mailbox_widening_20261002.md]],
+[[REPORT_42_partitioning_20261005.md]] and [[PLAN_45_integration_20261006.md]] (D1, D6, steps 4–7).
 
 ## The mailbox today (`pl/src/modules/hpwl_gradient/mailbox.hpp`)
 Only one chunk fits in URAM at a time, so anything that crosses between chunks goes through DDR.

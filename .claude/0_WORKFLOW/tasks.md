@@ -606,7 +606,7 @@ built 2026-08-31 (all ~85 `Placer` methods grouped by responsibility along the d
 tagged with its file; misplacements flagged).
 
 **Session 2026-08-31 → 2026-09-01 landed and is now committed** (3 commits, `1ed9ea7`/`652ba25`/
-`5867600` on `pl_algo` — see [[_NEW_HANDOFF_39_readability_refactor_session_20260901.md]] for the
+`5867600` on `pl_algo` — see [[HANDOFF_39_readability_refactor_session_20260901.md]] for the
 full narrative, including a real bit-identical regression hit and resolved mid-session):
 
 - **New `placer/BestSolution.cpp`** — gathers 6 best-solution methods that were split across
@@ -875,7 +875,7 @@ are the improvements. → [[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]. Done 
       2.2 M nets; 1e-6 on the small designs; int64 exact to 2e-8). It touches sw_only's schedule and
       printed GP HPWL, not the scored goldens. **Fixed the same day by #49** (double sum, Mark;
       history.md).
-      → [[_NEW_REPORT_45_pl_arithmetic_20261016.md]]
+      → [[REPORT_45_pl_arithmetic_20261016.md]]
 - [x] **Step 5b part 1: slot-order sums** — flip each order-sensitive sum to slot order and measure the drift
       against the bit-identical baseline (2026-10-14). `[sw_flat] slot_order =
       ["deposit", "reductions"]` and `wa_exp = "lut"` (the PL's exp table), all off by default
@@ -885,7 +885,7 @@ are the improvements. → [[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]. Done 
       the endgame; larger final differences come from the stop firing a few iterations off.
       **Slot order hides no semantic difference.** The table saves 12-21% of the gradient but only ~2-3% of
       software run time (gradient = 15% of an iteration; deposit + DCT 43%, metrics 24%).
-      → [[_NEW_REPORT_45_slot_order_sums_20261014.md]]
+      → [[REPORT_45_slot_order_sums_20261014.md]]
 - [ ] Steps 6–9 (density path in slot order → compose → hardware → retire `/vck5000`), each with its
       verification, in the plan.
 - [ ] **sw_flat DEF / `.pl` writer, so `dse.py` can score it legal-vs-legal.** Step 5 called it
@@ -897,7 +897,7 @@ are the improvements. → [[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]. Done 
 - Carried in: #41's timing / NMU check / URAM-resident loop; #42's widening choice, now contested by
   #47 (producer-side duplication; touches steps 4 and 6).
 
-→ [[_NEW_PLAN_45_integration_20261006.md]]
+→ [[PLAN_45_integration_20261006.md]]
 
 ## #47 — Mailbox redesign: exchange external slots where each chunk is already streamed (opened 2026-10-06, Mark)
 
@@ -914,7 +914,7 @@ chunk turns receive into part of load and return into part of drain. Estimate fo
 1.48 M (receive/return kept) or 0.95 M (tail), against 1.49 M for D1-B widening.
 
 **State (2026-10-09): B1-B3 built and verified; B4 needs a decision** (it needs `iteration_update`
-in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_20261009.md]].
+in slot order, #45 step 6). Briefing: [[EXPLAINER_47_tail_exchange_deck_20261009.md]].
 - [x] **M0 (2026-10-07):** `host/sw_flat/model/` (`make check`: TODAY equals the legacy model on 8/8).
       As a fraction of today's cycles, FUSED is 58–65%, FUSED_TAIL 28–56% (1 M: 8 designs; 512 K:
       17). bigblue4 at 1 M: 2.49 M → 1.52 M → 0.99 M. Merge: 2 adders/lane → 0 stalls. Open: shared
@@ -1016,7 +1016,7 @@ in slot order, #45 step 6). Briefing: [[_NEW_EXPLAINER_47_tail_exchange_deck_202
       `chunked_device_arrays(..., fill_tails = true)` writes real positions into the external tails;
       NaN stays the default. `tail_exchange_test` [2] holds it equal to the sent image.
 
-→ [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
+→ [[PLAN_47_mailbox_redesign_20261006.md]]
 
 ---
 
@@ -1110,7 +1110,7 @@ Open questions worth measuring, not yet scoped into a task.
 ## #48 — On-chip density path: density map, field, force gather (opened 2026-10-14, Mark)
 
 **Why:** XPlace on the GPU spends 54% of bigblue4's kernel time on density scatter + force gather,
-3.6% on the DCTs ([[_NEW_REPORT_xplace_gpu_iteration_breakdown_20261013.md]]). The VCK can keep the
+3.6% on the DCTs ([[REPORT_xplace_gpu_iteration_breakdown_20261013.md]]). The VCK can keep the
 grid on chip and run density alongside the WL gradient. Bar: the paper's 3090, bigblue4 10.0 ms/step
 (Table IV), ~12 ms deterministic. v1 grid 1024; 2048 is a planned extension.
 
@@ -1147,7 +1147,7 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       1024 (HLS infers rho_URAM cyclic-16 from it). `.claude/2_ARTIFACTS/scratch_48/bin_density_check_44_overflow_20261015.txt`
 - [x] **Phase 2: turn B' on in the step-6 golden config.** Done 2026-10-16 in #45 step 5b part 2: the
       `pl+Bprime` variant (`host/sw_flat/test/sum_order_drift.py`) is step 6's golden, measured on 5
-      designs, all converged ([[_NEW_REPORT_45_pl_arithmetic_20261016.md]]). Box closed 2026-10-19.
+      designs, all converged ([[REPORT_45_pl_arithmetic_20261016.md]]). Box closed 2026-10-19.
 - [ ] **Optional: bigblue3/4 trajectory at grid 1024** (the drift ran at 2048, where fewer fixed nodes
       are stretched). Before step 6 quotes numbers.
 - [x] **Phase 2, fixed-point accumulator (Mark, 2026-10-19: rename to `bin_density_CU`, whole chip for

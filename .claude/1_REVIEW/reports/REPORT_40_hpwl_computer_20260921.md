@@ -1,6 +1,6 @@
 # REPORT #40 — `hpwl_computer`: multi-net-per-beat HPWL bbox module (new bring_up/ module)
 
-*2026-09-21/22. Task #40, spawned from [[_NEW_HANDOFF_40_dhar_v2_rewrite_20260918.md]] (the main v2
+*2026-09-21/22. Task #40, spawned from [[HANDOFF_40_dhar_v2_rewrite_20260918.md]] (the main v2
 handoff — read that first for full background: the parallel-prefix scan, the controller/compute
 split, the cumulative-`net_count` degree resolution). **Status: DONE.** `hpwl_computer` is built at
 `vck5000/bring_up/hpwl_computer/`, tier-1-verified (bit-exact over 279 real nets), and C-synthesizes
@@ -277,7 +277,7 @@ shape of "which net is at this position" may differ slightly depending on packed
    resolved this way.
 
 ## Pointers
-- Main v2 handoff (read first): [[_NEW_HANDOFF_40_dhar_v2_rewrite_20260918.md]]
+- Main v2 handoff (read first): [[HANDOFF_40_dhar_v2_rewrite_20260918.md]]
 - VCK5000 DDR bandwidth measurement, same-repo precedent: `vck5000/bring_up/hpwl_pl/HANDOFF.md`
   (the latency-bound-not-bandwidth-bound finding, and per-CU replication risk)
 - AMD VCK5000 product brief (102.4 GB/s figure, block diagram):

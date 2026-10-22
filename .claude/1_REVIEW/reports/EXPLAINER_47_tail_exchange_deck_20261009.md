@@ -2,7 +2,7 @@
 
 A brief for an 11-slide deck: what each slide says, what it shows, and the numbers it quotes. The
 audience knows placement and FPGAs but not this code base. Every number below has a source in
-[[_NEW_PLAN_47_mailbox_redesign_20261006.md]] or `.claude/2_ARTIFACTS/mailbox_47/`; all cycle
+[[PLAN_47_mailbox_redesign_20261006.md]] or `.claude/2_ARTIFACTS/mailbox_47/`; all cycle
 figures are the cycle model's (per axis, per gradient evaluation, 300 MHz), not hardware
 measurements.
 

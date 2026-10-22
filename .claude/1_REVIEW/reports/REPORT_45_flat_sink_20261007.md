@@ -1,6 +1,6 @@
 # #45 step 3 — `FlatSink`: one parse into flat arrays (2026-10-07)
 
-Plan: [[_NEW_PLAN_45_integration_20261006.md]] step 3. Decisions taken (Mark, 2026-10-07):
+Plan: [[PLAN_45_integration_20261006.md]] step 3. Decisions taken (Mark, 2026-10-07):
 **DEF COVER is movable, as in DataBase**, and **the packer's macro rule is sw_only's
 `tagMovableMacros`**, computed after the parse.
 

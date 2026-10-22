@@ -1,10 +1,10 @@
 # REPORT #41 — place-and-route of the record-stream modules (2026-09-23, mid-task)
 
 > **Closed 2026-10-06; converted from HANDOFF.** The latest post-route numbers (2026-10-03: 3.453 ns,
-> chunked 3.955 ns) are in [[_NEW_REPORT_41_next_steps_20261002.md]] §2. Timing closure resumes
+> chunked 3.955 ns) are in [[REPORT_41_next_steps_20261002.md]] §2. Timing closure resumes
 > after #45's integration.
 
-Continues [[_NEW_REPORT_41_record_datapath_20260922.md]]. Interrupted by a machine shutdown
+Continues [[REPORT_41_record_datapath_20260922.md]]. Interrupted by a machine shutdown
 while diagnosing gradient-module timing.
 
 ## Where the runs are

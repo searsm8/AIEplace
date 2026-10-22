@@ -1,5 +1,5 @@
 // tail_layout.cpp -- #47 M1: can each chunk's borrowed nodes form a tail that iteration_update
-// writes as a plain sequential stream? (.claude/1_REVIEW/reports/_NEW_PLAN_47_mailbox_redesign_20261006.md)
+// writes as a plain sequential stream? (.claude/1_REVIEW/reports/PLAN_47_mailbox_redesign_20261006.md)
 //
 // Emission order into borrower k's tail: owners j ascending, each owner's borrowed nodes in its own slot
 // order under the tail layout (owned movable rows only, per bank in node order -- the order the

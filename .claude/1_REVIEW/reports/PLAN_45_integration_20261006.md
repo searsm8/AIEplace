@@ -48,7 +48,7 @@ What kept them apart:
 ## Decisions, second round (Mark, 2026-10-06)
 
 **D1. Mailbox: option A now, C later, B as the fallback** (from
-[[_NEW_REPORT_42_mailbox_widening_20261002.md]]). E = external slots; each crosses the mailbox 4×.
+[[REPORT_42_mailbox_widening_20261002.md]]). E = external slots; each crosses the mailbox 4×.
 
 | option | what | mailbox cycles | extra LUT | bigblue4 end-to-end |
 |---|---|---|---|---|
@@ -160,7 +160,7 @@ Each step: what, then how it is verified. Don't start a step until the previous 
    Positions, gradients and density maps stay device-resident between launches.
    → verify: sw_emu trajectory vs `sw_flat` on adaptec1, then a chunked design.
 8. **Hardware.** Timing closure (Mark: after integration; continue
-   [[_NEW_REPORT_41_next_steps_20261002.md]] §2), the NMU bandwidth check (§1 there: can one m_axi
+   [[REPORT_41_next_steps_20261002.md]] §2), the NMU bandwidth check (§1 there: can one m_axi
    port feed 64 B/cycle at 300 MHz?), the per-axis URAM strategy (one axis is 256 of 463 URAM, so
    the axes run in turn), then #44's A/B on real HW.
 9. **Retire `/vck5000`.** Move what is still needed (`tools/`, `test/regress/`, AIE, docs), delete
@@ -176,7 +176,7 @@ Each step: what, then how it is verified. Don't start a step until the previous 
   consumers' parcels. Collect becomes a sorted merge-add in the same stream. That removes the send
   pass and the fold pass, not just the loop cycles. Model estimate for bigblue4: 2.49 M → 0.95–1.48 M
   cycles per axis. Constrains step 4 (slot layout: a contiguous external tail is option M1) and step 6
-  (`iteration_update` gains the streams). → [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
+  (`iteration_update` gains the streams). → [[PLAN_47_mailbox_redesign_20261006.md]]
 
 ## What would falsify this plan
 - If step 5 cannot get `sw_flat` within tolerance of sw_only, slot order (or the flat model) hides a

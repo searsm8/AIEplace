@@ -2,7 +2,7 @@
 
 *2026-09-18. Task #40. Not implemented yet (Mark's call): this records why and how, so the work can
 be picked up without re-deriving it. The measurement behind it is
-[[_NEW_REPORT_40_net_degree_cap16_20260918.md]].*
+[[REPORT_40_net_degree_cap16_20260918.md]].*
 
 ## Why
 `hpwl_gradient_dhar` follows Dhar (FPL 2019) and **ignores every net with more than 16 pins**. It drops

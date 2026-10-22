@@ -72,7 +72,7 @@ product: Mark wants to see how each pragma changes the hardware.
 8. **HLS's Fmax estimate is made before routing.** It said 349 MHz; P&R said no. Don't run P&R until
    C-synthesis numbers are clean (#40's rule).
 9. **The 16-pin cap costs +12.4% HPWL** (28 of 28 ISPD designs worse). Support nets up to 100 pins
-   exactly by chunking → [[_NEW_PLAN_40_dhar_large_net_chunking_20260918.md]]. With every live pin
+   exactly by chunking → [[PLAN_40_dhar_large_net_chunking_20260918.md]]. With every live pin
    written exactly once, **Phase Z (zero `pin_grad`) is no longer needed.**
 10. **`hls::stream` in tier-1 is an unbounded `std::deque`,** and C-sim runs dataflow processes one
     after another, so it can't reveal FIFO-depth deadlocks. Size FIFOs deliberately and prove them in
@@ -252,8 +252,8 @@ spawned.
 
 ## Pointers
 - v1 module and its #40 comments: `vck5000/bring_up/hpwl_gradient_dhar/src/modules/hpwl_gradient_dhar.hpp`
-- Timing-failure trace: [[_NEW_HANDOFF_40_hpwl_gradient_dhar_hw_grad_bug_20260910.md]], tasks.md #40
-- Large-net chunking: [[_NEW_PLAN_40_dhar_large_net_chunking_20260918.md]]
+- Timing-failure trace: [[HANDOFF_40_hpwl_gradient_dhar_hw_grad_bug_20260910.md]], tasks.md #40
+- Large-net chunking: [[PLAN_40_dhar_large_net_chunking_20260918.md]]
 - Deck brief (v1): [[_NEW_EXPLAINER_40_dhar_deck_brief_20260918.md]]
 - Paper: `.claude/2_ARTIFACTS/papers/dhar_fpga_accel/` (Method 2, Figs. 10–11, for D5/D6)
 - C-synthesis check (v2): `vck5000/bring_up/hpwl_gradient_dhar_v2/synth_check.tcl` — **runs locally,

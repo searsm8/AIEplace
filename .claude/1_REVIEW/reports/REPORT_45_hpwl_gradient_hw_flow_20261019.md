@@ -124,8 +124,8 @@ drive one yet. Mark's pending choice (left in the last wrap-up, unanswered): bui
 | tier 1 | `make -C pl test` PASS; real-mode sweep 44/44 | tasks.md #45 step 2 |
 | C-synth | every loop II=1, Fmax est. **287.2 MHz** (target 300) at C8 `a98b3fe` | tasks.md #47 C8 entry |
 | RTL co-sim | capacity 1536, 16 chunks: hazard 4 PASS, hazard 1 FAILS (negative control) | same |
-| post-route | only on predecessors: `hpwl_gradient_computer_v2` **3.955 ns ≈ 253 MHz**, WNS −0.625 | [[_NEW_REPORT_41_next_steps_20261002.md]] §2 |
-| software golden | sw_flat `[sw_flat] wa_sums="tree", grad_merge="stream", hpwl="fixed", wa_exp="lut"` equals the CU (g++) **bit for bit** on 6 designs incl. chunked + macros | `make -C host/sw_flat check-record-stream`, [[_NEW_REPORT_45_pl_arithmetic_20261016.md]] |
+| post-route | only on predecessors: `hpwl_gradient_computer_v2` **3.955 ns ≈ 253 MHz**, WNS −0.625 | [[REPORT_41_next_steps_20261002.md]] §2 |
+| software golden | sw_flat `[sw_flat] wa_sums="tree", grad_merge="stream", hpwl="fixed", wa_exp="lut"` equals the CU (g++) **bit for bit** on 6 designs incl. chunked + macros | `make -C host/sw_flat check-record-stream`, [[REPORT_45_pl_arithmetic_20261016.md]] |
 
 The kernel top already exists and is Vitis-shaped: `pl/synth/hpwl_gradient_CU/hpwl_gradient_CU_top.cpp`
 (`extern "C"`, m_axi bundles gmem0..gmem9, `s_axilite` `hpwl_total_fixed`, `-flow_target vitis`, part
@@ -149,7 +149,7 @@ The kernel top already exists and is Vitis-shaped: `pl/synth/hpwl_gradient_CU/hp
    + the VCK5000; repo at `~/AIEplace`). It needs **Mark to open the tunnel** (`wsl ssh -fN build`):
    ask once, launch long jobs detached, never poll (rules.md).
 4. **Still-open hardware questions** (#45 step 8 carried items): the NMU bandwidth check (§1 of
-   [[_NEW_REPORT_41_next_steps_20261002.md]]: can one m_axi port feed 64 B/cycle?), and the per-axis
+   [[REPORT_41_next_steps_20261002.md]]: can one m_axi port feed 64 B/cycle?), and the per-axis
    URAM strategy (one axis is 256 of 463 URAM, so the axes run one call each, which the CU already does).
 
 ## Traps

@@ -4,7 +4,7 @@ Mark's brief (end of 2026-09-22): finish the beat packer, then build `hpwl_compu
 on chip, DDR streams records, random access only on chip), `hpwl_gradient_computer` (plus the
 gradient and the on-chip scatter), `hpwl_computer_v3` (the chunking extension) and
 `hpwl_gradient_computer_v2` (gradient plus chunking). The design this implements is in
-[[_NEW_REPORT_41_beat_packer_20260922.md]] (Parts 1–2); the protocol is in
+[[REPORT_41_beat_packer_20260922.md]] (Parts 1–2); the protocol is in
 [[vck5000/bring_up/beat_packer/README.md]].
 
 ## Status at a glance

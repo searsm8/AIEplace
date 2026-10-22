@@ -3,7 +3,7 @@
 **Question (Mark):** with the current BFS cut as the baseline, how much do better partitioners
 buy, judged end to end (host start-up + device)? Candidates: (0) baseline, (1) improved baseline,
 (2) k-way FM, (3) multilevel FM; KaHyPar as a quality oracle (reference only, never shipped).
-Follows [[_NEW_REPORT_42_mailbox_widening_20261002.md]] (same cycle model, 300 MHz, 1000 iterations,
+Follows [[REPORT_42_mailbox_widening_20261002.md]] (same cycle model, 300 MHz, 1000 iterations,
 2 axes; density/FFT time excluded — it is identical for every partition, so it cannot change a
 comparison between them, only the absolute seconds).
 

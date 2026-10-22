@@ -10,7 +10,7 @@
   tooling, docs and tests are NOT frozen. `make test-regress` bit-identical is now the contract.
   **One authorized exception (#49, Mark, 2026-10-16):** the HPWL metric sums in double (it read
   0.39% low on bigblue4 in float). Post-DP HPWL unchanged (+0.015% mean, 13 large designs); reported GP
-  HPWL now correct, up to +0.46% on bigblue4. Regress baselines regenerated. [[_NEW_REPORT_49_hpwl_double_sum_20261016.md]]
+  HPWL now correct, up to +0.46% on bigblue4. Regress baselines regenerated. [[REPORT_49_hpwl_double_sum_20261016.md]]
 - **pl_algo** — move the whole placement iteration onto the PL. **The active thread**, now as
   **#45**: integration restarts in a new top-level `/AIEplace/pl`, slot order everywhere; the
   `vck5000/` tree becomes read-only legacy until it is deleted. Why freezing came first: pl_algo's
@@ -98,17 +98,17 @@
   `make -C host/sw_flat check-placer`, [[REPORT_45_sw_flat_placer_20261009.md]]). **Step 5b:** slot-order
   sums and the PL's exp table are `[sw_flat]` switches, off by default; their drift is within 2-ULP
   noise on 28/30 runs, so slot order hides no semantic difference
-  ([[_NEW_REPORT_45_slot_order_sums_20261014.md]]). **Step 5b part 2 (10-16):** `wa_sums`/`grad_merge`/`hpwl`
+  ([[REPORT_45_slot_order_sums_20261014.md]]). **Step 5b part 2 (10-16):** `wa_sums`/`grad_merge`/`hpwl`
   switches make sw_flat's gradient + int64 HPWL **bit-exact to `hpwl_gradient_CU`** on 6/6 (chunked, macros);
   drift within noise apart from one best-solution flip. **Step 6's golden = sw_flat `pl+Bprime`.** It also found
-  sw_only's float HPWL error, fixed by #49 ([[_NEW_REPORT_45_pl_arithmetic_20261016.md]]). **Step 8 brought forward
+  sw_only's float HPWL error, fixed by #49 ([[REPORT_45_pl_arithmetic_20261016.md]]). **Step 8 brought forward
 (10-19):** `hpwl_gradient_CU` is a Vitis kernel at 250 MHz (`make -C pl xclbin`). Through XRT
 (`make -C host/sw_flat hpwl-gradient-xrt`), sw_emu 4/4 and hw_emu 3/3 (synthetic with 16 chunks, pci_bridge32_b, fft_a) are bit-exact vs the g++ CU.
 hw xclbin built at **200 MHz** (WNS +0.031 ns; 250 MHz failed at −0.729 ns on the tail exchange's URAM read).
 **On the VCK5000 (2026-10-20, host `vck`): PASS bit-exact** on synthetic, fft_a, mms/adaptec1 and bigblue4 (3 chunks,
 ~8.4 ms wall-clock per axis) ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
 **Then:** step 6, density path.
-  → [[_NEW_PLAN_45_integration_20261006.md]]
+  → [[PLAN_45_integration_20261006.md]]
 - **Building blocks (#41/#42, closed 2026-10-06; history.md):** chunked gradient tier-1 exact, II=1,
   post-route 3.955 ns vs 3.33; one axis 256 of 463 URAM; FM 1 pass 0.38× externals.
 - **#48 phase 2 — overflow map = B' (Mark, 2026-10-14; measured 10-15).** The device reduces the overflow
@@ -134,7 +134,7 @@ hw xclbin built at **200 MHz** (WNS +0.031 ns; 250 MHz failed at −0.729 ns on 
   faster than B4 and global colouring is free, but the region is 25% of capacity at K=3 and ≥ 100% at
   K=6 (512 K run); a sliding window (first→last user chunk) equals it at K ≤ 3 and is 39–58% at K=6.
   Only per-chunk tails scale to K=6.
-  → [[_NEW_PLAN_47_mailbox_redesign_20261006.md]]
+  → [[PLAN_47_mailbox_redesign_20261006.md]]
 - **v1 scope DECIDED (Mark, 2026-08-28; control placement 2026-10-06):** phase-1 GP, data
   device-resident, control on the CPU (#44 arm B). **No phase 2, no backtracking** (deferred until needed). **pl_algo pins to the frozen sw_only HEAD.** (Third §10
   question — grid-1024 A/B vs per-design `-DPL_GRID` — still open.)

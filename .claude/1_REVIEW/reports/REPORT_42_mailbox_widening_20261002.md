@@ -106,7 +106,7 @@ Every pick lies within the first `hazard` entries, so a `std::deque` gives the s
   is bank-major, the same idiom as `gather_pin_positions` and the `wa_gradient` scatter-add.
 - **Tier 1:** `test/mailbox_widened_test.cpp` (in `make test` — *annotation 2026-10-06: it was in
   `HARNESSES` but the `test:` target's own list skipped it until that day; it was run directly and
-  passed. See [[_NEW_REPORT_42_partitioning_20261005.md]] addendum.*) compares against the 1-float loops on
+  passed. See [[REPORT_42_partitioning_20261005.md]] addendum.*) compares against the 1-float loops on
   the same `Chunked` design. Positions and gradients are **bit-identical** (memcmp, NaN external
   slots included): collect adds each slot's contributions in the same parcel order, so the float
   sums do not even reorder. Mutants:
