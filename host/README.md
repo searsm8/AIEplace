@@ -11,46 +11,25 @@ write the result. Two variants under `./src`, selected with `HOST=`:
 
 ## First time on a fresh clone
 
-```
-bash vck5000/tools/bootstrap_third_party.sh
-```
+Nothing to fetch: `cd vck5000 && make host HOST=sw_only` builds straight from `git clone`.
 
-Then `cd vck5000 && make host HOST=sw_only`.
+### Third-party code
 
-Or clone with submodules already populated:
-
-```
-git clone --recurse-submodules <url>
-```
-
-### Why the bootstrap step exists
-
-The host's one third-party dependency is a **git submodule**, not a copy of someone else's source
-checked in here:
-
-| submodule | upstream | pinned at | needed by |
+| path | upstream | pinned at | needed by |
 |---|---|---|---|
-| `third_party/tabulate` | [p-ranav/tabulate](https://github.com/p-ranav/tabulate) — header-only tables, used by `Logger` | `3a58301` | the host |
-| `third_party/Limbo` | [limbo018/Limbo](https://github.com/limbo018/Limbo) — LEF/DEF/bookshelf parsers | tag `3.5.2` (`81b64433`) | **only** `vck5000/test/parser` |
+| `third_party/tabulate` | [p-ranav/tabulate](https://github.com/p-ranav/tabulate) — header-only tables, used by `Logger` | `3a58301`, **vendored** | the host |
+| `third_party/Limbo` | [limbo018/Limbo](https://github.com/limbo018/Limbo) — LEF/DEF/bookshelf parsers | tag `3.5.2` (`81b64433`), submodule | **only** `vck5000/test/parser` |
+
+tabulate's headers and licenses are checked in (see `third_party/tabulate/README.md`), so a plain
+clone builds. It used to be a submodule, which left the directory empty until someone ran the
+bootstrap script.
 
 The design files are read by the host's own reader, `src/common/src/DesignReader.cpp` (TODO #43).
 Limbo stays only as the reference that reader is checked against — see *Limbo* below.
 
-(A third submodule, `vck5000/aie/lib/Vitis_Libraries`, is only needed for AIE builds and is
-**gigabytes** — the bootstrap script deliberately does *not* initialize it. Do that by hand when
-you need it: `git submodule update --init vck5000/aie/lib/Vitis_Libraries`.)
-
-A submodule is a pointer, not a copy: this repo stores only the URL (in `.gitmodules`) and one
-commit id. A plain `git clone` therefore leaves the directory **empty**, and the build fails on a
-missing `tabulate/table.hpp` until you populate it. That is all the bootstrap script does by
-default:
-
-```
-git submodule update --init third_party/tabulate
-```
-
-Note it names the submodule rather than using `--recursive`, which would also drag in the
-multi-gigabyte Vitis_Libraries. tabulate is header-only, so there is nothing to compile.
+(`vck5000/aie/lib/Vitis_Libraries` is also a submodule, only needed for AIE builds and
+**gigabytes** — nothing initializes it automatically. Do that by hand when you need it:
+`git submodule update --init vck5000/aie/lib/Vitis_Libraries`.)
 
 The host is built with the default (C++11) `std::string` ABI. It used to need
 `-D_GLIBCXX_USE_CXX11_ABI=0` everywhere — and a per-file exception for pl_algo's XRT driver,

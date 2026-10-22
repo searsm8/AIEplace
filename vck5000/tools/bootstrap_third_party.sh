@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # bootstrap_third_party.sh -- fetch and build the third-party dependencies a fresh clone needs.
 #
-# Run ONCE after cloning, before the first `make host`:
-#     bash vck5000/tools/bootstrap_third_party.sh                 # tabulate: all the host needs
-#     bash vck5000/tools/bootstrap_third_party.sh --with-limbo    # + Limbo, for test/parser only
+# The host needs nothing from here: tabulate is vendored in third_party/tabulate. Run this only
+# for the parser equivalence harness:
+#     bash vck5000/tools/bootstrap_third_party.sh --with-limbo
 #
 # Since TODO #43 the host parses with its own reader (host/src/common/src/DesignReader.cpp) and
 # links no Limbo. Limbo is built only on request, for the parser equivalence harness in
@@ -40,25 +40,19 @@ done
 
 echo "== repo: $REPO_ROOT"
 
-# ---- 1. fetch the submodules at their pinned commits ---------------------------------------
+# ---- 1. fetch the submodule at its pinned commit ------------------------------------------
 # Named explicitly, NOT `--init --recursive`: vck5000/aie/lib/Vitis_Libraries is also a
 # submodule and is gigabytes. It is only needed for AIE builds -- init it by hand when you
 # need it (`git submodule update --init vck5000/aie/lib/Vitis_Libraries`).
-echo "== git submodule update --init (tabulate)"
-git -C "$REPO_ROOT" submodule update --init third_party/tabulate
-if [[ ! -f "$REPO_ROOT/third_party/tabulate/include/tabulate/table.hpp" ]]; then
-    echo "ERROR: third_party/tabulate is still empty after the update." >&2
-    exit 1
-fi
 if [[ $WITH_LIMBO == 0 ]]; then
-    echo "== OK. Now:  cd vck5000 && make host HOST=sw_only"
-    echo "   (Limbo skipped -- the host does not use it. --with-limbo builds it for vck5000/test/parser.)"
+    echo "== Nothing to do: the host needs no bootstrap (tabulate is vendored)."
+    echo "   --with-limbo builds Limbo for vck5000/test/parser."
     exit 0
 fi
 
 echo "== git submodule update --init (Limbo)"
 git -C "$REPO_ROOT" submodule update --init third_party/Limbo
-git -C "$REPO_ROOT" submodule status third_party/Limbo third_party/tabulate
+git -C "$REPO_ROOT" submodule status third_party/Limbo
 
 for probe_path in "$LIMBO_DIR/CMakeLists.txt"; do
     if [[ ! -f "$probe_path" ]]; then
