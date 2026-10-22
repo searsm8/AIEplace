@@ -20,7 +20,9 @@ collects **3+ timestamps**, promote it to [[rules.md]] and delete it from noteTo
 **Always read rules.md and treat it as gospel.** 
 
 **The workflow files live in `.claude/0_WORKFLOW/`** — `summary.md`, `tasks.md`, `history.md`,
-`rules.md`, `journal.md` (all tracked), plus the untracked personal scratchpad `noteToSelf.md`.
+`rules.md`, `journal.md`, `milestones.md` (all tracked), plus the untracked personal scratchpad `noteToSelf.md`.
+**`milestones.md`** is the short list of verified landmarks (a new capability vs a golden): add a line the
+day one lands. Meow.
 They sit in a dotfolder so a newcomer browsing the repo sees the code first, not our workflow.
 
 **`journal.md` is the dated narrative** — the chronological story of how the numbers and state
