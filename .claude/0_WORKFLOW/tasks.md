@@ -1172,7 +1172,10 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       and Mark's centre-weighted maps lose (graded bands: 192 URAMs, ≤ bands). The first ~16 iterations stay
       1.5–3× on every map. **Round 3 (Mark's FIFO per bank, 64 banks, 8 producers, 4 pushes/FIFO/cycle):
       5.2–8.3× and better early too; 16 producers 5.5–9.7× (bigblue4 9.3×) — beats lanes everywhere.**
-      **Next:** synthesize one producer to choose P; golden's row index by multiply (no dividers; sw_flat first, drift
+      **Producer synthesized (10-22):** 95 DSP / 17 K LUT each, II = 1 at 3.33 ns; dividers are NOT the cost
+      (divide ≈ multiply), the 32 float multiplies of the 16 increments are. **P = 8 chosen** (760 DSP, fits
+      beside hpwl_gradient_CU's 708); P = 16 needs the `(ow·w)·oh` reorder (−40% DSP, a golden change).
+      **Next:** golden's bin index by multiply (no dividers; sw_flat first, drift
       measured), then build. Real-design fixtures for the tests: branch `bin-density-real-fixtures`
       (`0994f7a`), not merged. → [[PLAN_48_bin_density_lanes_20261020.md]],
       [[EXPLAINER_48_lane_dispatcher_20261020.md]] ~21 ms per evaluation on bigblue4 at 1 cell/cycle → lanes next.

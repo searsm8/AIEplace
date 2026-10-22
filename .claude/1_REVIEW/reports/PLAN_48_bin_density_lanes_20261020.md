@@ -130,7 +130,39 @@ stream read at 4 places:
   network steering up to 16 updates per producer into 64 FIFOs that each take W per cycle (e.g. W
   sub-FIFOs per bank, drained round-robin). Not yet estimated: synthesize one producer before choosing P.
 
+## What one producer costs (2026-10-22)
+
+`pl/synth/bin_density_producer/producer_top.cpp`: one producer alone (streams in and out, so no m_axi in
+the price): per cycle one slot -> window -> 4 column + 4 row overlaps -> 16 (bank, address, increment)
+updates for the 64-bank grid. `producer_check.cpp` holds it to bin_density_CU's own deposit: 0 of 262,144
+bins differ over 200 K cells (a third placed on bin edges), with the bin index by divide (bit-exact, the
+check's verdict) and by multiply (also 0 differing bins, at die 10000 and 10007.3: the two only disagree
+when a quotient lands within a rounding step of an integer, and then only on a sliver of overlap).
+
+C-synthesis at 3.33 ns, II = 1 both ways:
+
+| bin index | DSP | LUT | FF | depth |
+|---|---|---|---|---|
+| multiply | 95 (4.8%) | 17.1 K (1.9%) | 11.3 K | 30 |
+| divide | 91 (4.6%) | 17.2 K (1.9%) | 11.3 K | 43 |
+
+- **The dividers were not the cost.** Four float divides price like four multiplies here; they only add
+  13 pipeline stages. The DSPs are the 16 increments, `(ow · oh) · weight`, ~32 float multiplies.
+- **Budget** (VC1902: 1,968 DSP, 900 K LUT; `hpwl_gradient_CU` alone takes 708 DSP / 279 K LUT):
+  P = 8 is ~760 DSP (39%) and ~137 K LUT (15%): with the gradient, 1,468 DSP (75%). **P = 16 is ~1,520 DSP
+  (77%) alone: does not fit beside the gradient.**
+- **To make P = 16 fit:** compute `ow · weight` once per column (4 multiplies) and then `· oh` (16): 20
+  multiplies instead of 32, ~40% fewer DSPs. That changes the rounding order, so it is a golden change too
+  (sw_flat first, drift measured), like the multiply bin index.
+- Not yet priced: the fill network (P × 16 updates steered into 64 FIFOs, W = 4 pushes each), and the 64
+  banks' read-add-write with forwarding (bin_density_CU today: 16 banks, 114 DSP, 101 K LUT in all).
+
+**Choice: P = 8** (5.2-8.3x over one cell per cycle on the five designs; bigblue4 8.0x, ~2.3 ms), with
+P = 16 (bigblue4 9.3x) only after the product reorder.
+
 ## Recommendation
+**Superseded by round 3** (a FIFO per bank, 64 banks, W = 4, P = 8). The row-lane recommendation below
+stands as the record:
 **Strips of 4 rows, a FIFO of 128 per lane, a dispatcher reading at 4 places, and pairing in each lane.**
 No divide at dispatch: change the golden's row index to a multiply by `1/bin_h` (sw_flat first, drift
 measured), then the dispatcher and lanes copy it exactly. Explainer: [[EXPLAINER_48_lane_dispatcher_20261020.md]].
