@@ -62,6 +62,11 @@ the slot in that lane's queue. It does no depositing itself.
 
 ## Slide 6 — "Which rows?" without dividers
 
+> **Superseded 2026-10-22:** synthesis of one producer (`pl/synth/bin_density_producer`) priced the 4
+> divides at about 4 multiplies (91 vs 95 DSP, 17.2 K vs 17.1 K LUT; +13 pipeline stages). The DSPs go to
+> the 16 amounts' ~32 multiplies. Keep the divides: bit-exact with today's golden, no model change. The
+> slide below is kept as the record. Meow.
+
 **Shows:** the footprint drawing (cell, stretched footprint, `half_h`, `half_ch`), then two lines:
 `yl = y + half_h − half_ch`, `yh = yl + 2·half_ch`, and `row = ⌊ yl / bin_h ⌋` crossed out, replaced by
 `row = ⌊ yl · inv_bin_h ⌋`.
