@@ -132,6 +132,8 @@ stream read at 4 places:
 
 ## What one producer costs (2026-10-22)
 
+> **⚠️ Retracted 2026-10-22:** the divide-vs-multiply cost comparison used HLS's C-synthesis estimate, which leaves the float divider cores out entirely (`fdiv_*_no_dsp` reports 0 LUT, 0 FF, 0 DSP). Divides use no DSPs, but their logic was never counted. Vivado synthesis of both variants is the measurement (`pl/synth/bin_density_producer/impl_check.tcl`). Meow.
+
 `pl/synth/bin_density_producer/producer_top.cpp`: one producer alone (streams in and out, so no m_axi in
 the price): per cycle one slot -> window -> 4 column + 4 row overlaps -> 16 (bank, address, increment)
 updates for the 64-bank grid. `producer_check.cpp` holds it to bin_density_CU's own deposit: 0 of 262,144

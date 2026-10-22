@@ -8,12 +8,16 @@
 
 #include <hls_stream.h>
 
+#ifndef PRODUCER_DIVIDE
+#define PRODUCER_DIVIDE 1   // as producer.hpp
+#endif
+
 #include <cmath>
 #include <cstdio>
 #include <random>
 #include <vector>
 
-struct SlotIn { float x, y; uint32_t footprint; };
+struct SlotIn { float x, y; uint32_t footprint, pad; };
 struct Updates { uint32_t addr[16]; uint32_t inc[16]; uint8_t bank[16]; bool valid[16]; };
 extern "C" void producer_top(hls::stream<SlotIn>&, hls::stream<Updates>&, const densrec::Footprint*, int, int, int,
                              float, float, float, float, float);
@@ -30,7 +34,7 @@ int main() {
     hls::stream<Updates> out;
     std::vector<SlotIn> slots;
     for (int i = 0; i < cells; i++) {
-        SlotIn s{unit(rng) * die - 20.0f, unit(rng) * die - 20.0f, (uint32_t)(i % table.size())};
+        SlotIn s{unit(rng) * die - 20.0f, unit(rng) * die - 20.0f, (uint32_t)(i % table.size()), 0};
         if (i % 3 == 0) { s.x = std::floor(s.x / bin_w) * bin_w; s.y = std::floor(s.y / bin_h) * bin_h; }   // on bin edges
         slots.push_back(s); in.write(s);
     }

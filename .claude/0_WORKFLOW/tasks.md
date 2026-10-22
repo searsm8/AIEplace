@@ -1071,6 +1071,12 @@ Algorithmic ideas beyond faithfulness cleanup — hypotheses, not yet scoped.
       measure ITS overhang; if it's comparable, the win (if any) is ours to take, not a faithfulness
       gap. Also **not a lead for #35** — adaptec3, the worst offender (315), is td=1.0 and flat; the
       regression tracks (1−td), not raggedness.
+- [ ] **Bin grids above 1024², by tiling the density map** (opened 2026-10-22, Mark: postponed,
+      a generality improvement for huge industrial designs). `bin_density_CU`'s whole 1024² grid fills
+      128 URAMs; 2048² does not fit on chip. A tiled pass (deposit one grid tile at a time, slots routed
+      or re-streamed per tile) would lift the cap. Why it is worth having: the on-chip grid has no cache,
+      so cost per node does not depend on grid size, while XPlace's GPU scatter/gather cost per node rises
+      3-5× from 512² to 2048² ([[REPORT_48_xplace_scatter_gather_suite_20261020.md]] T2). Meow.
 
 ---
 
@@ -1172,8 +1178,11 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       and Mark's centre-weighted maps lose (graded bands: 192 URAMs, ≤ bands). The first ~16 iterations stay
       1.5–3× on every map. **Round 3 (Mark's FIFO per bank, 64 banks, 8 producers, 4 pushes/FIFO/cycle):
       5.2–8.3× and better early too; 16 producers 5.5–9.7× (bigblue4 9.3×) — beats lanes everywhere.**
-      **Producer synthesized (10-22):** 95 DSP / 17 K LUT each, II = 1 at 3.33 ns; dividers are NOT the cost
-      (divide ≈ multiply), the 32 float multiplies of the 16 increments are. **P = 8 chosen** (760 DSP, fits
+      **Producer synthesized (10-22):** 95 DSP / 17 K LUT each (csynth estimate), II = 1 at 3.33 ns.
+      ⚠️ "Dividers are not the cost" is RETRACTED: csynth omits the fdiv cores (0 LUT/FF); Vivado synthesis
+      of both variants is running (`pl/synth/bin_density_producer/impl_check.tcl`). **Whole banked deposit
+      (`pl/synth/bin_density_banked`, bit-exact in C on 1 M bins): 1,136 DSP / 454 K LUT / 128 URAM; 64 of
+      each producer's 142 DSP are bank-address multiplies (removable); drain −2.1 ns.** **P = 8 chosen** (760 DSP, fits
       beside hpwl_gradient_CU's 708); P = 16 needs the `(ow·w)·oh` reorder (−40% DSP, a golden change).
       **Next:** golden's bin index by multiply (no dividers; sw_flat first, drift
       measured), then build. Real-design fixtures for the tests: branch `bin-density-real-fixtures`
