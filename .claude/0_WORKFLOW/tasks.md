@@ -1180,7 +1180,8 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       5.2–8.3× and better early too; 16 producers 5.5–9.7× (bigblue4 9.3×) — beats lanes everywhere.**
       **Producer synthesized (10-22):** 95 DSP / 17 K LUT each (csynth estimate), II = 1 at 3.33 ns.
       ⚠️ "Dividers are not the cost" is RETRACTED: csynth omits the fdiv cores (0 LUT/FF); Vivado synthesis
-      of both variants is running (`pl/synth/bin_density_producer/impl_check.tcl`). **Whole banked deposit
+      of both variants needs the BUILD SERVER: this box has no Vivado synthesis license for the VC1902
+      (`pl/synth/bin_density_producer/impl_check.tcl`, waiting on the ssh portal). **Whole banked deposit
       (`pl/synth/bin_density_banked`, bit-exact in C on 1 M bins): 1,136 DSP / 454 K LUT / 128 URAM; 64 of
       each producer's 142 DSP are bank-address multiplies (removable); drain −2.1 ns.** **P = 8 chosen** (760 DSP, fits
       beside hpwl_gradient_CU's 708); P = 16 needs the `(ow·w)·oh` reorder (−40% DSP, a golden change).
