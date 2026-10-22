@@ -132,6 +132,12 @@ stream read at 4 places:
 
 ## What one producer costs (2026-10-22)
 
+> **Measured 2026-10-22 (Vivado 2022.2 synthesis, build server, one producer, 3.33 ns met both ways):**
+> multiply 13,840 LUT / 14,525 FF / 94 DSP; divide 21,682 LUT / 17,231 FF / 90 DSP. **The 4 dividers cost
+> +7,842 LUT (+57%) and +2,706 FF per producer, ~2 K LUT each; ×8 producers ≈ 63 K LUT (7% of the chip).**
+> csynth had counted them as zero. The multiply route is worth a golden change (sw_flat bin index by
+> multiply, drift measured; the C check found 0 differing bins on 200 K cells). Meow.
+
 > **⚠️ Retracted 2026-10-22:** the divide-vs-multiply cost comparison used HLS's C-synthesis estimate, which leaves the float divider cores out entirely (`fdiv_*_no_dsp` reports 0 LUT, 0 FF, 0 DSP). Divides use no DSPs, but their logic was never counted. Vivado synthesis of both variants is the measurement (`pl/synth/bin_density_producer/impl_check.tcl`). Meow.
 
 `pl/synth/bin_density_producer/producer_top.cpp`: one producer alone (streams in and out, so no m_axi in

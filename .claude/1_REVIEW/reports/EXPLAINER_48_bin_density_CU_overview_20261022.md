@@ -76,8 +76,9 @@ Where the resources go, per producer (C-synthesis estimate, II = 1, 141 DSP and 
   integer multiply by a value only known at run time: one DSP per bank, per producer. Avoidable: compute
   the 4 column bases once per cell and let each bank pick one (→ ~77 DSP per producer).
 - **Step 6, the bank selection: ~15 K LUT.** Each of the 64 banks picks one of the 16 amounts every cycle.
-- **Step 3's 4 divides: no DSPs, logic not yet known.** HLS's estimate leaves the divider cores out
-  entirely (they report 0); Vivado synthesis is running to count them.
+- **Step 3's 4 divides: ~7.8 K LUT and 2.7 K FF per producer, no DSPs** (Vivado synthesis: a producer is
+  21.7 K LUT with divides, 13.8 K with multiplies). HLS's estimate had left the divider cores out entirely.
+  Across 8 producers that is ~63 K LUT, 7% of the chip.
 - **× 8 producers ≈ 1,136 DSP and ~316 K LUT: ~70% of the CU's logic and all of its DSPs.** The 64 banks
   with forwarding are ~63 K LUT and no DSP; the 512 FIFOs and glue the rest.
 
@@ -130,7 +131,9 @@ remaining levers are on slide 6.
 1. **Remove the 64 address multiplies per producer** (4 column bases per cell, picked per bank): ~−512 DSP.
 2. **Close timing on the 64-bank drain** (−2.1 ns: break the per-stage path), then **prove the forwarding
    depth in RTL co-sim**, as for the 16-bank CU (C simulation cannot).
-3. **Measure the dividers for real** (Vivado synthesis, running): HLS's estimate omits them.
+3. **Replace the dividers with multiplies** (−63 K LUT across 8 producers, measured): change the sw_flat
+   golden's bin index to a multiply by 1/bin first and measure the drift (the C check already found 0
+   differing bins on 200 K cells), then the device copies it exactly.
 4. **Re-run the speed model** for this exact design (private FIFOs ⇒ effectively 8 pushes per bank per
    cycle, independent producers), so slide 4's numbers describe what was built.
 5. **Make it fit**, cheapest first: (a) compute `ow × weight` once per column → 20 multiplies instead of 32
