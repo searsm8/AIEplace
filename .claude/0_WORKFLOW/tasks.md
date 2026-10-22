@@ -133,9 +133,21 @@ tree committed, **67 GB freed** from `results/` (helper: `tools/prune_run_artifa
 ## #9 — User friendliness (opened 2026-07-30)
 
 **Step 1 landed 2026-08-04: the silent fork is gone.** All 15 files that existed in both hosts now
-exist once, in `host/src/common/`. Limbo and tabulate are real submodules, zero `.a` tracked,
+exist once, in `host/src/common/`. **Since 2026-10-22 a plain `git clone` builds the host with no
+bootstrap:** tabulate's headers are vendored in `third_party/tabulate` (f932c98), and Limbo is gone
+entirely — submodule, `bootstrap_third_party.sh`, `third_party/patches`. `make test-parser` now
+checks the native reader against `test/parser/limbo_dump_hashes.txt`, Limbo's dumps for all 86
+inputs frozen as sha256 the same day (last native == Limbo run: all 86 identical, log in
+`.claude/2_ARTIFACTS/limbo_freeze_20261022/`). To diff a failure against Limbo, check out f932c98.
+The only submodule left is `vck5000/aie/lib/Vitis_Libraries`, used by legacy `AIE=markv1` alone
+(pl_algo takes the FFT from the Vitis install); Mark: decide when merging Geert's AIE code.
+
+<details><summary>Superseded 2026-10-22</summary>
+
+Limbo and tabulate are real submodules, zero `.a` tracked,
 `tools/bootstrap_third_party.sh` added; Boost reconciled (two Boosts on this box — everything
 actually compiles against 1.80; `-DBoost_NO_BOOST_CMAKE=ON` is required, not cosmetic).
+</details>
 
 - [ ] **STEP 1b — re-run `make run-density` and record the number.** ⚠️ **Any PASS recorded between
       2026-07-05 and 2026-08-04 is void**: pl_algo's frozen `Grid.cpp` had no √2 density clamp while

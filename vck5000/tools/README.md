@@ -90,7 +90,6 @@ never just one.
 
 | file | status | what |
 |---|---|---|
-| `bootstrap_third_party.sh` | **live** | `--with-limbo` fetches and builds Limbo, for the parser harness (`test/parser`) only. The host needs no bootstrap (tabulate is vendored). |
 | `prune_run_artifacts.sh` | **live** | reclaims disk from `results/` sweep dirs. Dry run by default; `--go` to delete. |
 
 ## Dormant

@@ -32,4 +32,4 @@ You can build the different parts of the application these commands:
     * Ideally, Vitis_Libraries could be added as a submodule once compatibility issues are solved.
 
 * LEF/DEF/Bookshelf are read by the host's own reader (`host/src/common/src/DesignReader.cpp`, TODO #43).
-    * The Limbo library that used to do it is now only the reference that reader is tested against (`vck5000/test/parser`).
+    * The Limbo library that used to do it was removed 2026-10-22; `vck5000/test/parser` checks the reader against frozen hashes of Limbo's output.

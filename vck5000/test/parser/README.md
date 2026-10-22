@@ -7,12 +7,26 @@ rows, units, areas; floats as `%a`, so equal means bit-equal) must match what th
 held when Limbo did the reading.
 
 ```
-bash vck5000/tools/bootstrap_third_party.sh --with-limbo   # once: builds Limbo
-cd vck5000 && make test-parser                             # ~15 min, exit 0 = all identical
+cd vck5000 && make test-parser    # ~1 min, exit 0 = every dump matches Limbo's
 ```
 
 Run it after any change to `DesignReader.cpp` or to `DataBase`'s parse callbacks.
 `make test-regress` exercises only 3 designs end to end; this covers 86 inputs field by field.
+
+### Limbo is gone; its output is frozen as hashes
+
+Limbo was removed on 2026-10-22. Before that, one last run (all 86 inputs native == Limbo,
+byte-identical) recorded the sha256 of each Limbo dump in `limbo_dump_hashes.txt`. The gate now
+compares the native dump's hash against that file, so it needs neither Limbo nor its old-ABI
+build. Two consequences:
+
+- **A mismatch names the input, not the line.** To see the diff, check out `f932c98` (the last
+  commit with the `--limbo` bridge and the Limbo submodule), build Limbo with
+  `bash vck5000/tools/bootstrap_third_party.sh --with-limbo`, and run the old gate there.
+- **The hashes are of the inputs as they were on 2026-10-22.** If a benchmark file itself changes
+  (e.g. `ispd2015_fix` regenerated), its hash goes stale and fails here even with a correct
+  reader. Only re-record from Limbo, via that old commit; never from the native reader, or the
+  gate is checking the reader against itself.
 
 ## What it compares
 
@@ -30,13 +44,14 @@ named `floorplan.def`.
 
 | | |
 |---|---|
-| `parse_bench.cpp` | parse one design dir, print the time, optionally `--dump` the canonical state. Built twice: `build/parse_bench` exactly like the host, and `build/parse_bench_limbo`, which adds `--limbo` (Limbo through a bridge into the same `ParseRecords`) and must use Limbo's old string ABI |
-| `compare_parsers.sh` | the gate: both dumps per input, `cmp`, exit non-zero on any difference (`JOBS=4` parallel by default) |
+| `parse_bench.cpp` | parse one design dir, print the time, optionally `--dump` the canonical state. Built exactly like the host |
+| `compare_parsers.sh` | the gate: native dump per input, sha256 vs `limbo_dump_hashes.txt`, exit non-zero on any difference (`JOBS=4` parallel by default) |
+| `limbo_dump_hashes.txt` | sha256 of Limbo's dump for each of the 86 inputs, keyed by the same tag the script derives from the directory |
 | `run_bench.sh` | best-of-`REPEATS` parse time for all 44 designs |
 | `best_of.sh` | the same for a few named designs, for tuning |
 | `sampler.hpp`, `sampler_report.py` | an in-process sampling profiler (`SAMPLE_PROFILE=<file> build/parse_bench …`, then `python3 sampler_report.py build/parse_bench <file>`; `ONLY=main` keeps the main thread). This box has no `perf`, and `ptrace_scope=1` rules out gdb sampling |
 
-## Known Limbo behaviours the bridge deliberately does NOT reproduce
+## Known Limbo behaviours the bridge deliberately did NOT reproduce
 
 - **Limbo `exit(0)`s on a LEF `NONDEFAULTRULE`**: its default `lef_nondefault_cbk` prints a
   reminder to stdout — which the old host had redirected to `/dev/null` — and calls `exit(0)`.

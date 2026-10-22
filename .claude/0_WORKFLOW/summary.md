@@ -175,7 +175,8 @@ hw xclbin built at **200 MHz** (WNS +0.031 ns; 250 MHz failed at −0.729 ns on 
 
 ## Also open
 - **#43 — native parser (CLOSED 2026-10-06; history.md).** `DesignReader.cpp` replaced Limbo (all 44
-  parse 5.3× faster). ⚠️ Touching `DesignReader.cpp` or a `DesignSink` (`DataBase`, beat_packer's
+  parse 5.3× faster). Limbo itself removed 2026-10-22: `make test-parser` compares against its
+  frozen dump hashes (#9). ⚠️ Touching `DesignReader.cpp` or a `DesignSink` (`DataBase`, beat_packer's
   `native_netlist.hpp`) → run `make test-parser` AND `make -C bring_up/beat_packer check-reader`.
 - **#44 — host control vs PL control (opened 2026-10-05, Mark).** XPlace runs its schedule on the
   CPU and pays only ~3–4 scalar readbacks per iteration. Build both arms (resident `MODE_PLACE` vs

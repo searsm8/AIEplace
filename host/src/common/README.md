@@ -30,9 +30,10 @@ The design files used to be read by the Limbo parsers (five checked-in `.a` unde
 later a submodule). Since TODO #43 they are read by `DesignReader.cpp`, which reproduces exactly
 what `DataBase` used to receive from Limbo — quirks included, each marked in the source. That is
 checked, not assumed: `vck5000/test/parser/compare_parsers.sh` parses all 44 benchmarks, 40
-extra DEFs and 2 hand-written edge cases both ways and requires a canonical dump of every parsed field to be byte-identical.
-**Run it after any change to `DesignReader.cpp` or `DataBase`'s callbacks** (it needs
-`bootstrap_third_party.sh --with-limbo`); `make test-regress` alone exercises only 3 designs.
+extra DEFs and 2 hand-written edge cases and requires a canonical dump of every parsed field to
+hash to what Limbo produced (Limbo itself was removed 2026-10-22; its output is frozen in
+`limbo_dump_hashes.txt` there). **Run it (`make test-parser`) after any change to
+`DesignReader.cpp` or `DataBase`'s callbacks**; `make test-regress` alone exercises only 3 designs.
 
 The reader covers the subset of each format our benchmarks use. Anything outside it — a DEF
 `+ PORT` pin, a Bookshelf `terminal_NI`, `.shapes`/`.route` files, non-empty `.wts` net weights —
