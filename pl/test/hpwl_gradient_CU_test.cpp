@@ -1,23 +1,23 @@
 // Verify hpwl_gradient_CU (src/modules/hpwl_gradient_CU.hpp) -- WA gradient for a design split into
-// chunks: tail positions out, tail gradients back, through the borrowers' tail rows (#41, #47).
+// chunks: borrowed positions out, borrowed gradients back, through the borrowers' borrowed rows (#41, #47).
 // From vck5000/test/hpwl_gradient_computer_v2_test.cpp @ 41f2193 (#45). Meow.
 //
 // Golden: wa_gradient_golden.hpp (sw_only's WA partial in double from the PARSED netlist), so it
-// is independent of the partition, homes, tail slots and tail layout. Each movable parsed
-// node's device gradient is read from its OWNER chunk's slot. Tail slots and macro-pin slots
+// is independent of the partition, homes, borrowed slots and borrowed layout. Each movable parsed
+// node's device gradient is read from its OWNER chunk's slot. Borrowed slots and macro-pin slots
 // start as NaN, so a missed send, refresh or fold cannot pass.
 //
 //   [1] STRUCTURE  vs same-LUT golden, rel_rms < 1e-5, max_rel < 1e-3, both axes:
-//                  capacity 4096 (several chunks), 2560 (bare cut, many owner blocks per tail) and
-//                  1M (one chunk, no tail)
+//                  capacity 4096 (several chunks), 2560 (bare cut, many owner blocks per borrower) and
+//                  1M (one chunk, nothing borrowed)
 //   [2] LUT BUDGET vs true-exp golden, rel_rms < 1e-4, max_rel < 1e-3 (chunked config)
 //   [3] ZERO       movable nodes with no in-scope pin get exactly 0
 //   [4] HPWL       the total-HPWL by-product, bit-exact vs the golden's integer sum; the golden's
 //                  quantization within 2^-HPWL_FRAC_BITS per net of the exact double sum
-//   [5] COVERAGE   several chunks; borrowed cells and macros exist; tail gradients carry a
-//                  real share of the total (a dropped merge would be visible); tails with many
+//   [5] COVERAGE   several chunks; borrowed cells and macros exist; borrowed gradients carry a
+//                  real share of the total (a dropped merge would be visible); borrowers with many
 //                  owner blocks, and blocks of several rows. Row-buffer wrap-around (a block of more
-//                  than TAIL_BUFFER_ROWS rows) appears only on real designs (--netlist).
+//                  than BORROWED_BUFFER_ROWS rows) appears only on real designs (--netlist).
 //
 // `hpwl_gradient_CU_test --netlist FILE [CAPACITY]` runs [1]+[4] on a real design (FILE from
 // `make -C host/sw_flat netlists`); CAPACITY defaults to the on-chip SLOT_CAPACITY. Meow.
@@ -46,7 +46,7 @@ static DeviceAxis run_axis(const packer::Chunked& ch, size_t num_parsed, int axi
     for (auto& beat : grad) for (float& v : beat.v) v = NAN;     // unwritten slots stay visibly wrong
     DeviceAxis out;
     hpwl_gradient_CU(dev.desc.data(), dev.group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(), dev.macro_pins.data(),
-                     dev.tail_blocks.data(), dev.tail_ops.data(),
+                     dev.borrowed_blocks.data(), dev.borrowed_ops.data(),
                      dev.offset_table.data(), (int)dev.offset_table.size(), lut.table.data(), lut.size,
                      grad.data(), dev.offset_bits, 1.0f / golden::GAMMA, lut.inv_step, out.hpwl_total_fixed);
 
@@ -129,25 +129,25 @@ int main(int argc, char** argv) {
     bool ok = true;
     packer::Chunked ch, tight;
     ok &= run_config("capacity=4096", nl, 4096, node_pos, lut, true, &ch);
-    // Many small chunks: a borrower's tail holds blocks from many owners (C7). Bare cut at 2560
+    // Many small chunks: a borrower's borrowed rows hold blocks from many owners (C7). Bare cut at 2560
     // (30 chunks); the per-owner blocks' row rounding means 2048 and below fit no K (scan 2026-10-09). Meow.
     ok &= run_config("capacity=2560", nl, 2560, node_pos, lut, false, &tight, 0);
     ok &= run_config("capacity=1M", nl, SLOT_CAPACITY, node_pos, lut, false);
 
-    // [5] the tail exchange's corner cases are present, so [1] exercised them. Meow.
-    long tail_block_count = 0, max_blocks = 0, multi_row_blocks = 0;
+    // [5] the borrowed-copy exchange's corner cases are present, so [1] exercised them. Meow.
+    long borrowed_block_count = 0, max_blocks = 0, multi_row_blocks = 0;
     for (const packer::Chunk& c : tight.chunks) {
-        tail_block_count += (long)c.tail_blocks.size();
-        max_blocks = std::max(max_blocks, (long)c.tail_blocks.size());
-        for (const auto& block : c.tail_blocks) multi_row_blocks += block.rows > 1;
+        borrowed_block_count += (long)c.borrowed_blocks.size();
+        max_blocks = std::max(max_blocks, (long)c.borrowed_blocks.size());
+        for (const auto& block : c.borrowed_blocks) multi_row_blocks += block.rows > 1;
     }
-    const bool tails_covered = tail_block_count >= 50 && max_blocks >= 5 && multi_row_blocks >= 10;
-    printf("%s [5] coverage: capacity=2560 has %ld tail blocks, up to %ld per tail, %ld of several rows\n",
-           tails_covered ? "ok  " : "FAIL", tail_block_count, max_blocks, multi_row_blocks);
-    ok &= tails_covered;
+    const bool borrowed_covered = borrowed_block_count >= 50 && max_blocks >= 5 && multi_row_blocks >= 10;
+    printf("%s [5] coverage: capacity=2560 has %ld borrowed blocks, up to %ld per borrower, %ld of several rows\n",
+           borrowed_covered ? "ok  " : "FAIL", borrowed_block_count, max_blocks, multi_row_blocks);
+    ok &= borrowed_covered;
 
     // [5] coverage: the return path must carry real gradient. Share of |grad|^2 on nodes that are
-    // borrowed somewhere (their total needs the tail merge) -- a dropped return path would lose it.
+    // borrowed somewhere (their total needs the borrowed merge) -- a dropped return path would lose it.
     // Macros cross chunks as macros: a macro gradient folded from a borrowed macro's local pins (C6). Meow.
     long borrowed_cells = 0, borrowed_macros = 0;
     std::vector<char> held_borrowed(ch.global.kind.size(), 0);

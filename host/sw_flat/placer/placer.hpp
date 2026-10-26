@@ -72,7 +72,7 @@ struct PlacerConfig {
     bool overflow_snapshot = false;       // overflow_map = "snapshot": the schedule's overflow is reduced from the solver's
                                           // map after the cells, before the fillers (electronic_density_layer.py:113-131)    // The rest of the PL's arithmetic (#45 step 5b, record_stream.cpp). Each needs ignore_net_degree = 96. Meow.
     bool wa_sums_tree = false;            // wa_sums = "tree": B/C sums over the record lanes by the Dhar trees (wa_sums.hpp)
-    bool grad_merge_stream = false;       // grad_merge = "stream": scatter-add in stream order, macro fold, tail merge
+    bool grad_merge_stream = false;       // grad_merge = "stream": scatter-add in stream order, macro fold, borrowed merge
     bool hpwl_fixed = false;              // hpwl = "fixed": the schedule's HPWL as the int64 sum of hpwl_to_fixed (hpwl_CU.hpp)
     // #48 (Mark, 2026-10-19): bin_density_CU accumulates in fixed point, one URAM_WORD_WIDTH word per bin. Meow.
     bool deposit_fixed = false;           // deposit = "fixed": each bin counts units of 2^-fixed_frac_bits bin areas
@@ -121,7 +121,7 @@ struct RecordStream {
     std::vector<Fold> folds;                  // every chunk's fold list (SKIPs dropped), chunk order
     std::vector<long> chunk_first_fold;       // num_chunks + 1
     std::vector<long> chunk_movable_end;      // per chunk: global first_fixed_slot
-    std::vector<std::pair<long, long>> tail_merges;   // (owner slot, borrower tail slot): owners ascending, borrowers ascending
+    std::vector<std::pair<long, long>> borrowed_merges;   // (owner slot, borrower's borrowed slot): owners ascending, borrowers ascending
     std::vector<int> nets;                    // FlatDesign nets the stream carries (the HPWL's)
     long dropped_nets = 0;                    // nets of 2..96 pins the packer could not encode: no gradient, no HPWL
 };

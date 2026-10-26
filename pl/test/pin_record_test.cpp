@@ -26,7 +26,7 @@ int main() {
     check(sizeof(SlotBeat) * 8 == 512, "[1] SlotBeat is one 512-bit beat");
     check(sizeof(MacroPinRef) == 16, "[1] MacroPinRef is 16 bytes (12 straddled bus words: II=2)");
     check(sizeof(ChunkDesc) * 8 <= 512, "[1] ChunkDesc fits one 512-bit port word");
-    check(sizeof(TailBlockDesc) == 20, "[1] TailBlockDesc is 20 bytes");
+    check(sizeof(BorrowedBlockDesc) == 20, "[1] BorrowedBlockDesc is 20 bytes");
 
     check(BANKS == 1 << BANK_BITS, "[2] BANKS == 2^BANK_BITS");
     check(NET_DEGREES_PROCESSED == 15 && MAX_NETS_PER_BEAT == 8, "[2] degrees 2..16, 8 nets per beat");
@@ -34,15 +34,15 @@ int main() {
     check(MAX_LARGE_NET_DEGREE % LANES == 0, "[2] the largest net fills whole beats");
     check(MAX_LARGE_NET_DEGREE / LANES <= MAX_SPAN, "[2] the largest net's minimum span is within MAX_SPAN");
     check(MAX_NET_EXTENT >= MAX_SPAN, "[2] a net's extent bound covers its maximum span");
-    check((TAIL_BUFFER_ROWS & (TAIL_BUFFER_ROWS - 1)) == 0, "[2] TAIL_BUFFER_ROWS is a power of 2");
-    {   // A tail ENTRY carries any slot of a chunk and any bank, and never looks like a TAIL_BEAT. Meow.
-        bool tail_ok = true;
-        for (uint32_t slot : {0u, 1u, (1u << 20) - 1, (1u << TAIL_OP_BANK_SHIFT) - 1})
+    check((BORROWED_BUFFER_ROWS & (BORROWED_BUFFER_ROWS - 1)) == 0, "[2] BORROWED_BUFFER_ROWS is a power of 2");
+    {   // A borrowed ENTRY carries any slot of a chunk and any bank, and never looks like a BORROWED_BEAT. Meow.
+        bool entry_ok = true;
+        for (uint32_t slot : {0u, 1u, (1u << 20) - 1, (1u << BORROWED_OP_BANK_SHIFT) - 1})
             for (int bank : {0, 1, BANKS - 1}) {
-                const uint32_t op = make_tail_entry(slot, bank);
-                tail_ok &= tail_entry_slot(op) == slot && tail_entry_bank(op) == bank && !(op & TAIL_BEAT_OP);
+                const uint32_t op = make_borrowed_entry(slot, bank);
+                entry_ok &= borrowed_entry_slot(op) == slot && borrowed_entry_bank(op) == bank && !(op & BORROWED_BEAT_OP);
             }
-        check(tail_ok, "[2] tail ENTRY ops round-trip slot and bank, and are not TAIL_BEAT");
+        check(entry_ok, "[2] borrowed ENTRY ops round-trip slot and bank, and are not BORROWED_BEAT");
     }
 
     bool round_trip_ok = true, empty_ok = true;

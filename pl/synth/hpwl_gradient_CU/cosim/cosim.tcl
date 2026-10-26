@@ -1,4 +1,4 @@
-# RTL co-simulation of hpwl_gradient_CU_top: the chunked passes, the tail exchange's row buffers
+# RTL co-simulation of hpwl_gradient_CU_top: the chunked passes, the borrowed-copy exchange's row buffers
 # (read the cycle after they are written, both directions) and the gradient merge, as synthesized
 # RTL. Run from pl/synth/hpwl_gradient_CU/cosim/:
 #   COSIM_ARGV="1536 4" LIBRARY_PATH=/usr/lib/x86_64-linux-gnu vitis_hls -f cosim.tcl   (source settings64.sh first)

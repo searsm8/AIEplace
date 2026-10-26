@@ -104,7 +104,7 @@
   sw_only's float HPWL error, fixed by #49 ([[REPORT_45_pl_arithmetic_20261016.md]]). **Step 8 brought forward
 (10-19):** `hpwl_gradient_CU` is a Vitis kernel at 250 MHz (`make -C pl xclbin`). Through XRT
 (`make -C host/sw_flat hpwl-gradient-xrt`), sw_emu 4/4 and hw_emu 3/3 (synthetic with 16 chunks, pci_bridge32_b, fft_a) are bit-exact vs the g++ CU.
-hw xclbin built at **200 MHz** (WNS +0.031 ns; 250 MHz failed at −0.729 ns on the tail exchange's URAM read).
+hw xclbin built at **200 MHz** (WNS +0.031 ns; 250 MHz failed at −0.729 ns on the borrowed-copy exchange's URAM read).
 **On the VCK5000 (2026-10-20, host `vck`): PASS bit-exact** on synthetic, fft_a, mms/adaptec1 and bigblue4 (3 chunks,
 ~8.4 ms wall-clock per axis) ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
 **Then:** step 6, density path.
@@ -129,7 +129,7 @@ hw xclbin built at **200 MHz** (WNS +0.031 ns; 250 MHz failed at −0.729 ns on 
   owners write / read them through a 32 x 256 row buffer replaying host-scheduled ops. Tier 1, 8/8
   real designs, RTL co-sim PASS. bigblue4 at 1 M: 2.49 M -> 1.93 M cycles per axis. **B4 = A (Mark,
   2026-10-09):** fold the exchange into `iteration_update` (modeled 0.98 M). Its golden (M2,
-  `host/sw_flat/tail_fusion.hpp`) is bit-identical to B3 on 8/8 chunked designs; M3 waits on #45 step 6.
+  `host/sw_flat/borrowed_fusion.hpp`) is bit-identical to B3 on 8/8 chunked designs; M3 waits on #45 step 6.
   **R (resident shared region) CLOSED 2026-10-19, measured, not chosen; B4 stays the plan.** Modeled 1–4 pp
   faster than B4 and global colouring is free, but the region is 25% of capacity at K=3 and ≥ 100% at
   K=6 (512 K run); a sliding window (first→last user chunk) equals it at K ≤ 3 and is 39–58% at K=6.

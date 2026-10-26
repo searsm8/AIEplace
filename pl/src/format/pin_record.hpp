@@ -83,10 +83,10 @@ struct MacroPinRef {
 
 // ---- Chunking (a design larger than one on-chip slot space) ----
 // Each chunk is an ordinary stream over its own local slots; the per-chunk arrays are concatenated
-// in DDR and located by this descriptor. Tail slots (copies of nodes a chunk borrows from their
-// owner chunk: borrowed nodes) are the chunk's TAIL rows (packer rule C7): one block per
+// in DDR and located by this descriptor. Borrowed slots (copies of nodes a chunk borrows from their
+// owner chunk: borrowed nodes) are the chunk's BORROWED rows (packer rule C7): one block per
 // owner, each starting on a fresh row. The owner fills its block in the borrower's position image and
-// later adds the gradients the borrower drained there into its own, through a TailBlockDesc (#47). See
+// later adds the gradients the borrower drained there into its own, through a BorrowedBlockDesc (#47). See
 // beat_packer.hpp (encode_chunked).
 // A chunk's group ends (degree groups, then large-net span groups) are a separate int32 table, NUM_GROUP_ENDS
 // per chunk: inside ChunkDesc they would make it 1120 bits, past the 1024-bit m_axi maximum. Meow.
@@ -95,36 +95,36 @@ struct ChunkDesc {
     int32_t record_beat_offset, num_beats;          // into the concatenated record stream
     int32_t slot_beat_offset, num_slot_beats;       // into the concatenated slot-major images
     int32_t first_private_slot;                     // owned slots below hold every node another chunk borrows (C8)
-    int32_t first_tail_slot;                        // owned movable slots below, the tail rows from here
+    int32_t first_borrowed_slot;                    // owned movable slots below, the borrowed rows from here
     int32_t first_fixed_slot;
     int32_t macro_pin_offset, num_macro_pins;       // into the concatenated macro-pin lists
-    int32_t first_tail_block, num_borrowers;        // this chunk's tail blocks AS OWNER, borrowers ascending
+    int32_t first_borrowed_block, num_borrowers;    // this chunk's borrowed blocks AS OWNER, borrowers ascending
 };
 
-// One owner -> borrower block of the borrower's tail, exchanged through an on-chip row buffer of
-// BANKS banks x TAIL_BUFFER_ROWS rows. Each list is replayed in order, one op per cycle; an ENTRY's
+// One owner -> borrower block of the borrower's borrowed rows, exchanged through an on-chip row buffer of
+// BANKS banks x BORROWED_BUFFER_ROWS rows. Each list is replayed in order, one op per cycle; an ENTRY's
 // row is the next one of its bank (rows within a block fill bank by bank, in emission order):
-//   send  (send_tails_pass)  : ENTRY     buffer[bank][row] = pos[owner slot]
-//                              TAIL_BEAT the buffer's next half-row -> the block, in pos_DDR
-//   merge (merge_tails_pass) : TAIL_BEAT the block's next half-row, from grad_DDR -> the buffer
-//                              ENTRY     grad[owner slot] += buffer[bank][row]
+//   send  (send_borrowed_pass)  : ENTRY         buffer[bank][row] = pos[owner slot]
+//                                 BORROWED_BEAT the buffer's next half-row -> the block, in pos_DDR
+//   merge (merge_borrowed_pass) : BORROWED_BEAT the block's next half-row, from grad_DDR -> the buffer
+//                                 ENTRY         grad[owner slot] += buffer[bank][row]
 // The host orders the ops so no buffer row is overwritten before it is written out (send) or used
 // (merge). A block's entries name distinct owner slots, ascending. Meow.
-struct TailBlockDesc {
+struct BorrowedBlockDesc {
     int32_t send_op_offset, num_send_ops;
-    int32_t merge_op_offset, num_merge_ops;         // into the concatenated tail ops
+    int32_t merge_op_offset, num_merge_ops;         // into the concatenated borrowed ops
     int32_t block_beat_offset;                      // the block's first beat in the concatenated slot images
 };
 
-#ifndef PL_TAIL_BUFFER_ROWS
-#define PL_TAIL_BUFFER_ROWS 256   // override (-D) only for experiments; the host schedules against it
+#ifndef PL_BORROWED_BUFFER_ROWS
+#define PL_BORROWED_BUFFER_ROWS 256   // override (-D) only for experiments; the host schedules against it
 #endif
-constexpr int      TAIL_BUFFER_ROWS   = PL_TAIL_BUFFER_ROWS;   // a power of 2
-constexpr uint32_t TAIL_BEAT_OP       = 1u << 31;
-constexpr int      TAIL_OP_BANK_SHIFT = 25;                     // ENTRY: owner slot (25 bits) | bank << 25
-inline uint32_t make_tail_entry(uint32_t owner_slot, int bank) { return owner_slot | (uint32_t)bank << TAIL_OP_BANK_SHIFT; }
-inline uint32_t tail_entry_slot(uint32_t op) { return op & ((1u << TAIL_OP_BANK_SHIFT) - 1u); }
-inline int      tail_entry_bank(uint32_t op) { return (int)(op >> TAIL_OP_BANK_SHIFT) & (BANKS - 1); }
+constexpr int      BORROWED_BUFFER_ROWS   = PL_BORROWED_BUFFER_ROWS;   // a power of 2
+constexpr uint32_t BORROWED_BEAT_OP       = 1u << 31;
+constexpr int      BORROWED_OP_BANK_SHIFT = 25;                     // ENTRY: owner slot (25 bits) | bank << 25
+inline uint32_t make_borrowed_entry(uint32_t owner_slot, int bank) { return owner_slot | (uint32_t)bank << BORROWED_OP_BANK_SHIFT; }
+inline uint32_t borrowed_entry_slot(uint32_t op) { return op & ((1u << BORROWED_OP_BANK_SHIFT) - 1u); }
+inline int      borrowed_entry_bank(uint32_t op) { return (int)(op >> BORROWED_OP_BANK_SHIFT) & (BANKS - 1); }
 
 inline uint32_t record_node_slot(uint32_t record, int offset_bits)  { return record >> offset_bits; }
 inline uint32_t record_offset_idx(uint32_t record, int offset_bits) { return record & ((1u << offset_bits) - 1u); }

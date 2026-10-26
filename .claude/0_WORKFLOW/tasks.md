@@ -771,7 +771,7 @@ gradient + HPWL bit-exact to `hpwl_gradient_CU`, drift within noise). **Next: st
 in slot order, each module vs sw_flat `pl+Bprime`. **Step 8 brought forward (2026-10-19, Mark: (a) 250 MHz,
 emulation first, a baseline to improve on):** `make -C pl xclbin TARGET=...` plus the XRT host
 `make -C host/sw_flat hpwl-gradient-xrt`. **sw_emu 4/4 and hw_emu 3/3 (synthetic with 16 chunks, mgc_pci_bridge32_b,
-mgc_fft_a) PASS bit-exact** vs the g++ CU. **hw: 250 MHz failed timing** (WNS −0.729 ns, the tail
+mgc_fft_a) PASS bit-exact** vs the g++ CU. **hw: 250 MHz failed timing** (WNS −0.729 ns, the borrowed-copy
 exchange's URAM read); **200 MHz met timing** (WNS +0.031 ns; URAM 256, LUT 122 K) and built an xclbin at `b3d0e87`.
 **Card run 2026-10-20 on `vck` (booked): PASS bit-exact** on synthetic, mgc_fft_a, mms/adaptec1 and
 bigblue4 (3 chunks; ~8.4 ms wall-clock per axis, WL gradient only). Baseline done; clock, profiling and DDR mapping
@@ -919,7 +919,7 @@ in slot order, #45 step 6). Briefing: [[EXPLAINER_47_tail_exchange_deck_20261009
       As a fraction of today's cycles, FUSED is 58–65%, FUSED_TAIL 28–56% (1 M: 8 designs; 512 K:
       17). bigblue4 at 1 M: 2.49 M → 1.52 M → 0.99 M. Merge: 2 adders/lane → 0 stalls. Open: shared
       macro pins (≤ 6.8 K entries) need a refresh in R1. The tail's alignment is not charged (M1).
-- [x] **M1 (2026-10-07, measured; layout code not written):** `host/sw_flat/model/tail_layout.cpp`.
+- [x] **M1 (2026-10-07, measured; layout code not written):** `host/sw_flat/model/borrowed_layout.cpp` (was `tail_layout.cpp`).
       Per-bank tail rows with today's colouring: tail/E 1.002–1.029, every chunk within capacity
       (8 designs at 1 M, 17 at 512 K). The update needs an assembly buffer per consumer stream (≤ 162
       rows of 32 floats) taking 4 writes/cycle (stalls ≤ 0.34%); the merge needs the mirror gather.
@@ -934,19 +934,19 @@ in slot order, #45 step 6). Briefing: [[EXPLAINER_47_tail_exchange_deck_20261009
       owner block in the owner's slot order; device-transparent. Chunk counts unchanged on all 44 at
       1 M and 512 K; single-chunk designs byte-identical; 4/4 mutants.
 - [x] **B3 (2026-10-09): the tail exchange replaces the mailbox.** One tail block per owner on fresh
-      rows; `TailStream` (renamed `TailBlockDesc` 2026-10-16) op lists replayed through a 32 x 256 row buffer (`tail_exchange.hpp`);
+      rows; `TailStream` (renamed `TailBlockDesc` 2026-10-16) op lists replayed through a 32 x 256 row buffer (`borrowed_copies.hpp`, was `tail_exchange.hpp`);
       compute pass has no receive / return. `check_chunked` replays every block on node ids. Tier 1,
       8/8 real designs (blocks up to 3,107 rows: the buffer wraps), 7/7 mutants, C-synth II=1
       (3.482 ns est.), **RTL co-sim PASS** (hazard-1 control FAILS). bigblue4 at 1 M: 2.49 M ->
       1.93 M cycles per axis. Synthetic test capacities moved to 4096 / 2560 (per-owner block
       rounding).
       **Re-verified 2026-10-16 at `48fb9fa`** (after the owner/borrower refactor `83e3719`, which also
-      moved `load_pos_zero_grad` and wrapped `send_tails_pass` in `if (chunked)`): on the build server,
+      moved `load_pos_zero_grad` and wrapped `send_tails_pass`, now `send_borrowed_pass`, in `if (chunked)`): on the build server,
       C-synth 24/24 loops II=1, Fmax est. 287.2 MHz (unchanged); RTL co-sim capacity 1536 hazard 4
       PASS, hazard 1 FAILS (rel_rms ~2e2). Logs: build:`~/AIEplace/pl/synth/hpwl_gradient_CU/`.
-- [ ] **B4 = A, stream fusion (Mark, 2026-10-09).** **M2 DONE:** `host/sw_flat/tail_fusion.hpp`
+- [ ] **B4 = A, stream fusion (Mark, 2026-10-09).** **M2 DONE:** `host/sw_flat/borrowed_fusion.hpp`
       (`fused_send` / `fused_merge`: one ascending pass per owner, a cursor per consumer, merge in
-      ascending consumer order). Bit-identical to B3's device exchange: `pl/test/tail_exchange_test`
+      ascending consumer order). Bit-identical to B3's device exchange: `pl/test/borrowed_copies_test`
       (in `make -C pl test`), synthetic 3 + 30 chunks, and **8/8 chunked real designs at 1 M, 0
       differences**; consumer-order and dropped-entry mutants caught.
       `.claude/2_ARTIFACTS/mailbox_47/m2_tail_fusion_20261009.txt`. **Next: M3** (`hpwl_gradient_CU`
@@ -963,7 +963,7 @@ in slot order, #45 step 6). Briefing: [[EXPLAINER_47_tail_exchange_deck_20261009
       now take its lowest rows. `ChunkDesc.first_private_slot` marks the end of that prefix (≈ shared/16
       beats; banks balance within 0.4 pp), and the send reload and merge reload/drain cover only it.
       Cycle model, B3 → C8: bigblue4 1.93 M → 1.57 M (−18%), the other 7 −17..−31%; chunk counts,
-      externals, max_slots unchanged. `check_chunked` asserts C8; tail_exchange_test [5] mutant (prefix
+      externals, max_slots unchanged. `check_chunked` asserts C8; borrowed_copies_test [5] mutant (prefix
       a row short) bites. Tier 1 PASS, 8/8 real chunked designs PASS. **C-synth at `a98b3fe` (build
       server, in a since-removed worktree):** every pipelined loop II=1, Fmax est.
       287.2 MHz, both unchanged; +222 FF / +48 LUT (ChunkDesc 40 → 44 bytes). The top-level −1.05 ns
@@ -1013,8 +1013,8 @@ in slot order, #45 step 6). Briefing: [[EXPLAINER_47_tail_exchange_deck_20261009
       chunk order is already the best of all 720. Verdict: the window does not scale either; only
       per-chunk tails (B3/C8 today, B4 fused) do. `window_{1M,512K}_20261019.txt` (same folder).
 - [x] **Bring-up shortcut: YES, behind an option (Mark, 2026-10-09). Done:**
-      `chunked_device_arrays(..., fill_tails = true)` writes real positions into the external tails;
-      NaN stays the default. `tail_exchange_test` [2] holds it equal to the sent image.
+      `chunked_device_arrays(..., fill_borrowed = true)` writes real positions into the borrowed rows;
+      NaN stays the default. `borrowed_copies_test` [2] holds it equal to the sent image.
 
 → [[PLAN_47_mailbox_redesign_20261006.md]]
 

@@ -2,20 +2,20 @@
 #define SW_FLAT_CYCLE_MODEL_HPP
 
 // cycle_model.hpp -- device cycles per chunked gradient evaluation (one axis), per phase, from a
-// Chunked design's static trip counts and its tail op lists. Started as a copy of
-// vck5000/bring_up/beat_packer/cycle_model.hpp @ ef62dba (#47 M0); rewritten for the tail exchange
+// Chunked design's static trip counts and its borrowed op lists. Started as a copy of
+// vck5000/bring_up/beat_packer/cycle_model.hpp @ ef62dba (#47 M0); rewritten for the borrowed-copy exchange
 // (#47 B3, .claude/1_REVIEW/reports/PLAN_47_mailbox_redesign_20261006.md):
 //
-//   TODAY   hpwl_gradient_CU as built (B3 + C8): send_tails_pass (shared-row load + send ops),
-//           compute_pass, merge_tails_pass (shared-row reload + merge ops + shared-row drain).
-//   FUSED   B4: send and merge ride on iteration_update's chunk-major stream, so send_tails_pass and
-//           merge_tails_pass's reload / drain disappear. Charged instead: each block's beats, written
+//   TODAY   hpwl_gradient_CU as built (B3 + C8): send_borrowed_pass (shared-row load + send ops),
+//           compute_pass, merge_borrowed_pass (shared-row reload + merge ops + shared-row drain).
+//   FUSED   B4: send and merge ride on iteration_update's chunk-major stream, so send_borrowed_pass and
+//           merge_borrowed_pass's reload / drain disappear. Charged instead: each block's beats, written
 //           (send) and read (merge) as if DDR-bound, and merge stalls on a lane that needs more adds
 //           than it has adders.
 //   RESIDENT  R: every shared node has one slot, the same in every chunk, in a region that stays in
 //           URAM for the whole call. Chunk rows: private [0, P_k) | gap to P_max | region
 //           [P_max, P_max + R) | fixed. The region must start at the same row in every chunk to
-//           persist, hence P_max. Region loaded once, drained once; no tails, no send, no merge.
+//           persist, hence P_max. Region loaded once, drained once; no borrowed rows, no send, no merge.
 //           Macro pins stay per-chunk local slots (C6): refreshed and folded in every chunk.
 //   RESIDENT_MACROS  R+M: R with every macro and macro pin in the region too, so refresh runs once
 //           after the region load and the fold once before the region drain, not per chunk.
@@ -133,9 +133,9 @@ inline long ceil_div(long a, long b) { return (a + b - 1) / b; }
 inline long merge_stall_cycles(const Chunked& ch, int owner, const std::vector<long>& owner_slot, int adders_per_lane) {
     std::vector<int> adds(ch.chunks[owner].enc.num_slots, 0);
     for (const Chunk& c : ch.chunks)
-        for (const Chunk::TailBlock& block : c.tail_blocks)
+        for (const Chunk::BorrowedBlock& block : c.borrowed_blocks)
             if (block.owner == owner)
-                for (long i = block.first; i < block.first + block.count; i++) adds[owner_slot[c.work_node[c.tail_order[i]]]]++;
+                for (long i = block.first; i < block.first + block.count; i++) adds[owner_slot[c.work_node[c.borrowed_order[i]]]]++;
     long stalls = 0;
     for (size_t beat = 0; beat * LANES < adds.size(); beat++) {
         int busiest = 0;
@@ -162,18 +162,18 @@ inline Phases model_cycles(const Chunked& ch, Variant v, int adders_per_lane = 2
         if (!chunked) continue;
         if (!fused) {
             p.send_reload += shared_beats + O;
-            p.fold_other  += shared_beats + O + shared_beats + O;   // merge_tails_pass: reload + drain shared rows (C8)
+            p.fold_other  += shared_beats + O + shared_beats + O;   // merge_borrowed_pass: reload + drain shared rows (C8)
         } else {
             p.update_merge += merge_stall_cycles(ch, k, owner_slot, adders_per_lane);
         }
     }
     for (const Chunk& c : ch.chunks)   // every block, as its owner exchanges it
-        for (const Chunk::TailBlock& block : c.tail_blocks) {
+        for (const Chunk::BorrowedBlock& block : c.borrowed_blocks) {
             if (fused) {
                 p.update_send  += block.rows * BANKS / LANES;
                 p.update_merge += block.rows * BANKS / LANES;
             } else {
-                const TailOps ops = block_ops(ch, c, block, owner_slot);
+                const BorrowedOps ops = block_ops(ch, c, block, owner_slot);
                 p.send  += (long)ops.send.size() + O;
                 p.merge += (long)ops.merge.size() + O;
             }

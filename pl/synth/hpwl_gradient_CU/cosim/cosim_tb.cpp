@@ -1,5 +1,5 @@
-// cosim_tb.cpp -- RTL co-simulation bench for hpwl_gradient_CU_top: the chunked send_tails /
-// compute / merge_tails passes, the tail exchange's row buffers and the gradient merge, as synthesized RTL. A small
+// cosim_tb.cpp -- RTL co-simulation bench for hpwl_gradient_CU_top: the chunked send_borrowed /
+// compute / merge_borrowed passes, the borrowed-copy exchange's row buffers and the gradient merge, as synthesized RTL. A small
 // synthetic design is split into chunks by a small capacity. Same golden and tolerance as tier 1.
 // Exits 0 on pass.
 //
@@ -21,7 +21,7 @@
 
 extern "C" void hpwl_gradient_CU_top(
         const pinrec::ChunkDesc*, const int32_t*, int, const pinrec::RecordBeat*, pinrec::SlotBeat*, const pinrec::MacroPinRef*,
-        const pinrec::TailBlockDesc*, const uint32_t*, const float*, int, const float*, int,
+        const pinrec::BorrowedBlockDesc*, const uint32_t*, const float*, int, const float*, int,
         pinrec::SlotBeat*, int, float, float, int64_t*);
 
 // Co-simulation copies `depth` elements from every pointer (cosim_top.cpp): pad to it. Meow.
@@ -30,27 +30,27 @@ template <class T> static std::vector<T> padded(std::vector<T> v, size_t depth) 
     return v;
 }
 
-// Back-to-back row-buffer uses: a send TAIL_BEAT straight after an ENTRY of the half-row it writes,
-// and a merge ENTRY straight after the TAIL_BEAT that loaded its half-row. Meow.
+// Back-to-back row-buffer uses: a send BORROWED_BEAT straight after an ENTRY of the half-row it writes,
+// and a merge ENTRY straight after the BORROWED_BEAT that loaded its half-row. Meow.
 static void count_back_to_back(const packer::ChunkedDevice& dev, long& send_pairs, long& merge_pairs) {
-    for (const pinrec::TailBlockDesc& block_desc : dev.tail_blocks) {
+    for (const pinrec::BorrowedBlockDesc& block_desc : dev.borrowed_blocks) {
         std::vector<long> row(pinrec::BANKS, 0);
         long beat = 0;
         for (int i = 0; i < block_desc.num_send_ops; i++) {
-            const uint32_t op = dev.tail_ops[block_desc.send_op_offset + i];
-            if (op & pinrec::TAIL_BEAT_OP) { beat++; continue; }
-            const int bank = pinrec::tail_entry_bank(op);
+            const uint32_t op = dev.borrowed_ops[block_desc.send_op_offset + i];
+            if (op & pinrec::BORROWED_BEAT_OP) { beat++; continue; }
+            const int bank = pinrec::borrowed_entry_bank(op);
             const long half_beat = row[bank]++ * 2 + bank / pinrec::LANES;
-            if (i + 1 < block_desc.num_send_ops && (dev.tail_ops[block_desc.send_op_offset + i + 1] & pinrec::TAIL_BEAT_OP) && beat == half_beat) send_pairs++;
+            if (i + 1 < block_desc.num_send_ops && (dev.borrowed_ops[block_desc.send_op_offset + i + 1] & pinrec::BORROWED_BEAT_OP) && beat == half_beat) send_pairs++;
         }
         std::fill(row.begin(), row.end(), 0);
         beat = 0;
         for (int i = 0; i < block_desc.num_merge_ops; i++) {
-            const uint32_t op = dev.tail_ops[block_desc.merge_op_offset + i];
-            if (op & pinrec::TAIL_BEAT_OP) { beat++; continue; }
-            const int bank = pinrec::tail_entry_bank(op);
+            const uint32_t op = dev.borrowed_ops[block_desc.merge_op_offset + i];
+            if (op & pinrec::BORROWED_BEAT_OP) { beat++; continue; }
+            const int bank = pinrec::borrowed_entry_bank(op);
             const long half_beat = row[bank]++ * 2 + bank / pinrec::LANES;
-            if (i > 0 && (dev.tail_ops[block_desc.merge_op_offset + i - 1] & pinrec::TAIL_BEAT_OP) && beat - 1 == half_beat) merge_pairs++;
+            if (i > 0 && (dev.borrowed_ops[block_desc.merge_op_offset + i - 1] & pinrec::BORROWED_BEAT_OP) && beat - 1 == half_beat) merge_pairs++;
         }
     }
 }
@@ -85,7 +85,7 @@ int main(int argc, char** argv) {
         const packer::ChunkedDevice dev = packer::chunked_device_arrays(ch, axis, node_pos[axis]);
         const bool fits = dev.records.size() / pinrec::LANES <= 2048 && dev.slot_images.size() / pinrec::LANES <= 4096 &&
                           dev.desc.size() <= 64 && dev.group_ends.size() <= 2048 && dev.macro_pins.size() <= 4096 &&
-                          dev.tail_blocks.size() <= 1024 && dev.tail_ops.size() <= 32768;
+                          dev.borrowed_blocks.size() <= 1024 && dev.borrowed_ops.size() <= 32768;
         if (!fits) { printf("FAIL design exceeds a cosim port depth\n"); return 1; }
         std::vector<pinrec::RecordBeat> records(2048);
         std::memcpy(records.data(), dev.records.data(), dev.records.size() * sizeof(uint32_t));
@@ -94,13 +94,13 @@ int main(int argc, char** argv) {
         const std::vector<pinrec::ChunkDesc> desc = padded(dev.desc, 64);
         const std::vector<int32_t> group_ends = padded(dev.group_ends, 2048);
         const std::vector<pinrec::MacroPinRef> refs = padded(dev.macro_pins, 4096);
-        const std::vector<pinrec::TailBlockDesc> tail_blocks = padded(dev.tail_blocks, 1024);
-        const std::vector<uint32_t> tail_ops = padded(dev.tail_ops, 32768);
+        const std::vector<pinrec::BorrowedBlockDesc> borrowed_blocks = padded(dev.borrowed_blocks, 1024);
+        const std::vector<uint32_t> borrowed_ops = padded(dev.borrowed_ops, 32768);
         const std::vector<float> offsets = padded(dev.offset_table, 1024);
         std::vector<pinrec::SlotBeat> grad(4096);
         int64_t hpwl_total_fixed = -1;
         hpwl_gradient_CU_top(desc.data(), group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(), refs.data(),
-                             tail_blocks.data(), tail_ops.data(), offsets.data(), (int)dev.offset_table.size(), lut_table.data(),
+                             borrowed_blocks.data(), borrowed_ops.data(), offsets.data(), (int)dev.offset_table.size(), lut_table.data(),
                              lut.size, grad.data(), dev.offset_bits, 1.0f / golden::GAMMA, lut.inv_step, &hpwl_total_fixed);
 
         const float* grad_slots = reinterpret_cast<const float*>(grad.data());

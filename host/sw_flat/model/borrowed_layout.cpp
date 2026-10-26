@@ -1,12 +1,12 @@
-// tail_layout.cpp -- #47 M1: can each chunk's borrowed nodes form a tail that iteration_update
+// borrowed_layout.cpp -- #47 M1: can each chunk's borrowed nodes form borrowed rows that iteration_update
 // writes as a plain sequential stream? (.claude/1_REVIEW/reports/PLAN_47_mailbox_redesign_20261006.md)
 //
-// Emission order into borrower k's tail: owners j ascending, each owner's borrowed nodes in its own slot
-// order under the tail layout (owned movable rows only, per bank in node order -- the order the
-// update streams them). Layout (M0's): each borrowed node takes the next tail row OF ITS BANK (the bank
-// encode_chunked's colouring chose), so the tail is max_b(borrowed nodes in bank b) rows. The update writes
-// the tail row by row, holding rows in an on-chip assembly buffer until they are final (every bank
-// has filled the row, or will put nothing more there -- known statically). Reported: tail size / E
+// Emission order into borrower k's borrowed rows: owners j ascending, each owner's borrowed nodes in its own slot
+// order under the borrowed layout (owned movable rows only, per bank in node order -- the order the
+// update streams them). Layout (M0's): each borrowed node takes the next borrowed row OF ITS BANK (the bank
+// encode_chunked's colouring chose), so the borrowed rows are max_b(borrowed nodes in bank b) deep. The update writes
+// the borrowed rows one by one, holding rows in an on-chip assembly buffer until they are final (every bank
+// has filled the row, or will put nothing more there -- known statically). Reported: borrowed size / E
 // (1.00 = no padding), the buffer depth in rows, the most entries for one bank among 16 consecutive
 // emissions, and the update's stalls / FIFO depth at W buffer writes per cycle per borrower.
 // Colouring hints toward the emission order were measured in ed888f9 and did not pay. Meow.
@@ -18,14 +18,14 @@ using namespace packer;
 constexpr int WRITE_RATES[] = {1, 2, 4, 8};   // assembly-buffer entries per cycle, per borrower stream
 constexpr int NUM_RATES = 4;
 
-struct TailCost { long tail_slots = 0, buffer_rows = 0, bank_ports = 0; };
+struct BorrowedCost { long borrowed_slots = 0, buffer_rows = 0, bank_ports = 0; };
 
-static TailCost tail_cost(const std::vector<int>& order_banks) {
-    TailCost t;
+static BorrowedCost borrowed_cost(const std::vector<int>& order_banks) {
+    BorrowedCost t;
     std::vector<long> final_count(BANKS, 0), count(BANKS, 0);
     for (int b : order_banks) final_count[b]++;
     const long rows = *std::max_element(final_count.begin(), final_count.end());
-    t.tail_slots = rows * BANKS;
+    t.borrowed_slots = rows * BANKS;
     long flushed = 0, highest = 0;   // rows already written; rows any bank has started
     auto row_final = [&](long r) {
         for (int k = 0; k < BANKS; k++) if (count[k] <= r && final_count[k] > r) return false;
@@ -52,9 +52,9 @@ int main(int argc, char** argv) {
         auto next = [&]() { if (i + 1 >= argc) exit(2); return std::string(argv[++i]); };
         if (arg == "--capacity") capacity = std::stol(next());
         else if (arg == "--netlist") designs.push_back(next());
-        else { fprintf(stderr, "usage: tail_layout [--capacity SLOTS] (--netlist FILE)...\n"); exit(2); }
+        else { fprintf(stderr, "usage: borrowed_layout [--capacity SLOTS] (--netlist FILE)...\n"); exit(2); }
     }
-    printf("#47 tail_layout: capacity=%ld; tail size as a multiple of E (1.00 = no padding)\n", capacity);
+    printf("#47 borrowed_layout: capacity=%ld; borrowed size as a multiple of E (1.00 = no padding)\n", capacity);
 
     for (size_t d = 0; d < designs.size(); d++) {
         const Netlist nl = read_netlist(designs[d]);
@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
         if (ch.num_chunks == 1) continue;
         const int K = ch.num_chunks;
 
-        // Owner-side slot of every owned movable node under the tail layout. Meow.
+        // Owner-side slot of every owned movable node under the borrowed layout. Meow.
         std::vector<long> owner_slot(ch.global.kind.size(), -1);
         std::vector<long> owned_rows(K, 0);
         for (int j = 0; j < K; j++) {
@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
         }
 
         long E = 0, max_slots = 0;
-        TailCost cost;
+        BorrowedCost cost;
         std::vector<long> max_fifo(NUM_RATES, 0);
         std::vector<std::vector<long>> stall(NUM_RATES, std::vector<long>(K, 0));
         for (int k = 0; k < K; k++) {
@@ -105,12 +105,12 @@ int main(int argc, char** argv) {
 
             std::vector<int> banks;
             for (int l : order) banks.push_back(c.enc.bank[l]);
-            const TailCost t = tail_cost(banks);
-            cost.tail_slots += t.tail_slots;
+            const BorrowedCost t = borrowed_cost(banks);
+            cost.borrowed_slots += t.borrowed_slots;
             cost.buffer_rows = std::max(cost.buffer_rows, t.buffer_rows);
             cost.bank_ports = std::max(cost.bank_ports, t.bank_ports);
             const long fixed_rows = (c.enc.num_slots - c.enc.first_fixed_slot) / BANKS;
-            max_slots = std::max(max_slots, (owned_rows[k] + t.tail_slots / BANKS + fixed_rows) * BANKS);
+            max_slots = std::max(max_slots, (owned_rows[k] + t.borrowed_slots / BANKS + fixed_rows) * BANKS);
         }
         long update_beats = 0;
         for (int j = 0; j < K; j++) update_beats += owned_rows[j] * BANKS / LANES;
@@ -121,8 +121,8 @@ int main(int argc, char** argv) {
             printf("  write rate %d/cycle per borrower: update stalls %7ld cycles (%6.2f%%), FIFO %6ld entries\n",
                    WRITE_RATES[w], stall_total, 100.0 * stall_total / update_beats, max_fifo[w]);
         }
-        printf("  tail/E %5.3f  assembly buffer %4ld rows  bank ports %ld  max chunk %ld slots with tail (%s capacity)\n",
-               (double)cost.tail_slots / E, cost.buffer_rows, cost.bank_ports, max_slots, max_slots <= capacity ? "within" : "OVER");
+        printf("  borrowed/E %5.3f  assembly buffer %4ld rows  bank ports %ld  max chunk %ld slots with borrowed rows (%s capacity)\n",
+               (double)cost.borrowed_slots / E, cost.buffer_rows, cost.bank_ports, max_slots, max_slots <= capacity ? "within" : "OVER");
         fflush(stdout);
     }
     return 0;

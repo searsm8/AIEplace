@@ -94,19 +94,19 @@
 //  C2  Every small net, and with cfg.large_nets every large net, is homed in one chunk (majority
 //      of its movable nodes); its nodes owned elsewhere are borrowed nodes there. A large net then
 //      follows L1-L8 inside its home chunk's stream; drops sum into Chunked::large_dropped.
-//  C3, C4  retired 2026-10-09 (#47 B3) with the DDR mailbox they described; the tail exchange
+//  C3, C4  retired 2026-10-09 (#47 B3) with the DDR mailbox they described; the borrowed-copy exchange
 //      (C7) replaced it.                                                  [check_chunked: C1, C2]
 //  C5  Each chunk is an ordinary stream: R, S, B and M hold per chunk.   [check_chunked decodes]
 //  C6  A macro pin is never borrowed. A chunk whose nets use a pin of a macro owned elsewhere holds
 //      the pin as a local slot (in its macro-pin list, refreshed and folded on chip) and the macro
 //      as the borrowed node: borrowed nodes are cells and macros only.  [check_chunked]
-//  C7  Borrowed nodes sit in the chunk's tail rows, [first_tail_slot, first_fixed_slot): one block per
+//  C7  Borrowed nodes sit in the chunk's borrowed rows, [first_borrowed_slot, first_fixed_slot): one block per
 //      owner, owners ascending, each block starting on a fresh row; inside a block every bank fills
-//      its rows in emission order (the owner's slot order). tail_order lists the borrowed nodes in that
-//      order, tail_blocks the blocks. Every block's send and merge op lists fit TAIL_BUFFER_ROWS.
-//      Capacity is checked on num_slots, so it covers the tail.                [check_chunked]
+//      its rows in emission order (the owner's slot order). borrowed_order lists the borrowed nodes in that
+//      order, borrowed_blocks the blocks. Every block's send and merge op lists fit BORROWED_BUFFER_ROWS.
+//      Capacity is checked on num_slots, so it covers the borrowed rows.       [check_chunked]
 //  C8  Shared owned nodes (borrowed by another chunk) take the lowest owned rows of their bank, so
-//      every one sits below first_private_slot: the tail passes reload / drain only that prefix.
+//      every one sits below first_private_slot: the borrowed passes reload / drain only that prefix.
 //      Rows only -- banks, and so beats and hazards, are unchanged.            [check_chunked]
 // =================================================================================================
 
@@ -296,10 +296,10 @@ struct Encoded {
     long              large_extra_span = 0; // large nets whose span exceeds ceil(degree / LANES)
 
     std::vector<long> node_slot;            // per work node, -1 if none
-    std::vector<int>  tail_owner;           // per work node: its owner chunk if borrowed (tail rows, C7), else -1; empty = none
+    std::vector<int>  borrowed_from;        // per work node: its owner chunk if borrowed (borrowed rows, C7), else -1; empty = none
     std::vector<char> shared;               // per work node: owned here AND borrowed by another chunk (C8); empty = none
     long              first_private_slot = 0;   // owned slots below hold every shared node (C8); 0 unchunked
-    long              first_tail_slot = 0;  // owned movable slots below, borrowed-node tail rows from here (C7)
+    long              first_borrowed_slot = 0;  // owned movable slots below, borrowed rows from here (C7)
     long              first_fixed_slot = 0;
     long              num_slots = 0;        // multiple of BANKS (and so of LANES)
     long              max_slot = 0;
@@ -690,17 +690,17 @@ inline void pack_large_nets(Encoded& enc, const Config& cfg) {
 }
 
 // Step 4: node_slot = row * BANKS + bank. Owned movable rows first in every bank, then the
-// borrowed-node tail rows (C7; none unchunked), then fixed rows, so `node_slot >= first_fixed_slot` is
-// the device's "read position, skip gradient write" test. The tail is one block per owner, owners
-// ascending, each on fresh rows; a tail node's row inside its block is provisional here:
-// order_borrowed_tails puts each block in emission order once every chunk is encoded. Meow.
+// borrowed rows (C7; none unchunked), then fixed rows, so `node_slot >= first_fixed_slot` is
+// the device's "read position, skip gradient write" test. The borrowed rows are one block per owner, owners
+// ascending, each on fresh rows; a borrowed node's row inside its block is provisional here:
+// order_borrowed_blocks puts each block in emission order once every chunk is encoded. Meow.
 inline void assign_node_slots(Encoded& enc) {
     const auto& kind = enc.kind;
-    enum { FIXED_ROWS, OWNED_ROWS, TAIL_ROWS };
-    auto tail = [&](size_t node) { return !enc.tail_owner.empty() && enc.tail_owner[node] >= 0; };
+    enum { FIXED_ROWS, OWNED_ROWS, BORROWED_ROWS };
+    auto is_borrowed = [&](size_t node) { return !enc.borrowed_from.empty() && enc.borrowed_from[node] >= 0; };
     auto row_class = [&](size_t node) {
         if (slot_class(kind[node]) == 0) return (int)FIXED_ROWS;
-        return tail(node) ? (int)TAIL_ROWS : (int)OWNED_ROWS;
+        return is_borrowed(node) ? (int)BORROWED_ROWS : (int)OWNED_ROWS;
     };
     std::vector<long> rows[3] = {std::vector<long>(BANKS, 0), std::vector<long>(BANKS, 0), std::vector<long>(BANKS, 0)};
     std::map<int, std::vector<long>> block_bank_rows;   // owner -> rows per bank of its block
@@ -710,23 +710,23 @@ inline void assign_node_slots(Encoded& enc) {
         if (enc.bank[node] == NO_BANK) continue;
         rows[row_class(node)][enc.bank[node]]++;
         if (shared(node)) shared_rows[enc.bank[node]]++;
-        if (row_class(node) == TAIL_ROWS) {
-            auto& counts = block_bank_rows[enc.tail_owner[node]];
+        if (row_class(node) == BORROWED_ROWS) {
+            auto& counts = block_bank_rows[enc.borrowed_from[node]];
             counts.resize(BANKS, 0);
             counts[enc.bank[node]]++;
         }
     }
     const long owned_rows = *std::max_element(rows[OWNED_ROWS].begin(), rows[OWNED_ROWS].end());
-    long tail_rows = 0;
+    long borrowed_rows = 0;
     std::map<int, long> block_start;   // owner -> its block's first row
     for (const auto& [owner, counts] : block_bank_rows) {
-        block_start[owner] = owned_rows + tail_rows;
-        tail_rows += *std::max_element(counts.begin(), counts.end());
+        block_start[owner] = owned_rows + borrowed_rows;
+        borrowed_rows += *std::max_element(counts.begin(), counts.end());
     }
     const long fixed_rows = *std::max_element(rows[FIXED_ROWS].begin(), rows[FIXED_ROWS].end());
-    const long movable_rows = owned_rows + tail_rows;
+    const long movable_rows = owned_rows + borrowed_rows;
     enc.first_private_slot = *std::max_element(shared_rows.begin(), shared_rows.end()) * BANKS;
-    enc.first_tail_slot  = owned_rows * BANKS;
+    enc.first_borrowed_slot = owned_rows * BANKS;
     enc.first_fixed_slot = movable_rows * BANKS;
     enc.num_slots        = (movable_rows + fixed_rows) * BANKS;
 
@@ -739,7 +739,7 @@ inline void assign_node_slots(Encoded& enc) {
     for (size_t node = 0; node < kind.size(); node++) {
         const int bank = enc.bank[node];
         if (bank == NO_BANK) continue;
-        const long row = tail(node)   ? block_next_row[enc.tail_owner[node]][bank]++
+        const long row = is_borrowed(node) ? block_next_row[enc.borrowed_from[node]][bank]++
                        : shared(node) ? next_shared_row[bank]++
                                       : next_row[row_class(node)][bank]++;
         enc.node_slot[node] = row * BANKS + bank;
@@ -1079,9 +1079,9 @@ inline int check(const Netlist& nl, const Encoded& enc, const Config& cfg) {
 // (their position never changes, so they are not borrowed).
 // Each chunk is then an ordinary Encoded stream over local slots, so node_slot bits shrink too.
 //
-// Borrowed nodes' values move through the borrowers' TAIL rows (C7): the owner writes a block's positions
+// Borrowed nodes' values move through the borrowers' BORROWED rows (C7): the owner writes a block's positions
 // into the borrower's position image and later adds what the borrower drained into the same block of
-// the gradient image into its own (pin_record.hpp TailBlockDesc). Every DDR access is sequential; the
+// the gradient image into its own (pin_record.hpp BorrowedBlockDesc). Every DDR access is sequential; the
 // random side is always on chip. Meow.
 
 struct Chunk {
@@ -1089,9 +1089,9 @@ struct Chunk {
     std::vector<int>  net_global;            // local net -> global net (= parsed net index)
     std::vector<int>  work_node;             // local node -> global work node
     std::vector<char> borrowed;              // per local node: borrowed, i.e. owned by another chunk
-    std::vector<int>  tail_order;            // borrowed locals in emission order: owner ascending, then owner slot (C7)
-    struct TailBlock { int owner; long first, count, start_row, rows; };   // tail_order[first, first+count)
-    std::vector<TailBlock> tail_blocks;      // one per owner with nodes borrowed here, owners ascending (C7)
+    std::vector<int>  borrowed_order;        // borrowed locals in emission order: owner ascending, then owner slot (C7)
+    struct BorrowedBlock { int owner; long first, count, start_row, rows; };   // borrowed_order[first, first+count)
+    std::vector<BorrowedBlock> borrowed_blocks;  // one per owner with nodes borrowed here, owners ascending (C7)
 };
 
 struct Chunked {
@@ -1155,12 +1155,12 @@ inline std::vector<int> order_owner(const Encoded& g, const std::vector<int>& or
 
 // Builds every chunk from a given owner per movable work node (-1 for fixed), any partitioner's
 // (#42). A macro's pins are forced to the macro's chunk. False if a chunk does not fit. Meow.
-// C7: a borrower's tail holds one block per owner, owners ascending, each on fresh rows, and inside
+// C7: a borrower's borrowed rows hold one block per owner, owners ascending, each on fresh rows, and inside
 // a block every bank fills its rows in EMISSION order -- the owner's slot order, the order its
 // update streams them -- so a block can be assembled row by row. Owner slots exist only once every
 // chunk is encoded, so this runs last and re-encodes the records of each chunk it reorders (the
 // permutation stays inside each bank's rows of one block: banks, beats and hazards are unchanged). Meow.
-inline void order_borrowed_tails(Chunked& ch) {
+inline void order_borrowed_blocks(Chunked& ch) {
     std::vector<long> owner_slot(ch.global.kind.size(), -1);
     for (int j = 0; j < ch.num_chunks; j++) {
         const Chunk& c = ch.chunks[j];
@@ -1168,24 +1168,24 @@ inline void order_borrowed_tails(Chunked& ch) {
             if (!c.borrowed[l] && ch.owner[c.work_node[l]] == j) owner_slot[c.work_node[l]] = c.enc.node_slot[l];
     }
     for (Chunk& c : ch.chunks) {
-        c.tail_order.clear();
-        for (size_t l = 0; l < c.work_node.size(); l++) if (c.borrowed[l]) c.tail_order.push_back((int)l);
-        if (c.tail_order.empty()) continue;
-        std::stable_sort(c.tail_order.begin(), c.tail_order.end(), [&](int a, int b) {
+        c.borrowed_order.clear();
+        for (size_t l = 0; l < c.work_node.size(); l++) if (c.borrowed[l]) c.borrowed_order.push_back((int)l);
+        if (c.borrowed_order.empty()) continue;
+        std::stable_sort(c.borrowed_order.begin(), c.borrowed_order.end(), [&](int a, int b) {
             const int na = c.work_node[a], nb = c.work_node[b];
             return ch.owner[na] != ch.owner[nb] ? ch.owner[na] < ch.owner[nb] : owner_slot[na] < owner_slot[nb]; });
-        c.tail_blocks.clear();
-        long start_row = c.enc.first_tail_slot / BANKS;
-        for (size_t first = 0; first < c.tail_order.size();) {
-            const int owner = ch.owner[c.work_node[c.tail_order[first]]];
+        c.borrowed_blocks.clear();
+        long start_row = c.enc.first_borrowed_slot / BANKS;
+        for (size_t first = 0; first < c.borrowed_order.size();) {
+            const int owner = ch.owner[c.work_node[c.borrowed_order[first]]];
             size_t end = first;
             std::vector<long> next_row(BANKS, start_row);
-            for (; end < c.tail_order.size() && ch.owner[c.work_node[c.tail_order[end]]] == owner; end++) {
-                const int l = c.tail_order[end];
+            for (; end < c.borrowed_order.size() && ch.owner[c.work_node[c.borrowed_order[end]]] == owner; end++) {
+                const int l = c.borrowed_order[end];
                 c.enc.node_slot[l] = next_row[c.enc.bank[l]]++ * BANKS + c.enc.bank[l];
             }
             const long rows = *std::max_element(next_row.begin(), next_row.end()) - start_row;
-            c.tail_blocks.push_back({owner, (long)first, (long)(end - first), start_row, rows});
+            c.borrowed_blocks.push_back({owner, (long)first, (long)(end - first), start_row, rows});
             start_row += rows;
             first = end;
         }
@@ -1272,8 +1272,8 @@ inline bool build_chunks_from_owner(Chunked& ch, std::vector<int> owner, int num
             if (local_of[mp.pin_node] >= 0)   // owned macros: all pins; borrowed macros: the pins its nets use (C6). Meow.
                 e.macro_pins.push_back({local_of[mp.pin_node], local_of[mp.macro_node], {mp.offset[0], mp.offset[1]}});
         if (std::count(c.borrowed.begin(), c.borrowed.end(), 1)) {   // C7
-            e.tail_owner.assign(c.work_node.size(), -1);
-            for (size_t l = 0; l < c.work_node.size(); l++) if (c.borrowed[l]) e.tail_owner[l] = ch.owner[c.work_node[l]];
+            e.borrowed_from.assign(c.work_node.size(), -1);
+            for (size_t l = 0; l < c.work_node.size(); l++) if (c.borrowed[l]) e.borrowed_from[l] = ch.owner[c.work_node[l]];
         }
         e.shared.assign(c.work_node.size(), 0);
         for (size_t l = 0; l < c.work_node.size(); l++) e.shared[l] = !c.borrowed[l] && shared[c.work_node[l]];
@@ -1283,7 +1283,7 @@ inline bool build_chunks_from_owner(Chunked& ch, std::vector<int> owner, int num
         ch.large_dropped += e.large_dropped;
     }
 
-    order_borrowed_tails(ch);
+    order_borrowed_blocks(ch);
     return true;
 }
 
@@ -1348,17 +1348,17 @@ inline Chunked encode_chunked(const Netlist& nl, const Config& cfg, long capacit
     return ch;
 }
 
-// One tail block's op lists (pin_record.hpp TailBlockDesc), from its entries in emission order: each
+// One borrowed block's op lists (pin_record.hpp BorrowedBlockDesc), from its entries in emission order: each
 // entry's bank and the owner slot it carries; its row is the next of its bank, from the block's
-// first row. Send: TAIL_BEAT writes the next half-row as soon as every bank of that half has put its
-// last entry there. Merge: TAIL_BEAT loads a half-row just before its first entry needs it. Either
+// first row. Send: BORROWED_BEAT writes the next half-row as soon as every bank of that half has put its
+// last entry there. Merge: BORROWED_BEAT loads a half-row just before its first entry needs it. Either
 // list is infeasible if a buffer row would be reused before it is written out (send) or used (merge)
-// -- the block needs more than TAIL_BUFFER_ROWS rows in flight. Meow.
-struct TailOps { std::vector<uint32_t> send, merge; bool feasible = true; long max_rows_in_flight = 0; };
+// -- the block needs more than BORROWED_BUFFER_ROWS rows in flight. Meow.
+struct BorrowedOps { std::vector<uint32_t> send, merge; bool feasible = true; long max_rows_in_flight = 0; };
 
-inline TailOps tail_block_ops(const std::vector<long>& owner_slots, const std::vector<int>& banks, long rows) {
-    TailOps t;
-    const long R = TAIL_BUFFER_ROWS, beats = rows * BANKS / LANES;
+inline BorrowedOps borrowed_block_ops(const std::vector<long>& owner_slots, const std::vector<int>& banks, long rows) {
+    BorrowedOps t;
+    const long R = BORROWED_BUFFER_ROWS, beats = rows * BANKS / LANES;
     std::vector<long> total(BANKS, 0), placed(BANKS, 0);
     for (int b : banks) total[b]++;
     auto half_final = [&](long beat) {   // every bank of the half has placed its entry for that row, or never will
@@ -1371,11 +1371,11 @@ inline TailOps tail_block_ops(const std::vector<long>& owner_slots, const std::v
         const long row = placed[banks[i]];
         if ((row - R + 1) * (BANKS / LANES) > written) t.feasible = false;   // buffer row still holds row - R
         t.max_rows_in_flight = std::max(t.max_rows_in_flight, row + 1 - written * LANES / BANKS);
-        t.send.push_back(make_tail_entry((uint32_t)owner_slots[i], banks[i]));
+        t.send.push_back(make_borrowed_entry((uint32_t)owner_slots[i], banks[i]));
         placed[banks[i]]++;
-        while (written < beats && half_final(written)) { t.send.push_back(TAIL_BEAT_OP); written++; }
+        while (written < beats && half_final(written)) { t.send.push_back(BORROWED_BEAT_OP); written++; }
     }
-    while (written < beats) { t.send.push_back(TAIL_BEAT_OP); written++; }
+    while (written < beats) { t.send.push_back(BORROWED_BEAT_OP); written++; }
 
     std::fill(placed.begin(), placed.end(), 0);   // now: entries consumed per bank
     long loaded = 0;
@@ -1386,15 +1386,15 @@ inline TailOps tail_block_ops(const std::vector<long>& owner_slots, const std::v
             const long row = loaded * LANES / BANKS, half = loaded % (BANKS / LANES);
             for (int k = (int)half * LANES; k < (int)(half + 1) * LANES; k++)
                 if (row >= R && placed[k] <= row - R && total[k] > row - R) t.feasible = false;   // row - R not used yet
-            t.merge.push_back(TAIL_BEAT_OP);
+            t.merge.push_back(BORROWED_BEAT_OP);
         }
-        t.merge.push_back(make_tail_entry((uint32_t)owner_slots[i], b));
+        t.merge.push_back(make_borrowed_entry((uint32_t)owner_slots[i], b));
         placed[b]++;
     }
     return t;
 }
 
-// Owner-side slot of every owned node, for the tail ops. Meow.
+// Owner-side slot of every owned node, for the borrowed ops. Meow.
 inline std::vector<long> owner_slots_of(const Chunked& ch) {
     std::vector<long> owner_slot(ch.global.kind.size(), -1);
     for (int j = 0; j < ch.num_chunks; j++)
@@ -1404,26 +1404,26 @@ inline std::vector<long> owner_slots_of(const Chunked& ch) {
     return owner_slot;
 }
 
-inline TailOps block_ops(const Chunked& ch, const Chunk& borrower, const Chunk::TailBlock& block, const std::vector<long>& owner_slot) {
+inline BorrowedOps block_ops(const Chunked& ch, const Chunk& borrower, const Chunk::BorrowedBlock& block, const std::vector<long>& owner_slot) {
     std::vector<long> slots;
     std::vector<int> banks;
     for (long i = block.first; i < block.first + block.count; i++) {
-        const int l = borrower.tail_order[i];
+        const int l = borrower.borrowed_order[i];
         slots.push_back(owner_slot[borrower.work_node[l]]);
         banks.push_back(borrower.enc.bank[l]);
     }
-    return tail_block_ops(slots, banks, block.rows);
+    return borrowed_block_ops(slots, banks, block.rows);
 }
 
 // Slot-major position image of chunk k, one axis. Own cells/macros carry their position, fixed
 // pins position + offset; macro pins AND borrowed nodes are NaN -- the device must refresh / receive them.
-// fill_tails (#47 bring-up shortcut, Mark 2026-10-09): borrowed nodes carry their node's real position
+// fill_borrowed (#47 bring-up shortcut, Mark 2026-10-09): borrowed nodes carry their node's real position
 // instead, as if every owner's send had already run, so compute_pass can be tested on its own. Meow.
 inline std::vector<float> chunk_slot_positions(const Chunked& ch, int k, int axis, const std::vector<float>& node_pos,
-                                               bool fill_tails = false) {
+                                               bool fill_borrowed = false) {
     const Chunk& c = ch.chunks[k];
     std::vector<float> image = slot_positions(c.enc, axis, node_pos);
-    if (!fill_tails)
+    if (!fill_borrowed)
         for (size_t l = 0; l < c.borrowed.size(); l++) if (c.borrowed[l]) image[c.enc.node_slot[l]] = NAN;
     return image;
 }
@@ -1436,14 +1436,14 @@ struct ChunkedDevice {
     std::vector<uint32_t>         records;        // LANES per beat
     std::vector<float>            slot_images;    // slot-major, each chunk a whole number of beats
     std::vector<MacroPinRef>      macro_pins;
-    std::vector<TailBlockDesc>    tail_blocks;    // per owner, borrowers ascending (ChunkDesc first_tail_block, num_borrowers)
-    std::vector<uint32_t>         tail_ops;       // every tail block's send and merge ops
+    std::vector<BorrowedBlockDesc> borrowed_blocks;  // per owner, borrowers ascending (ChunkDesc first_borrowed_block, num_borrowers)
+    std::vector<uint32_t>          borrowed_ops;     // every borrowed block's send and merge ops
     std::vector<float>            offset_table;
     int                           offset_bits = 0;
 };
 
 inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const std::vector<float>& node_pos,
-                                           bool fill_tails = false) {   // see chunk_slot_positions
+                                           bool fill_borrowed = false) {   // see chunk_slot_positions
     ChunkedDevice dev;
     dev.offset_table  = ch.global.offset_table[axis];
     dev.offset_bits   = ch.chunks[0].enc.offset_bits;
@@ -1454,38 +1454,38 @@ inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const st
         const Chunk& c = ch.chunks[k];
         if (c.enc.offset_bits != dev.offset_bits) { fprintf(stderr, "chunks disagree on offset_bits\n"); exit(2); }
         ChunkDesc d = {};
-        d.record_beat_offset = (int32_t)(dev.records.size() / LANES);
-        d.num_beats          = (int32_t)c.enc.issue.size();
+        d.record_beat_offset   = (int32_t)(dev.records.size() / LANES);
+        d.num_beats            = (int32_t)c.enc.issue.size();
         dev.group_ends.insert(dev.group_ends.end(), c.enc.degree_group_end.begin(), c.enc.degree_group_end.end());
         dev.group_ends.insert(dev.group_ends.end(), c.enc.span_group_end.begin(), c.enc.span_group_end.end());
-        d.slot_beat_offset   = (int32_t)(dev.slot_images.size() / LANES);
-        d.num_slot_beats     = (int32_t)(c.enc.num_slots / LANES);
-        d.first_private_slot = (int32_t)c.enc.first_private_slot;
-        d.first_tail_slot    = (int32_t)c.enc.first_tail_slot;
-        d.first_fixed_slot   = (int32_t)c.enc.first_fixed_slot;
-        d.macro_pin_offset   = (int32_t)dev.macro_pins.size();
-        d.num_macro_pins     = (int32_t)c.enc.macro_order.size();   // the scheduled list, SKIP padding included
-        d.first_tail_block   = (int32_t)dev.tail_blocks.size();
+        d.slot_beat_offset     = (int32_t)(dev.slot_images.size() / LANES);
+        d.num_slot_beats       = (int32_t)(c.enc.num_slots / LANES);
+        d.first_private_slot   = (int32_t)c.enc.first_private_slot;
+        d.first_borrowed_slot  = (int32_t)c.enc.first_borrowed_slot;
+        d.first_fixed_slot     = (int32_t)c.enc.first_fixed_slot;
+        d.macro_pin_offset     = (int32_t)dev.macro_pins.size();
+        d.num_macro_pins       = (int32_t)c.enc.macro_order.size();   // the scheduled list, SKIP padding included
+        d.first_borrowed_block = (int32_t)dev.borrowed_blocks.size();
         for (int borrower = 0; borrower < ch.num_chunks; borrower++)   // this chunk as owner (C7)
-            for (const Chunk::TailBlock& block : ch.chunks[borrower].tail_blocks) {
+            for (const Chunk::BorrowedBlock& block : ch.chunks[borrower].borrowed_blocks) {
                 if (block.owner != k) continue;
-                const TailOps ops = block_ops(ch, ch.chunks[borrower], block, owner_slot);
-                if (!ops.feasible) { fprintf(stderr, "tail block %d -> %d needs more than %d buffer rows\n", k, borrower, TAIL_BUFFER_ROWS); exit(2); }
-                TailBlockDesc block_desc;
-                block_desc.send_op_offset = (int32_t)dev.tail_ops.size();
+                const BorrowedOps ops = block_ops(ch, ch.chunks[borrower], block, owner_slot);
+                if (!ops.feasible) { fprintf(stderr, "borrowed block %d -> %d needs more than %d buffer rows\n", k, borrower, BORROWED_BUFFER_ROWS); exit(2); }
+                BorrowedBlockDesc block_desc;
+                block_desc.send_op_offset = (int32_t)dev.borrowed_ops.size();
                 block_desc.num_send_ops = (int32_t)ops.send.size();
-                dev.tail_ops.insert(dev.tail_ops.end(), ops.send.begin(), ops.send.end());
-                block_desc.merge_op_offset = (int32_t)dev.tail_ops.size();
+                dev.borrowed_ops.insert(dev.borrowed_ops.end(), ops.send.begin(), ops.send.end());
+                block_desc.merge_op_offset = (int32_t)dev.borrowed_ops.size();
                 block_desc.num_merge_ops = (int32_t)ops.merge.size();
-                dev.tail_ops.insert(dev.tail_ops.end(), ops.merge.begin(), ops.merge.end());
+                dev.borrowed_ops.insert(dev.borrowed_ops.end(), ops.merge.begin(), ops.merge.end());
                 block_desc.block_beat_offset = (int32_t)(slot_beat_offset[borrower] + block.start_row * BANKS / LANES);
-                dev.tail_blocks.push_back(block_desc);
+                dev.borrowed_blocks.push_back(block_desc);
             }
-        d.num_borrowers      = (int32_t)dev.tail_blocks.size() - d.first_tail_block;
+        d.num_borrowers        = (int32_t)dev.borrowed_blocks.size() - d.first_borrowed_block;
         dev.desc.push_back(d);
 
         dev.records.insert(dev.records.end(), c.enc.records[axis].begin(), c.enc.records[axis].end());
-        const std::vector<float> image = chunk_slot_positions(ch, k, axis, node_pos, fill_tails);
+        const std::vector<float> image = chunk_slot_positions(ch, k, axis, node_pos, fill_borrowed);
         dev.slot_images.insert(dev.slot_images.end(), image.begin(), image.end());
         const std::vector<MacroPinRef> refs = macro_pin_refs(c.enc, axis);
         dev.macro_pins.insert(dev.macro_pins.end(), refs.begin(), refs.end());
@@ -1504,16 +1504,16 @@ inline std::vector<int> chunked_large_nets(const Chunked& ch) {
 // per-bank row counters, half-row beats), and checks that every borrower slot of the block receives
 // its own node from the owner, and that every merge entry adds that node into its owner slot. A buffer
 // row reused too early, a wrong bank or row, or a beat out of place all show as a wrong node. Meow.
-inline bool tail_ops_deliver(const Chunked& ch, const Chunk& borrower, const Chunk::TailBlock& block, const TailOps& ops) {
+inline bool borrowed_ops_deliver(const Chunked& ch, const Chunk& borrower, const Chunk::BorrowedBlock& block, const BorrowedOps& ops) {
     const Chunk& owner = ch.chunks[block.owner];
     std::vector<int> owner_node(owner.enc.num_slots, -1), borrower_node(borrower.enc.num_slots, -1);
     for (size_t l = 0; l < owner.work_node.size(); l++) if (owner.enc.node_slot[l] >= 0) owner_node[owner.enc.node_slot[l]] = owner.work_node[l];
     for (size_t l = 0; l < borrower.work_node.size(); l++) if (borrower.enc.node_slot[l] >= 0) borrower_node[borrower.enc.node_slot[l]] = borrower.work_node[l];
-    const long R = TAIL_BUFFER_ROWS, first_slot = block.start_row * BANKS;
+    const long R = BORROWED_BUFFER_ROWS, first_slot = block.start_row * BANKS;
     std::vector<int> buffer(BANKS * R, -1), row(BANKS, 0);
     long beat = 0;
     for (uint32_t op : ops.send) {
-        if (op & TAIL_BEAT_OP) {
+        if (op & BORROWED_BEAT_OP) {
             const long r = beat * LANES / BANKS, half = beat % (BANKS / LANES);
             for (int j = 0; j < LANES; j++) {
                 const int b = (int)half * LANES + j;
@@ -1523,8 +1523,8 @@ inline bool tail_ops_deliver(const Chunked& ch, const Chunk& borrower, const Chu
             }
             beat++;
         } else {
-            const int b = tail_entry_bank(op);
-            buffer[b * R + row[b]++ % R] = owner_node[tail_entry_slot(op)];
+            const int b = borrowed_entry_bank(op);
+            buffer[b * R + row[b]++ % R] = owner_node[borrowed_entry_slot(op)];
         }
     }
     if (beat != block.rows * BANKS / LANES) return false;
@@ -1532,21 +1532,21 @@ inline bool tail_ops_deliver(const Chunked& ch, const Chunk& borrower, const Chu
     std::fill(row.begin(), row.end(), 0);
     beat = 0;
     for (uint32_t op : ops.merge) {
-        if (op & TAIL_BEAT_OP) {
+        if (op & BORROWED_BEAT_OP) {
             const long r = beat * LANES / BANKS, half = beat % (BANKS / LANES);
             for (int j = 0; j < LANES; j++) buffer[((int)half * LANES + j) * R + r % R] = borrower_node[first_slot + beat * LANES + j];
             beat++;
         } else {
-            const int b = tail_entry_bank(op);
+            const int b = borrowed_entry_bank(op);
             const int node = buffer[b * R + row[b]++ % R];
-            if (node < 0 || node != owner_node[tail_entry_slot(op)]) return false;   // adds another node's gradient
+            if (node < 0 || node != owner_node[borrowed_entry_slot(op)]) return false;   // adds another node's gradient
         }
     }
     return true;
 }
 
 // Chunked checker: every chunk decodes on its own (local slots -> parsed geometry); the union must
-// be the in-scope netlist exactly. Plus ownership, capacity, the tail layout (C7), and the tail ops
+// be the in-scope netlist exactly. Plus ownership, capacity, the borrowed layout (C7), and the borrowed ops
 // replayed on node ids: every borrowed node's slot receives the node its borrower expects, and every merge
 // adds into that node's owner slot. Meow.
 inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg) {
@@ -1581,7 +1581,7 @@ inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg
         }
         chunk_slot_nodes.push_back(slot_nodes);
     }
-    {   // C7: every borrowed node in its chunk's tail rows, each bank's tail in emission order. Meow.
+    {   // C7: every borrowed node in its chunk's borrowed rows, each bank's borrowed rows in emission order. Meow.
         const std::vector<long> owner_slot = owner_slots_of(ch);
         for (int k = 0; k < ch.num_chunks; k++) {
             const Chunk& c = ch.chunks[k];
@@ -1591,38 +1591,38 @@ inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg
                 const long slot = e.node_slot[l];
                 if (c.borrowed[l]) {
                     num_borrowed++;
-                    if (slot < e.first_tail_slot || slot >= e.first_fixed_slot) fail("borrowed node outside its chunk's tail rows (C7)", k);
-                } else if (slot_class(e.kind[l]) == 1 && slot >= e.first_tail_slot) {
-                    fail("owned movable slot in the tail rows (C7)", k);
+                    if (slot < e.first_borrowed_slot || slot >= e.first_fixed_slot) fail("borrowed node outside its chunk's borrowed rows (C7)", k);
+                } else if (slot_class(e.kind[l]) == 1 && slot >= e.first_borrowed_slot) {
+                    fail("owned movable slot in the borrowed rows (C7)", k);
                 }
             }
-            if ((long)c.tail_order.size() != num_borrowed) { fail("tail_order does not list every borrowed node (C7)", k); continue; }
-            for (size_t i = 0; i < c.tail_order.size(); i++) {
-                const int l = c.tail_order[i];
-                if (!c.borrowed[l]) { fail("tail_order names a node that is not borrowed (C7)", k); break; }
+            if ((long)c.borrowed_order.size() != num_borrowed) { fail("borrowed_order does not list every borrowed node (C7)", k); continue; }
+            for (size_t i = 0; i < c.borrowed_order.size(); i++) {
+                const int l = c.borrowed_order[i];
+                if (!c.borrowed[l]) { fail("borrowed_order names a node that is not borrowed (C7)", k); break; }
                 if (i > 0) {
-                    const int a = c.work_node[c.tail_order[i - 1]], b = c.work_node[l];
+                    const int a = c.work_node[c.borrowed_order[i - 1]], b = c.work_node[l];
                     if (ch.owner[a] > ch.owner[b] || (ch.owner[a] == ch.owner[b] && owner_slot[a] >= owner_slot[b]))
-                        { fail("tail_order not in emission order (C7)", k); break; }
+                        { fail("borrowed_order not in emission order (C7)", k); break; }
                 }
             }
-            long row = e.first_tail_slot / BANKS, covered = 0;
-            for (const Chunk::TailBlock& block : c.tail_blocks) {
-                if (block.start_row != row || block.first != covered) { fail("tail blocks not contiguous, fresh rows (C7)", k); break; }
+            long row = e.first_borrowed_slot / BANKS, covered = 0;
+            for (const Chunk::BorrowedBlock& block : c.borrowed_blocks) {
+                if (block.start_row != row || block.first != covered) { fail("borrowed blocks not contiguous, fresh rows (C7)", k); break; }
                 std::vector<long> next_row(BANKS, block.start_row);
                 for (long i = block.first; i < block.first + block.count; i++) {
-                    const int l = c.tail_order[i];
-                    if (ch.owner[c.work_node[l]] != block.owner) { fail("a tail block holds another owner's node (C7)", k); break; }
-                    if (e.node_slot[l] != next_row[e.bank[l]]++ * BANKS + e.bank[l]) { fail("a bank's rows in a tail block not in emission order (C7)", k); break; }
+                    const int l = c.borrowed_order[i];
+                    if (ch.owner[c.work_node[l]] != block.owner) { fail("a borrowed block holds another owner's node (C7)", k); break; }
+                    if (e.node_slot[l] != next_row[e.bank[l]]++ * BANKS + e.bank[l]) { fail("a bank's rows in a borrowed block not in emission order (C7)", k); break; }
                 }
-                if (*std::max_element(next_row.begin(), next_row.end()) - block.start_row != block.rows) fail("tail block row count (C7)", k);
-                const TailOps ops = block_ops(ch, c, block, owner_slot);
-                if (!ops.feasible) fail("tail block needs more than TAIL_BUFFER_ROWS rows in flight (C7)", k);
-                if (!tail_ops_deliver(ch, c, block, ops)) fail("tail ops deliver a node to the wrong slot (C7)", k);
+                if (*std::max_element(next_row.begin(), next_row.end()) - block.start_row != block.rows) fail("borrowed block row count (C7)", k);
+                const BorrowedOps ops = block_ops(ch, c, block, owner_slot);
+                if (!ops.feasible) fail("borrowed block needs more than BORROWED_BUFFER_ROWS rows in flight (C7)", k);
+                if (!borrowed_ops_deliver(ch, c, block, ops)) fail("borrowed ops deliver a node to the wrong slot (C7)", k);
                 row += block.rows;
                 covered += block.count;
             }
-            if (covered != num_borrowed || row * BANKS != e.first_fixed_slot) fail("tail blocks do not cover the tail (C7)", k);
+            if (covered != num_borrowed || row * BANKS != e.first_fixed_slot) fail("borrowed blocks do not cover the borrowed rows (C7)", k);
         }
     }
     {   // C8: shared marks exactly the owned nodes some chunk borrows, and all of them sit below
@@ -1633,7 +1633,7 @@ inline int check_chunked(const Netlist& nl, const Chunked& ch, const Config& cfg
         for (int k = 0; k < ch.num_chunks; k++) {
             const Chunk& c = ch.chunks[k];
             const Encoded& e = c.enc;
-            if (e.first_private_slot % BANKS || e.first_private_slot > e.first_tail_slot) fail("first_private_slot not a row inside the owned rows (C8)", k);
+            if (e.first_private_slot % BANKS || e.first_private_slot > e.first_borrowed_slot) fail("first_private_slot not a row inside the owned rows (C8)", k);
             for (size_t l = 0; l < c.work_node.size(); l++) {
                 if (c.borrowed[l]) continue;
                 const bool is_borrowed = borrowed_anywhere[c.work_node[l]];

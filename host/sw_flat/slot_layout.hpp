@@ -8,7 +8,7 @@
 //               | first_filler_slot + filler index               the density-only tail
 //
 // The chunk part IS the gradient's layout (encode_chunked, unchanged): owned cells and macros, the
-// borrowed-node tail rows (copies of nodes owned by another chunk), macro-pin slots, fixed-pin slots, and
+// borrowed-node borrowed rows (copies of nodes owned by another chunk), macro-pin slots, fixed-pin slots, and
 // row-padding EMPTY slots. Every movable node owns exactly one slot there, netless ones included --
 // assign_banks gives a node on no net the least-loaded bank -- so the density-only tail holds only
 // the fillers. They have no pins, so they never enter a record beat, a bank colouring or a chunk's

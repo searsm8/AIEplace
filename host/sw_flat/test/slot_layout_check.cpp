@@ -9,8 +9,8 @@
 //               height and the effective target density, bit-equal.
 //   [layout]    the invariants the density path relies on, checked from the layout alone (plus the
 //               chunk ranges): every movable node owns exactly one slot and home_slot names it; every
-//               filler owns one tail slot; a BORROWED slot is a copy of a node owned in ANOTHER chunk
-//               and sits in its chunk's tail rows; pin slots point at a movable macro / a fixed node or
+//               filler owns one borrowed slot; a BORROWED slot is a copy of a node owned in ANOTHER chunk
+//               and sits in its chunk's borrowed rows; pin slots point at a movable macro / a fixed node or
 //               IO pad; only OWNED and FILLER slots carry a size, and it is the node's / the filler's.
 //   [self-test] six corruptions of the layout and one of the fillers; each must fail its check.
 //               Proves the checks can fail at all.
@@ -116,14 +116,14 @@ std::string layout_difference(const FlatDesign& design, const std::vector<char>&
         switch (role) {
         case SlotRole::OWNED:
             if (!movable) return at("OWNED slot of a fixed node or IO pad", slot);
-            if (local >= enc.first_tail_slot) return at("OWNED slot outside its chunk's owned rows", slot);
+            if (local >= enc.first_borrowed_slot) return at("OWNED slot outside its chunk's owned rows", slot);
             if (!same_bits(layout.width[slot], design.node_width[node]) || !same_bits(layout.height[slot], design.node_height[node]))
                 return at("OWNED size is not the node's", slot);
             owned_count[node]++;
             break;
         case SlotRole::BORROWED:
             if (!movable) return at("BORROWED slot of a fixed node or IO pad", slot);
-            if (local < enc.first_tail_slot || local >= enc.first_fixed_slot) return at("BORROWED slot outside its chunk's tail rows", slot);
+            if (local < enc.first_borrowed_slot || local >= enc.first_fixed_slot) return at("BORROWED slot outside its chunk's borrowed rows", slot);
             if (layout.home_slot[node] < 0 || chunk_of(layout.home_slot[node]) == chunk) return at("BORROWED slot not owned by another chunk", slot);
             break;
         case SlotRole::MACRO_PIN:

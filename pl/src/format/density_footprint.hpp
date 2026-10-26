@@ -8,7 +8,7 @@
 // die frame) and a footprint index: 16 per 512-bit beat, aligned beat-for-beat with the positions.
 // The index selects an entry of a small on-chip table of distinct footprints, the way a pin record's
 // offset_idx selects a pin offset (pin_record.hpp): cells come from a library of few sizes, and every
-// filler shares one entry. Slots that deposit nothing (tail copies, pin slots, EMPTY padding)
+// filler shares one entry. Slots that deposit nothing (borrowed copies, pin slots, EMPTY padding)
 // carry NO_DEPOSIT. Fixed nodes are not in the stream: the host deposits them once into a base map,
 // already capped at min(rho, td) (#35), which the device loads as the accumulator's starting value. Meow.
 

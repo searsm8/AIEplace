@@ -4,7 +4,7 @@
 //
 // Golden: a naive double-precision deposit written here from sw_flat density.cpp (node_footprint,
 // for_each_overlap), on a synthetic slot range: a cell library, movable macros at td < 1 (the weight
-// override), cells hanging off the die edge, one shared filler size, and NO_DEPOSIT slots (tail
+// override), cells hanging off the die edge, one shared filler size, and NO_DEPOSIT slots (borrowed
 // copies, pins, padding) whose positions are NaN, so a wrongly read slot poisons the map.
 //
 //   [1] MATCH     rho vs golden, rel_rms < REL_RMS_MAX and worst-bin error / peak < PEAK_REL_MAX, at
@@ -75,7 +75,7 @@ static SyntheticDesign make_design(unsigned seed, float die) {
     };
     const float library_w[] = {2, 3, 4, 6, 8, 10, 14, 20};
     for (int i = 0; i < 20000; i++) {
-        if (i % 7 == 3) add(0, 0, false, false);   // tail copy / pin / padding
+        if (i % 7 == 3) add(0, 0, false, false);   // borrowed copy / pin / padding
         else            add(library_w[i % 8], row_h, false, true);
     }
     for (int i = 0; i < 6; i++) add(150.0f + 40 * i, 120.0f + 30 * i, true, true);

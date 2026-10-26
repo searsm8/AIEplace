@@ -4,7 +4,7 @@
 //                          a large net sums its beats through the window tree. The combiner itself is
 //                          already wa_gradient.hpp's expression term for term (wirelength.cpp).
 //   grad_merge = "stream"  each beat's repeated-slot lanes merged by the Hillis-Steele scan, scattered
-//                          in stream order; macro pins folded in list order; tails merged into their
+//                          in stream order; macro pins folded in list order; borrowed copies merged into their
 //                          owners, borrowers ascending (hpwl_gradient_CU.hpp's three passes).
 //   hpwl = "fixed"         the schedule's HPWL as an int64 sum of hpwl_to_fixed per net and axis, the
 //                          stream's nets only (hpwl_CU.hpp). The float conversion of the total is ours:
@@ -135,16 +135,16 @@ void Placer::build_record_stream()
     }
     rs.large_first.push_back((long)rs.large_positions.size());
 
-    // merge_tails_pass: owners ascending; per owner its borrowers ascending (chunked_device_arrays). Meow.
+    // merge_borrowed_pass: owners ascending; per owner its borrowers ascending (chunked_device_arrays). Meow.
     const std::vector<long> owner_slot = packer::owner_slots_of(chunked);
     for (int owner = 0; owner < chunked.num_chunks; owner++)
         for (int borrower = 0; borrower < chunked.num_chunks; borrower++) {
             const packer::Chunk& c = chunked.chunks[borrower];
-            for (const packer::Chunk::TailBlock& block : c.tail_blocks) {
+            for (const packer::Chunk::BorrowedBlock& block : c.borrowed_blocks) {
                 if (block.owner != owner) continue;
                 for (long i = block.first; i < block.first + block.count; i++) {
-                    const int local = c.tail_order[i];
-                    rs.tail_merges.emplace_back(layout.chunk_first_slot[owner] + owner_slot[c.work_node[local]],
+                    const int local = c.borrowed_order[i];
+                    rs.borrowed_merges.emplace_back(layout.chunk_first_slot[owner] + owner_slot[c.work_node[local]],
                                                 layout.chunk_first_slot[borrower] + c.enc.node_slot[local]);
                 }
             }
@@ -158,9 +158,9 @@ void Placer::build_record_stream()
     long merged_lanes = 0;   // lanes the scan folds into the lane before: a node's repeated pins (B3)
     for (size_t lane = 1; lane < rs.lane_pin.size(); lane++)
         merged_lanes += lane % LANES != 0 && rs.lane_pin[lane] >= 0 && rs.lane_slot[lane] == rs.lane_slot[lane - 1];
-    printf("sw_flat: record stream: %d chunks, %ld positions, %zu nets, %ld dropped by the packer, %ld merged lanes, %zu folds, %zu tail merges\n",
+    printf("sw_flat: record stream: %d chunks, %ld positions, %zu nets, %ld dropped by the packer, %ld merged lanes, %zu folds, %zu borrowed merges\n",
            chunked.num_chunks, rs.chunk_first_position.back(), rs.nets.size(), rs.dropped_nets, merged_lanes,
-           rs.folds.size(), rs.tail_merges.size());
+           rs.folds.size(), rs.borrowed_merges.size());
 }
 
 void Placer::compute_stream_partials()
@@ -313,7 +313,7 @@ void Placer::merge_stream_gradient()
             else running[fold.macro_slot] = sum;
         }
     }
-    for (const auto& [owner_slot, tail_slot] : rs.tail_merges) next.probe_grad[owner_slot] += next.probe_grad[tail_slot];
+    for (const auto& [owner_slot, borrowed_slot] : rs.borrowed_merges) next.probe_grad[owner_slot] += next.probe_grad[borrowed_slot];
 }
 
 float Placer::stream_wirelength(bool at_probe) const
