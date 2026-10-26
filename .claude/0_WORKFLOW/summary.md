@@ -124,12 +124,14 @@ hw xclbin built at **200 MHz** (WNS +0.031 ns; 250 MHz failed at −0.729 ns on 
   in noise on 5/5 (bigblue4 +0.002%). **10-20: F per design from the total-area bound (never overflows;
   F = 14..23), and one cell per cycle: 4×4 banks + forwarding, II = 1, bit-exact 44/44, forwarding proven in
   RTL co-sim (depth 4 fails, 5 passes).** Next: lanes. → [[REPORT_48_bin_density_fixed_point_20261019.md]]
-- **#47 — the tail exchange replaced the chunk mailbox (2026-10-09).** Rule C6: a macro pin is never
-  external (the macro is). Rule C7: a chunk's externals are its tail rows, one block per owner;
-  owners write / read them through a 32 x 256 row buffer replaying host-scheduled ops. Tier 1, 8/8
-  real designs, RTL co-sim PASS. bigblue4 at 1 M: 2.49 M -> 1.93 M cycles per axis. **B4 = A (Mark,
-  2026-10-09):** fold the exchange into `iteration_update` (modeled 0.98 M). Its golden (M2,
-  `host/sw_flat/borrowed_fusion.hpp`) is bit-identical to B3 on 8/8 chunked designs; M3 waits on #45 step 6.
+- **#47 — the borrowed-copy exchange replaced the chunk mailbox (2026-10-09; "tail" renamed "borrowed"
+  2026-10-26).** Rule C6: a macro pin is never borrowed (the macro is). Rule C7: a chunk's borrowed
+  copies sit in its borrowed rows, one block per owner; owners write / read them through a 32 x 256 row
+  buffer replaying host-scheduled ops (`borrowed_copies.hpp`). C8: shared-first owned rows. bigblue4 at
+  1 M: 2.49 M -> 1.57 M cycles per axis. **Not built: B4 = A (Mark, 2026-10-09)**, which removes the
+  CU's send and merge passes by folding them into `iteration_update` (modeled 0.98 M). Only its golden
+  (M2, `host/sw_flat/borrowed_fusion.hpp`, bit-identical to B3) exists; the device side waits on #45
+  step 6, and four pieces can be built before it ([[PLAN_47_borrowed_copies_status_20261026.md]]).
   **R (resident shared region) CLOSED 2026-10-19, measured, not chosen; B4 stays the plan.** Modeled 1–4 pp
   faster than B4 and global colouring is free, but the region is 25% of capacity at K=3 and ≥ 100% at
   K=6 (512 K run); a sliding window (first→last user chunk) equals it at K ≤ 3 and is 39–58% at K=6.

@@ -913,8 +913,18 @@ gradient parcels, which are sorted by owner slot (collect). Optionally, a contig
 chunk turns receive into part of load and return into part of drain. Estimate for bigblue4: 2.49 M →
 1.48 M (receive/return kept) or 0.95 M (tail), against 1.49 M for D1-B widening.
 
+**State (2026-10-26): B1-B3 + C8 built; the pass removal (B4 = A) is NOT built.** The CU still runs
+both extra passes (`send_borrowed_pass`, `merge_borrowed_pass`); A, which deletes them, exists only as
+the M2 golden and the M0 model (bigblue4 1.57 M → 0.98 M cycles per axis). Device side (send + merge in
+`iteration_update`) waits on #45 step 6. **Buildable now:** M1 re-run on the as-built C7/C8 layout, A's
+beat-level op format, a beat-level golden + standalone HLS send/merge blocks (early M5). "tail" was
+renamed "borrowed" on this date (borrower side; "shared" stays the owner side).
+→ [[PLAN_47_borrowed_copies_status_20261026.md]]. Briefing: [[EXPLAINER_47_tail_exchange_deck_20261009.md]].
+<details><summary>superseded headline (2026-10-09)</summary>
+
 **State (2026-10-09): B1-B3 built and verified; B4 needs a decision** (it needs `iteration_update`
-in slot order, #45 step 6). Briefing: [[EXPLAINER_47_tail_exchange_deck_20261009.md]].
+in slot order, #45 step 6).
+</details>
 - [x] **M0 (2026-10-07):** `host/sw_flat/model/` (`make check`: TODAY equals the legacy model on 8/8).
       As a fraction of today's cycles, FUSED is 58–65%, FUSED_TAIL 28–56% (1 M: 8 designs; 512 K:
       17). bigblue4 at 1 M: 2.49 M → 1.52 M → 0.99 M. Merge: 2 adders/lane → 0 stalls. Open: shared
