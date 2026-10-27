@@ -190,7 +190,10 @@ int main(int argc, char** argv)
                         "       hpwl_gradient_xrt <kernel.xclbin> synthetic [capacity]\n");
         return 2;
     }
-    xrt::device device(0);
+    // `vck` also holds two U55Cs that enumerate first, so device 0 is not a VCK5000 there: pick the card
+    // by PCIe BDF (e.g. 0000:c1:00.1) when XRT_DEVICE_BDF is set. Meow.
+    const char* device_bdf = std::getenv("XRT_DEVICE_BDF");
+    xrt::device device = device_bdf ? xrt::device(std::string(device_bdf)) : xrt::device(0);
     const xrt::uuid uuid = device.load_xclbin(argv[1]);
     xrt::kernel kernel(device, uuid, "hpwl_gradient_CU_top");
     if (std::strcmp(argv[2], "synthetic") == 0) return run_synthetic(device, kernel, argc > 3 ? atol(argv[3]) : 1536);

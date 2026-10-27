@@ -776,11 +776,12 @@ exchange's URAM read); **200 MHz met timing** (WNS +0.031 ns; URAM 256, LUT 122 
 **Card run 2026-10-20 on `vck` (booked): PASS bit-exact** on synthetic, mgc_fft_a, mms/adaptec1 and
 bigblue4 (3 chunks; ~8.4 ms wall-clock per axis, WL gradient only). Baseline done; clock, profiling and DDR mapping
 are the improvements. → [[REPORT_45_hpwl_gradient_hw_flow_20261019.md]].
-**Clock (2026-10-27): 230 MHz routes clean, card run pending.**
-- **230 MHz met timing** (WNS +0.001 ns, WHS +0.010; 220 MHz +0.005), xclbin packaged from F on `build`
-  (`~/AIEplace_timing/expF/pl/build/run230/`, md5 `f725da2a…`). F = HLS scheduled at 400 MHz (new `HLS_FREQ_HZ`)
-  plus fold/merge/refresh each on its own adder; bit-exact in sw_emu 4/4, hw_emu 2/2 and co-sim.
-- **Next: card run on `vck` (Mark books it)**, then raise `KERNEL_FREQ_HZ` 200 → 230 and add the milestone.
+**Clock (2026-10-27): 230 MHz, PASS bit-exact on the card.**
+- **230 MHz met timing** (WNS +0.001 ns, WHS +0.010; 220 MHz +0.005) and **passed on the VCK5000** on synthetic,
+  fft_a, mms/adaptec1 and bigblue4 (7.9 ms/axis, from 8.4). `KERNEL_FREQ_HZ` = 230 MHz. xclbin: `build`
+  `~/AIEplace_timing/expF/pl/build/run230/` (md5 `f725da2a…`), also `vck` `~/AIEplace/pl/build/hw/`. F = HLS
+  scheduled at 400 MHz (new `HLS_FREQ_HZ`) plus fold/merge/refresh each on its own adder.
+- **On `vck` set `XRT_DEVICE_BDF=0000:c1:00.1`:** two U55Cs now enumerate first, so device 0 is not a VCK5000.
 - **250 MHz is not closed:** best WNS −0.178 ns. What remains: `send_ops` (goes with B4, #47), URAM input
   fan-out from `fold_macros`/`load_slots`, and `wa_sums` DSP inputs. Mark's call: `pos_URAM` `latency=3`
   would need `fold_macros` at II=2.

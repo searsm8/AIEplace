@@ -8,8 +8,22 @@
   `~/AIEplace_timing/expF/pl/build/run230/hpwl_gradient_CU_top.xclbin` (md5 `f725da2a85f501419e3bb62e99444caa`)
   and `run220/` (md5 `9ca22ba401b9cedcf43d846a959954f8`). Built from server `b3d0e87` + F's hunks, before the
   #47 rename (`bfe68c7`); HEAD differs from that source only in identifier names.
-- **Not yet run on the card.** Next: book `vck`, run the four designs bit-exact at 230 MHz, then raise
-  `KERNEL_FREQ_HZ` 200 → 230 in `pl/Makefile` and add the milestone. The +0.001 ns margin is thin but signed off.
+- **Card run (2026-10-27, `vck`, card `0000:c1:00.1`): PASS bit-exact at 230 MHz** on all four designs.
+  `KERNEL_FREQ_HZ` is now 230 MHz in `pl/Makefile`. The +0.001 ns margin is thin but signed off.
+
+  | design | [1] image vs g++ CU | [3] vs sw_flat | kernel run per axis, 230 MHz | at 200 MHz (10-20) |
+  |---|---|---|---|---|
+  | synthetic (16 chunks) | 0 / 17,344 | n/a | 9.5 / 0.6 ms | 9.3 / 0.8 ms |
+  | mgc_fft_a | 0 / 34,592 | 0 / 30,625 | 0.2 / 0.1 ms | 0.2 / 0.1 ms |
+  | mms/adaptec1 | 0 / 227,712 | 0 / 210,967 | 0.8 / 0.7 ms | 0.9 / 0.8 ms |
+  | bigblue4 (3 chunks) | 0 / 2,616,832 | 0 / 2,169,183 | **7.9 / 7.8 ms** | 8.4 / 8.3 ms |
+
+  Wall-clock from `kernel(...)` to `run.wait()`, launch overhead included, so bigblue4 gains 6% for a 15%
+  clock (axis 0 of synthetic is the first launch's warm-up). The host on `vck` is the `b3d0e87` tree, the
+  xclbin's own base, plus one change:
+- **`vck` now has two U55Cs that enumerate before the VCK5000s,** so `xrt::device(0)` loaded the xclbin onto
+  a U55C (`failed to load xclbin: Invalid argument`, err −22). `hpwl_gradient_xrt` takes `XRT_DEVICE_BDF`
+  (e.g. `0000:c1:00.1`); run as `XRT_DEVICE_BDF=0000:c1:00.1 TARGET=hw bash test/hpwl_gradient_xrt.sh`.
 - **250 MHz does not close. The best routed WNS is −0.178 ns (build F); the baseline was −0.378 ns.**
 - The 250 MHz strategy sweep (`runS`, 4 Vivado strategies) died with the first `run230` attempt: the server home
   hit its disk quota while implementation wrote checkpoints. It was not rerun; the 230/220 builds came first.
@@ -69,7 +83,7 @@ Classifier: `classify_paths.tcl` + `group_paths.py` / `coarse_groups.py` (in `.c
    - HLS had shared one 1-cycle fadd between `fold_macros` and `merge_tail_block`. Its output fed the write data of every bank of both arrays: the largest group left in B.
    - Distinct bindings stop the sharing. Fold's add sits inside the distance-4 read-add-write, so it can only take latency 1; latency 2, or the fabric adder, gives II=2 or 3 at a 400 MHz target.
 3. **`no_bufg.tcl` on the `hw` link** (`LINK_OPTS_hw` in `pl/Makefile`), as above.
-4. **Default `KERNEL_FREQ_HZ` 250 → 200 MHz:** the fastest clock verified on the card. Raise it to 230 MHz when the card passes there.
+4. **Default `KERNEL_FREQ_HZ` 250 → 200 → 230 MHz:** 200 while it was the fastest clock verified on the card; 230 after the card run of 10-27.
 
 ## Tried and dropped
 - **`BIND_STORAGE ... latency=2` on both URAM arrays: worse** (−0.947 ns). It registers the URAM read output, but the failing paths are the INPUT side.

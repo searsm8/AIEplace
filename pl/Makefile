@@ -16,8 +16,9 @@ clean:
 # --- Vitis kernel build -------------------------------------------------------------------------
 PLATFORM       ?= xilinx_vck5000_gen4x8_qdma_2_202220_1
 TARGET         ?= sw_emu
-# The link (kernel) clock: the fastest that has closed routing on this kernel (200 MHz, 2026-10-20). Meow.
-KERNEL_FREQ_HZ ?= 200000000
+# The link (kernel) clock: the fastest that has closed routing and passed on the card (230 MHz, WNS
+# +0.001 ns, 2026-10-27). 200 MHz is the fallback if a source change tips it over. Meow.
+KERNEL_FREQ_HZ ?= 230000000
 # HLS schedules for a faster clock than the link: deeper FP and mux pipelines, every loop still II=1.
 # At a 250 MHz link, HLS at 400 MHz routed WNS -0.234 ns vs -0.378 ns at HLS = link (2026-10-26). Meow.
 HLS_FREQ_HZ    ?= 400000000

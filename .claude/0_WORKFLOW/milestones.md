@@ -7,6 +7,7 @@ you show someone. Add an entry the day it lands. Never rewrite one; annotate it.
 
 | date | milestone | verified by | evidence |
 |---|---|---|---|
+| 2026-10-27 | **`hpwl_gradient_CU` on the VCK5000 at 230 MHz** (from 200), still **bit for bit** on synthetic, mgc_fft_a, mms/adaptec1 and bigblue4 (~7.9 ms wall-clock per axis, from 8.4). Routed WNS +0.001 ns; HLS scheduled at 400 MHz + unshared fold/merge adders | device grad image + int64 HPWL vs the g++ CU; owned slots vs sw_flat | `b0e2290`, [[REPORT_45_hpwl_gradient_timing_20261027.md]] |
 | 2026-10-20 | **First run on the real VCK5000.** `hpwl_gradient_CU` at 200 MHz, driven through XRT, matches the software golden **bit for bit** on synthetic (16 chunks), mgc_fft_a, mms/adaptec1 and bigblue4 (3 chunks, 2.17 M slots, ~8.4 ms wall-clock per axis) | device grad image + int64 HPWL vs the g++ CU; owned slots vs sw_flat | `4972a61`, [[REPORT_45_hpwl_gradient_hw_flow_20261019.md]] |
 | 2026-10-19 | `hpwl_gradient_CU` passes RTL hardware emulation bit-exact (synthetic 16 chunks, pci_bridge32_b, fft_a); hw build closes timing at 200 MHz (WNS +0.031 ns) | hw_emu vs the g++ CU | `d2608bb`, `8c0405c`, same report |
 | 2026-10-16 | The CPU placer `sw_flat` computes the PL's gradient arithmetic **bit-exact to `hpwl_gradient_CU`**, so the hardware has a software golden that matches it exactly, end to end | `make -C host/sw_flat check-record-stream`, 6 designs | `8323939`, [[REPORT_45_pl_arithmetic_20261016.md]] |
