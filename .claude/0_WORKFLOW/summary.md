@@ -104,7 +104,8 @@
   sw_only's float HPWL error, fixed by #49 ([[REPORT_45_pl_arithmetic_20261016.md]]). **Step 8 brought forward
 (10-19):** `hpwl_gradient_CU` is a Vitis kernel at 250 MHz (`make -C pl xclbin`). Through XRT
 (`make -C host/sw_flat hpwl-gradient-xrt`), sw_emu 4/4 and hw_emu 3/3 (synthetic with 16 chunks, pci_bridge32_b, fft_a) are bit-exact vs the g++ CU.
-hw xclbin built at **200 MHz** (WNS +0.031 ns; 250 MHz failed at −0.729 ns on the borrowed-copy exchange's URAM read).
+hw xclbin built at **200 MHz** (WNS +0.031 ns). **Clock work (10-27):** **230 MHz meets timing** (WNS +0.001 ns; HLS at
+400 MHz + unshared adders, bit-exact in emulation), xclbin built, card run pending; 250 MHz best −0.178 ns ([[REPORT_45_hpwl_gradient_timing_20261027.md]]).
 **On the VCK5000 (2026-10-20, host `vck`): PASS bit-exact** on synthetic, fft_a, mms/adaptec1 and bigblue4 (3 chunks,
 ~8.4 ms wall-clock per axis) ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
 **Then:** step 6, density path.

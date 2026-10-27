@@ -16,8 +16,14 @@ clean:
 # --- Vitis kernel build -------------------------------------------------------------------------
 PLATFORM       ?= xilinx_vck5000_gen4x8_qdma_2_202220_1
 TARGET         ?= sw_emu
-# A baseline clock, not the goal: post-route of the predecessor closed at ~253 MHz (#41). Meow.
-KERNEL_FREQ_HZ ?= 250000000
+# The link (kernel) clock: the fastest that has closed routing on this kernel (200 MHz, 2026-10-20). Meow.
+KERNEL_FREQ_HZ ?= 200000000
+# HLS schedules for a faster clock than the link: deeper FP and mux pipelines, every loop still II=1.
+# At a 250 MHz link, HLS at 400 MHz routed WNS -0.234 ns vs -0.378 ns at HLS = link (2026-10-26). Meow.
+HLS_FREQ_HZ    ?= 400000000
+# opt_design otherwise promotes a high-fanout pipeline enable to a BUFG, which the platform's
+# dynamic-region Pblock cannot place (DRC HDPR-18; synth/hpwl_gradient_CU/no_bufg.tcl). Meow.
+LINK_OPTS_hw    = --vivado.prop run.impl_1.STEPS.OPT_DESIGN.TCL.PRE=$(abspath synth/hpwl_gradient_CU/no_bufg.tcl)
 
 KERNEL   = hpwl_gradient_CU_top
 KERNEL_SRC = synth/hpwl_gradient_CU/$(KERNEL).cpp
@@ -35,10 +41,10 @@ xclbin: $(XCLBIN) $(HW_DIR)/emconfig.json
 
 $(XO): $(KERNEL_SRC) $(shell find src -name '*.hpp')
 	@mkdir -p $(HW_DIR)
-	$(VPP) -c -k $(KERNEL) -Isrc --hls.clock $(KERNEL_FREQ_HZ):$(KERNEL) $< -o $@
+	$(VPP) -c -k $(KERNEL) -Isrc --hls.clock $(HLS_FREQ_HZ):$(KERNEL) $< -o $@
 
 $(XSA): $(XO)
-	$(VPP) -l --clock.freqHz $(KERNEL_FREQ_HZ):$(KERNEL)_1 $< -o $@
+	$(VPP) -l $(LINK_OPTS_$(TARGET)) --clock.freqHz $(KERNEL_FREQ_HZ):$(KERNEL)_1 $< -o $@
 
 $(XCLBIN): $(XSA)
 	$(VPP) -p --package.out_dir $(HW_DIR) $< -o $@

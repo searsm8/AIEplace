@@ -76,7 +76,12 @@ merge_ops:
         } else {
             const uint32_t slot = pinrec::borrowed_entry_slot(op);
             const int bank = pinrec::borrowed_entry_bank(op);
-            grad_URAM[slot % pinrec::BANKS][slot / pinrec::BANKS] += row_buf_BRAM[bank][next_row_REG[bank] & (pinrec::BORROWED_BUFFER_ROWS - 1)];
+            const float merged = grad_URAM[slot % pinrec::BANKS][slot / pinrec::BANKS]
+                               + row_buf_BRAM[bank][next_row_REG[bank] & (pinrec::BORROWED_BUFFER_ROWS - 1)];
+            // No carried dependence (distinct slots), so the add can take a deep DSP pipeline; a
+            // binding unlike fold_macros' keeps HLS from sharing one adder between them (slot_arrays.hpp). Meow.
+#pragma HLS BIND_OP variable=merged op=fadd impl=primitivedsp latency=3
+            grad_URAM[slot % pinrec::BANKS][slot / pinrec::BANKS] = merged;
             next_row_REG[bank]++;
         }
     }

@@ -104,8 +104,11 @@ refresh_macros:   // reads macro slots, writes macro-pin slots: disjoint, so no 
 // path, measured 2026-09-22). In memory it is a read-add-write, and the host orders the list so a
 // macro recurs only every HAZARD_DISTANCE entries (schedule_macro_pins) -- the same contract as the
 // scatter-add. FIRST starts the sum; LAST writes it into grad. The caller passes pos_URAM as
-// acc_URAM: positions are dead once the beat loop is done. The add keeps its default 1-cycle
-// latency: it sits inside the read-add-write that HAZARD_DISTANCE covers. Meow.
+// acc_URAM: positions are dead once the beat loop is done. The add sits inside the read-add-write
+// that HAZARD_DISTANCE covers: a 1-cycle DSP add (latency 2, or the fabric adder, breaks II=1 at a
+// 400 MHz HLS target). Its own binding (latency 1; refresh_macros 2, merge_borrowed_block 3) keeps HLS
+// from sharing it: shared with merge, one adder fed
+// the write data of every bank of both arrays, the largest failing group at 250 MHz (2026-10-26). Meow.
 static void fold_macro_pins(const pinrec::MacroPinRef* macro_pins_DDR, int num_macro_pins,
                             float grad_URAM[pinrec::BANKS][ROWS_PER_BANK],
                             float acc_URAM[pinrec::BANKS][ROWS_PER_BANK]) {
@@ -119,7 +122,9 @@ fold_macros:
         if (ref.pin_slot == pinrec::MACRO_PIN_SKIP) continue;
         const int macro_bank = ref.macro_slot % pinrec::BANKS, macro_row = ref.macro_slot / pinrec::BANKS;
         const float pin_grad = grad_URAM[ref.pin_slot % pinrec::BANKS][ref.pin_slot / pinrec::BANKS];
-        const float sum = (ref.flags & pinrec::MACRO_PIN_FIRST) ? pin_grad : acc_URAM[macro_bank][macro_row] + pin_grad;
+        const float acc_plus_pin = acc_URAM[macro_bank][macro_row] + pin_grad;
+#pragma HLS BIND_OP variable=acc_plus_pin op=fadd impl=primitivedsp latency=1
+        const float sum = (ref.flags & pinrec::MACRO_PIN_FIRST) ? pin_grad : acc_plus_pin;
         if (ref.flags & pinrec::MACRO_PIN_LAST) grad_URAM[macro_bank][macro_row] = sum;
         else                                    acc_URAM[macro_bank][macro_row] = sum;
     }

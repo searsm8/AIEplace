@@ -138,8 +138,10 @@ constexpr int IGNORE_NET_DEGREE = MAX_LARGE_NET_DEGREE;   // 96
 constexpr int NO_BANK           = -1;
 constexpr int BUBBLE            = -1;    // an issued all-EMPTY beat (hazard wait)
 constexpr int NO_NET            = -1;
-constexpr int URAM_WORDS        = 4096;  // URAM288: 4K x 72 bits, fixed shape
-constexpr int FLOATS_PER_WORD   = 2;     // 64 of the 72 bits used
+// Floats per URAM per array: 288 Kb / 36. Versal's URAM288E5 is not fixed at 4K x 72; it also runs
+// 8K x 36 .. 32K x 9, and our 32K-row banks route as 4 x (32K x 9) URAMs, one byte of each float
+// apiece (routed 2026-10-26). The count is the same either way. Meow.
+constexpr int URAM_FLOATS       = 8192;
 constexpr int VC1902_URAMS      = 463;
 
 enum NodeKind : uint8_t { CELL, MACRO, MACRO_PIN, FIXED, FIXED_PIN };
@@ -745,9 +747,8 @@ inline void assign_node_slots(Encoded& enc) {
         enc.node_slot[node] = row * BANKS + bank;
         enc.max_slot = std::max(enc.max_slot, enc.node_slot[node]);
     }
-    const long words_per_uram = (long)URAM_WORDS * FLOATS_PER_WORD;
-    enc.uram_grad = BANKS * ((movable_rows + words_per_uram - 1) / words_per_uram);
-    enc.uram_pos  = BANKS * ((movable_rows + fixed_rows + words_per_uram - 1) / words_per_uram);
+    enc.uram_grad = BANKS * ((movable_rows + URAM_FLOATS - 1) / URAM_FLOATS);
+    enc.uram_pos  = BANKS * ((movable_rows + fixed_rows + URAM_FLOATS - 1) / URAM_FLOATS);
 }
 
 // Step 4b: order the macro-pin list for the device's read-add-write fold: no macro within

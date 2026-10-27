@@ -112,11 +112,11 @@ static void hpwl_gradient_CU(
 
     ONCHIP_ARRAY float pos_URAM[pinrec::BANKS][ROWS_PER_BANK];
 #pragma HLS ARRAY_PARTITION variable=pos_URAM complete dim=1
-#pragma HLS BIND_STORAGE variable=pos_URAM type=ram_2p impl=uram latency=2
+#pragma HLS BIND_STORAGE variable=pos_URAM type=ram_2p impl=uram
 
     ONCHIP_ARRAY float grad_URAM[pinrec::BANKS][ROWS_PER_BANK];
 #pragma HLS ARRAY_PARTITION variable=grad_URAM complete dim=1
-#pragma HLS BIND_STORAGE variable=grad_URAM type=ram_2p impl=uram latency=2
+#pragma HLS BIND_STORAGE variable=grad_URAM type=ram_2p impl=uram
 
     ONCHIP_ARRAY float offset_BRAM[pinrec::LANES][OFFSET_TABLE_MAX];
 #pragma HLS ARRAY_PARTITION variable=offset_BRAM complete dim=1

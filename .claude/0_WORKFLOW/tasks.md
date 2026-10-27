@@ -775,7 +775,18 @@ mgc_fft_a) PASS bit-exact** vs the g++ CU. **hw: 250 MHz failed timing** (WNS �
 exchange's URAM read); **200 MHz met timing** (WNS +0.031 ns; URAM 256, LUT 122 K) and built an xclbin at `b3d0e87`.
 **Card run 2026-10-20 on `vck` (booked): PASS bit-exact** on synthetic, mgc_fft_a, mms/adaptec1 and
 bigblue4 (3 chunks; ~8.4 ms wall-clock per axis, WL gradient only). Baseline done; clock, profiling and DDR mapping
-are the improvements. → [[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]. Done 2026-10-06 as low-hanging fruit: gradient `max_rel` 1e-3
+are the improvements. → [[REPORT_45_hpwl_gradient_hw_flow_20261019.md]].
+**Clock (2026-10-27): 230 MHz routes clean, card run pending.**
+- **230 MHz met timing** (WNS +0.001 ns, WHS +0.010; 220 MHz +0.005), xclbin packaged from F on `build`
+  (`~/AIEplace_timing/expF/pl/build/run230/`, md5 `f725da2a…`). F = HLS scheduled at 400 MHz (new `HLS_FREQ_HZ`)
+  plus fold/merge/refresh each on its own adder; bit-exact in sw_emu 4/4, hw_emu 2/2 and co-sim.
+- **Next: card run on `vck` (Mark books it)**, then raise `KERNEL_FREQ_HZ` 200 → 230 and add the milestone.
+- **250 MHz is not closed:** best WNS −0.178 ns. What remains: `send_ops` (goes with B4, #47), URAM input
+  fan-out from `fold_macros`/`load_slots`, and `wa_sums` DSP inputs. Mark's call: `pos_URAM` `latency=3`
+  would need `fold_macros` at II=2.
+→ [[REPORT_45_hpwl_gradient_timing_20261027.md]]
+
+Done 2026-10-06 as low-hanging fruit: gradient `max_rel` 1e-3
 (`vck5000/test/wa_gradient_golden.hpp`; newblue3 / mms/bigblue4 / newblue7 now pass, rel_rms still
 1e-5-bounded); `make test` 21/21 PASS.
 - [x] **Decisions, second round (Mark, 2026-10-06):** D1 mailbox A now / C later / B fallback; D2
