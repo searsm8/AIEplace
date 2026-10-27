@@ -80,7 +80,7 @@ inline Resident build_resident(const Chunked& ch, const Config& cfg, bool all_ma
         else r.shared_cells++;
     }
     r.region_rows = *std::max_element(region_per_bank.begin(), region_per_bank.end());
-    if (all_macros) { schedule_macro_pins(colour, cfg); r.region_macro_entries = (long)colour.macro_order.size(); }
+    if (all_macros) { schedule_macro_pins(colour, cfg); r.region_macro_entries = (long)colour.macro_beats.size(); }
 
     for (const Chunk& c : ch.chunks) {
         const Encoded& src = c.enc;
@@ -101,7 +101,7 @@ inline Resident build_resident(const Chunked& ch, const Config& cfg, bool all_ma
         r.private_rows.push_back(*std::max_element(private_per_bank.begin(), private_per_bank.end()));
         r.fixed_rows.push_back(*std::max_element(fixed_per_bank.begin(), fixed_per_bank.end()));
         r.issue_beats.push_back((long)e.issue.size());
-        r.macro_entries.push_back((long)e.macro_order.size());
+        r.macro_entries.push_back((long)e.macro_beats.size());
     }
     r.max_private_rows = *std::max_element(r.private_rows.begin(), r.private_rows.end());
     for (long fixed : r.fixed_rows) r.max_slots = std::max(r.max_slots, (r.max_private_rows + r.region_rows + fixed) * BANKS);
@@ -154,7 +154,7 @@ inline Phases model_cycles(const Chunked& ch, Variant v, int adders_per_lane = 2
     for (int k = 0; k < ch.num_chunks; k++) {
         const Encoded& e = ch.chunks[k].enc;
         const long slot_beats = e.num_slots / LANES, movable_beats = e.first_fixed_slot / LANES;
-        const long shared_beats = e.first_private_slot / LANES, macro_entries = (long)e.macro_order.size();
+        const long shared_beats = e.first_private_slot / LANES, macro_entries = (long)e.macro_beats.size();
         p.load       += slot_beats + O + macro_entries + O;   // load + refresh
         p.beats      += (long)e.issue.size() + NUM_GROUP_ENDS + 2 * O;   // + the dataflow region's fill. Meow.
         p.fold_other += macro_entries + O;                     // the macro-pin fold, compute_pass (C6)

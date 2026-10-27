@@ -97,7 +97,8 @@ static void hpwl_gradient_CU(
         int                             num_chunks,
         const pinrec::RecordBeat*       records_DDR,       // every chunk's stream, concatenated, this axis
         pinrec::SlotBeat*               pos_DDR,           // every chunk's slot-major positions, this axis; send_borrowed_pass fills the borrowed rows
-        const pinrec::MacroPinRef*      macro_pins_DDR,    // every chunk's refresh / fold list, this axis
+        const pinrec::MacroBeat*        macro_beats_DDR,   // every chunk's refresh / fold beats, this axis
+        const pinrec::SlotBeat*         macro_offsets_DDR, // beat for beat: the lanes' pin offsets, this axis
         const pinrec::BorrowedBlockDesc* borrowed_blocks_DDR,   // every owner's borrowed blocks (ChunkDesc first_borrowed_block, num_borrowers)
         const uint32_t*                 borrowed_ops_DDR,      // their send and merge ops
         const float*                    offset_table_DDR,  // [offset_table_size] shared by all chunks
@@ -156,14 +157,14 @@ compute_pass:
         int64_t chunk_hpwl_fixed;
         load_pos_zero_grad(pos_DDR + desc.slot_beat_offset, desc.num_slot_beats, movable_slot_beats,   // slot_arrays.hpp
                            pos_URAM, grad_URAM);
-        refresh_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, pos_URAM);   // slot_arrays.hpp; borrowed macros arrived with the borrowed rows (C6)
+        refresh_macro_pins(macro_beats_DDR + desc.macro_beat_offset, macro_offsets_DDR + desc.macro_beat_offset, desc.num_macro_beats, pos_URAM);   // slot_arrays.hpp; borrowed macros arrived with the borrowed rows (C6)
         load_group_ends(group_ends_DDR + k * pinrec::NUM_GROUP_ENDS, group_end_REG);   // record_gather.hpp
         gradient_beat_loop(records_DDR + desc.record_beat_offset, desc.num_beats, group_end_REG, pos_URAM,   // this file
                            offset_BRAM, lut_BRAM, lut_size, inv_lut_step, inv_gamma, grad_URAM,
                            desc.first_fixed_slot, offset_bits, chunk_hpwl_fixed);
         hpwl_sum += chunk_hpwl_fixed;
         // pos_URAM is passed as the fold's scratch accumulator: positions are dead once the beat loop is done. Meow.
-        fold_macro_pins(macro_pins_DDR + desc.macro_pin_offset, desc.num_macro_pins, grad_URAM, pos_URAM);   // slot_arrays.hpp
+        fold_macro_pins(macro_beats_DDR + desc.macro_beat_offset, desc.num_macro_beats, grad_URAM, pos_URAM);   // slot_arrays.hpp
         drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR + desc.slot_beat_offset);   // slot_arrays.hpp
     }
     hpwl_total_fixed = hpwl_sum;

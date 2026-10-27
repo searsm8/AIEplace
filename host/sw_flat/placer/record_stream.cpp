@@ -4,7 +4,7 @@
 //                          a large net sums its beats through the window tree. The combiner itself is
 //                          already wa_gradient.hpp's expression term for term (wirelength.cpp).
 //   grad_merge = "stream"  each beat's repeated-slot lanes merged by the Hillis-Steele scan, scattered
-//                          in stream order; macro pins folded in list order; borrowed copies merged into their
+//                          in stream order; macro pins folded beat by beat (macro_pin_tree); borrowed copies merged into their
 //                          owners, borrowers ascending (hpwl_gradient_CU.hpp's three passes).
 //   hpwl = "fixed"         the schedule's HPWL as an int64 sum of hpwl_to_fixed per net and axis, the
 //                          stream's nets only (hpwl_CU.hpp). The float conversion of the total is ours:
@@ -125,10 +125,15 @@ void Placer::build_record_stream()
         }
         rs.chunk_first_position.push_back(end_position);
 
-        for (const pinrec::MacroPinRef& ref : packer::macro_pin_refs(e, 0)) {
-            if (ref.pin_slot == pinrec::MACRO_PIN_SKIP) continue;
-            rs.folds.push_back({base_slot + ref.pin_slot, base_slot + ref.macro_slot,
-                                (ref.flags & pinrec::MACRO_PIN_FIRST) != 0, (ref.flags & pinrec::MACRO_PIN_LAST) != 0});
+        for (const pinrec::MacroBeat& beat : packer::macro_beat_records(e, 0)) {
+            if (beat.macro_slot == pinrec::MACRO_BEAT_SKIP) continue;
+            RecordStream::MacroFold fold;
+            fold.macro_slot = base_slot + beat.macro_slot;
+            for (int lane = 0; lane < LANES; lane++)
+                fold.pin_slot[lane] = (beat.lane_valid >> lane & 1) ? base_slot + pinrec::macro_lane_slot(beat, lane) : -1;
+            fold.first = (beat.flags & pinrec::MACRO_BEAT_FIRST) != 0;
+            fold.last  = (beat.flags & pinrec::MACRO_BEAT_LAST) != 0;
+            rs.folds.push_back(fold);
         }
         rs.chunk_first_fold.push_back((long)rs.folds.size());
         rs.chunk_movable_end.push_back(base_slot + e.first_fixed_slot);
@@ -303,12 +308,19 @@ void Placer::merge_stream_gradient()
                 if (head && rs.lane_pin[lane0 + i] >= 0 && rs.lane_movable[lane0 + i]) next.probe_grad[rs.lane_slot[lane0 + i]] += g[i];
             }
         }
-        // fold_macro_pins: FIRST starts a macro's sum, LAST writes it over the macro's gradient. Meow.
+        // fold_macro_pins: each macro beat's lanes through slot_arrays.hpp's macro_pin_tree (empty lanes 0),
+        // FIRST starts a macro's sum, LAST writes it over the macro's gradient. Meow.
         std::unordered_map<long, Gradient> running;
         for (long f = rs.chunk_first_fold[k]; f < rs.chunk_first_fold[k + 1]; f++) {
-            const RecordStream::Fold& fold = rs.folds[f];
-            Gradient sum = next.probe_grad[fold.pin_slot];
-            if (!fold.first) { sum = running[fold.macro_slot]; sum += next.probe_grad[fold.pin_slot]; }
+            const RecordStream::MacroFold& fold = rs.folds[f];
+            float lane_x[LANES], lane_y[LANES];
+            for (int lane = 0; lane < LANES; lane++) {
+                const bool valid = fold.pin_slot[lane] >= 0;
+                lane_x[lane] = valid ? next.probe_grad[fold.pin_slot[lane]].x : 0.0f;
+                lane_y[lane] = valid ? next.probe_grad[fold.pin_slot[lane]].y : 0.0f;
+            }
+            Gradient sum(plalgo::macro_pin_tree(lane_x), plalgo::macro_pin_tree(lane_y));
+            if (!fold.first) { Gradient acc = running[fold.macro_slot]; acc += sum; sum = acc; }
             if (fold.last) next.probe_grad[fold.macro_slot] = sum;
             else running[fold.macro_slot] = sum;
         }

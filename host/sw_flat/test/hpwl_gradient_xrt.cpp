@@ -88,7 +88,7 @@ AxisResult run_gpp(AxisInputs in)   // by value: send_borrowed_pass writes pos
     AxisResult out;
     out.grad = nan_image(in.pos.size());
     plalgo::hpwl_gradient_CU(in.dev.desc.data(), in.dev.group_ends.data(), (int)in.dev.desc.size(), in.records.data(),
-                             in.pos.data(), in.dev.macro_pins.data(), in.dev.borrowed_blocks.data(), in.dev.borrowed_ops.data(),
+                             in.pos.data(), in.dev.macro_beats.data(), in.dev.macro_offsets.data(), in.dev.borrowed_blocks.data(), in.dev.borrowed_ops.data(),
                              in.dev.offset_table.data(), (int)in.dev.offset_table.size(), in.exp_lut.data(),
                              (int)in.exp_lut.size(), out.grad.data(), in.dev.offset_bits, in.inv_gamma, in.inv_lut_step,
                              out.hpwl_fixed);
@@ -115,16 +115,17 @@ AxisResult run_xrt(const xrt::device& device, xrt::kernel& kernel, const AxisInp
     xrt::bo group_ends   = to_device(device, kernel, 1, in.dev.group_ends);
     xrt::bo records      = to_device(device, kernel, 3, in.records);
     xrt::bo pos          = to_device(device, kernel, 4, in.pos);
-    xrt::bo macro_pins   = to_device(device, kernel, 5, in.dev.macro_pins);
-    xrt::bo borrowed_blocks  = to_device(device, kernel, 6, in.dev.borrowed_blocks);
-    xrt::bo borrowed_ops     = to_device(device, kernel, 7, in.dev.borrowed_ops);
-    xrt::bo offset_table = to_device(device, kernel, 8, in.dev.offset_table);
-    xrt::bo exp_lut      = to_device(device, kernel, 10, in.exp_lut);
-    xrt::bo grad         = to_device(device, kernel, 12, out.grad);
-    xrt::bo hpwl_total   = to_device(device, kernel, 16, std::vector<int64_t>{-1});
+    xrt::bo macro_beats  = to_device(device, kernel, 5, in.dev.macro_beats);
+    xrt::bo macro_offsets = to_device(device, kernel, 6, in.dev.macro_offsets);
+    xrt::bo borrowed_blocks  = to_device(device, kernel, 7, in.dev.borrowed_blocks);
+    xrt::bo borrowed_ops     = to_device(device, kernel, 8, in.dev.borrowed_ops);
+    xrt::bo offset_table = to_device(device, kernel, 9, in.dev.offset_table);
+    xrt::bo exp_lut      = to_device(device, kernel, 11, in.exp_lut);
+    xrt::bo grad         = to_device(device, kernel, 13, out.grad);
+    xrt::bo hpwl_total   = to_device(device, kernel, 17, std::vector<int64_t>{-1});
 
     const auto start = std::chrono::steady_clock::now();
-    xrt::run run = kernel(chunks, group_ends, (int)in.dev.desc.size(), records, pos, macro_pins, borrowed_blocks, borrowed_ops,
+    xrt::run run = kernel(chunks, group_ends, (int)in.dev.desc.size(), records, pos, macro_beats, macro_offsets, borrowed_blocks, borrowed_ops,
                           offset_table, (int)in.dev.offset_table.size(), exp_lut, (int)in.exp_lut.size(), grad,
                           in.dev.offset_bits, in.inv_gamma, in.inv_lut_step, hpwl_total);
     run.wait();

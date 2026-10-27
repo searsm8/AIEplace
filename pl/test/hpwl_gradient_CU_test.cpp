@@ -45,7 +45,7 @@ static DeviceAxis run_axis(const packer::Chunked& ch, size_t num_parsed, int axi
     std::vector<pinrec::SlotBeat> grad(pos.size());
     for (auto& beat : grad) for (float& v : beat.v) v = NAN;     // unwritten slots stay visibly wrong
     DeviceAxis out;
-    hpwl_gradient_CU(dev.desc.data(), dev.group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(), dev.macro_pins.data(),
+    hpwl_gradient_CU(dev.desc.data(), dev.group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(), dev.macro_beats.data(), dev.macro_offsets.data(),
                      dev.borrowed_blocks.data(), dev.borrowed_ops.data(),
                      dev.offset_table.data(), (int)dev.offset_table.size(), lut.table.data(), lut.size,
                      grad.data(), dev.offset_bits, 1.0f / golden::GAMMA, lut.inv_step, out.hpwl_total_fixed);

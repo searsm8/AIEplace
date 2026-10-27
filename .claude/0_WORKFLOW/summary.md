@@ -106,6 +106,7 @@
 (`make -C host/sw_flat hpwl-gradient-xrt`), sw_emu 4/4 and hw_emu 3/3 (synthetic with 16 chunks, pci_bridge32_b, fft_a) are bit-exact vs the g++ CU.
 hw xclbin built at **200 MHz** (WNS +0.031 ns). **Clock work (10-27):** **230 MHz PASSES bit-exact on the card** (4 designs, bigblue4 7.9 ms/axis; WNS +0.001 ns; HLS at
 400 MHz + unshared adders); on vck set XRT_DEVICE_BDF=0000:c1:00.1; 250 MHz best −0.178 ns ([[REPORT_45_hpwl_gradient_timing_20261027.md]]).
+**Macro beats (10-27):** refresh/fold 16 pins per cycle, ~11–14× fewer macro-pin cycles on MMS, bit-exact in sw_emu and hw_emu; kernel interface changed, so a new xclbin is needed ([[REPORT_45_macro_beats_20261027.md]]).
 **On the VCK5000 (2026-10-20, host `vck`): PASS bit-exact** on synthetic, fft_a, mms/adaptec1 and bigblue4 (3 chunks,
 ~8.4 ms wall-clock per axis) ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
 **Then:** step 6, density path.

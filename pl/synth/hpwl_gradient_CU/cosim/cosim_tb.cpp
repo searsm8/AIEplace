@@ -20,7 +20,7 @@
 #include <cstring>
 
 extern "C" void hpwl_gradient_CU_top(
-        const pinrec::ChunkDesc*, const int32_t*, int, const pinrec::RecordBeat*, pinrec::SlotBeat*, const pinrec::MacroPinRef*,
+        const pinrec::ChunkDesc*, const int32_t*, int, const pinrec::RecordBeat*, pinrec::SlotBeat*, const pinrec::MacroBeat*, const pinrec::SlotBeat*,
         const pinrec::BorrowedBlockDesc*, const uint32_t*, const float*, int, const float*, int,
         pinrec::SlotBeat*, int, float, float, int64_t*);
 
@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
     for (int axis = 0; axis < 2; axis++) {
         const packer::ChunkedDevice dev = packer::chunked_device_arrays(ch, axis, node_pos[axis]);
         const bool fits = dev.records.size() / pinrec::LANES <= 2048 && dev.slot_images.size() / pinrec::LANES <= 4096 &&
-                          dev.desc.size() <= 64 && dev.group_ends.size() <= 2048 && dev.macro_pins.size() <= 4096 &&
+                          dev.desc.size() <= 64 && dev.group_ends.size() <= 2048 && dev.macro_beats.size() <= 4096 &&
                           dev.borrowed_blocks.size() <= 1024 && dev.borrowed_ops.size() <= 32768;
         if (!fits) { printf("FAIL design exceeds a cosim port depth\n"); return 1; }
         std::vector<pinrec::RecordBeat> records(2048);
@@ -93,13 +93,14 @@ int main(int argc, char** argv) {
         std::memcpy(pos.data(), dev.slot_images.data(), dev.slot_images.size() * sizeof(float));
         const std::vector<pinrec::ChunkDesc> desc = padded(dev.desc, 64);
         const std::vector<int32_t> group_ends = padded(dev.group_ends, 2048);
-        const std::vector<pinrec::MacroPinRef> refs = padded(dev.macro_pins, 4096);
+        const std::vector<pinrec::MacroBeat> macro_beats = padded(dev.macro_beats, 4096);
+        const std::vector<pinrec::SlotBeat> macro_offsets = padded(dev.macro_offsets, 4096);
         const std::vector<pinrec::BorrowedBlockDesc> borrowed_blocks = padded(dev.borrowed_blocks, 1024);
         const std::vector<uint32_t> borrowed_ops = padded(dev.borrowed_ops, 32768);
         const std::vector<float> offsets = padded(dev.offset_table, 1024);
         std::vector<pinrec::SlotBeat> grad(4096);
         int64_t hpwl_total_fixed = -1;
-        hpwl_gradient_CU_top(desc.data(), group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(), refs.data(),
+        hpwl_gradient_CU_top(desc.data(), group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(), macro_beats.data(), macro_offsets.data(),
                              borrowed_blocks.data(), borrowed_ops.data(), offsets.data(), (int)dev.offset_table.size(), lut_table.data(),
                              lut.size, grad.data(), dev.offset_bits, 1.0f / golden::GAMMA, lut.inv_step, &hpwl_total_fixed);
 

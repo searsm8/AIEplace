@@ -47,7 +47,7 @@ DeviceAxis run_device(const sw_flat::Placer& placer, int axis)
     DeviceAxis out;
     const float inv_lut_step = 1.0f / (sw_flat::PL_LUT_STEP_NORM * placer.gamma);
     plalgo::hpwl_gradient_CU(dev.desc.data(), dev.group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(),
-                             dev.macro_pins.data(), dev.borrowed_blocks.data(), dev.borrowed_ops.data(),
+                             dev.macro_beats.data(), dev.macro_offsets.data(), dev.borrowed_blocks.data(), dev.borrowed_ops.data(),
                              dev.offset_table.data(), (int)dev.offset_table.size(),
                              placer.exp_lut.data(), (int)placer.exp_lut.size(), grad.data(), dev.offset_bits,
                              placer.inv_gamma, inv_lut_step, out.hpwl_fixed);

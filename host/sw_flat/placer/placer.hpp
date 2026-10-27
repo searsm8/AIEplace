@@ -26,6 +26,7 @@
 
 #include "Common.h"   // AIEplace::Position / Gradient: the same float operators as sw_only's Node
 
+#include <array>
 #include <chrono>
 #include <limits>
 #include <string>
@@ -117,8 +118,8 @@ struct RecordStream {
     std::vector<char> lane_movable;           // per position * LANES: below its chunk's first_fixed_slot (gets a gradient)
     std::vector<long> small_positions;        // positions of small-net beats
     std::vector<long> large_first, large_positions;   // CSR: each large net's real beats, in stream order
-    struct Fold { long pin_slot, macro_slot; bool first, last; };
-    std::vector<Fold> folds;                  // every chunk's fold list (SKIPs dropped), chunk order
+    struct MacroFold { long macro_slot; std::array<long, pinrec::LANES> pin_slot; bool first, last; };   // pin_slot -1: empty lane
+    std::vector<MacroFold> folds;             // every chunk's macro beats (SKIPs dropped), chunk order
     std::vector<long> chunk_first_fold;       // num_chunks + 1
     std::vector<long> chunk_movable_end;      // per chunk: global first_fixed_slot
     std::vector<std::pair<long, long>> borrowed_merges;   // (owner slot, borrower's borrowed slot): owners ascending, borrowers ascending

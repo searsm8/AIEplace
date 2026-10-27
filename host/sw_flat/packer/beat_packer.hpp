@@ -10,7 +10,7 @@
 //        Encoded enc = encode_netlist(nl, cfg);        // nl is not modified
 //        check(nl, enc, cfg)                           // decode the stream, compare geometry
 //        slot_positions(enc, axis, node_pos)           // per-call position image, slot-major
-//        macro_pin_refs(enc, axis)                     // on-chip refresh / fold list
+//        macro_beat_records(enc, axis)                 // on-chip refresh / fold beats
 //
 // Node kinds after encode_netlist rewrites pins (the device only ever sees slots):
 //   CELL       movable, own pins on nets              slot: position + gradient
@@ -84,10 +84,11 @@
 //      is at most MAX_NET_EXTENT: the gradient's stage FIFOs hold one extent while a later stage
 //      waits on the net's bbox / sums, so a longer net would deadlock the device. Nets the
 //      schedule would stretch further are dropped (large_extent_dropped).               [check]
-// Macro-pin list (macro_pin_refs: refresh, then fold)
-//  M1  Every macro pin appears exactly once; MACRO_PIN_SKIP entries are padding.        [check]
-//  M2  No macro recurs within HAZARD_DISTANCE entries (the fold read-modify-write).     [check]
-//  M3  FIRST marks a macro's first entry (starts its sum), LAST its last (writes the total into
+// Macro beats (macro_beat_records: refresh, then fold; 16 pins per beat since 2026-10-27)
+//  MB1 Every macro pin is in exactly one lane of one beat; a beat holds pins of one macro only;
+//      lane j's pin sits in bank j or j + LANES; MACRO_BEAT_SKIP beats are padding.      [check]
+//  MB2 No macro recurs within MACRO_FOLD_DISTANCE beats (the fold read-modify-write).   [check]
+//  MB3 FIRST marks a macro's first beat (starts its sum), LAST its last (writes the total into
 //      the macro's gradient).                                                        [harness]
 // Chunking (encode_chunked, required to handle designs too big for URAM)
 //  C1  Every movable node is owned by exactly one chunk; a macro and its macro pins by the same one.
@@ -273,13 +274,19 @@ struct MacroPin {
     float offset[2];
 };
 
+// One device macro beat: up to LANES pins of one macro, lane j's pin in bank j or j + LANES. Meow.
+struct MacroBeatPlan {
+    int macro_node = -1;                    // -1: a SKIP beat
+    std::array<int, LANES> pin;             // index into Encoded::macro_pins, or -1
+};
+
 struct Encoded {
     Netlist work;                           // nl with macro and fixed pins rewritten to pin nodes
     std::vector<NodeKind> kind;             // per work node
     std::vector<int> base_node;             // per work node: itself, or the node a pin node stands for
     std::vector<std::array<float, 2>> pinned_offset;  // per work node: 0, or the offset a pin node bakes in
     std::vector<MacroPin> macro_pins;       // grouped by macro_node
-    std::vector<int>      macro_order;      // device order: index into macro_pins, or -1 (SKIP)
+    std::vector<MacroBeatPlan> macro_beats; // device order (MB1-MB3)
     std::vector<std::vector<int>> unique_nodes;       // per net: distinct work nodes
 
     std::vector<int>  in_scope_nets;
@@ -751,26 +758,40 @@ inline void assign_node_slots(Encoded& enc) {
     enc.uram_pos  = BANKS * ((movable_rows + fixed_rows + URAM_FLOATS - 1) / URAM_FLOATS);
 }
 
-// Step 4b: order the macro-pin list for the device's read-add-write fold: no macro within
-// `hazard` entries of itself. Largest-remaining-first with a cooldown (the task-scheduler
-// greedy), a SKIP entry only when every macro with pins left is still cooling. Meow.
+// Step 4b: the macro beats (MB1-MB3). Each macro's pins are bucketed by bank % LANES, the bucket
+// being the lane that can reach them; beat i takes the i-th pin of every bucket, so a macro needs as
+// many beats as its fullest bucket. The beats are then ordered for the fold's read-add-write, no
+// macro within MACRO_FOLD_DISTANCE beats of itself: largest-remaining-first with a cooldown (the
+// task-scheduler greedy), a SKIP beat only when every macro with beats left is still cooling. Meow.
 inline void schedule_macro_pins(Encoded& enc, const Config& cfg) {
-    std::map<int, std::vector<int>> by_macro;
-    for (size_t i = 0; i < enc.macro_pins.size(); i++) by_macro[enc.macro_pins[i].macro_node].push_back((int)i);
-    std::vector<std::vector<int>> pins;
-    for (auto& entry : by_macro) pins.push_back(entry.second);
-    std::vector<size_t> next(pins.size(), 0);
-    std::vector<long> ready(pins.size(), 0);
-    long position = 0;
-    size_t remaining = enc.macro_pins.size();
-    enc.macro_order.clear();
+    std::map<int, std::array<std::vector<int>, LANES>> buckets;   // macro -> lane -> pins
+    for (size_t i = 0; i < enc.macro_pins.size(); i++) {
+        const MacroPin& mp = enc.macro_pins[i];
+        buckets[mp.macro_node][enc.bank[mp.pin_node] % LANES].push_back((int)i);
+    }
+    std::vector<std::vector<MacroBeatPlan>> beats;   // per macro, its beats in order
+    for (auto& [macro, lanes] : buckets) {
+        size_t count = 0;
+        for (const auto& bucket : lanes) count = std::max(count, bucket.size());
+        std::vector<MacroBeatPlan> own(count);
+        for (size_t b = 0; b < count; b++) {
+            own[b].macro_node = macro;
+            for (int lane = 0; lane < LANES; lane++) own[b].pin[lane] = b < lanes[lane].size() ? lanes[lane][b] : -1;
+        }
+        beats.push_back(std::move(own));
+    }
+    std::vector<size_t> next(beats.size(), 0);
+    std::vector<long> ready(beats.size(), 0);
+    long position = 0, remaining = 0;
+    for (const auto& own : beats) remaining += (long)own.size();
+    enc.macro_beats.clear();
     while (remaining) {
         int best = -1;
-        for (size_t m = 0; m < pins.size(); m++)
-            if (next[m] < pins[m].size() && ready[m] <= position &&
-                (best < 0 || pins[m].size() - next[m] > pins[best].size() - next[best])) best = (int)m;
-        if (best < 0) enc.macro_order.push_back(-1);
-        else { enc.macro_order.push_back(pins[best][next[best]++]); ready[best] = position + cfg.hazard; remaining--; }
+        for (size_t m = 0; m < beats.size(); m++)
+            if (next[m] < beats[m].size() && ready[m] <= position &&
+                (best < 0 || beats[m].size() - next[m] > beats[best].size() - next[best])) best = (int)m;
+        if (best < 0) { MacroBeatPlan skip; skip.pin.fill(-1); enc.macro_beats.push_back(skip); }
+        else { enc.macro_beats.push_back(beats[best][next[best]++]); ready[best] = position + MACRO_FOLD_DISTANCE; remaining--; }
         position++;
     }
 }
@@ -858,22 +879,37 @@ inline std::vector<float> slot_positions(const Encoded& enc, int axis, const std
     return image;
 }
 
-inline std::vector<MacroPinRef> macro_pin_refs(const Encoded& enc, int axis) {
-    std::map<int, int> first, last;   // macro_node -> position in macro_order
-    for (size_t e = 0; e < enc.macro_order.size(); e++) {
-        if (enc.macro_order[e] < 0) continue;
-        const int macro = enc.macro_pins[enc.macro_order[e]].macro_node;
-        if (!first.count(macro)) first[macro] = (int)e;
-        last[macro] = (int)e;
+// The device's macro beats and, beat for beat, their lanes' offsets on `axis` (0 in empty lanes). Meow.
+inline std::vector<MacroBeat> macro_beat_records(const Encoded& enc, int axis, std::vector<SlotBeat>* offsets = nullptr) {
+    std::map<int, size_t> first, last;   // macro_node -> position in macro_beats
+    for (size_t t = 0; t < enc.macro_beats.size(); t++) {
+        const int macro = enc.macro_beats[t].macro_node;
+        if (macro < 0) continue;
+        if (!first.count(macro)) first[macro] = t;
+        last[macro] = t;
     }
-    std::vector<MacroPinRef> refs;
-    for (size_t e = 0; e < enc.macro_order.size(); e++) {
-        if (enc.macro_order[e] < 0) { refs.push_back({MACRO_PIN_SKIP, MACRO_PIN_SKIP, 0.0f, 0}); continue; }
-        const MacroPin& mp = enc.macro_pins[enc.macro_order[e]];
-        const int32_t flags = (first[mp.macro_node] == (int)e ? MACRO_PIN_FIRST : 0) | (last[mp.macro_node] == (int)e ? MACRO_PIN_LAST : 0);
-        refs.push_back({(int32_t)enc.node_slot[mp.pin_node], (int32_t)enc.node_slot[mp.macro_node], mp.offset[axis], flags});
+    std::vector<MacroBeat> records;
+    for (size_t t = 0; t < enc.macro_beats.size(); t++) {
+        const MacroBeatPlan& plan = enc.macro_beats[t];
+        MacroBeat beat = {};
+        SlotBeat lane_offset = {};
+        beat.macro_slot = MACRO_BEAT_SKIP;
+        if (plan.macro_node >= 0) {
+            beat.macro_slot = (int32_t)enc.node_slot[plan.macro_node];
+            beat.flags = (uint16_t)((first[plan.macro_node] == t ? MACRO_BEAT_FIRST : 0) | (last[plan.macro_node] == t ? MACRO_BEAT_LAST : 0));
+            for (int lane = 0; lane < LANES; lane++) {
+                if (plan.pin[lane] < 0) continue;
+                const MacroPin& mp = enc.macro_pins[plan.pin[lane]];
+                const long slot = enc.node_slot[mp.pin_node];
+                beat.lane_valid |= (uint16_t)(1u << lane);
+                lane_offset.v[lane] = mp.offset[axis];
+                beat.pin_row[lane] = (uint16_t)((slot / BANKS) | (slot % BANKS >= LANES ? MACRO_ROW_UPPER : 0));
+            }
+        }
+        records.push_back(beat);
+        if (offsets) offsets->push_back(lane_offset);
     }
-    return refs;
+    return records;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1045,14 +1081,24 @@ inline void decode_stream(const Encoded& enc, const Config& cfg, Failures& fail,
         if (enc.base_node[mp.pin_node] != enc.base_node[mp.macro_node]) fail("macro pin list names the wrong macro", mp.pin_node);
     std::vector<int> seen(enc.macro_pins.size(), 0);
     std::unordered_map<int, long> last_fold;
-    for (size_t e = 0; e < enc.macro_order.size(); e++) {
-        const int i = enc.macro_order[e];
-        if (i < 0) continue;
-        if (i >= (int)seen.size()) { fail("macro order names no macro pin", (long)e); continue; }
-        seen[i]++;
-        auto it = last_fold.find(enc.macro_pins[i].macro_node);
-        if (it != last_fold.end() && (long)e - it->second < cfg.hazard) fail("macro fold RAW hazard", (long)e);
-        last_fold[enc.macro_pins[i].macro_node] = (long)e;
+    for (size_t t = 0; t < enc.macro_beats.size(); t++) {
+        const MacroBeatPlan& plan = enc.macro_beats[t];
+        if (plan.macro_node < 0) {
+            for (int i : plan.pin) if (i >= 0) fail("SKIP macro beat holds a pin", (long)t);
+            continue;
+        }
+        for (int lane = 0; lane < LANES; lane++) {
+            const int i = plan.pin[lane];
+            if (i < 0) continue;
+            if (i >= (int)seen.size()) { fail("macro beat names no macro pin", (long)t); continue; }
+            seen[i]++;
+            if (enc.macro_pins[i].macro_node != plan.macro_node) fail("macro beat mixes macros", (long)t);
+            if (enc.node_slot[enc.macro_pins[i].pin_node] % LANES != lane) fail("macro pin on a lane that cannot reach its bank", (long)t);
+            if (enc.node_slot[enc.macro_pins[i].pin_node] / BANKS > MACRO_ROW_MASK) fail("macro pin row past 15 bits", (long)t);
+        }
+        auto it = last_fold.find(plan.macro_node);
+        if (it != last_fold.end() && (long)t - it->second < MACRO_FOLD_DISTANCE) fail("macro fold RAW hazard", (long)t);
+        last_fold[plan.macro_node] = (long)t;
     }
     for (size_t i = 0; i < seen.size(); i++) if (seen[i] != 1) fail("macro pin not folded exactly once", (long)i);
 }
@@ -1436,7 +1482,8 @@ struct ChunkedDevice {
     std::vector<int32_t>          group_ends;     // NUM_GROUP_ENDS per chunk: degree_group_end, then span_group_end
     std::vector<uint32_t>         records;        // LANES per beat
     std::vector<float>            slot_images;    // slot-major, each chunk a whole number of beats
-    std::vector<MacroPinRef>      macro_pins;
+    std::vector<MacroBeat>        macro_beats;
+    std::vector<SlotBeat>         macro_offsets;  // beat for beat with macro_beats, this axis
     std::vector<BorrowedBlockDesc> borrowed_blocks;  // per owner, borrowers ascending (ChunkDesc first_borrowed_block, num_borrowers)
     std::vector<uint32_t>          borrowed_ops;     // every borrowed block's send and merge ops
     std::vector<float>            offset_table;
@@ -1464,8 +1511,8 @@ inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const st
         d.first_private_slot   = (int32_t)c.enc.first_private_slot;
         d.first_borrowed_slot  = (int32_t)c.enc.first_borrowed_slot;
         d.first_fixed_slot     = (int32_t)c.enc.first_fixed_slot;
-        d.macro_pin_offset     = (int32_t)dev.macro_pins.size();
-        d.num_macro_pins       = (int32_t)c.enc.macro_order.size();   // the scheduled list, SKIP padding included
+        d.macro_beat_offset    = (int32_t)dev.macro_beats.size();
+        d.num_macro_beats      = (int32_t)c.enc.macro_beats.size();   // SKIP beats included
         d.first_borrowed_block = (int32_t)dev.borrowed_blocks.size();
         for (int borrower = 0; borrower < ch.num_chunks; borrower++)   // this chunk as owner (C7)
             for (const Chunk::BorrowedBlock& block : ch.chunks[borrower].borrowed_blocks) {
@@ -1488,8 +1535,8 @@ inline ChunkedDevice chunked_device_arrays(const Chunked& ch, int axis, const st
         dev.records.insert(dev.records.end(), c.enc.records[axis].begin(), c.enc.records[axis].end());
         const std::vector<float> image = chunk_slot_positions(ch, k, axis, node_pos, fill_borrowed);
         dev.slot_images.insert(dev.slot_images.end(), image.begin(), image.end());
-        const std::vector<MacroPinRef> refs = macro_pin_refs(c.enc, axis);
-        dev.macro_pins.insert(dev.macro_pins.end(), refs.begin(), refs.end());
+        const std::vector<MacroBeat> beats = macro_beat_records(c.enc, axis, &dev.macro_offsets);
+        dev.macro_beats.insert(dev.macro_beats.end(), beats.begin(), beats.end());
     }
     return dev;
 }

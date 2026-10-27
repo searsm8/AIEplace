@@ -24,7 +24,7 @@ static void check(bool ok, const char* what) {
 int main() {
     check(sizeof(RecordBeat) * 8 == 512, "[1] RecordBeat is one 512-bit beat");
     check(sizeof(SlotBeat) * 8 == 512, "[1] SlotBeat is one 512-bit beat");
-    check(sizeof(MacroPinRef) == 16, "[1] MacroPinRef is 16 bytes (12 straddled bus words: II=2)");
+    check(sizeof(MacroBeat) * 8 == 512, "[1] MacroBeat is one 512-bit beat");
     check(sizeof(ChunkDesc) * 8 <= 512, "[1] ChunkDesc fits one 512-bit port word");
     check(sizeof(BorrowedBlockDesc) == 20, "[1] BorrowedBlockDesc is 20 bytes");
 

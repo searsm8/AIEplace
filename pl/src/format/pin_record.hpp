@@ -66,20 +66,37 @@ struct RecordBeat { uint32_t r[LANES]; };   // one 512-bit DDR beat of the stati
 struct SlotBeat   { float    v[LANES]; };   // one 512-bit DDR beat of a slot-major array
 
 // A movable macro's pin is its own slot: pos[pin_slot] = pos[macro_slot] + offset, refreshed on
-// chip each call; its gradient folds back into the macro as a read-add-write, so the host orders
-// the list with no macro repeated within HAZARD_DISTANCE entries (padding with SKIP entries when a
-// macro dominates). FIRST starts a macro's sum instead of adding to it; LAST writes the total into
-// the macro's gradient -- no separate zeroing or copy pass. 16 bytes: a 12-byte entry straddles
-// bus words and cost refresh_macros II=2. Meow.
-constexpr int32_t MACRO_PIN_SKIP  = -1;   // pin_slot of a padding entry
-constexpr int32_t MACRO_PIN_FIRST = 1;
-constexpr int32_t MACRO_PIN_LAST  = 2;
-struct MacroPinRef {
-    int32_t pin_slot;
-    int32_t macro_slot;
-    float   offset;      // this axis
-    int32_t flags;       // MACRO_PIN_FIRST | MACRO_PIN_LAST
+// chip each call, and its gradient folds back into the macro. A MacroBeat carries up to LANES pins
+// of ONE macro, lane j's pin in bank j or j + LANES (MACRO_ROW_UPPER), so refresh writes and fold
+// reads 16 pins per cycle through a 2:1 mux per lane. The fold sums a beat's lanes with
+// macro_pin_tree (slot_arrays.hpp) and adds that into the macro's running sum, a read-add-write, so
+// the host orders the beats with no macro repeated within HAZARD_DISTANCE beats (SKIP beats pad).
+// FIRST starts a macro's sum; LAST writes the total into the macro's gradient. 64 bytes, one 512-bit
+// bus word; the lanes' offsets are a parallel SlotBeat array (macro_offsets) that only refresh reads:
+// as one 128-byte beat it took two bus reads per beat (II=2) even with a 1024-bit widen cap. Meow.
+// Beats between two beats of one macro in the fold. Longer than HAZARD_DISTANCE so the running sum's
+// read-add-write can pipeline its add (3 cycles) instead of chaining URAM read, bank mux and add in
+// one cycle (4.3 ns estimated at a 2.5 ns target, 2026-10-27). Macros have many beats each and a
+// chunk dozens of macros, so the wider spacing costs almost no SKIP beats. Meow.
+constexpr int      MACRO_FOLD_DISTANCE = 8;
+constexpr int32_t  MACRO_BEAT_SKIP  = -1;       // macro_slot of a padding beat
+constexpr uint16_t MACRO_BEAT_FIRST = 1;
+constexpr uint16_t MACRO_BEAT_LAST  = 2;
+constexpr uint16_t MACRO_ROW_UPPER  = 0x8000;   // pin_row: the pin is in bank lane + LANES, not bank lane
+constexpr uint16_t MACRO_ROW_MASK   = 0x7FFF;   // pin_row: the URAM row (ROWS_PER_BANK <= 32K)
+static_assert(BANKS == 2 * LANES, "a macro-beat lane serves exactly two banks");
+struct MacroBeat {
+    uint16_t pin_row[LANES];   // MACRO_ROW_UPPER | row
+    int32_t  macro_slot;       // MACRO_BEAT_SKIP on a padding beat
+    uint16_t lane_valid;       // bit j: lane j holds a pin
+    uint16_t flags;            // MACRO_BEAT_FIRST | MACRO_BEAT_LAST
+    int32_t  pad[6];
 };
+static_assert(sizeof(MacroBeat) == 64, "MacroBeat is one 512-bit bus word");
+inline int32_t macro_lane_slot(const MacroBeat& beat, int lane) {
+    const int bank = lane + ((beat.pin_row[lane] & MACRO_ROW_UPPER) ? LANES : 0);
+    return (int32_t)(beat.pin_row[lane] & MACRO_ROW_MASK) * BANKS + bank;
+}
 
 // ---- Chunking (a design larger than one on-chip slot space) ----
 // Each chunk is an ordinary stream over its own local slots; the per-chunk arrays are concatenated
@@ -97,7 +114,7 @@ struct ChunkDesc {
     int32_t first_private_slot;                     // owned slots below hold every node another chunk borrows (C8)
     int32_t first_borrowed_slot;                    // owned movable slots below, the borrowed rows from here
     int32_t first_fixed_slot;
-    int32_t macro_pin_offset, num_macro_pins;       // into the concatenated macro-pin lists
+    int32_t macro_beat_offset, num_macro_beats;     // into the concatenated macro beats (SKIP beats included)
     int32_t first_borrowed_block, num_borrowers;    // this chunk's borrowed blocks AS OWNER, borrowers ascending
 };
 

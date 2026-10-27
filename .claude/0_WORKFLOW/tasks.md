@@ -786,6 +786,11 @@ are the improvements. → [[REPORT_45_hpwl_gradient_hw_flow_20261019.md]].
   fan-out from `fold_macros`/`load_slots`, and `wa_sums` DSP inputs. Mark's call: `pos_URAM` `latency=3`
   would need `fold_macros` at II=2.
 → [[REPORT_45_hpwl_gradient_timing_20261027.md]]
+**Macro beats (2026-10-27, Mark): refresh and fold at 16 pins per cycle.** Golden-first; bit-exact golden vs CU
+6/6, tier 1, packer MB1–MB3 on all 16 MMS designs, sw_emu 4/4, hw_emu 2/2 (synthetic with macros, fft_a). Macro-pin cycles ~11–14× fewer
+on MMS (adaptec1 16,265 → 1,203 per pass); fold distance 8 took `fold_macros` from −1.80 to −0.01 ns estimated.
+**The kernel interface changed** (`MacroBeat` + new `macro_offsets` argument): the 230 MHz xclbin above no
+longer matches pl_algo's host. Next: a routed 230/250 MHz build, card run. → [[REPORT_45_macro_beats_20261027.md]]
 
 Done 2026-10-06 as low-hanging fruit: gradient `max_rel` 1e-3
 (`vck5000/test/wa_gradient_golden.hpp`; newblue3 / mms/bigblue4 / newblue7 now pass, rel_rms still
