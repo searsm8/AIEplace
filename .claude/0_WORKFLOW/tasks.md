@@ -1,12 +1,11 @@
 # Tasks
 
-**Active Task (2026-10-20): #45 step 6 / #48 — `bin_density_CU`.** One cell per cycle is in: 4×4 banks +
-forwarding, II = 1, bit-exact to sw_flat on 44/44, forwarding proven in RTL co-sim; F per design from the
-total-area bound ([[REPORT_48_bin_density_fixed_point_20261019.md]]). Next: lanes (row-band ownership,
-8 lanes = no extra URAM) — Mark's call. XPlace's own scatter/gather is being read in
-[[REPORT_48_xplace_density_scatter_gather_20261020.md]] (separate session). Done alongside (2026-10-20): #45 step 8's
-`hpwl_gradient_CU` hardware baseline, **PASS bit-exact on the VCK5000 at 200 MHz** ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
-#46 closed 2026-10-19 (re-scored, new goldens archived; history.md).
+**Active Task (2026-10-27): #48 — bin index by multiply (Mark).** The golden's `(int)(edge / bin)` becomes
+`(int)(edge * inv_bin)` in sw_flat (switch, drift measured), then `bin_density_CU` and the producers match it
+bit-exact: the 4 dividers cost ~63 K LUT over 8 producers (Vivado). A deliberate divergence from XPlace
+(it divides). → [[HANDOFF_48_multiply_bin_index_20261027.md]]. Next after it: the producers' 64 address
+multiplies, the drain's timing, macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
+`hpwl_gradient_CU` passes on the VCK5000 at 230 MHz ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
 
 Open work, one section per task. **Status lives here; evidence lives in a
 report.** Don't reuse task numbers, find the highest number and add one.
