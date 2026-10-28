@@ -31,7 +31,8 @@ typedef uint64_t acc_word;   // wider off-synthesis, as bin_density_CU
 constexpr int PRODUCERS     = 8;
 constexpr int BANK_SIDE     = 8;                                      // 8 x 8 interleave
 constexpr int NUM_BANKS     = BANK_SIDE * BANK_SIDE;                  // 64
-constexpr int BANK_WORDS    = (densrec::GRID_MAX / BANK_SIDE) * (densrec::GRID_MAX / BANK_SIDE);   // 16K at 1024
+constexpr int BANK_PITCH    = densrec::GRID_MAX / BANK_SIDE;          // fixed, as bin_density_CU: a shift, no DSP
+constexpr int BANK_WORDS    = BANK_PITCH * BANK_PITCH;                // 16K at 1024
 constexpr int FIFO_DEPTH    = 8;
 constexpr int FORWARD_DEPTH = BANKED_FORWARD_DEPTH;
 constexpr int TABLE_MAX     = 128;                                    // measured 4..105 on the 44 designs
@@ -64,7 +65,7 @@ produce:
             const int dr = (b % BANK_SIDE - a.row_lo) & (BANK_SIDE - 1);
             if (dc < PRODUCER_SIDE && dr < PRODUCER_SIDE && a.valid[dc * PRODUCER_SIDE + dr]) {
                 const int col = a.col_lo + dc, row = a.row_lo + dr;
-                to_bank[b].write(BankUpdate{(uint16_t)((col / BANK_SIDE) * (grid_bins / BANK_SIDE) + row / BANK_SIDE),
+                to_bank[b].write(BankUpdate{(uint16_t)((col / BANK_SIDE) * BANK_PITCH + row / BANK_SIDE),
                                             a.inc[dc * PRODUCER_SIDE + dr], false});
             }
         }

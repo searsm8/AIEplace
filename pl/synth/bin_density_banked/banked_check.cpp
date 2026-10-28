@@ -16,8 +16,9 @@
 extern "C" void banked_top(ARGS(0), ARGS(1), ARGS(2), ARGS(3), ARGS(4), ARGS(5), ARGS(6), ARGS(7), int, int, float,
                            float, float, unsigned long long*);
 
-int main() {
-    const int grid = 1024, cells = 400000, producers = 8;
+// One grid size. Below GRID_MAX the banks keep the GRID_MAX pitch, so the words past the grid must stay 0. Meow.
+static long check_grid(int grid) {
+    const int cells = 400000, producers = 8;
     const float die = 20013.7f, bin_w = die / grid, bin_h = die / grid, bin_area = bin_w * bin_h;
     const float fixed_scale = std::ldexp(1.0f, 18) / bin_area;
     std::vector<densrec::Footprint> table;
@@ -47,7 +48,7 @@ int main() {
         }
     }
 
-    std::vector<unsigned long long> raw((size_t)grid * grid);
+    std::vector<unsigned long long> raw((size_t)densrec::GRID_MAX * densrec::GRID_MAX);
     const int T = (int)table.size();
     banked_top(table.data(), slices[0].data(), (int)slices[0].size(), table.data(), slices[1].data(), (int)slices[1].size(),
                table.data(), slices[2].data(), (int)slices[2].size(), table.data(), slices[3].data(), (int)slices[3].size(),
@@ -56,13 +57,20 @@ int main() {
                T, grid, bin_w, bin_h, fixed_scale, raw.data());
 
     long differ = 0;
-    const int words_per_col = grid / 8;
+    const int pitch = densrec::GRID_MAX / 8;
     for (size_t i = 0; i < raw.size(); i++) {
         const int b = (int)(i % 64), a = (int)(i / 64);
-        const int col = (a / words_per_col) * 8 + b / 8, row = (a % words_per_col) * 8 + b % 8;
-        differ += raw[i] != golden[(size_t)col * grid + row];
+        const int col = (a / pitch) * 8 + b / 8, row = (a % pitch) * 8 + b % 8;
+        const uint64_t want = col < grid && row < grid ? golden[(size_t)col * grid + row] : 0;
+        differ += raw[i] != want;
     }
-    printf("banked deposit (8 producers, 64 banks): %ld of %d bins differ from the plain deposit -> %s\n", differ,
-           grid * grid, differ ? "FAIL" : "PASS");
+    printf("banked deposit (8 producers, 64 banks), grid %d: %ld of %zu words differ from the plain deposit -> %s\n", grid,
+           differ, raw.size(), differ ? "FAIL" : "PASS");
+    return differ;
+}
+
+int main() {
+    long differ = 0;
+    for (int grid : {densrec::GRID_MAX, 512, 336}) differ += check_grid(grid);
     return differ ? 1 : 0;
 }
