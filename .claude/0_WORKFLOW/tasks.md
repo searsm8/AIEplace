@@ -788,7 +788,11 @@ are the improvements. → [[REPORT_45_hpwl_gradient_hw_flow_20261019.md]].
 6/6, tier 1, packer MB1–MB3 on all 16 MMS designs, sw_emu 4/4, hw_emu 2/2 (synthetic with macros, fft_a). Macro-pin cycles ~11–14× fewer
 on MMS (adaptec1 16,265 → 1,203 per pass); fold distance 8 took `fold_macros` from −1.80 to −0.01 ns estimated.
 **The kernel interface changed** (`MacroBeat` + new `macro_offsets` argument): the 230 MHz xclbin above no
-longer matches pl_algo's host. Next: a routed 230/250 MHz build, card run. → [[REPORT_45_macro_beats_20261027.md]]
+longer matches pl_algo's host. **Routed (build G, 10-28):** 230 MHz closes (WNS 0.000, xclbin md5 `12675424…`
+in `build:~/AIEplace_timing/expG/pl/build/run230/`); 250 MHz WNS −0.178 → −0.119 ns, but TNS −87 → −157 ns. Fold, refresh
+and most `send_ops` paths are gone, and ~64% of TNS is now `wa_sums`/`wa_gradient` DSP operand inputs. Co-sim (synthetic):
+compute pass −20%, chunk 0 1,452 → 782 cycles; refresh/fold now pay ~80 cycles of DDR latency per call. Next: card run of
+G's 230 xclbin; register the `wa_*` DSP operands for 250. → [[REPORT_45_macro_beats_20261027.md]]
 
 Done 2026-10-06 as low-hanging fruit: gradient `max_rel` 1e-3
 (`vck5000/test/wa_gradient_golden.hpp`; newblue3 / mms/bigblue4 / newblue7 now pass, rel_rms still

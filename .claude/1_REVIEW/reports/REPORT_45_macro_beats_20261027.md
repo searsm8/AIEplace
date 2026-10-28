@@ -62,7 +62,52 @@ to 16 of its pins; lane *j* holds a pin whose slot is in bank *j* or *j + 16*, o
 `host/sw_flat/model/cycle_model.hpp`, tests (`pin_record_test`, `hpwl_gradient_CU_test`, `record_stream_check`,
 `hpwl_gradient_xrt`, `cosim_tb`).
 
+## Routed (build G, 2026-10-28)
+Build G is `6d3961c`, built with build F's scripts unchanged: HLS at 400 MHz, `no_bufg.tcl` on the 230 MHz link, and the 250 MHz link with the timing check off. Output is on `build` in `~/AIEplace_timing/expG/pl/build/{run,run230}/`. Failing paths were grouped with `scratch_45/timing_250/{classify_paths.tcl,group_paths.py}` (`run/paths_G250.csv`).
+
+| build | clock | WNS (ns) | TNS (ns) | failing endpoints | REG | LUT | BRAM |
+|---|---|---|---|---|---|---|---|
+| F | 230 | +0.001 | 0 | 0 | 220,211 | 145,460 | 228 |
+| **G** | **230** | **0.000** | **0** | **0** | | | |
+| F | 250 | −0.178 | −87 | 1,596 | | | |
+| **G** | **250** | **−0.119** | **−157** | **2,840** | 225,600 | 145,805 | 232 |
+
+- **230 MHz still closes.** The xclbin is packaged at `run230/hpwl_gradient_CU_top.xclbin` (md5 `12675424bc115b0b005761d4be96b16d`). It has not been run on the card.
+- **At 250 MHz the macro and exchange paths went away, and the beat loop's DSPs are now the wall.**
+
+  | path group (source → destination) | F endpoints / WNS | G endpoints / WNS |
+  |---|---|---|
+  | `grad_URAM` → `fold_macros` | 63 / −0.178 | gone |
+  | `fold_macros` → `pos_URAM` | 235 / −0.176 | gone (fold internal: 24 / −0.054) |
+  | `load_slots` → `pos_URAM` | 70 / −0.175 | ~50 / −0.110 (FSM → URAM) |
+  | `send_ops` → `send_ops` | 456 / −0.172 | 75 / −0.090 |
+  | `merge_ops` ↔ `grad_URAM` | 68 / −0.174 | 32 / −0.119 |
+  | `wa_sums` / `wa_gradient` → their DSPs | 459 / −0.078 | **~1,650 / −0.119, ~64% of TNS** |
+
+- The failing DSP paths start at the fabric register holding an fadd/fmul operand (`grp_fu_*_p1`) and end at the DSP's input pipeline register (`DSP_FPM_PIPEREG_INST`). They have 2–3 logic levels and are about 70% route delay. These are the same `wa_sums` paths as in F, now spread across `wa_gradient` as well. WNS is between −0.08 and −0.12 ns in every group, which points to whole-die congestion rather than one bad structure. The kernel's +5 K REG and +29 DSP land on a die where it already holds 55% of the URAMs.
+- **Next for 250 MHz:** register the operand into each `wa_*` DSP (one more operator latency stage, or a register before the DSP input). Then rerun the classification.
+
+## Measured: RTL co-simulation (2026-10-28)
+Both runs use the same synthetic design (`cosim_tb "1536 4"`: 16 chunks, 5 movable macros) at a 400 MHz HLS target. Before is the 10-26 waveform; after is `6d3961c`.
+
+**Figures:** [[.claude/2_ARTIFACTS/hpwl_gradient_timing_20261028/page.html]]. Scripts are in `scratch_45/waveform/`: `cosim_setup_mb.tcl`, `wave_vcd_mb.tcl`, `render_mb.py` (cuts both timelines with windows derived from the signals) and `build_page_mb.py`.
+
+| | before | after |
+|---|---|---|
+| compute pass, chunk 0 | 1,452 | **782** cycles |
+| compute pass, 16 chunks | 18,097 | **14,528** (−20%) |
+| refresh busy, whole pass | 2,654 | 1,810 |
+| fold busy, whole pass | 2,594 | 2,002 |
+| one call (axis 0) | 142,280 | 138,715 |
+
+- **Refresh and fold now pay a fixed ~80 cycles per call** before the first beat arrives, because each one fetches its own beat list from DDR. Before, the pin list arrived alongside `load_pos_zero_grad`. As a result:
+  - chunks with a few hundred macro pins got about 3× faster (chunk 0: refresh 450 → 141 cycles);
+  - chunks with a handful got slower (chunk 4: 2 → 81).
+
+  On MMS designs, with 1,000–5,000 beats per pass, the beats dominate. Hiding the fetch would need a prefetch of the beat list that overlaps `load_pos_zero_grad` (not done).
+- The beat loop itself is unchanged (4,413 cycles). The two exchange passes are still most of a call on this design; B4 (#47) moves them out of this CU.
+
 ## Next
-- A routed build: 230 MHz to confirm no regression, and 250 MHz to see what the fold change buys.
-- Card run (new xclbin interface: the 230 MHz xclbin from `b0e2290` does not match this host).
-- A placer run on an MMS design: trajectory within float noise of before (summation order only).
+- Card run of build G's 230 MHz xclbin. `pl_algo`'s host matches it; on `vck` set `XRT_DEVICE_BDF=0000:c1:00.1`.
+- 250 MHz: register the `wa_*` DSP operands (see the routed section above).
+- A placer run on an MMS design: the trajectory should stay within float noise of before (only the summation order changed).
