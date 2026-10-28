@@ -792,7 +792,7 @@ longer matches pl_algo's host. **Routed (build G, 10-28):** 230 MHz closes (WNS 
 in `build:~/AIEplace_timing/expG/pl/build/run230/`); 250 MHz WNS −0.178 → −0.119 ns, but TNS −87 → −157 ns. Fold, refresh
 and most `send_ops` paths are gone, and ~64% of TNS is now `wa_sums`/`wa_gradient` DSP operand inputs. Co-sim (synthetic):
 compute pass −20%, chunk 0 1,452 → 782 cycles; refresh/fold now pay ~80 cycles of DDR latency per call. **On the card (10-28):**
-G at 230 MHz 4/4 bit-exact; adaptec1 0.8 → 0.7 ms per axis. Next: register the `wa_*` DSP operands for 250. → [[REPORT_45_macro_beats_20261027.md]]
+G at 230 MHz 4/4 bit-exact; adaptec1 0.8 → 0.7 ms per axis. Next: register the `wa_*` DSP operands for 250. → [[REPORT_45_macro_beats_20261027.md]]; handoff [[HANDOFF_45_build_G_250mhz_20261028.md]]
 
 Done 2026-10-06 as low-hanging fruit: gradient `max_rel` 1e-3
 (`vck5000/test/wa_gradient_golden.hpp`; newblue3 / mms/bigblue4 / newblue7 now pass, rel_rms still
