@@ -97,33 +97,40 @@ drain:
     while (!done) {
 #pragma HLS PIPELINE II=1
 #pragma HLS DEPENDENCE variable=rho_URAM inter false   // safe ONLY because of the forwarding registers
+        // Exit on the counts as they stood BEFORE this cycle's reads: the 64-way AND then starts from
+        // registers instead of trailing pick -> read -> count. Costs one idle cycle at the end. Meow.
         bool all_finished = true;
+        for (int b = 0; b < NUM_BANKS; b++) all_finished &= finished[b] == PRODUCERS;
+        done = all_finished;
     banks:
         for (int b = 0; b < NUM_BANKS; b++) {
 #pragma HLS UNROLL
-            // Fixed priority over this bank's 8 FIFOs: all 8 "has data" flags at once, then one read, so
-            // the pick is a priority encoder rather than a chain of 8 reads in one cycle. Meow.
-            int pick = -1;
-            for (int p = PRODUCERS - 1; p >= 0; p--)
-                if (!from[p][b].empty()) pick = p;
+            // Fixed priority over this bank's 8 FIFOs as a one-hot `take`; only the taken read is nonzero,
+            // so the update is the OR of all 8: a balanced tree, not the 8-deep mux chain that
+            // `if (pick == p) u = read()` became. Meow.
             BankUpdate u{0, 0, false};
-            const bool got = pick >= 0;
-            for (int p = 0; p < PRODUCERS; p++)
-                if (pick == p) u = from[p][b].read();
+            bool got = false;
+            for (int p = 0; p < PRODUCERS; p++) {
+                const bool take = !got && !from[p][b].empty();
+                got |= take;
+                const BankUpdate r = take ? from[p][b].read() : BankUpdate{0, 0, false};
+                u.addr |= r.addr; u.inc |= r.inc; u.last |= r.last;
+            }
             const bool add = got && !u.last;
             if (got && u.last) finished[b]++;
             acc_word current = rho_URAM[b][u.addr];
             for (int d = FORWARD_DEPTH - 1; d >= 0; d--)
                 if (fwd_valid[b][d] && fwd_addr[b][d] == u.addr) current = fwd_value[b][d];
             const acc_word updated = current + u.inc;
-            if (add) rho_URAM[b][u.addr] = updated;
+            // Write back the PREVIOUS cycle's sum (forwarding slot 0), so the store's data is a register and
+            // the URAM read -> select -> add path ends in fwd_value. Every real update is followed by at
+            // least one more cycle (its bank's `last`s come after it), so none is left unwritten. Meow.
+            if (fwd_valid[b][0]) rho_URAM[b][fwd_addr[b][0]] = fwd_value[b][0];
             for (int d = FORWARD_DEPTH; d > 0; d--) {
                 fwd_addr[b][d] = fwd_addr[b][d - 1]; fwd_value[b][d] = fwd_value[b][d - 1]; fwd_valid[b][d] = fwd_valid[b][d - 1];
             }
             fwd_addr[b][0] = u.addr; fwd_value[b][0] = updated; fwd_valid[b][0] = add;
-            all_finished &= finished[b] == PRODUCERS;
         }
-        done = all_finished;
     }
 }
 
