@@ -179,6 +179,13 @@ touch one, check here first.
   golden and the device mask the same nets. 28 of 44 designs have no 97..100-pin net (bit-identical);
   on the other 16 it is ≤ 0.27% of pins. Masked GP-vs-GP against XPlace (masked at 100) is off by
   those nets there; the legal-vs-legal headline is unmasked. Meow.
+- **Bin index by multiply, `(int)(edge * inv_bin_w)`, not XPlace's divide** (`density_map_cuda_kernel.cu:27-30`;
+  sw_flat `[sw_flat] bin_index = "multiply"` and `bin_density_CU`; **sw_only still divides**). Landed
+  2026-10-27, Mark-authorized (TODO #48): the 4 float dividers cost +7.8 K LUT per producer (Vivado),
+  ~63 K over 8. `inv_bin_w = 1.0f / bin_w` once, on the host. Measured: 0 indices differ in 4.4 G
+  evaluations on fft_a, pci_bridge32_b, adaptec1, mms/adaptec1 (trace byte-identical to the divide's);
+  bigblue4 at grid 2048: 1.6e-5 differ, HPWL in noise
+  ([[REPORT_48_multiply_bin_index_20261027.md]]). Meow.
 
 ## pl_algo current state
 **Moving (2026-10-06, #45):** integration restarts in a new top-level `/AIEplace/pl`, slot order

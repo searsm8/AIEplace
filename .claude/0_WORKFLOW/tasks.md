@@ -1,10 +1,9 @@
 # Tasks
 
-**Active Task (2026-10-27): #48 — bin index by multiply (Mark).** The golden's `(int)(edge / bin)` becomes
-`(int)(edge * inv_bin)` in sw_flat (switch, drift measured), then `bin_density_CU` and the producers match it
-bit-exact: the 4 dividers cost ~63 K LUT over 8 producers (Vivado). A deliberate divergence from XPlace
-(it divides). → [[HANDOFF_48_multiply_bin_index_20261027.md]]. Next after it: the producers' 64 address
-multiplies, the drain's timing, macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
+**Active Task (2026-10-27): #48 — on-chip density path.** Bin index by multiply landed 2026-10-27 (golden
+and device bit-exact; drift nil on 4/5 designs, in noise on bigblue4; ~63 K LUT saved over 8 producers) →
+[[REPORT_48_multiply_bin_index_20261027.md]]. Next: the producers' 64 address multiplies, the drain's
+timing, macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
 `hpwl_gradient_CU` passes on the VCK5000 at 230 MHz ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
 
 Open work, one section per task. **Status lives here; evidence lives in a
@@ -1222,12 +1221,17 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       ⚠️ "Dividers are not the cost" is RETRACTED: csynth omits the fdiv cores (0 LUT/FF); Vivado synthesis
       on the build server (this box has no Vivado synth license for the VC1902), 10-22: **divide 21.7 K LUT /
       17.2 K FF / 90 DSP vs multiply 13.8 K / 14.5 K / 94 per producer: dividers +57% LUT, ~63 K across 8.**
-      → change the golden's bin index to a multiply (sw_flat first, drift measured). **Whole banked deposit
+      → **DONE 2026-10-27: the golden's bin index is a multiply** (`[sw_flat] bin_index = "multiply"`,
+      `inv_bin_w = 1.0f / bin_w` on the host; registered divergence in CLAUDE.md). 0 of 4.4 G indices differ
+      on 4 designs (trace byte-identical to `pl+Bprime+fixed`); bigblue4 at 2048: 1.6e-5 differ, parts at
+      iteration 82, HPWL −0.002% vs base (fixed −0.013%), in its ±0.01% noise; `bin_density_CU` (new args
+      `inv_bin_w/h`) and the producer (`PRODUCER_DIVIDE` = 0) bit-exact, check-bin-density 44/44; RTL co-sim:
+      depth 117 → 104, read→write distance still 5. **Step 6's golden is now `pl+Bprime+fixed+mul`.**
+      → [[REPORT_48_multiply_bin_index_20261027.md]] **Whole banked deposit
       (`pl/synth/bin_density_banked`, bit-exact in C on 1 M bins): 1,136 DSP / 454 K LUT / 128 URAM; 64 of
       each producer's 142 DSP are bank-address multiplies (removable); drain −2.1 ns.** **P = 8 chosen** (760 DSP, fits
       beside hpwl_gradient_CU's 708); P = 16 needs the `(ow·w)·oh` reorder (−40% DSP, a golden change).
-      **Next:** golden's bin index by multiply (no dividers; sw_flat first, drift
-      measured), then build. Real-design fixtures for the tests: branch `bin-density-real-fixtures`
+      **Next:** the producers' 64 bank-address multiplies, then build. Real-design fixtures for the tests: branch `bin-density-real-fixtures`
       (`0994f7a`), not merged. → [[PLAN_48_bin_density_lanes_20261020.md]],
       [[EXPLAINER_48_lane_dispatcher_20261020.md]] ~21 ms per evaluation on bigblue4 at 1 cell/cycle → lanes next.
       → [[REPORT_48_bin_density_fixed_point_20261019.md]] One 36-bit
