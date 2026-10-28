@@ -1182,6 +1182,13 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
 - [x] **Phase 2: turn B' on in the step-6 golden config.** Done 2026-10-16 in #45 step 5b part 2: the
       `pl+Bprime` variant (`host/sw_flat/test/sum_order_drift.py`) is step 6's golden, measured on 5
       designs, all converged ([[REPORT_45_pl_arithmetic_20261016.md]]). Box closed 2026-10-19.
+- [ ] **Wide footprints (macros) as 4×4 tiles through the producers (Mark, 2026-10-22; designed, not
+      built).** Today `deposit_slow` adds one bin per cycle: on MMS phase 1 that is up to 8.8× all the
+      cells (adaptec2: 663 K bins vs 76 K cell cycles). Tiled: a tiler splits each wide footprint into
+      bank-aligned 4×4 pieces, each producer clips the footprint window to its piece (golden arithmetic,
+      bit-exact), and four tiles of an 8×8 block fill all 64 banks once, so macros run at the banks'
+      64 bins/cycle (1-14 % of cell time). Open: producer interface, the gather's summation order.
+      **Next:** add tiles to `bank_fifo_model`. → [[HANDOFF_48_macro_tiles_20261022.md]]
 - [ ] **Optional: bigblue3/4 trajectory at grid 1024** (the drift ran at 2048, where fewer fixed nodes
       are stretched). Before step 6 quotes numbers.
 - [x] **Phase 2, fixed-point accumulator (Mark, 2026-10-19: rename to `bin_density_CU`, whole chip for

@@ -14,7 +14,7 @@
 //
 // BANKS (#48, 2026-10-20): the grid is split over 16 banks. 
 // For a node area that lands in bin@(row, col), the bin accumulation occurs in bank = 4 * (col % 4) + (row % 4), 
-// with address (col / 4, row / 4). Any window of up to 4 x 4 bins then touches 16 different banks, so a footprint of
+// address (col / 4, row / 4). Any window of up to 4 x 4 bins then touches 16 different banks, so a footprint of
 // at most WINDOW_BINS bins per axis is deposited in ONE cycle: every bank does at most one
 // read-add-write. Each bank is a (bins/4)^2 = 64K x 36 b URAM array at 1024: 8 URAMs, 128 in all.
 //
@@ -132,13 +132,20 @@ deposit_fast_loop:
     for (int s = first_slot; s < last_slot; s++) {
 #pragma HLS PIPELINE II=1
 #pragma HLS DEPENDENCE variable=rho_URAM inter false   // safe ONLY because of the forwarding registers
+        // (1) Fetch: one 512-bit DDR beat holds 16 slots, so x, y and the footprint index are read once
+        //     every 16th slot and held; the other 15 slots pick their lane out of the held beats. Meow.
         const int lane = s % pinrec::LANES;
         if (lane == 0) { x_beat = pos_x_DDR[s / pinrec::LANES]; y_beat = pos_y_DDR[s / pinrec::LANES]; idx_beat = footprint_idx_DDR[s / pinrec::LANES]; }
         const uint32_t idx = idx_beat.idx[lane];
+
+        // (2) Footprint and window: look up the clamped size, then the range of bins it covers. A
+        //     NO_DEPOSIT slot reads entry 0 so the pipeline never branches; live = false masks it below. Meow.
         const bool live = idx != densrec::NO_DEPOSIT;
         const densrec::Footprint fp = footprint_BRAM[live ? idx : 0];
         const Window w = footprint_window(x_beat.v[lane], y_beat.v[lane], fp, grid_bins, bin_w, bin_h);
 
+        // (3) Overlap lengths per axis: 4 column widths and 4 row heights; a bin's overlap area is then
+        //     ow[dc] * oh[dr], 16 products instead of 16 rectangle intersections. Meow.
         // The window's 4 columns and 4 rows: k-th = lo + k, valid up to hi. Column offset k lands in
         // bank column (col_lo + k) % 4, so each bank sees exactly one (column, row) pair. Meow.
         float ow[BANK_SIDE], oh[BANK_SIDE];
@@ -153,18 +160,39 @@ deposit_fast_loop:
     banks:
         for (int b = 0; b < NUM_BANKS; b++) {
 #pragma HLS UNROLL
+            // (4) Which bin this bank owns: the one window column whose col % 4 is this bank's column
+            //     (b / 4), and likewise the row. The & 3 wraps the offset into 0..3. Meow.
             const int dc  = (b / BANK_SIDE - w.col_lo) & (BANK_SIDE - 1);   // window column this bank owns
             const int dr  = (b % BANK_SIDE - w.row_lo) & (BANK_SIDE - 1);
             const int col = w.col_lo + dc, row = w.row_lo + dr;
+
+            // (5) hit: the slot is live and the footprint really overlaps that bin. A miss still runs
+            //     (6)-(9) at address 0 and simply does not write, so all 16 banks do the same work. Meow.
             const bool hit = live && ow[dc] > 0.0f && oh[dr] > 0.0f;
             const int addr = hit ? address_of(col, row, grid_bins) : 0;   // a miss may lie past the grid edge
 
+            // (6) Read: in hardware this read is issued ~5 stages before (9) writes, so it can miss the
+            //     last 5 cells' writes to this bank and return a stale value. Meow.
             rho_word current = rho_URAM[b][addr];
+
+            // (7) Forward: if a register holds a newer value for this address, use it instead. Each
+            //     register is a compare (addr ==, and valid) driving a 2:1 mux; the muxes chain from
+            //     fwd[DEPTH-1] to fwd[0], so fwd[0], the previous cell's write, decides last. Meow.
             for (int d = FORWARD_DEPTH - 1; d >= 0; d--)   // oldest first, so the newest match wins
                 if (fwd_valid[b][d] && fwd_addr[b][d] == addr) current = fwd_value[b][d];
+
+            // (8) Add this cell's deposit: overlap area x pre-scaled weight, rounded once to fixed units. Meow.
             const rho_word updated = current + densrec::to_fixed(ow[dc] * oh[dr] * fp.weight);
+
+            // (9) Write back. This lands in URAM several cycles from now; until then the copy pushed
+            //     into fwd[0] in (10) is the only up-to-date one. Meow.
             if (hit) rho_URAM[b][addr] = updated;
 
+            // (10) Shift every register one place older and push this cycle's result into fwd[0]. It
+            //      shifts on a miss too (valid = false), so fwd[d] always holds cell m-1-d's write.
+            //      (7) -> (8) -> (10) is a loop through registers that must close in one clock; the
+            //      read (6) is outside it, which is why it may run early. The top slot, fwd[DEPTH], is
+            //      written but never compared: it only exists so DEPTH = 0 still compiles. Meow.
             for (int d = FORWARD_DEPTH; d > 0; d--) {
                 fwd_addr[b][d] = fwd_addr[b][d - 1]; fwd_value[b][d] = fwd_value[b][d - 1]; fwd_valid[b][d] = fwd_valid[b][d - 1];
             }
@@ -178,6 +206,11 @@ static void deposit_slow(const pinrec::SlotBeat* pos_x_DDR, const pinrec::SlotBe
                          const densrec::SlowSlot* slow_slots_DDR, int first, int last,
                          const densrec::Footprint footprint_BRAM[densrec::FOOTPRINT_TABLE_MAX], int grid_bins,
                          float bin_w, float bin_h, rho_word rho_URAM[NUM_BANKS][BANK_WORDS]) {
+    // (1) Per slow slot: fetch its position by slot number and its footprint by table index (the slow
+    //     list names both, since the fast stream marked this slot NO_DEPOSIT).
+    // (2) Walk every bin of the window, skipping zero overlaps, and add into that bin's bank.
+    // No DEPENDENCE pragma here, so HLS keeps each read-add-write in order and no forwarding is needed:
+    // correct, just slower, which is fine for the few macros and huge cells that take this path. Meow.
 slow_slots:
     for (int i = first; i < last; i++) {
         const densrec::SlowSlot slow = slow_slots_DDR[i];
@@ -209,6 +242,11 @@ reduce:
     for (int a = 0; a < tiles; a++) {
 #pragma HLS LOOP_TRIPCOUNT max=BANK_WORDS
 #pragma HLS PIPELINE II=1
+        // (1) Read address a in all 16 banks: the 4x4 tile of bins at tile column a / (bins/4), tile row
+        //     a % (bins/4). Each bank gives one bin, so all 16 reads happen in the same cycle.
+        // (2) Each bin's excess over the cap, clipped at zero.
+        // (3) Adder tree: 16 -> 8 -> 4 -> 2 -> 1, four levels of adds per tile.
+        // (4) Add the tile's total to the running sum. Meow.
         uint64_t excess[NUM_BANKS];
 #pragma HLS ARRAY_PARTITION variable=excess complete
         for (int b = 0; b < NUM_BANKS; b++) {
@@ -259,6 +297,9 @@ load_base:
     for (int q = 0; q < quads; q++) {
 #pragma HLS LOOP_TRIPCOUNT max=densrec::GRID_MAX*densrec::GRID_MAX/4
 #pragma HLS PIPELINE II=1
+        // (1) Quad q is 4 consecutive bins of the col-major grid: bin index i = 4q, rows row..row+3 of
+        //     one column. (2) Read the DDR beat that holds them. (3) Write each row into its own bank
+        //     (bank row k), all at the same address. Meow.
         const int i = q * BANK_SIDE, col = i / grid_bins, row = i % grid_bins;
         const densrec::FixedBeat beat = fixed_base_DDR[i / pinrec::LANES];
         for (int k = 0; k < BANK_SIDE; k++)   // row % 4 == 0, so row + k is bank row k: 4 distinct banks
@@ -274,6 +315,8 @@ load_table:
         footprint_BRAM[i] = fp;
     }
 
+    // Cells first (fast stream, then slow list), then the overflow excess, then the fillers: XPlace's
+    // overflow counts cells and fixed nodes but not fillers, so it must be summed between the two. Meow.
     const int first_filler_slot = num_cell_beats * pinrec::LANES;
     deposit_fast(pos_x_DDR, pos_y_DDR, footprint_idx_DDR, 0, first_filler_slot, footprint_BRAM, grid_bins, bin_w, bin_h, rho_URAM);
     deposit_slow(pos_x_DDR, pos_y_DDR, slow_slots_DDR, 0, num_slow_cells, footprint_BRAM, grid_bins, bin_w, bin_h, rho_URAM);
@@ -287,6 +330,9 @@ drain:
     for (int q = 0; q < quads; q++) {
 #pragma HLS LOOP_TRIPCOUNT max=densrec::GRID_MAX*densrec::GRID_MAX/4
 #pragma HLS PIPELINE II=1
+        // (1) The same quad walk as load_base: 4 rows of one column, one per bank, same address.
+        // (2) Convert each to float bin areas (count x 2^-F) into its lane of out_beat.
+        // (3) After the 4th quad (lanes 12..15) the beat is full: write it to DDR. Meow.
         const int i = q * BANK_SIDE, col = i / grid_bins, row = i % grid_bins;
         for (int k = 0; k < BANK_SIDE; k++)
             out_beat.v[i % pinrec::LANES + k] = (float)(uint64_t)rho_URAM[BANK_SIDE * (col % BANK_SIDE) + k][address_of(col, row, grid_bins)] * rho_unit;
