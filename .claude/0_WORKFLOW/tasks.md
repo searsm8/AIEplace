@@ -2,8 +2,8 @@
 
 **Active Task (2026-10-27): #48 — on-chip density path.** Bin index by multiply landed 2026-10-27 (golden
 and device bit-exact; drift nil on 4/5 designs, in noise on bigblue4; ~63 K LUT saved over 8 producers) →
-[[REPORT_48_multiply_bin_index_20261027.md]]. Next: the producers' 64 address multiplies, the drain's
-timing, macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
+[[REPORT_48_multiply_bin_index_20261027.md]]. Now: the producers' 64 bank-address multiplies
+-> [[HANDOFF_48_bank_address_multiplies_20261028.md]]. Then the drain's timing, macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
 `hpwl_gradient_CU` passes on the VCK5000 at 230 MHz ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
 
 Open work, one section per task. **Status lives here; evidence lives in a
