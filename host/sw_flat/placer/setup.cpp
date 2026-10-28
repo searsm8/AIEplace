@@ -108,6 +108,7 @@ PlacerConfig read_placer_config(const std::string& path)
     c.grad_merge_stream = pick("grad_merge", "file", "stream");
     c.hpwl_fixed = pick("hpwl", "float", "fixed");
     c.deposit_fixed = pick("deposit", "float", "fixed");
+    c.bin_index_multiply = pick("bin_index", "divide", "multiply");
     // The stream carries nets of 2..96 pins (the packer's IGNORE_NET_DEGREE): another mask would
     // compare two net sets, not two arithmetics. Meow.
     if (c.uses_record_stream() && c.ignore_net_degree != packer::IGNORE_NET_DEGREE)
@@ -229,6 +230,8 @@ void Placer::setup(const PlacerConfig& config)
     die_h = (int)die_ysize;
     bin_w = die_xsize / (float)bins;
     bin_h = die_ysize / (float)bins;
+    inv_bin_w = 1.0f / bin_w;
+    inv_bin_h = 1.0f / bin_h;
     bin_area.resize((size_t)bins * bins);
     for (int col = 0; col < bins; col++)
         for (int row = 0; row < bins; row++)

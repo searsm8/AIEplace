@@ -33,16 +33,22 @@ inline Footprint node_footprint(const Placer& placer, float x, float y, float w,
     return Footprint{xl, yl, xl + cw, yl + ch, weight};
 }
 
+// A footprint edge's bin. bin_index = "multiply" is the device's (#48): XPlace and sw_only divide. Meow.
+inline int bin_index(const Placer& placer, float edge, float bin, float inv_bin)
+{
+    return placer.cfg.bin_index_multiply ? (int)(edge * inv_bin) : (int)(edge / bin);
+}
+
 // Grid::computeNodeOverlaps' loop: visit(bin, area) in its order (column, then row). The deposit
 // and the force gather both walk it, so the gather sums in the order the bins were filled. Meow.
 template <typename Visit>
 inline void for_each_overlap(const Placer& placer, const Footprint& fp, Visit&& visit)
 {
     const int bins = placer.bins;
-    int col_lo = std::max(0, (int)(fp.xl / placer.bin_w));
-    int col_hi = std::min(bins - 1, (int)(fp.xh / placer.bin_w));
-    int row_lo = std::max(0, (int)(fp.yl / placer.bin_h));
-    int row_hi = std::min(bins - 1, (int)(fp.yh / placer.bin_h));
+    int col_lo = std::max(0, bin_index(placer, fp.xl, placer.bin_w, placer.inv_bin_w));
+    int col_hi = std::min(bins - 1, bin_index(placer, fp.xh, placer.bin_w, placer.inv_bin_w));
+    int row_lo = std::max(0, bin_index(placer, fp.yl, placer.bin_h, placer.inv_bin_h));
+    int row_hi = std::min(bins - 1, bin_index(placer, fp.yh, placer.bin_h, placer.inv_bin_h));
     for (int col = col_lo; col <= col_hi; col++) {
         float bin_xl = col * placer.bin_w;
         float overlap_w = std::min(fp.xh, bin_xl + placer.bin_w) - std::max(fp.xl, bin_xl);
@@ -256,10 +262,10 @@ float Placer::compute_overflow(bool smooth) const
     std::vector<float> density((size_t)nx * ny, 0.0f);
 
     auto deposit = [&](const Footprint& fp) {
-        int col_lo = std::max(0, (int)(fp.xl / bin_w));
-        int col_hi = std::min(nx - 1, (int)(fp.xh / bin_w));
-        int row_lo = std::max(0, (int)(fp.yl / bin_h));
-        int row_hi = std::min(ny - 1, (int)(fp.yh / bin_h));
+        int col_lo = std::max(0, bin_index(*this, fp.xl, bin_w, inv_bin_w));
+        int col_hi = std::min(nx - 1, bin_index(*this, fp.xh, bin_w, inv_bin_w));
+        int row_lo = std::max(0, bin_index(*this, fp.yl, bin_h, inv_bin_h));
+        int row_hi = std::min(ny - 1, bin_index(*this, fp.yh, bin_h, inv_bin_h));
         for (int c = col_lo; c <= col_hi; c++) {
             float ox = std::min(fp.xh, (c + 1) * bin_w) - std::max(fp.xl, c * bin_w);
             if (ox <= 0.0f) continue;

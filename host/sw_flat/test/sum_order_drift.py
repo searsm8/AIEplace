@@ -13,7 +13,8 @@ Per design, from the D6 config (d6_config.py), runs:
     tree, stream, fixed   hpwl_gradient_CU's arithmetic, one switch each (record_stream.cpp)
     pl                    all of the PL's arithmetic: slot+lut, tree, stream, fixed
     pl+Bprime             pl plus #48's B': step 6's golden config
-    pl+Bprime+fixed       that, with bin_density_CU's 18.18 fixed-point accumulator (#48): step 6's golden
+    pl+Bprime+fixed       that, with bin_density_CU's 18.18 fixed-point accumulator (#48)
+    pl+Bprime+fixed+mul   that, with bin indices by multiply by 1/bin (#48, 2026-10-27): step 6's golden
 and prints, vs base: the first trace row that differs, iterations, and the final masked HPWL, exact
 HPWL and exact overflow as relative differences. Runs in build/sum_order_drift/. This is a
 measurement, not a pass/fail test: the verdict is read against the noise rows. Meow.
@@ -50,6 +51,7 @@ VARIANTS = {
                    "grad_merge": "stream", "hpwl": "fixed", "overflow_map": "snapshot", "fixed_base": "exact"},
 }
 VARIANTS["pl+Bprime+fixed"] = {**VARIANTS["pl+Bprime"], "deposit": "fixed"}
+VARIANTS["pl+Bprime+fixed+mul"] = {**VARIANTS["pl+Bprime+fixed"], "bin_index": "multiply"}
 
 
 def variant_config(base_text, spec):
@@ -60,7 +62,7 @@ def variant_config(base_text, spec):
     lines = []
     if "slot_order" in spec:
         lines.append("slot_order = [" + ", ".join(f'"{f}"' for f in spec["slot_order"]) + "]")
-    for key in ("wa_exp", "overflow_map", "fixed_base", "wa_sums", "grad_merge", "hpwl", "deposit"):
+    for key in ("wa_exp", "overflow_map", "fixed_base", "wa_sums", "grad_merge", "hpwl", "deposit", "bin_index"):
         if key in spec:
             lines.append(f'{key} = "{spec[key]}"')
     if lines:

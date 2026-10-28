@@ -77,6 +77,8 @@ struct PlacerConfig {
     bool hpwl_fixed = false;              // hpwl = "fixed": the schedule's HPWL as the int64 sum of hpwl_to_fixed (hpwl_CU.hpp)
     // #48 (Mark, 2026-10-19): bin_density_CU accumulates in fixed point, one URAM_WORD_WIDTH word per bin. Meow.
     bool deposit_fixed = false;           // deposit = "fixed": each bin counts units of 2^-fixed_frac_bits bin areas
+    // #48 (Mark, 2026-10-27): a divider per edge costs the producer +7.8K LUT; XPlace divides. Meow.
+    bool bin_index_multiply = false;      // bin_index = "multiply": (int)(edge * inv_bin_w), not (int)(edge / bin_w)
     bool uses_record_stream() const { return wa_sums_tree || grad_merge_stream || hpwl_fixed; }
 };
 // Exits with a message on a missing required key or a config outside sw_flat's scope (D6). Meow.
@@ -159,6 +161,7 @@ struct Placer {
     // Grid: bins_per_row x bins_per_row over [0, die), flat col * bins + row.
     int   bins = 0, die_w = 0, die_h = 0;   // die_w / die_h: Grid::getDieWidth, an int on purpose
     float bin_w = 0, bin_h = 0;
+    float inv_bin_w = 0, inv_bin_h = 0;   // 1.0f / bin_w, 1.0f / bin_h: bin_index = "multiply", and bin_density_CU's arguments
     std::vector<float> bin_area, bin_overlap;
     std::vector<float> fixed_base;     // the fixed nodes' deposit, capped: constant, so built once (bin_density_CU's base map)
     std::vector<uint64_t> fixed_base_q, bin_fixed;   // deposit = "fixed": fixed_base and the accumulator, in fixed units
