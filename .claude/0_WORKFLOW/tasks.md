@@ -3,7 +3,9 @@
 **Active Task (2026-10-28): #48 — on-chip density path.** Bank address at a fixed pitch landed 2026-10-28
 (the 64 per-producer multiplies gone: banked deposit 1,168 -> 656 DSP, 69 % of the chip beside
 `hpwl_gradient_CU`; bit-exact, forwarding distance still 5) -> [[REPORT_48_bank_address_multiplies_20261028.md]].
-Now: the drain's timing (-2.14 ns) -> [[HANDOFF_48_drain_timing_20261028.md]], then macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
+Drain timing closed in csynth 2026-10-28 (`drain_banks` -2.14 -> +0.10 ns, bit-exact; the write-back moved one
+iteration later, so the 64-bank co-sim must sweep the forwarding depth) -> [[REPORT_48_drain_timing_20261028.md]].
+Next: the 64-bank co-sim, Vivado timing if the portal is open, then macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
 `hpwl_gradient_CU` passes on the VCK5000 at 230 MHz ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
 
 Open work, one section per task. **Status lives here; evidence lives in a
@@ -1239,7 +1241,12 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       **1,168 → 656 DSP, 146 → 82 per producer** (fresh csynth; the 1,136 above predates the multiply index);
       `bin_density_CU` 121 → 102. banked_check 0 differ at grids 1024/512/336 (old pitch caught at 512/336),
       check-bin-density 44/44, pl test PASS, co-sim distance still 5. → [[REPORT_48_bank_address_multiplies_20261028.md]]
-      **Next:** the drain's −2.14 ns, then build. Real-design fixtures for the tests: branch `bin-density-real-fixtures`
+      → **DONE 2026-10-28 (csynth): drain timing.** `drain_banks` −2.14 → **+0.10 ns**, `drain` 4.17 → 2.33 ns,
+      II = 1: exit on registered counts, one-hot pick + OR-merge, URAM write-back from forwarding slot 0 (state 5
+      was also 3.13 ns). DSP 656 unchanged, FF −6.4 K. banked_check 0 differ at 1024/512/336, 3 mutants caught.
+      ⚠️ The write now lands one iteration later: **co-sim must sweep `BANKED_FORWARD_DEPTH`** (6 may have no
+      margin; raise, never lower). Vivado not run. → [[REPORT_48_drain_timing_20261028.md]]
+      **Next:** the 64-bank co-sim, then build. Real-design fixtures for the tests: branch `bin-density-real-fixtures`
       (`0994f7a`), not merged. → [[PLAN_48_bin_density_lanes_20261020.md]],
       [[EXPLAINER_48_lane_dispatcher_20261020.md]] ~21 ms per evaluation on bigblue4 at 1 cell/cycle → lanes next.
       → [[REPORT_48_bin_density_fixed_point_20261019.md]] One 36-bit
