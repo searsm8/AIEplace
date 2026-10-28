@@ -20,6 +20,8 @@ extern "C" void bin_density_CU_top(
         int                            grid_bins,         // not "bins": a SystemVerilog keyword, which breaks co-sim. Meow.
         float                          bin_w,
         float                          bin_h,
+        float                          inv_bin_w,
+        float                          inv_bin_h,
         float                          fixed_scale,
         float                          rho_unit,
         unsigned int                   overflow_cap,
@@ -36,6 +38,6 @@ extern "C" void bin_density_CU_top(
 
     uint64_t excess = 0;
     bin_density_CU(pos_x, pos_y, footprint_idx, num_slot_beats, num_cell_beats, slow_slots, num_slow_cells, num_slow,
-                   footprints, num_footprints, fixed_base, grid_bins, bin_w, bin_h, fixed_scale, rho_unit, overflow_cap, rho, excess);
+                   footprints, num_footprints, fixed_base, grid_bins, bin_w, bin_h, inv_bin_w, inv_bin_h, fixed_scale, rho_unit, overflow_cap, rho, excess);
     *overflow_excess = excess;
 }

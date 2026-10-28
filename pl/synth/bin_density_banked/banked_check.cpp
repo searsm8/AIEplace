@@ -36,7 +36,7 @@ int main() {
         if (s.footprint == densrec::NO_DEPOSIT) continue;
         densrec::Footprint fp = table[s.footprint];
         fp.weight *= fixed_scale;
-        const plalgo::Window w = plalgo::footprint_window(s.x, s.y, fp, grid, bin_w, bin_h);
+        const plalgo::Window w = plalgo::footprint_window(s.x, s.y, fp, grid, 1.0f / bin_w, 1.0f / bin_h);
         for (int col = w.col_lo; col <= w.col_hi; col++) {
             const float ow = plalgo::overlap_x(w, col, bin_w);
             if (ow <= 0.0f) continue;

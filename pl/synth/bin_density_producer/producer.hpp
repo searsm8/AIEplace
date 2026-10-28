@@ -4,13 +4,13 @@
 // producer.hpp -- one bin-density producer's arithmetic (#48 round 3), shared by producer_top.cpp (cost
 // of one producer) and ../bin_density_banked (the whole banked deposit). One cell in, its window's up to
 // 4 x 4 fixed-point amounts out, in window order (dc, dr). Same arithmetic as bin_density_CU
-// (footprint_window, overlap_x/y, to_fixed). PRODUCER_DIVIDE=1 (default) indexes bins by divide, as the
-// golden does; 0 by multiply (costing only: the two were measured equal in cost). Meow.
+// (footprint_window, overlap_x/y, to_fixed). PRODUCER_DIVIDE=0 (default) indexes bins by multiply, as the
+// golden does since 2026-10-27; 1 by divide, for costing only: Vivado put the 4 dividers at +7.8K LUT (#48). Meow.
 
 #include "format/density_footprint.hpp"
 
 #ifndef PRODUCER_DIVIDE
-#define PRODUCER_DIVIDE 1
+#define PRODUCER_DIVIDE 0
 #endif
 
 constexpr int PRODUCER_SIDE = densrec::WINDOW_BINS;                 // 4: window bins per axis

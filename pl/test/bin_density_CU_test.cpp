@@ -5,7 +5,9 @@
 // Golden: a naive double-precision deposit written here from sw_flat density.cpp (node_footprint,
 // for_each_overlap), on a synthetic slot range: a cell library, movable macros at td < 1 (the weight
 // override), cells hanging off the die edge, one shared filler size, and NO_DEPOSIT slots (borrowed
-// copies, pins, padding) whose positions are NaN, so a wrongly read slot poisons the map.
+// copies, pins, padding) whose positions are NaN, so a wrongly read slot poisons the map. The golden
+// indexes bins by divide while the CU multiplies by 1/bin (#48): kept independent on purpose, since it
+// is the math, and an index that differs at a bin edge moves a sliver far below these bounds. Meow.
 //
 //   [1] MATCH     rho vs golden, rel_rms < REL_RMS_MAX and worst-bin error / peak < PEAK_REL_MAX, at
 //                 128 and 1024 bins. The error is the fixed point's: each overlap rounds to 2^-19 of a bin.
@@ -197,7 +199,7 @@ static DeviceRun run_device(const SyntheticDesign& d, int bins, const std::vecto
     out.rho.resize(num_bins / pinrec::LANES);
     bin_density_CU(pos_x.data(), pos_y.data(), idx.data(), (int)(num_slots / pinrec::LANES),
                    (int)(d.first_filler_slot / pinrec::LANES), slow.data(), num_slow_cells, (int)slow.size(),
-                   table.data(), (int)table.size(), fixed_base.data(), bins, bin_w, bin_h, fixed_scale,
+                   table.data(), (int)table.size(), fixed_base.data(), bins, bin_w, bin_h, 1.0f / bin_w, 1.0f / bin_h, fixed_scale,
                    std::ldexp(1.0f, -out.frac_bits), densrec::to_fixed(bin_w * bin_h * d.target_density * fixed_scale),
                    out.rho.data(), out.excess);
     return out;

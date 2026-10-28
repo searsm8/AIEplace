@@ -1,15 +1,15 @@
 // producer_check.cpp -- the producer (producer_top.cpp) in C: its updates, summed into a grid through the
 // 64-bank mapping, must equal bin_density_CU's plain bin-by-bin deposit (footprint_window, overlap_x/y,
-// to_fixed) BIT FOR BIT when PRODUCER_DIVIDE=1. With PRODUCER_DIVIDE=0 (multiply) it prints how many bins
-// and cells differ: what moving the golden to the multiply would change. Exit 0 = pass. Meow.
-//   g++ -std=c++14 -O2 -I../../src -I$XILINX_HLS/include -DPRODUCER_DIVIDE=1 producer_check.cpp producer_top.cpp
+// to_fixed) BIT FOR BIT when PRODUCER_DIVIDE=0 (multiply, the golden's since #48 2026-10-27). With
+// PRODUCER_DIVIDE=1 (divide) it prints how many bins differ, for costing only. Exit 0 = pass. Meow.
+//   g++ -std=c++14 -O2 -I../../src -I$XILINX_HLS/include producer_check.cpp producer_top.cpp
 
 #include "modules/bin_density_CU.hpp"
 
 #include <hls_stream.h>
 
 #ifndef PRODUCER_DIVIDE
-#define PRODUCER_DIVIDE 1   // as producer.hpp
+#define PRODUCER_DIVIDE 0   // as producer.hpp
 #endif
 
 #include <cmath>
@@ -50,7 +50,7 @@ int main() {
             }
         densrec::Footprint fp = table[slots[i].footprint];
         fp.weight *= fixed_scale;
-        const plalgo::Window w = plalgo::footprint_window(slots[i].x, slots[i].y, fp, grid, bin_w, bin_h);
+        const plalgo::Window w = plalgo::footprint_window(slots[i].x, slots[i].y, fp, grid, 1.0f / bin_w, 1.0f / bin_h);
         for (int col = w.col_lo; col <= w.col_hi; col++) {
             const float ow = plalgo::overlap_x(w, col, bin_w);
             if (ow <= 0.0f) continue;
@@ -63,5 +63,5 @@ int main() {
     long differ = 0;
     for (int b = 0; b < grid * grid; b++) differ += device[b] != golden[b];
     printf("producer (%s): %ld of %d bins differ from bin_density_CU's deposit\n", PRODUCER_DIVIDE ? "divide" : "multiply", differ, grid * grid);
-    return PRODUCER_DIVIDE && differ ? 1 : 0;
+    return !PRODUCER_DIVIDE && differ ? 1 : 0;
 }

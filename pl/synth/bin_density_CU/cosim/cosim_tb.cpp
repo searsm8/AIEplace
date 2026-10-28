@@ -24,7 +24,7 @@ using namespace plalgo;
 
 extern "C" void bin_density_CU_top(const pinrec::SlotBeat*, const pinrec::SlotBeat*, const densrec::FootprintBeat*, int, int,
                                    const densrec::SlowSlot*, int, int, const densrec::Footprint*, int,
-                                   const densrec::FixedBeat*, int, float, float, float, float, unsigned int,
+                                   const densrec::FixedBeat*, int, float, float, float, float, float, float, unsigned int,
                                    pinrec::SlotBeat*, unsigned long long*);
 
 constexpr int BINS = 64, NUM_BEATS = 64, NUM_SLOTS = NUM_BEATS * pinrec::LANES, CELL_BEATS = 48;
@@ -81,7 +81,7 @@ int main() {
         if (idx[i] == densrec::NO_DEPOSIT) continue;
         densrec::Footprint fp = table[idx[i]];
         fp.weight *= fixed_scale;
-        const Window w = footprint_window(x[i], y[i], fp, BINS, BIN_W, BIN_H);
+        const Window w = footprint_window(x[i], y[i], fp, BINS, 1.0f / BIN_W, 1.0f / BIN_H);
         for (int col = w.col_lo; col <= w.col_hi; col++) {
             const float ow = overlap_x(w, col, BIN_W);
             if (ow <= 0.0f) continue;
@@ -107,7 +107,7 @@ int main() {
     unsigned long long excess = 0;
 
     bin_density_CU_top(pos_x.data(), pos_y.data(), index.data(), NUM_BEATS, CELL_BEATS, slow.data(), 1, 1, table.data(),
-                       (int)table.size(), fixed_base.data(), BINS, BIN_W, BIN_H, fixed_scale, rho_unit, cap, rho.data(), &excess);
+                       (int)table.size(), fixed_base.data(), BINS, BIN_W, BIN_H, 1.0f / BIN_W, 1.0f / BIN_H, fixed_scale, rho_unit, cap, rho.data(), &excess);
 
     int differ = 0, first = -1;
     for (int b = 0; b < BINS * BINS; b++) {

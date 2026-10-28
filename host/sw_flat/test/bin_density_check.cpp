@@ -4,7 +4,7 @@
 //   bin_density_check <config.toml> [iterations=30]
 //
 // Runs sw_flat_place for `iterations` with bin_density_CU's arithmetic on ([sw_flat] deposit = "fixed",
-// F from the total-area bound) and #48 B' (overflow_map = "snapshot", fixed_base = "exact"), then hands bin_density_CU the same
+// F from the total-area bound; bin_index = "multiply") and #48 B' (overflow_map = "snapshot", fixed_base = "exact"), then hands bin_density_CU the same
 // slot positions, footprint table, per-slot indices, fixed base and scalars (density_inputs.hpp).
 // Checks, each a verdict:
 //   [1] rho          bit-equal to sw_flat's (float)acc * 2^-F on every bin
@@ -59,7 +59,7 @@ DeviceOut run_device(const Placer& placer, const DensityInputs& in, const std::v
     plalgo::bin_density_CU(pos_x.data(), pos_y.data(), index.data(), (int)num_beats,
                            (int)(placer.layout.first_filler_slot / pinrec::LANES), slow.data(), in.num_slow_cells,
                            (int)slow.size(), in.footprints.data(), (int)in.footprints.size(), in.fixed_base.data(),
-                           placer.bins, placer.bin_w, placer.bin_h, in.fixed_scale, in.rho_unit, in.overflow_cap,
+                           placer.bins, placer.bin_w, placer.bin_h, in.inv_bin_w, in.inv_bin_h, in.fixed_scale, in.rho_unit, in.overflow_cap,
                            rho.data(), out.excess);
     out.rho.resize((size_t)placer.bins * placer.bins);
     std::memcpy(out.rho.data(), rho.data(), out.rho.size() * sizeof(float));
@@ -84,6 +84,7 @@ int main(int argc, char** argv)
     cfg.overflow_snapshot = true;
     cfg.fixed_base_exact = true;
     cfg.deposit_fixed = true;
+    cfg.bin_index_multiply = true;
     Placer placer;
     placer.setup(cfg);
     const std::string tag = placer.design.name + " (grid " + std::to_string(placer.bins) + ")";

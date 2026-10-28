@@ -48,9 +48,11 @@
 #endif
 
 #ifndef BIN_FORWARD_DEPTH
-// >= the deposit's scheduled read-to-write distance: 5 (URAM read issued at stage 112, write at 117, csynth
-// 2026-10-20). Co-sim on a stream that re-hits bins at distances 1..5: depth 0 and 4 FAIL in RTL, 5 and 6
-// PASS. 6 leaves one spare; re-run cosim/run_depths.sh whenever deposit_fast changes. Meow.
+// >= the deposit's scheduled read-to-write distance: 5 (URAM read issued at stage 99, write at 104 of 104,
+// csynth 2026-10-27 with the bin index by multiply; the dividers sat before the read, so dropping them took
+// 13 stages off the front and left the distance at 5). Co-sim on a stream that re-hits bins at distances
+// 1..5: depth 0 and 4 FAIL in RTL, 5 and 6 PASS. 6 leaves one spare; re-run cosim/run_depths.sh whenever
+// deposit_fast changes. Meow.
 #define BIN_FORWARD_DEPTH 6
 #endif
 
@@ -81,20 +83,21 @@ constexpr int RHO_BEATS_MAX = densrec::GRID_MAX * densrec::GRID_MAX / pinrec::LA
 inline int bank_of(int col, int row) { return BANK_SIDE * (col % BANK_SIDE) + row % BANK_SIDE; }
 inline int address_of(int col, int row, int grid_bins) { return (col / BANK_SIDE) * (grid_bins / BANK_SIDE) + row / BANK_SIDE; }
 
-// A footprint's corner bins: Grid::computeNodeOverlaps' index range, clipped to the grid. Meow.
+// A footprint's corner bins: Grid::computeNodeOverlaps' index range, clipped to the grid. By multiply,
+// as sw_flat's bin_index = "multiply": a float divider per edge cost +7.8K LUT per producer (#48). Meow.
 struct Window { float xl, yl, xh, yh; int col_lo, col_hi, row_lo, row_hi; };
 
-static Window footprint_window(float x, float y, const densrec::Footprint& fp, int grid_bins, float bin_w, float bin_h) {
+static Window footprint_window(float x, float y, const densrec::Footprint& fp, int grid_bins, float inv_bin_w, float inv_bin_h) {
 #pragma HLS INLINE
     Window w;
     w.xl = x + fp.half_w - fp.half_cw;
     w.yl = y + fp.half_h - fp.half_ch;
     w.xh = w.xl + 2.0f * fp.half_cw;
     w.yh = w.yl + 2.0f * fp.half_ch;
-    w.col_lo = (int)(w.xl / bin_w);  if (w.col_lo < 0)        w.col_lo = 0;
-    w.col_hi = (int)(w.xh / bin_w);  if (w.col_hi > grid_bins - 1) w.col_hi = grid_bins - 1;
-    w.row_lo = (int)(w.yl / bin_h);  if (w.row_lo < 0)        w.row_lo = 0;
-    w.row_hi = (int)(w.yh / bin_h);  if (w.row_hi > grid_bins - 1) w.row_hi = grid_bins - 1;
+    w.col_lo = (int)(w.xl * inv_bin_w);  if (w.col_lo < 0)        w.col_lo = 0;
+    w.col_hi = (int)(w.xh * inv_bin_w);  if (w.col_hi > grid_bins - 1) w.col_hi = grid_bins - 1;
+    w.row_lo = (int)(w.yl * inv_bin_h);  if (w.row_lo < 0)        w.row_lo = 0;
+    w.row_hi = (int)(w.yh * inv_bin_h);  if (w.row_hi > grid_bins - 1) w.row_hi = grid_bins - 1;
     return w;
 }
 
@@ -114,7 +117,7 @@ static float overlap_y(const Window& w, int row, float bin_h) {
 static void deposit_fast(const pinrec::SlotBeat* pos_x_DDR, const pinrec::SlotBeat* pos_y_DDR,
                          const densrec::FootprintBeat* footprint_idx_DDR, int first_slot, int last_slot,
                          const densrec::Footprint footprint_BRAM[densrec::FOOTPRINT_TABLE_MAX], int grid_bins,
-                         float bin_w, float bin_h, rho_word rho_URAM[NUM_BANKS][BANK_WORDS]) {
+                         float bin_w, float bin_h, float inv_bin_w, float inv_bin_h, rho_word rho_URAM[NUM_BANKS][BANK_WORDS]) {
     // Per bank, its last FORWARD_DEPTH writes, newest first: the values not yet safe to read back. Meow.
     // (+1: a zero-length array is not C++, and FORWARD_DEPTH = 0 is co-sim's negative control.) Meow.
     int      fwd_addr[NUM_BANKS][FORWARD_DEPTH + 1];
@@ -142,7 +145,7 @@ deposit_fast_loop:
         //     NO_DEPOSIT slot reads entry 0 so the pipeline never branches; live = false masks it below. Meow.
         const bool live = idx != densrec::NO_DEPOSIT;
         const densrec::Footprint fp = footprint_BRAM[live ? idx : 0];
-        const Window w = footprint_window(x_beat.v[lane], y_beat.v[lane], fp, grid_bins, bin_w, bin_h);
+        const Window w = footprint_window(x_beat.v[lane], y_beat.v[lane], fp, grid_bins, inv_bin_w, inv_bin_h);
 
         // (3) Overlap lengths per axis: 4 column widths and 4 row heights; a bin's overlap area is then
         //     ow[dc] * oh[dr], 16 products instead of 16 rectangle intersections. Meow.
@@ -205,7 +208,7 @@ deposit_fast_loop:
 static void deposit_slow(const pinrec::SlotBeat* pos_x_DDR, const pinrec::SlotBeat* pos_y_DDR,
                          const densrec::SlowSlot* slow_slots_DDR, int first, int last,
                          const densrec::Footprint footprint_BRAM[densrec::FOOTPRINT_TABLE_MAX], int grid_bins,
-                         float bin_w, float bin_h, rho_word rho_URAM[NUM_BANKS][BANK_WORDS]) {
+                         float bin_w, float bin_h, float inv_bin_w, float inv_bin_h, rho_word rho_URAM[NUM_BANKS][BANK_WORDS]) {
     // (1) Per slow slot: fetch its position by slot number and its footprint by table index (the slow
     //     list names both, since the fast stream marked this slot NO_DEPOSIT).
     // (2) Walk every bin of the window, skipping zero overlaps, and add into that bin's bank.
@@ -217,7 +220,7 @@ slow_slots:
         const float x = pos_x_DDR[slow.slot / pinrec::LANES].v[slow.slot % pinrec::LANES];
         const float y = pos_y_DDR[slow.slot / pinrec::LANES].v[slow.slot % pinrec::LANES];
         const densrec::Footprint fp = footprint_BRAM[slow.footprint];
-        const Window w = footprint_window(x, y, fp, grid_bins, bin_w, bin_h);
+        const Window w = footprint_window(x, y, fp, grid_bins, inv_bin_w, inv_bin_h);
     slow_cols:
         for (int col = w.col_lo; col <= w.col_hi; col++) {
             const float ow = overlap_x(w, col, bin_w);
@@ -276,6 +279,8 @@ static void bin_density_CU(
         int                            grid_bins,             // bins per row, <= GRID_MAX, a multiple of 16
         float                          bin_w,            // bin size, die frame
         float                          bin_h,
+        float                          inv_bin_w,        // 1.0f / bin_w, as the host's float divide gives it: the bin index
+        float                          inv_bin_h,
         float                          fixed_scale,      // 2^F / bin_area[0]: die-frame area -> fixed units
         float                          rho_unit,         // 2^-F: bin areas per fixed unit
         uint32_t                       overflow_cap,     // to_fixed(bin_w * bin_h * td * fixed_scale): XPlace's uniform cap
@@ -318,12 +323,12 @@ load_table:
     // Cells first (fast stream, then slow list), then the overflow excess, then the fillers: XPlace's
     // overflow counts cells and fixed nodes but not fillers, so it must be summed between the two. Meow.
     const int first_filler_slot = num_cell_beats * pinrec::LANES;
-    deposit_fast(pos_x_DDR, pos_y_DDR, footprint_idx_DDR, 0, first_filler_slot, footprint_BRAM, grid_bins, bin_w, bin_h, rho_URAM);
-    deposit_slow(pos_x_DDR, pos_y_DDR, slow_slots_DDR, 0, num_slow_cells, footprint_BRAM, grid_bins, bin_w, bin_h, rho_URAM);
+    deposit_fast(pos_x_DDR, pos_y_DDR, footprint_idx_DDR, 0, first_filler_slot, footprint_BRAM, grid_bins, bin_w, bin_h, inv_bin_w, inv_bin_h, rho_URAM);
+    deposit_slow(pos_x_DDR, pos_y_DDR, slow_slots_DDR, 0, num_slow_cells, footprint_BRAM, grid_bins, bin_w, bin_h, inv_bin_w, inv_bin_h, rho_URAM);
     overflow_excess = overflow_excess_sum(rho_URAM, grid_bins, overflow_cap);
     deposit_fast(pos_x_DDR, pos_y_DDR, footprint_idx_DDR, first_filler_slot, num_slot_beats * pinrec::LANES, footprint_BRAM,
-                 grid_bins, bin_w, bin_h, rho_URAM);
-    deposit_slow(pos_x_DDR, pos_y_DDR, slow_slots_DDR, num_slow_cells, num_slow, footprint_BRAM, grid_bins, bin_w, bin_h, rho_URAM);
+                 grid_bins, bin_w, bin_h, inv_bin_w, inv_bin_h, rho_URAM);
+    deposit_slow(pos_x_DDR, pos_y_DDR, slow_slots_DDR, num_slow_cells, num_slow, footprint_BRAM, grid_bins, bin_w, bin_h, inv_bin_w, inv_bin_h, rho_URAM);
 
     pinrec::SlotBeat out_beat;
 drain:

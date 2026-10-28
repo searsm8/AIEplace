@@ -9,8 +9,8 @@
 //   slow         slots whose footprint may span more than WINDOW_BINS bins (densrec::fits_window), with
 //                their footprint, ascending; num_slow_cells of them precede the filler tail
 //   fixed_base   Placer::fixed_base_q (col-major, capped, fixed units), 16 bins per beat
-// with the scalars fixed_scale, rho_unit and overflow_cap as the placer computed them; needs [sw_flat] deposit =
-// "fixed". The positions are the placer's next.probe_pos per slot, the ones its deposit reads. Meow.
+// with the scalars fixed_scale, rho_unit, overflow_cap and inv_bin_w/h as the placer computed them; needs [sw_flat]
+// deposit = "fixed" and bin_index = "multiply". The positions are the placer's next.probe_pos per slot, the ones its deposit reads. Meow.
 
 #include "format/density_footprint.hpp"
 #include "placer/placer.hpp"
@@ -29,6 +29,7 @@ struct DensityInputs {
     int num_slow_cells = 0;
     std::vector<densrec::FixedBeat> fixed_base;
     float fixed_scale = 0, rho_unit = 0;
+    float inv_bin_w = 0, inv_bin_h = 0;   // the bin index's 1/bin (#48): needs [sw_flat] bin_index = "multiply". Meow.
     uint32_t overflow_cap = 0;
 };
 
@@ -62,6 +63,8 @@ inline DensityInputs make_density_inputs(const Placer& placer)
         in.fixed_base[bin / pinrec::LANES].q[bin % pinrec::LANES] = (uint32_t)placer.fixed_base_q[bin];
     in.fixed_scale = placer.fixed_scale;
     in.rho_unit = placer.fixed_unit;
+    in.inv_bin_w = placer.inv_bin_w;
+    in.inv_bin_h = placer.inv_bin_h;
     in.overflow_cap = placer.fixed_overflow_cap;
     return in;
 }
