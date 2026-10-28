@@ -1,4 +1,57 @@
-# HANDOFF #48: close timing on the 64-bank drain (`drain_banks`, −2.14 ns)
+# REPORT #48: timing closed on the 64-bank drain (`drain_banks` −2.14 → +0.10 ns, C-synthesis)
+
+*2026-10-28. Branch `pl_algo`. Was the handoff of the same name (kept below as the brief).*
+
+## Result
+
+| `pl/synth/bin_density_banked` csynth, 3.33 ns, 0.90 ns uncertainty | before | after |
+|---|---|---|
+| `drain` pipeline estimate | 4.169 ns | **2.329 ns** (II = 1, depth 6) |
+| `drain_banks` slack | **−2.14 ns** | **+0.10 ns** |
+| `drain_banks` FF / LUT | 49,074 / 63,148 | 42,706 / 62,700 |
+| `banked_top` DSP / FF / LUT / URAM | 656 / 269,559 / 454,115 / 128 | 656 / 263,191 / 453,667 / 128 |
+| `banked_top` slack | −2.14 | −0.00 (the producers, unchanged: they were −0.00 before too) |
+
+Reports: `.claude/2_ARTIFACTS/drain_timing_48_{before,after}/` (csynth.rpt, the drain csynth reports and the
+verbose schedule). HLS Fmax estimate 218.7 → 411.4 MHz.
+
+**Vivado not run:** that needs the build-server portal open (Mark's call). The csynth number is an estimate.
+
+## What changed (`drain_banks`, three edits)
+
+1. **Exit on registered counts.** `all_finished` is the AND of `finished[b] == PRODUCERS` taken at the top of
+   the iteration, before that cycle's reads. The 64-way AND now starts from registers (state 2, 2.21 ns) and
+   the drain spends one idle cycle at the end.
+2. **One-hot pick, OR-merge.** `take = !got && !empty`; only the taken read is nonzero, so the update is the
+   OR of the 8 reads. The 8-deep `u.last` phi chain is gone (state 1 now: a 1 ns mux before `r.addr`).
+3. **Deferred write-back. The handoff missed this one.** Before, state 5 was also over budget: **3.13 ns**
+   = URAM dout 0.97 + forward select 0.45 + add 0.91 + URAM store 0.80, all chained. Now each cycle writes
+   the PREVIOUS cycle's sum from forwarding slot 0 (`if (fwd_valid[b][0]) rho_URAM[b][fwd_addr[b][0]] =
+   fwd_value[b][0]`), so the store data comes from a register: state 5 = 2.33 ns, store alone in state 6.
+   No update is left unwritten: a bank's real updates always come before its 8th `last`, and the loop runs
+   at least one cycle after that.
+
+## Verification
+
+- `banked_check` (C, 400 K cells over 8 producers): **0 of 1,048,576 words differ at grids 1024, 512, 336.**
+- Mutants, all caught:
+  - old run-time pitch (`col/8 * grid_bins/8`): 1024 PASS (the two layouts coincide), 512 FAIL 388,823, 336 FAIL 185,471 (same counts as before);
+  - one-hot broken (`got` never set): the drain never exits (two `last`s in one cycle count once);
+  - write-back dropped: FAIL at all three grids (881,982 / 261,831 / 112,896).
+
+## Forwarding depth: the co-sim item must check this
+
+The URAM access **states did not move**: the load is issued in state 2 (4-cycle, `latency=3`) and the store in
+state 5, before and after. **But the store now carries the previous iteration's sum, so the read→write distance in
+iterations is one longer.** `bin_density_CU`'s co-sim measured distance 5 (depth 4 fails, 5 passes) with the old
+write. If the banked drain matched that, it now needs 6, which is exactly `BANKED_FORWARD_DEPTH` = 6, with no
+margin. C simulation cannot see this (it runs iteration by iteration). The 64-bank co-sim (next item) must sweep the
+depth as `run_depths.sh` does. If 6 fails, **raise** the depth (to 7: 64 × 51 b ≈ 3.3 K FF). Do not lower it.
+
+---
+
+# Original brief (handoff)
+
 
 *2026-10-28. Branch `pl_algo`. Mark: "the next #48" after [[REPORT_48_bank_address_multiplies_20261028.md]].
 Context: [[EXPLAINER_48_bin_density_CU_overview_20261022.md]] slide 6 step 2, [[PLAN_48_bin_density_lanes_20261020.md]].*
