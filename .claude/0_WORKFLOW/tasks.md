@@ -3,7 +3,7 @@
 **Active Task (2026-10-28): #48 — on-chip density path.** Bank address at a fixed pitch landed 2026-10-28
 (the 64 per-producer multiplies gone: banked deposit 1,168 -> 656 DSP, 69 % of the chip beside
 `hpwl_gradient_CU`; bit-exact, forwarding distance still 5) -> [[REPORT_48_bank_address_multiplies_20261028.md]].
-Now: the drain's timing (-2.14 ns), then macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
+Now: the drain's timing (-2.14 ns) -> [[HANDOFF_48_drain_timing_20261028.md]], then macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
 `hpwl_gradient_CU` passes on the VCK5000 at 230 MHz ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
 
 Open work, one section per task. **Status lives here; evidence lives in a
