@@ -127,7 +127,8 @@ hw xclbin built at **200 MHz** (WNS +0.031 ns). **Clock work (10-27):** **230 MH
   F = 14..23), and one cell per cycle: 4×4 banks + forwarding, II = 1, bit-exact 44/44, forwarding proven in
   RTL co-sim (depth 4 fails, 5 passes).** → [[REPORT_48_bin_density_fixed_point_20261019.md]] **10-27: bin index
   by multiply** in golden and device (registered divergence; drift nil on 4/5, in noise on bigblue4; ~63 K LUT saved over 8
-  producers) → [[REPORT_48_multiply_bin_index_20261027.md]]
+  producers) → [[REPORT_48_multiply_bin_index_20261027.md]] **10-28: banked deposit 656 DSP, drain timing met in
+  csynth (+0.10 ns)**; co-sim must re-prove the forwarding depth → [[REPORT_48_drain_timing_20261028.md]]
 - **#47 — the borrowed-copy exchange replaced the chunk mailbox (2026-10-09; "tail" renamed "borrowed"
   2026-10-26).** Rule C6: a macro pin is never borrowed (the macro is). Rule C7: a chunk's borrowed
   copies sit in its borrowed rows, one block per owner; owners write / read them through a 32 x 256 row
