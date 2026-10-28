@@ -72,7 +72,20 @@ Build G is `6d3961c`, built with build F's scripts unchanged: HLS at 400 MHz, `n
 | F | 250 | −0.178 | −87 | 1,596 | | | |
 | **G** | **250** | **−0.119** | **−157** | **2,840** | 225,600 | 145,805 | 232 |
 
-- **230 MHz still closes.** The xclbin is packaged at `run230/hpwl_gradient_CU_top.xclbin` (md5 `12675424bc115b0b005761d4be96b16d`). It has not been run on the card.
+- **230 MHz still closes.** The xclbin is packaged at `run230/hpwl_gradient_CU_top.xclbin` (md5 `12675424bc115b0b005761d4be96b16d`).
+
+## On the card (2026-10-28, `vck`, build G at 230 MHz)
+**4/4 PASS, bit for bit** against the g++ CU. Run with `XRT_DEVICE_BDF=0000:c1:00.1 TARGET=hw bash test/hpwl_gradient_xrt.sh` at `e9f798a`. The card checkout's `pl/build/hw/` now holds build G; F's xclbin is kept beside it as `hpwl_gradient_CU_top.F230.xclbin`.
+
+| design | grad image vs g++ CU | kernel run per axis, G | F, 230 MHz (10-27) |
+|---|---|---|---|
+| synthetic (16 chunks, 5 macros) | 0 / 17,344 | 10.1 / 0.7 ms | 9.5 / 0.6 ms |
+| mgc_fft_a | 0 / 34,592 | 0.2 / 0.1 ms | 0.2 / 0.1 ms |
+| mms/adaptec1 | 0 / 227,712 | **0.7 / 0.6 ms** | 0.8 / 0.7 ms |
+| bigblue4 (3 chunks) | 0 / 2,616,832 | 7.8 / 7.8 ms | 7.9 / 7.8 ms |
+
+- **adaptec1 is 0.1 ms faster per axis.** That matches the cycle count: ~30 K fewer macro-pin cycles per call (refresh + fold, 15 K each) is 0.13 ms at 230 MHz. The host timer reads in 0.1 ms steps.
+- The other designs are unchanged within that resolution. Synthetic axis 0 includes the first call's setup; its axis 1 (0.6 → 0.7 ms) is within the timer step, and on this design the ~80 cycles of fixed fetch latency per call outweigh its few macro pins (see the co-sim section below).
 - **At 250 MHz the macro and exchange paths went away, and the beat loop's DSPs are now the wall.**
 
   | path group (source → destination) | F endpoints / WNS | G endpoints / WNS |
@@ -108,6 +121,5 @@ Both runs use the same synthetic design (`cosim_tb "1536 4"`: 16 chunks, 5 movab
 - The beat loop itself is unchanged (4,413 cycles). The two exchange passes are still most of a call on this design; B4 (#47) moves them out of this CU.
 
 ## Next
-- Card run of build G's 230 MHz xclbin. `pl_algo`'s host matches it; on `vck` set `XRT_DEVICE_BDF=0000:c1:00.1`.
 - 250 MHz: register the `wa_*` DSP operands (see the routed section above).
 - A placer run on an MMS design: the trajectory should stay within float noise of before (only the summation order changed).
