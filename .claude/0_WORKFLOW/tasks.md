@@ -936,6 +936,13 @@ the M2 golden and the M0 model (bigblue4 1.57 M → 0.98 M cycles per axis). Dev
 `iteration_update`) waits on #45 step 6. **Buildable now:** M1 re-run on the as-built C7/C8 layout, A's
 beat-level op format, a beat-level golden + standalone HLS send/merge blocks (early M5). "tail" was
 renamed "borrowed" on this date (borrower side; "shared" stays the owner side).
+**2026-10-27: sw_flat runs A's exchange where A puts it** (Mark): `Placer::run` is now
+`initialization(); while { compute_hpwl_partials; compute_electric_fields; iteration_update }`, and
+`iteration_update` merges the borrowed gradients and, after the step, sends each owner's probe position
+into its borrowed slots, which the stream lanes now read. Bit-identical: check-placer 2/2, and stream
+runs (`wa_sums`/`grad_merge`/`hpwl` on) on mgc_fft_a, bigblue3 (K=2) and mms/bigblue3 (K=2, 1,611 macro
+folds) have identical traces before and after; a send-before-step mutant fails at iteration 1. The
+device loop is a skeleton only: `host/sw_flat/device_loop.hpp`.
 → [[PLAN_47_borrowed_copies_status_20261026.md]]. Briefing: [[EXPLAINER_47_tail_exchange_deck_20261009.md]].
 <details><summary>superseded headline (2026-10-09)</summary>
 

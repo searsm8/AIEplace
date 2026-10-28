@@ -5,7 +5,10 @@
 //                          already wa_gradient.hpp's expression term for term (wirelength.cpp).
 //   grad_merge = "stream"  each beat's repeated-slot lanes merged by the Hillis-Steele scan, scattered
 //                          in stream order; macro pins folded beat by beat (macro_pin_tree); borrowed copies merged into their
-//                          owners, borrowers ascending (hpwl_gradient_CU.hpp's three passes).
+//                          owners, borrowers ascending -- in iteration_update, where #47 B4 puts it, not in
+//                          the gradient (merge_borrowed_gradients). Meow.
+// Under wa_sums = "tree" the lanes read positions from their own chunk's slots, borrowed copies
+// included, which iteration_update fills after each step (send_borrowed_positions, #47 B4). Meow.
 //   hpwl = "fixed"         the schedule's HPWL as an int64 sum of hpwl_to_fixed per net and axis, the
 //                          stream's nets only (hpwl_CU.hpp). The float conversion of the total is ours:
 //                          the device returns the int64s.
@@ -140,7 +143,8 @@ void Placer::build_record_stream()
     }
     rs.large_first.push_back((long)rs.large_positions.size());
 
-    // merge_borrowed_pass: owners ascending; per owner its borrowers ascending (chunked_device_arrays). Meow.
+    // The merge's order, merge_borrowed_pass's: owners ascending; per owner its borrowers ascending
+    // (chunked_device_arrays). Meow.
     const std::vector<long> owner_slot = packer::owner_slots_of(chunked);
     for (int owner = 0; owner < chunked.num_chunks; owner++)
         for (int borrower = 0; borrower < chunked.num_chunks; borrower++) {
@@ -149,11 +153,26 @@ void Placer::build_record_stream()
                 if (block.owner != owner) continue;
                 for (long i = block.first; i < block.first + block.count; i++) {
                     const int local = c.borrowed_order[i];
-                    rs.borrowed_merges.emplace_back(layout.chunk_first_slot[owner] + owner_slot[c.work_node[local]],
-                                                layout.chunk_first_slot[borrower] + c.enc.node_slot[local]);
+                    rs.borrowed_copies.emplace_back(layout.chunk_first_slot[owner] + owner_slot[c.work_node[local]],
+                                                    layout.chunk_first_slot[borrower] + c.enc.node_slot[local]);
                 }
             }
         }
+
+    // Each lane's position slot: its node's slot in this chunk, owned or borrowed; a macro pin reads
+    // its macro's (refresh_macro_pins: pin = macro + offset); a fixed pin keeps the file's position. Meow.
+    std::unordered_map<long, long> macro_of_pin;
+    for (const RecordStream::MacroFold& fold : rs.folds)
+        for (long pin_slot : fold.pin_slot) if (pin_slot >= 0) macro_of_pin[pin_slot] = fold.macro_slot;
+    rs.lane_node_slot.assign(rs.lane_slot.size(), -1);
+    for (size_t lane = 0; lane < rs.lane_slot.size(); lane++) {
+        if (rs.lane_pin[lane] < 0 || pin_slot[rs.lane_pin[lane]] < 0) continue;
+        const long slot = rs.lane_slot[lane];
+        if (layout.role[slot] != SlotRole::MACRO_PIN) { rs.lane_node_slot[lane] = slot; continue; }
+        const auto macro = macro_of_pin.find(slot);
+        if (macro == macro_of_pin.end()) fail("a macro-pin lane is in no macro beat");
+        rs.lane_node_slot[lane] = macro->second;
+    }
 
     for (size_t n = 0; n < design_net.size(); n++) {
         if (carried[n]) rs.nets.push_back(design_net[n]);
@@ -163,9 +182,9 @@ void Placer::build_record_stream()
     long merged_lanes = 0;   // lanes the scan folds into the lane before: a node's repeated pins (B3)
     for (size_t lane = 1; lane < rs.lane_pin.size(); lane++)
         merged_lanes += lane % LANES != 0 && rs.lane_pin[lane] >= 0 && rs.lane_slot[lane] == rs.lane_slot[lane - 1];
-    printf("sw_flat: record stream: %d chunks, %ld positions, %zu nets, %ld dropped by the packer, %ld merged lanes, %zu folds, %zu borrowed merges\n",
+    printf("sw_flat: record stream: %d chunks, %ld positions, %zu nets, %ld dropped by the packer, %ld merged lanes, %zu folds, %zu borrowed copies\n",
            chunked.num_chunks, rs.chunk_first_position.back(), rs.nets.size(), rs.dropped_nets, merged_lanes,
-           rs.folds.size(), rs.borrowed_merges.size());
+           rs.folds.size(), rs.borrowed_copies.size());
 }
 
 void Placer::compute_stream_partials()
@@ -198,7 +217,10 @@ void Placer::compute_stream_partials()
     };
     auto set_grad = [&](long lane, int axis, float g) { (axis ? lane_grad[lane].y : lane_grad[lane].x) = g; };
     auto lane_x = [&](long lane, int axis) {
-        const Position p = pin_position(*this, rs.lane_pin[lane], true);
+        const int pin = rs.lane_pin[lane];
+        const long slot = rs.lane_node_slot[lane];
+        const Position p = slot < 0 ? pin_position(*this, pin, true)
+                         : next.probe_pos[slot] + Position(design.pin_offset_x[pin], design.pin_offset_y[pin]);
         return axis ? p.y : p.x;
     };
 
@@ -325,7 +347,21 @@ void Placer::merge_stream_gradient()
             else running[fold.macro_slot] = sum;
         }
     }
-    for (const auto& [owner_slot, borrowed_slot] : rs.borrowed_merges) next.probe_grad[owner_slot] += next.probe_grad[borrowed_slot];
+}
+
+// The #47 B4 exchange, where the PL's iteration_update will do it (borrowed_fusion.hpp is its
+// per-owner streaming golden): after a step, every borrowed slot takes its owner's new probe
+// position (send, R1); before the next step, every owner adds in its borrowers' gradients, owners
+// then borrowers ascending, the order B3's merge_borrowed_pass adds them in (merge, R4). Meow.
+void Placer::send_borrowed_positions()
+{
+    for (const auto& [owner_slot, borrowed_slot] : stream.borrowed_copies) next.probe_pos[borrowed_slot] = next.probe_pos[owner_slot];
+}
+
+void Placer::merge_borrowed_gradients()
+{
+    if (!cfg.grad_merge_stream || nan_detected) return;
+    for (const auto& [owner_slot, borrowed_slot] : stream.borrowed_copies) next.probe_grad[owner_slot] += next.probe_grad[borrowed_slot];
 }
 
 float Placer::stream_wirelength(bool at_probe) const

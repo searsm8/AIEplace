@@ -122,7 +122,8 @@ struct RecordStream {
     std::vector<MacroFold> folds;             // every chunk's macro beats (SKIPs dropped), chunk order
     std::vector<long> chunk_first_fold;       // num_chunks + 1
     std::vector<long> chunk_movable_end;      // per chunk: global first_fixed_slot
-    std::vector<std::pair<long, long>> borrowed_merges;   // (owner slot, borrower's borrowed slot): owners ascending, borrowers ascending
+    std::vector<long> lane_node_slot;         // per position * LANES: the slot its position comes from (a macro pin: its macro), -1 fixed or EMPTY
+    std::vector<std::pair<long, long>> borrowed_copies;   // (owner slot, borrower's borrowed slot): owners ascending, borrowers ascending
     std::vector<int> nets;                    // FlatDesign nets the stream carries (the HPWL's)
     long dropped_nets = 0;                    // nets of 2..96 pins the packer could not encode: no gradient, no HPWL
 };
@@ -201,6 +202,8 @@ struct Placer {
     void build_record_stream();
     void compute_stream_partials();   // wa_sums = "tree": lane_grad
     void merge_stream_gradient();     // grad_merge = "stream": lane_grad -> probe_grad
+    void send_borrowed_positions();   // owners' probe positions -> their borrowed copies
+    void merge_borrowed_gradients();  // grad_merge = "stream": borrowed gradients += into their owners
     float stream_wirelength(bool at_probe) const;
     void stream_hpwl_fixed(bool at_probe, int64_t totals[2]) const;   // per axis, hpwl_to_fixed units
     // density.cpp
@@ -213,7 +216,7 @@ struct Placer {
     Gradient electrostatic_force(long slot) const;
     float compute_overflow(bool smooth) const;
     // step.cpp
-    void perform_next_step();
+    void take_step();
     void estimate_initial_step();
     float lipschitz_estimate();
     void combine_gradients();
@@ -227,9 +230,12 @@ struct Placer {
     void update_schedule();
     bool check_convergence();
     int  select_best_solution() const;   // a BestSlot, or -1 = none valid
-    // main.cpp
+    // placer.cpp
     void run();
-    void perform_iteration();
+    void initialization();
+    void iteration_update();
+    void run_until(int last);
+    void dump_schedule_trace() const;
 };
 
 // NetPin::getProbePos / getPos: the node's position plus the pin's offset. A fixed node or IO pad

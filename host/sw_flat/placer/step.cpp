@@ -10,8 +10,9 @@
 
 namespace sw_flat {
 
-// performNextStep with enable_backtracking = false: one trial, always accepted. Meow.
-void Placer::perform_next_step()
+// performNextStep with enable_backtracking = false, up to the move: one trial, always accepted. The
+// gradient at the new point is the next iteration's (Placer::run), and so is the BB step from it. Meow.
+void Placer::take_step()
 {
     float a_next = (1.0f + sqrtf(4.0f * nesterov_ak * nesterov_ak + 1.0f)) / 2.0f;
     momentum_coeff = cfg.enable_momentum ? (nesterov_ak - 1.0f) / a_next : 0.0f;
@@ -19,10 +20,7 @@ void Placer::perform_next_step()
 
     cache_state();
     step_all_nodes();
-    compute_hpwl_partials();
-    compute_electric_fields();
-    combine_gradients();
-    step_length = lipschitz_estimate();
+    send_borrowed_positions();
 }
 
 // XPlace estimate_initial_learning_rate (initializer.py:171): one trial step of init_step_seed site
@@ -37,9 +35,11 @@ void Placer::estimate_initial_step()
     step_length    = cfg.init_step_seed * site_width;
     momentum_coeff = 0.0f;
     step_all_nodes();
+    send_borrowed_positions();
 
     compute_hpwl_partials();
     compute_electric_fields();
+    merge_borrowed_gradients();
     combine_gradients();
 
     step_length = lipschitz_estimate();

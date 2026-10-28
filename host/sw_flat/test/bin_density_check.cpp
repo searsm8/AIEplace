@@ -91,14 +91,7 @@ int main(int argc, char** argv)
         printf("FAIL %s: grid outside bin_density_CU's range (<= %d, a multiple of %d)\n", tag.c_str(), densrec::GRID_MAX, pinrec::LANES);
         return 1;
     }
-    placer.initialize_placement();
-    placer.compute_hpwl_partials();
-    placer.compute_electric_fields();
-    placer.initialize_density_weight();
-    while (placer.iteration < iterations) {
-        placer.perform_iteration();
-        if (placer.check_convergence()) break;
-    }
+    placer.run_until(iterations);
 
     // sw_flat's rho: deposit_fixed_point's drain of the deposit it just did. Meow.
     std::vector<float> golden(placer.bin_fixed.size());

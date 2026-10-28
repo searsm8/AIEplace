@@ -49,14 +49,7 @@ int main(int argc, char** argv)
     Placer placer;
     placer.setup(cfg);
     const std::string tag = placer.design.name + " (grid " + std::to_string(placer.bins) + ")";
-    placer.initialize_placement();
-    placer.compute_hpwl_partials();
-    placer.compute_electric_fields();
-    placer.initialize_density_weight();
-    while (placer.iteration < iterations) {
-        placer.perform_iteration();
-        if (placer.check_convergence()) break;
-    }
+    placer.run_until(iterations);
 
     const float separate = placer.compute_overflow(true);
     const float clamped = snapshot(placer, false);

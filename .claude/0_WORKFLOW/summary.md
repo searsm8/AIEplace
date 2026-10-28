@@ -131,9 +131,10 @@ hw xclbin built at **200 MHz** (WNS +0.031 ns). **Clock work (10-27):** **230 MH
   copies sit in its borrowed rows, one block per owner; owners write / read them through a 32 x 256 row
   buffer replaying host-scheduled ops (`borrowed_copies.hpp`). C8: shared-first owned rows. bigblue4 at
   1 M: 2.49 M -> 1.57 M cycles per axis. **Not built: B4 = A (Mark, 2026-10-09)**, which removes the
-  CU's send and merge passes by folding them into `iteration_update` (modeled 0.98 M). Only its golden
-  (M2, `host/sw_flat/borrowed_fusion.hpp`, bit-identical to B3) exists; the device side waits on #45
-  step 6, and four pieces can be built before it ([[PLAN_47_borrowed_copies_status_20261026.md]]).
+  CU's send and merge passes by folding them into `iteration_update` (modeled 0.98 M). Software only:
+  the M2 golden, and since 2026-10-27 sw_flat's own loop (`initialization`, then gradient, field,
+  `iteration_update`, which merges and sends; bit-identical). The device side waits on #45 step 6
+  (loop skeleton: `host/sw_flat/device_loop.hpp`) ([[PLAN_47_borrowed_copies_status_20261026.md]]).
   **R (resident shared region) CLOSED 2026-10-19, measured, not chosen; B4 stays the plan.** Modeled 1–4 pp
   faster than B4 and global colouring is free, but the region is 25% of capacity at K=3 and ≥ 100% at
   K=6 (512 K run); a sliding window (first→last user chunk) equals it at K ≤ 3 and is 39–58% at K=6.

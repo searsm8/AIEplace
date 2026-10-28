@@ -208,13 +208,9 @@ int main(int argc, char** argv)
     }
     sw_flat::Placer placer;
     placer.setup(cfg);
-    placer.initialize_placement();
-    placer.compute_hpwl_partials();
-    placer.compute_electric_fields();
-    placer.initialize_density_weight();
-    while (placer.iteration < iterations && !placer.nan_detected) placer.perform_iteration();
+    placer.run_until(iterations);
     if (placer.nan_detected) { printf("FAIL %s: NaN before iteration %d\n", placer.design.name.c_str(), iterations); return 1; }
-    placer.compute_hpwl_partials();   // the WA gradient alone: perform_iteration leaves the combined one
+    placer.merge_borrowed_gradients();   // the CU still merges in merge_borrowed_pass (B3); sw_flat does it in the update. Meow.
 
     int failures = 0;
     const std::vector<float> device_grad[2] = {check_axis(device, kernel, placer_inputs(placer, 0), 0, failures),

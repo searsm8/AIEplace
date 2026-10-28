@@ -133,10 +133,7 @@ int main(int argc, char** argv)
     cfg.deposit_fixed = true;
     Placer placer;
     placer.setup(cfg);
-    placer.initialize_placement();
-    placer.compute_hpwl_partials();
-    placer.compute_electric_fields();
-    placer.initialize_density_weight();
+    placer.initialize_placement();   // iteration 0's positions, sampled before initialization() draws the same ones (seeded). Meow.
 
     const DensityInputs in = make_density_inputs(placer);
     const int bins = placer.bins;
@@ -188,8 +185,11 @@ int main(int argc, char** argv)
             simulated++;
         }
         if (max_iterations && placer.iteration >= max_iterations) break;
-        placer.perform_iteration();
-        if (placer.check_convergence()) break;
+        if (placer.iteration == 0) placer.initialization();
+        else placer.iteration_update();
+        if (placer.stop_reason != sw_flat::StopReason::RUNNING) break;
+        placer.compute_hpwl_partials();
+        placer.compute_electric_fields();
     }
 
     printf("whole run, %d iterations simulated; speedup over one slot per cycle (iterations 0-15 alone in brackets):\n", simulated);

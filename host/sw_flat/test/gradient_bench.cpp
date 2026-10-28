@@ -23,11 +23,7 @@ int main(int argc, char** argv)
     cfg.dump_schedule_trace = false;
     sw_flat::Placer placer;
     placer.setup(cfg);
-    placer.initialize_placement();
-    placer.compute_hpwl_partials();
-    placer.compute_electric_fields();
-    placer.initialize_density_weight();
-    while (placer.iteration < 50) placer.perform_iteration();
+    placer.run_until(50);
 
     auto time_mode = [&](bool lut, std::vector<sw_flat::Gradient>& grad) {
         placer.cfg.wa_exp_lut = lut;
