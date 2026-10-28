@@ -51,7 +51,7 @@
 // >= the deposit's scheduled read-to-write distance: 5 (URAM read issued at stage 99, write at 104 of 104,
 // csynth 2026-10-27 with the bin index by multiply; the dividers sat before the read, so dropping them took
 // 13 stages off the front and left the distance at 5). Co-sim on a stream that re-hits bins at distances
-// 1..5: depth 0 and 4 FAIL in RTL, 5 and 6 PASS. 6 leaves one spare; re-run cosim/run_depths.sh whenever
+// 1..5: depth 0 and 4 FAIL in RTL, 5 and 6 PASS (again 2026-10-28, with the fixed bank pitch). 6 leaves one spare; re-run cosim/run_depths.sh whenever
 // deposit_fast changes. Meow.
 #define BIN_FORWARD_DEPTH 6
 #endif
@@ -76,12 +76,16 @@ typedef uint64_t rho_word;
 
 constexpr int BANK_SIDE     = densrec::WINDOW_BINS;              // 4: banks per axis
 constexpr int NUM_BANKS     = BANK_SIDE * BANK_SIDE;             // 16
-constexpr int BANK_WORDS    = (densrec::GRID_MAX / BANK_SIDE) * (densrec::GRID_MAX / BANK_SIDE);   // 64K at 1024
+constexpr int BANK_PITCH    = densrec::GRID_MAX / BANK_SIDE;     // words per bank column, at every grid size
+constexpr int BANK_WORDS    = BANK_PITCH * BANK_PITCH;           // 64K at 1024
 constexpr int FORWARD_DEPTH = BIN_FORWARD_DEPTH;
 constexpr int RHO_BEATS_MAX = densrec::GRID_MAX * densrec::GRID_MAX / pinrec::LANES;
 
+// The pitch is GRID_MAX / 4, not grid_bins / 4: a constant power of two makes the multiply a shift. The
+// run-time pitch cost one DSP per bank per producer (#48). A smaller grid leaves words unused, which
+// were allocated anyway. Meow.
 inline int bank_of(int col, int row) { return BANK_SIDE * (col % BANK_SIDE) + row % BANK_SIDE; }
-inline int address_of(int col, int row, int grid_bins) { return (col / BANK_SIDE) * (grid_bins / BANK_SIDE) + row / BANK_SIDE; }
+inline int address_of(int col, int row) { return (col / BANK_SIDE) * BANK_PITCH + row / BANK_SIDE; }
 
 // A footprint's corner bins: Grid::computeNodeOverlaps' index range, clipped to the grid. By multiply,
 // as sw_flat's bin_index = "multiply": a float divider per edge cost +7.8K LUT per producer (#48). Meow.
@@ -172,7 +176,7 @@ deposit_fast_loop:
             // (5) hit: the slot is live and the footprint really overlaps that bin. A miss still runs
             //     (6)-(9) at address 0 and simply does not write, so all 16 banks do the same work. Meow.
             const bool hit = live && ow[dc] > 0.0f && oh[dr] > 0.0f;
-            const int addr = hit ? address_of(col, row, grid_bins) : 0;   // a miss may lie past the grid edge
+            const int addr = hit ? address_of(col, row) : 0;   // a miss may lie past the grid edge
 
             // (6) Read: in hardware this read is issued ~5 stages before (9) writes, so it can miss the
             //     last 5 cells' writes to this bank and return a stale value. Meow.
@@ -229,7 +233,7 @@ slow_slots:
             for (int row = w.row_lo; row <= w.row_hi; row++) {
                 const float oh = overlap_y(w, row, bin_h);
                 if (oh <= 0.0f) continue;
-                rho_URAM[bank_of(col, row)][address_of(col, row, grid_bins)] += densrec::to_fixed(ow * oh * fp.weight);
+                rho_URAM[bank_of(col, row)][address_of(col, row)] += densrec::to_fixed(ow * oh * fp.weight);
             }
         }
     }
@@ -240,18 +244,22 @@ slow_slots:
 // Integer adds are exact and one cycle, so a plain tree and one accumulator hold II=1. Meow.
 static uint64_t overflow_excess_sum(const rho_word rho_URAM[NUM_BANKS][BANK_WORDS], int grid_bins, uint32_t overflow_cap) {
     uint64_t excess_sum = 0;
-    const int tiles = (grid_bins / BANK_SIDE) * (grid_bins / BANK_SIDE);
+    const int tiles_per_axis = grid_bins / BANK_SIDE;
+    int tile_col = 0, tile_row = 0;   // counters, not a / tiles_per_axis: that would be a run-time divide. Meow.
 reduce:
-    for (int a = 0; a < tiles; a++) {
+    for (int t = 0; t < tiles_per_axis * tiles_per_axis; t++) {
 #pragma HLS LOOP_TRIPCOUNT max=BANK_WORDS
 #pragma HLS PIPELINE II=1
-        // (1) Read address a in all 16 banks: the 4x4 tile of bins at tile column a / (bins/4), tile row
-        //     a % (bins/4). Each bank gives one bin, so all 16 reads happen in the same cycle.
+        // (1) Read address a in all 16 banks: the 4x4 tile of bins at (tile_col, tile_row). Each bank
+        //     gives one bin, so all 16 reads happen in the same cycle. On a grid below GRID_MAX the
+        //     words with tile_row >= tiles_per_axis are never visited: they were never loaded.
         // (2) Each bin's excess over the cap, clipped at zero.
         // (3) Adder tree: 16 -> 8 -> 4 -> 2 -> 1, four levels of adds per tile.
         // (4) Add the tile's total to the running sum. Meow.
         uint64_t excess[NUM_BANKS];
 #pragma HLS ARRAY_PARTITION variable=excess complete
+        const int a = tile_col * BANK_PITCH + tile_row;
+        if (++tile_row == tiles_per_axis) { tile_row = 0; tile_col++; }
         for (int b = 0; b < NUM_BANKS; b++) {
             const uint64_t q = (uint64_t)rho_URAM[b][a];
             excess[b] = q > overflow_cap ? q - overflow_cap : 0;
@@ -308,7 +316,7 @@ load_base:
         const int i = q * BANK_SIDE, col = i / grid_bins, row = i % grid_bins;
         const densrec::FixedBeat beat = fixed_base_DDR[i / pinrec::LANES];
         for (int k = 0; k < BANK_SIDE; k++)   // row % 4 == 0, so row + k is bank row k: 4 distinct banks
-            rho_URAM[BANK_SIDE * (col % BANK_SIDE) + k][address_of(col, row, grid_bins)] = beat.q[i % pinrec::LANES + k];
+            rho_URAM[BANK_SIDE * (col % BANK_SIDE) + k][address_of(col, row)] = beat.q[i % pinrec::LANES + k];
     }
 
     // The scaled weight is sw_flat's fp.weight *= fixed_scale: one float multiply per table entry. Meow.
@@ -340,7 +348,7 @@ drain:
         // (3) After the 4th quad (lanes 12..15) the beat is full: write it to DDR. Meow.
         const int i = q * BANK_SIDE, col = i / grid_bins, row = i % grid_bins;
         for (int k = 0; k < BANK_SIDE; k++)
-            out_beat.v[i % pinrec::LANES + k] = (float)(uint64_t)rho_URAM[BANK_SIDE * (col % BANK_SIDE) + k][address_of(col, row, grid_bins)] * rho_unit;
+            out_beat.v[i % pinrec::LANES + k] = (float)(uint64_t)rho_URAM[BANK_SIDE * (col % BANK_SIDE) + k][address_of(col, row)] * rho_unit;
         if (i % pinrec::LANES == pinrec::LANES - BANK_SIDE) rho_DDR[i / pinrec::LANES] = out_beat;
     }
 }
