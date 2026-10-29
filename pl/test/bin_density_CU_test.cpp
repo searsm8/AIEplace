@@ -1,6 +1,7 @@
 // Verify bin_density_CU (src/modules/bin_density_CU.hpp) -- the bin density map from slot-ordered
 // positions, footprint indices and a fixed-node base map, accumulated in fixed point (#48) with F from
-// the total-area bound, over 16 banks (4 x 4 interleaved) with forwarding; wide footprints take the slow path.
+// the total-area bound, by 8 producers into 64 banks (8 x 8 interleaved) with forwarding; wide footprints
+// take the slow path. Off-synthesis the CU's streams are a plain queue (no Vitis needed). Meow.
 //
 // Golden: a naive double-precision deposit written here from sw_flat density.cpp (node_footprint,
 // for_each_overlap), on a synthetic slot range: a cell library, movable macros at td < 1 (the weight

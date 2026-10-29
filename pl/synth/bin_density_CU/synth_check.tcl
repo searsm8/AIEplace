@@ -1,5 +1,5 @@
-# C-synthesis check for bin_density_CU (tier 2). The prototype must synthesize; only the overflow
-# reduction (reduce) is expected at II=1 once rho_URAM is banked 16 wide -- read its II in the report.
+# C-synthesis check for bin_density_CU (tier 2): 8 producers, 64 URAM banks. Expected II=1 in deal_beats,
+# produce_cells, drain_banks' drain, load_base, reduce and drain; read them in the report. Meow.
 # Run from pl/synth/bin_density_CU/:  vitis_hls -f synth_check.tcl   (source Vitis settings64.sh first)
 open_project synth_check_prj
 set_top bin_density_CU_top

@@ -23,10 +23,10 @@ namespace densrec {
 #define PL_DENSITY_GRID_MAX 1024   // override (-D) only to shrink RTL co-simulation
 #endif
 constexpr int      GRID_MAX            = PL_DENSITY_GRID_MAX;   // v1 hardware grid; 2048 is the planned extension
-constexpr int      FOOTPRINT_TABLE_MAX = 4096;          // assumed, not yet measured on the 44 designs
+constexpr int      FOOTPRINT_TABLE_MAX = 128;           // per-producer BRAM copy; measured 4..105 on the 44 designs (#48)
 constexpr uint32_t NO_DEPOSIT          = 0xFFFFFFFFu;
 constexpr int      URAM_WORD_WIDTH     = 36;            // a URAM word in 8K x 36 mode: one bin's fixed-point accumulator
-constexpr int      WINDOW_BINS         = 4;             // bins per axis a fast-path footprint may span (4x4 banks)
+constexpr int      WINDOW_BINS         = 4;             // bins per axis a fast-path footprint may span (a 4x4 window)
 
 struct FootprintBeat { uint32_t idx[pinrec::LANES]; };  // one 512-bit DDR beat of footprint indices
 struct FixedBeat     { uint32_t q[pinrec::LANES]; };    // one 512-bit DDR beat of a fixed-point map (the base)

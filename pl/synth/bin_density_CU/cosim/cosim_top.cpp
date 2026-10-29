@@ -1,5 +1,5 @@
 // cosim_top.cpp -- bin_density_CU_top for RTL co-simulation: ../bin_density_CU_top.cpp plus `depth=` on
-// every m_axi port, which co-simulation needs to size its memories (cosim_tb.cpp's arrays fit them). Meow.
+// every m_axi port, which co-simulation needs to size its memories (cosim_tb.cpp pads its arrays to them). Meow.
 
 #include "modules/bin_density_CU.hpp"
 
@@ -27,9 +27,9 @@ extern "C" void bin_density_CU_top(
         unsigned int                   overflow_cap,
         pinrec::SlotBeat*              rho,
         unsigned long long*            overflow_excess) {
-#pragma HLS INTERFACE m_axi port=pos_x         bundle=gmem0 offset=slave depth=64
-#pragma HLS INTERFACE m_axi port=pos_y         bundle=gmem1 offset=slave depth=64
-#pragma HLS INTERFACE m_axi port=footprint_idx bundle=gmem2 offset=slave depth=64
+#pragma HLS INTERFACE m_axi port=pos_x         bundle=gmem0 offset=slave depth=400
+#pragma HLS INTERFACE m_axi port=pos_y         bundle=gmem1 offset=slave depth=400
+#pragma HLS INTERFACE m_axi port=footprint_idx bundle=gmem2 offset=slave depth=400
 #pragma HLS INTERFACE m_axi port=footprints    bundle=gmem3 offset=slave depth=16
 #pragma HLS INTERFACE m_axi port=fixed_base    bundle=gmem4 offset=slave depth=256
 #pragma HLS INTERFACE m_axi port=rho           bundle=gmem5 offset=slave depth=256
