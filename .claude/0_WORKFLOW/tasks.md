@@ -5,7 +5,7 @@
 `hpwl_gradient_CU`; bit-exact, forwarding distance still 5) -> [[REPORT_48_bank_address_multiplies_20261028.md]].
 Drain timing closed 2026-10-29 in **Vivado synthesis: 2.93 ns at 3.33 (WNS +0.40)**, bit-exact; the write-back
 moved one iteration later, so the 64-bank co-sim must sweep the forwarding depth -> [[REPORT_48_drain_timing_20261028.md]].
-Next: the 64-bank co-sim, then macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
+Now: the 64-bank co-sim -> [[HANDOFF_48_banked_cosim_20261029.md]], then macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
 `hpwl_gradient_CU` passes on the VCK5000 at 230 MHz ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
 
 Open work, one section per task. **Status lives here; evidence lives in a
