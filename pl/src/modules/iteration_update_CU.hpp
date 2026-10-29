@@ -97,12 +97,11 @@ static void combine_pass(int num_chunks, const pinrec::ChunkDesc* chunks_DDR, co
     bool held_REG[MAX_BORROWERS][pinrec::LANES];
 #pragma HLS ARRAY_PARTITION variable=held_REG complete dim=0
     SlotReducer pos_sum, grad_sum, gwl_sum, gden_sum;
-#pragma HLS ARRAY_PARTITION variable=pos_sum.partial complete
-#pragma HLS ARRAY_PARTITION variable=grad_sum.partial complete
-#pragma HLS ARRAY_PARTITION variable=gwl_sum.partial complete
-#pragma HLS ARRAY_PARTITION variable=gden_sum.partial complete
+#pragma HLS ARRAY_PARTITION variable=pos_sum.acc complete
+#pragma HLS ARRAY_PARTITION variable=grad_sum.acc complete
+#pragma HLS ARRAY_PARTITION variable=gwl_sum.acc complete
+#pragma HLS ARRAY_PARTITION variable=gden_sum.acc complete
     pos_sum.clear(); grad_sum.clear(); gwl_sum.clear(); gden_sum.clear();
-    int beat_index = 0;
 
     // Every chunk's owned beats, then the fillers: merge each owner's borrowed gradients in, subtract the
     // density force, and sum the four norms. Meow.
@@ -167,13 +166,12 @@ combine_segments:
             }
             next_grad_x_DDR[addr] = out_x;
             next_grad_y_DDR[addr] = out_y;
-            pos_sum.add_beat(beat_index, pos_terms);
-            grad_sum.add_beat(beat_index, grad_terms);
-            gwl_sum.add_beat(beat_index, gwl_terms);
-            gden_sum.add_beat(beat_index, gden_terms);
+            pos_sum.add_beat(pos_terms);
+            grad_sum.add_beat(grad_terms);
+            gwl_sum.add_beat(gwl_terms);
+            gden_sum.add_beat(gden_terms);
             for (int s = 0; s < MAX_BORROWERS; s++) for (int j = 0; j < pinrec::LANES; j++) held_REG[s][j] = false;
             t++;
-            beat_index++;
         }
     }
     norms_out[0] = pos_sum.total();
@@ -203,10 +201,9 @@ static void step_pass(int num_chunks, const pinrec::ChunkDesc* chunks_DDR, const
     float new_probe_REG[2][pinrec::LANES];         // the beat's new probe positions, for its later groups
 #pragma HLS ARRAY_PARTITION variable=new_probe_REG complete dim=0
     SlotReducer a1_sum, a2_sum;
-#pragma HLS ARRAY_PARTITION variable=a1_sum.partial complete
-#pragma HLS ARRAY_PARTITION variable=a2_sum.partial complete
+#pragma HLS ARRAY_PARTITION variable=a1_sum.acc complete
+#pragma HLS ARRAY_PARTITION variable=a2_sum.acc complete
     a1_sum.clear(); a2_sum.clear();
-    int beat_index = 0;
 
     // Every chunk's owned beats, then the fillers: new preconditioner, the Nesterov step, the die clamp,
     // and each shared slot's new probe position into its borrowers' blocks. Meow.
@@ -271,10 +268,9 @@ step_segments:
                 next_node_x_DDR[addr] = node_x;
                 next_node_y_DDR[addr] = node_y;
                 inv_precond_DDR[addr] = ipw_out;
-                a1_sum.add_beat(beat_index, a1_terms);
-                a2_sum.add_beat(beat_index, a2_terms);
+                a1_sum.add_beat(a1_terms);
+                a2_sum.add_beat(a2_terms);
                 t++;
-                beat_index++;
             }
             int probe_addr = addr;
             if (op.beat) {

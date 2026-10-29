@@ -158,12 +158,11 @@ DeviceOut run_device(const Fixture& f, int mode, const std::vector<pinrec::Fused
 float lanes_sum(const Fixture& f, const std::vector<float>& by_slot) {
     SlotReducer r;
     r.clear();
-    int beat_index = 0;
     auto add = [&](long first_beat, long beats) {
         for (long b = first_beat; b < first_beat + beats; b++) {
             float v[LANES];
             for (int j = 0; j < LANES; j++) v[j] = by_slot[b * LANES + j];
-            r.add_beat(beat_index++, v);
+            r.add_beat(v);
         }
     };
     for (const pinrec::ChunkDesc& d : f.dev.desc) add(d.slot_beat_offset, d.first_borrowed_slot / LANES);

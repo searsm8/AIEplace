@@ -1,5 +1,5 @@
 # Summary — project status at a glance
-*Updated 2026-10-16. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
+*Updated 2026-10-29. Branch `pl_algo`. If this file and the code disagree, the code wins — say so.*
 > **Soft cap — one in, one out.** Current state only, ~2 screens. To add a line, remove one:
 > superseded snapshots & dated "Closed" narration → [[journal.md]]; finished task sections → [[history.md]].
 > If it's done and no longer live context, it isn't "where things stand" — evict it.
@@ -109,7 +109,10 @@ hw xclbin built at **200 MHz** (WNS +0.031 ns). **Clock work (10-27):** **230 MH
 **Macro beats (10-27):** refresh/fold 16 pins per cycle, ~11–14× fewer macro-pin cycles on MMS, bit-exact in sw_emu and hw_emu; routed (build G) 230 MHz still closes and 250 MHz WNS is −0.119 ns, now limited by the `wa_*` DSP inputs; on the card at 230 MHz 4/4 bit-exact, adaptec1 0.8 → 0.7 ms per axis ([[REPORT_45_macro_beats_20261027.md]]). **Build H (10-29): 250 MHz closes routed** (WNS 0.000, 0 failing, thin margin) with the `wa_*` float ops at full DSP latency, and **passes on the card 4/4 bit for bit**; `KERNEL_FREQ_HZ` = 250 MHz ([[REPORT_45_build_H_250mhz_20261028.md]]).
 **On the VCK5000 (2026-10-20, host `vck`): PASS bit-exact** on synthetic, fft_a, mms/adaptec1 and bigblue4 (3 chunks,
 ~8.4 ms wall-clock per axis) ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
-**Then:** step 6, density path.
+**Step 6, update piece (10-29): `iteration_update_CU`** — two calls per iteration (COMBINE: merge + combine + BB/L1
+norms; STEP: precond + Nesterov step + clamp + send), #47's borrowed exchange fused in (B4 = A). **Bit-exact vs
+`Placer::iteration_update`** on 5 designs incl. bigblue3 (K=2) and bigblue4 (K=3) under sw_flat's new `reductions = "lanes"`
+(default off); force gather still an input ([[REPORT_45_iteration_update_CU_20261029.md]]). **Then:** density path, then the passes out of `hpwl_gradient_CU`.
   → [[PLAN_45_integration_20261006.md]]
 - **Building blocks (#41/#42, closed 2026-10-06; history.md):** chunked gradient tier-1 exact, II=1,
   post-route 3.955 ns vs 3.33; one axis 256 of 463 URAM; FM 1 pass 0.38× externals.
@@ -134,11 +137,9 @@ hw xclbin built at **200 MHz** (WNS +0.031 ns). **Clock work (10-27):** **230 MH
   2026-10-26).** Rule C6: a macro pin is never borrowed (the macro is). Rule C7: a chunk's borrowed
   copies sit in its borrowed rows, one block per owner; owners write / read them through a 32 x 256 row
   buffer replaying host-scheduled ops (`borrowed_copies.hpp`). C8: shared-first owned rows. bigblue4 at
-  1 M: 2.49 M -> 1.57 M cycles per axis. **Not built: B4 = A (Mark, 2026-10-09)**, which removes the
-  CU's send and merge passes by folding them into `iteration_update` (modeled 0.98 M). Software only:
-  the M2 golden, and since 2026-10-27 sw_flat's own loop (`initialization`, then gradient, field,
-  `iteration_update`, which merges and sends; bit-identical). The device side waits on #45 step 6
-  (loop skeleton: `host/sw_flat/device_loop.hpp`) ([[PLAN_47_borrowed_copies_status_20261026.md]]).
+  1 M: 2.49 M -> 1.57 M cycles per axis. **B4 = A (Mark, 2026-10-09): device side BUILT 2026-10-29 in
+  `iteration_update_CU`** (bit-exact, above); `hpwl_gradient_CU` still runs its B3 passes until they are
+  removed (modeled 0.98 M) ([[PLAN_47_borrowed_copies_status_20261026.md]]).
   **R (resident shared region) CLOSED 2026-10-19, measured, not chosen; B4 stays the plan.** Modeled 1–4 pp
   faster than B4 and global colouring is free, but the region is 25% of capacity at K=3 and ≥ 100% at
   K=6 (512 K run); a sliding window (first→last user chunk) equals it at K ≤ 3 and is 39–58% at K=6.

@@ -107,7 +107,7 @@ float Placer::reduce_sum(const std::vector<float>& terms) const
     for (size_t b = 0; b < lane_beats.size(); b++) {
         float lanes[pinrec::LANES];
         for (int j = 0; j < pinrec::LANES; j++) lanes[j] = by_slot[lane_beats[b] * pinrec::LANES + j];
-        reducer.add_beat((int)b, lanes);
+        reducer.add_beat(lanes);
     }
     return reducer.total();
 }

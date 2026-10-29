@@ -769,7 +769,13 @@ fresh in `/AIEplace/pl`, `/vck5000` deleted once moved; timing after integration
 
 **State:** steps 1–5b done (5 bit-identical to sw_only; 5b: sw_flat's `pl+Bprime` config computes the
 gradient + HPWL bit-exact to `hpwl_gradient_CU`, drift within noise). **Next: step 6**, density path
-in slot order, each module vs sw_flat `pl+Bprime`. **Step 8 brought forward (2026-10-19, Mark: (a) 250 MHz,
+in slot order, each module vs sw_flat `pl+Bprime`. **Step 6's update piece landed 2026-10-29:
+`iteration_update_CU`**, two calls per iteration (COMBINE: merge + combine + BB/L1 norms; STEP: precond +
+Nesterov step + clamp + send), #47's exchange fused in. **Bit-exact vs `Placer::iteration_update`** on
+fft_a, pci_bridge32_b, mms/adaptec1, bigblue3, bigblue4 (3 iterations each, `make -C host/sw_flat
+check-iteration-update`) under the new `[sw_flat] reductions = "lanes"` (the device's sum order; default
+off, check-placer unchanged). The force gather is an input array until it exists. Open: `initialization()`
+on the device, DDR ports, `hpwl_gradient_CU` without its passes. [[REPORT_45_iteration_update_CU_20261029.md]] **Step 8 brought forward (2026-10-19, Mark: (a) 250 MHz,
 emulation first, a baseline to improve on):** `make -C pl xclbin TARGET=...` plus the XRT host
 `make -C host/sw_flat hpwl-gradient-xrt`. **sw_emu 4/4 and hw_emu 3/3 (synthetic with 16 chunks, mgc_pci_bridge32_b,
 mgc_fft_a) PASS bit-exact** vs the g++ CU. **hw: 250 MHz failed timing** (WNS −0.729 ns, the borrowed-copy
@@ -941,6 +947,16 @@ gradient parcels, which are sorted by owner slot (collect). Optionally, a contig
 chunk turns receive into part of load and return into part of drain. Estimate for bigblue4: 2.49 M →
 1.48 M (receive/return kept) or 0.95 M (tail), against 1.49 M for D1-B widening.
 
+**State (2026-10-29): A's device side is BUILT, in `iteration_update_CU` (#45 step 6); `hpwl_gradient_CU`
+still runs its B3 passes (item 4, not done).** Send and merge ride on the owner's shared beats as one
+host-built 64-bit op list per owner (GROUPs of ≤ 4 entries in distinct banks, BEAT half-rows, a ring per
+borrower, a 4-deep masked add chain in rank order). Bit-exact vs M2 in tier 1 (6 mutants bite) and vs
+`Placer::iteration_update` on bigblue3 (K=2) and bigblue4 (K=3). Borrowers are served in turn: bigblue4
+100.6 K exchange ops on 16.7 K shared beats, a call +26.5% over its beats. Deviations from this plan (no
+stream processes, chain not 2 adders, serial borrowers) and why: [[PLAN_45_iteration_update_CU_20261029.md]];
+results [[REPORT_45_iteration_update_CU_20261029.md]].
+<details><summary>superseded headline (2026-10-26)</summary>
+
 **State (2026-10-26): B1-B3 + C8 built; the pass removal (B4 = A) is NOT built.** The CU still runs
 both extra passes (`send_borrowed_pass`, `merge_borrowed_pass`); A, which deletes them, exists only as
 the M2 golden and the M0 model (bigblue4 1.57 M → 0.98 M cycles per axis). Device side (send + merge in
@@ -954,6 +970,8 @@ into its borrowed slots, which the stream lanes now read. Bit-identical: check-p
 runs (`wa_sums`/`grad_merge`/`hpwl` on) on mgc_fft_a, bigblue3 (K=2) and mms/bigblue3 (K=2, 1,611 macro
 folds) have identical traces before and after; a send-before-step mutant fails at iteration 1. The
 device loop is a skeleton only: `host/sw_flat/device_loop.hpp`.
+</details>
+
 → [[PLAN_47_borrowed_copies_status_20261026.md]]. Briefing: [[EXPLAINER_47_tail_exchange_deck_20261009.md]].
 <details><summary>superseded headline (2026-10-09)</summary>
 
