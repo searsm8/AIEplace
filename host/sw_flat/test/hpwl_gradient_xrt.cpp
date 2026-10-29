@@ -14,12 +14,15 @@
 //   [2] HPWL      the device's hpwl_total_fixed equals the g++ CU's
 //   [3] GOLDEN    (config only) every OWNED slot equals sw_flat's own gradient: record_stream_check's
 //                 claim, carried across the device path
+// The borrowed exchange around the CU is iteration_update_CU's (#47 B4 = A), here its golden:
+// borrowed_fusion.hpp's fused_send on the inputs, fused_merge on the device image before [3].
 // Emulation (sw_emu / hw_emu) is chosen by XCL_EMULATION_MODE, as for any XRT host. Meow.
 
 #include "placer/placer.hpp"
 
 #include "../../../pl/test/tier1_stub.hpp"   // PL_TIER1_STUB + hls::stream stand-in, BEFORE the module
 #include "modules/hpwl_gradient_CU.hpp"
+#include "borrowed_fusion.hpp"
 #include "../../../pl/test/wa_gradient_golden.hpp"
 
 #include "xrt/xrt_bo.h"
@@ -49,14 +52,17 @@ struct AxisResult {
     double kernel_ms = 0;
 };
 
-AxisInputs make_inputs(packer::ChunkedDevice dev, std::vector<float> exp_lut, float inv_gamma, float inv_lut_step)
+AxisInputs make_inputs(const packer::Chunked& ch, packer::ChunkedDevice dev, std::vector<float> exp_lut, float inv_gamma, float inv_lut_step)
 {
     AxisInputs in;
     in.dev = std::move(dev);
     in.records.resize(in.dev.records.size() / pinrec::LANES);
     std::memcpy(in.records.data(), in.dev.records.data(), in.dev.records.size() * sizeof(uint32_t));
-    in.pos.resize(in.dev.slot_images.size() / pinrec::LANES);
-    std::memcpy(in.pos.data(), in.dev.slot_images.data(), in.dev.slot_images.size() * sizeof(float));
+    const auto parcels = sw_flat::borrowed_parcels(ch);
+    std::vector<float> pos_slots = in.dev.slot_images;
+    for (int j = 0; j < ch.num_chunks; j++) sw_flat::fused_send(ch, j, parcels[j], pos_slots);
+    in.pos.resize(pos_slots.size() / pinrec::LANES);
+    std::memcpy(in.pos.data(), pos_slots.data(), pos_slots.size() * sizeof(float));
     in.exp_lut = std::move(exp_lut);
     in.inv_gamma = inv_gamma;
     in.inv_lut_step = inv_lut_step;
@@ -72,7 +78,7 @@ AxisInputs placer_inputs(const sw_flat::Placer& placer, int axis)
                                              : placer.next.probe_pos[slot];
         node_pos[node] = axis ? p.y : p.x;
     }
-    return make_inputs(packer::chunked_device_arrays(placer.chunked, axis, node_pos), placer.exp_lut, placer.inv_gamma,
+    return make_inputs(placer.chunked, packer::chunked_device_arrays(placer.chunked, axis, node_pos), placer.exp_lut, placer.inv_gamma,
                        1.0f / (sw_flat::PL_LUT_STEP_NORM * placer.gamma));
 }
 
@@ -83,12 +89,12 @@ std::vector<pinrec::SlotBeat> nan_image(size_t beats)
     return grad;
 }
 
-AxisResult run_gpp(AxisInputs in)   // by value: send_borrowed_pass writes pos
+AxisResult run_gpp(const AxisInputs& in)
 {
     AxisResult out;
     out.grad = nan_image(in.pos.size());
     plalgo::hpwl_gradient_CU(in.dev.desc.data(), in.dev.group_ends.data(), (int)in.dev.desc.size(), in.records.data(),
-                             in.pos.data(), in.dev.macro_beats.data(), in.dev.macro_offsets.data(), in.dev.borrowed_blocks.data(), in.dev.borrowed_ops.data(),
+                             in.pos.data(), in.dev.macro_beats.data(), in.dev.macro_offsets.data(),
                              in.dev.offset_table.data(), (int)in.dev.offset_table.size(), in.exp_lut.data(),
                              (int)in.exp_lut.size(), out.grad.data(), in.dev.offset_bits, in.inv_gamma, in.inv_lut_step,
                              out.hpwl_fixed);
@@ -96,7 +102,7 @@ AxisResult run_gpp(AxisInputs in)   // by value: send_borrowed_pass writes pos
 }
 
 // One buffer per pointer argument, in the kernel's argument order. XRT rejects a zero-size bo, so an
-// empty array (no macro pins, an unchunked design's borrowed blocks) gets a few words that the CU never reads. Meow.
+// empty array (no macro pins) gets a few words that the CU never reads. Meow.
 template <typename T>
 xrt::bo to_device(const xrt::device& device, const xrt::kernel& kernel, int arg, const std::vector<T>& host)
 {
@@ -117,15 +123,13 @@ AxisResult run_xrt(const xrt::device& device, xrt::kernel& kernel, const AxisInp
     xrt::bo pos          = to_device(device, kernel, 4, in.pos);
     xrt::bo macro_beats  = to_device(device, kernel, 5, in.dev.macro_beats);
     xrt::bo macro_offsets = to_device(device, kernel, 6, in.dev.macro_offsets);
-    xrt::bo borrowed_blocks  = to_device(device, kernel, 7, in.dev.borrowed_blocks);
-    xrt::bo borrowed_ops     = to_device(device, kernel, 8, in.dev.borrowed_ops);
-    xrt::bo offset_table = to_device(device, kernel, 9, in.dev.offset_table);
-    xrt::bo exp_lut      = to_device(device, kernel, 11, in.exp_lut);
-    xrt::bo grad         = to_device(device, kernel, 13, out.grad);
-    xrt::bo hpwl_total   = to_device(device, kernel, 17, std::vector<int64_t>{-1});
+    xrt::bo offset_table = to_device(device, kernel, 7, in.dev.offset_table);
+    xrt::bo exp_lut      = to_device(device, kernel, 9, in.exp_lut);
+    xrt::bo grad         = to_device(device, kernel, 11, out.grad);
+    xrt::bo hpwl_total   = to_device(device, kernel, 15, std::vector<int64_t>{-1});
 
     const auto start = std::chrono::steady_clock::now();
-    xrt::run run = kernel(chunks, group_ends, (int)in.dev.desc.size(), records, pos, macro_beats, macro_offsets, borrowed_blocks, borrowed_ops,
+    xrt::run run = kernel(chunks, group_ends, (int)in.dev.desc.size(), records, pos, macro_beats, macro_offsets,
                           offset_table, (int)in.dev.offset_table.size(), exp_lut, (int)in.exp_lut.size(), grad,
                           in.dev.offset_bits, in.inv_gamma, in.inv_lut_step, hpwl_total);
     run.wait();
@@ -141,8 +145,8 @@ AxisResult run_xrt(const xrt::device& device, xrt::kernel& kernel, const AxisInp
 // [1] and [2] for one axis; returns the device's grad image as floats for [3]. Meow.
 std::vector<float> check_axis(const xrt::device& device, xrt::kernel& kernel, const AxisInputs& in, int axis, int& failures)
 {
-    printf("[info]        axis %d: %zu chunks, %zu record beats, %zu slot beats, %zu borrowed ops (the kernel's work)\n",
-           axis, in.dev.desc.size(), in.records.size(), in.pos.size(), in.dev.borrowed_ops.size());
+    printf("[info]        axis %d: %zu chunks, %zu record beats, %zu slot beats (the kernel's work)\n",
+           axis, in.dev.desc.size(), in.records.size(), in.pos.size());
     const AxisResult golden = run_gpp(in);
     const AxisResult hw = run_xrt(device, kernel, in);
 
@@ -174,7 +178,7 @@ int run_synthetic(const xrt::device& device, xrt::kernel& kernel, long capacity)
     int failures = 0;
     for (int axis = 0; axis < 2; axis++) {
         const std::vector<float> node_pos = fixture::random_positions(nl.movable.size(), 11u + axis, golden::EXTENT);
-        check_axis(device, kernel, make_inputs(packer::chunked_device_arrays(ch, axis, node_pos), lut.table,
+        check_axis(device, kernel, make_inputs(ch, packer::chunked_device_arrays(ch, axis, node_pos), lut.table,
                                                1.0f / golden::GAMMA, lut.inv_step), axis, failures);
     }
     printf("%s synthetic: %d chunks at capacity %ld, %zu nodes\n", failures ? "FAIL" : "PASS", ch.num_chunks, capacity,
@@ -210,11 +214,14 @@ int main(int argc, char** argv)
     placer.setup(cfg);
     placer.run_until(iterations);
     if (placer.nan_detected) { printf("FAIL %s: NaN before iteration %d\n", placer.design.name.c_str(), iterations); return 1; }
-    placer.merge_borrowed_gradients();   // the CU still merges in merge_borrowed_pass (B3); sw_flat does it in the update. Meow.
+    placer.merge_borrowed_gradients();   // as the fused_merge below does; sw_flat does it in the update. Meow.
 
     int failures = 0;
-    const std::vector<float> device_grad[2] = {check_axis(device, kernel, placer_inputs(placer, 0), 0, failures),
-                                               check_axis(device, kernel, placer_inputs(placer, 1), 1, failures)};
+    std::vector<float> device_grad[2] = {check_axis(device, kernel, placer_inputs(placer, 0), 0, failures),
+                                         check_axis(device, kernel, placer_inputs(placer, 1), 1, failures)};
+    const auto parcels = sw_flat::borrowed_parcels(placer.chunked);
+    for (int axis = 0; axis < 2; axis++)
+        for (int j = 0; j < placer.chunked.num_chunks; j++) sw_flat::fused_merge(placer.chunked, j, parcels[j], device_grad[axis]);
     long owned = 0, differing = 0;
     for (long slot = 0; slot < placer.layout.first_filler_slot; slot++) {
         if (placer.layout.role[slot] != sw_flat::SlotRole::OWNED) continue;

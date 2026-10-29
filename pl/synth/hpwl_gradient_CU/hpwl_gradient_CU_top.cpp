@@ -12,11 +12,9 @@ extern "C" void hpwl_gradient_CU_top(
         const int32_t*                  group_ends,
         int                             num_chunks,
         const pinrec::RecordBeat*       records,
-        pinrec::SlotBeat*               pos,             // read, and send_borrowed_pass writes the borrowed rows
+        const pinrec::SlotBeat*         pos,             // borrowed rows already sent by iteration_update_CU
         const pinrec::MacroBeat*        macro_beats,
         const pinrec::SlotBeat*         macro_offsets,
-        const pinrec::BorrowedBlockDesc*    borrowed_blocks,
-        const uint32_t*                 borrowed_ops,
         const float*                    offset_table,
         int                             offset_table_size,
         const float*                    exp_lut,
@@ -33,8 +31,6 @@ extern "C" void hpwl_gradient_CU_top(
 #pragma HLS INTERFACE m_axi port=macro_beats    bundle=gmem3 offset=slave
 // gmem2: refresh reads it while pos is idle, so the two never compete for the port. Meow.
 #pragma HLS INTERFACE m_axi port=macro_offsets  bundle=gmem2 offset=slave
-#pragma HLS INTERFACE m_axi port=borrowed_blocks    bundle=gmem0 offset=slave
-#pragma HLS INTERFACE m_axi port=borrowed_ops       bundle=gmem4 offset=slave max_widen_bitwidth=32
 #pragma HLS INTERFACE m_axi port=offset_table   bundle=gmem9 offset=slave max_widen_bitwidth=32
 #pragma HLS INTERFACE m_axi port=exp_lut        bundle=gmem9 offset=slave max_widen_bitwidth=32
 // m_axi, not s_axilite: a pointer on s_axilite becomes a write-only control register that XRT cannot
@@ -42,6 +38,6 @@ extern "C" void hpwl_gradient_CU_top(
 #pragma HLS INTERFACE m_axi port=hpwl_total_fixed bundle=gmem5 offset=slave
 #pragma HLS INTERFACE m_axi port=grad           bundle=gmem8 offset=slave
 
-    hpwl_gradient_CU(chunks, group_ends, num_chunks, records, pos, macro_beats, macro_offsets, borrowed_blocks, borrowed_ops, offset_table, offset_table_size, exp_lut, lut_size, grad,
+    hpwl_gradient_CU(chunks, group_ends, num_chunks, records, pos, macro_beats, macro_offsets, offset_table, offset_table_size, exp_lut, lut_size, grad,
                      offset_bits, inv_gamma, inv_lut_step, *hpwl_total_fixed);
 }

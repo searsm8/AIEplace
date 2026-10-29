@@ -16,14 +16,12 @@
 //     [first_borrowed_slot, first_fixed_slot)    borrowed rows: one block per owner it borrows from
 //     [first_fixed_slot, num_slots)              fixed pins: position only, never a gradient
 //
-//   send_borrowed_pass   for each owner: load its shared rows' positions, write a copy into every
-//                        borrower's borrowed block for it (borrowed_copies.hpp)
-//   compute_pass         for each chunk: load all its positions (zeroing grad in the same pass),
-//                        refresh macro pins, run the gradient beat loop, fold macro pins, and drain
-//                        owned and borrowed gradients to grad_DDR
-//   merge_borrowed_pass  for each owner: reload its shared rows' gradients, add in what every borrower
-//                        drained into its borrowed block for it, drain those rows
-// The two borrowed passes run only when the design is chunked. Meow.
+//   compute_pass   for each chunk: load all its positions (zeroing grad in the same pass), refresh
+//                  macro pins, run the gradient beat loop, fold macro pins, and drain owned and
+//                  borrowed gradients to grad_DDR
+// The borrowed copies are exchanged around this CU, by iteration_update_CU (#47 B4 = A): its STEP
+// writes every borrowed row's position before the call, and its COMBINE adds the borrowed rows'
+// gradients into their owners after it. Here an owned slot's gradient is only its own chunk's part. Meow.
 //
 // The beat loop is three stages in a DATAFLOW region, joined by streams (hpwl_gradient/):
 //   hpwl_CU     gather -> bbox trees -> each pin's net (max, min); HPWL total
@@ -41,7 +39,6 @@
 #include "modules/hpwl_gradient/slot_arrays.hpp"
 #include "modules/hpwl_gradient/record_gather.hpp"
 #include "modules/hpwl_gradient/wa_gradient.hpp"   // includes wa_sums, hpwl_CU
-#include "modules/hpwl_gradient/borrowed_copies.hpp"
 
 namespace plalgo {
 
@@ -96,11 +93,9 @@ static void hpwl_gradient_CU(
         const int32_t*                  group_ends_DDR,  // [num_chunks * NUM_GROUP_ENDS]
         int                             num_chunks,
         const pinrec::RecordBeat*       records_DDR,       // every chunk's stream, concatenated, this axis
-        pinrec::SlotBeat*               pos_DDR,           // every chunk's slot-major positions, this axis; send_borrowed_pass fills the borrowed rows
+        const pinrec::SlotBeat*         pos_DDR,           // every chunk's slot-major positions, this axis, borrowed rows already sent
         const pinrec::MacroBeat*        macro_beats_DDR,   // every chunk's refresh / fold beats, this axis
         const pinrec::SlotBeat*         macro_offsets_DDR, // beat for beat: the lanes' pin offsets, this axis
-        const pinrec::BorrowedBlockDesc* borrowed_blocks_DDR,   // every owner's borrowed blocks (ChunkDesc first_borrowed_block, num_borrowers)
-        const uint32_t*                 borrowed_ops_DDR,      // their send and merge ops
         const float*                    offset_table_DDR,  // [offset_table_size] shared by all chunks
         int                             offset_table_size,
         const float*                    exp_lut_DDR,       // [lut_size] exp(-t) table
@@ -129,27 +124,13 @@ static void hpwl_gradient_CU(
     int group_end_REG[pinrec::NUM_GROUP_ENDS];
 #pragma HLS ARRAY_PARTITION variable=group_end_REG complete dim=0
 
-    const bool chunked = num_chunks > 1;
     load_offset_table(offset_table_DDR, offset_table_size, offset_BRAM);   // record_gather.hpp
     load_exp_lut(exp_lut_DDR, lut_size, lut_BRAM);   // wa_sums.hpp
-
-    // For each owner: load the positions of its shared rows into URAM, then write a copy of every
-    // node another chunk borrows into that borrower's borrowed block in DDR. After this, every
-    // borrowed slot holds this iteration's position. Meow.
-    if (chunked) {
-    send_borrowed_pass:
-        for (int j = 0; j < num_chunks; j++) {
-            const pinrec::ChunkDesc desc = chunks_DDR[j];
-            load_slot_array(pos_DDR + desc.slot_beat_offset, desc.first_private_slot / pinrec::LANES, pos_URAM);   // slot_arrays.hpp
-            for (int s = 0; s < desc.num_borrowers; s++)
-                send_borrowed_block(borrowed_blocks_DDR[desc.first_borrowed_block + s], borrowed_ops_DDR, pos_URAM, pos_DDR);   // borrowed_copies.hpp
-        }
-    }
 
     int64_t hpwl_sum = 0;
     // For each chunk: load all its positions (owned, borrowed, fixed) into URAM, compute every one of
     // its nets' gradient contributions, and write its owned and borrowed gradients to DDR, where
-    // merge_borrowed_pass picks up the borrowed ones. Meow.
+    // iteration_update_CU's COMBINE picks up the borrowed ones. Meow.
 compute_pass:
     for (int k = 0; k < num_chunks; k++) {
         const pinrec::ChunkDesc desc = chunks_DDR[k];
@@ -168,21 +149,6 @@ compute_pass:
         drain_slot_array(grad_URAM, movable_slot_beats, grad_DDR + desc.slot_beat_offset);   // slot_arrays.hpp
     }
     hpwl_total_fixed = hpwl_sum;
-
-    // For each owner: reload the gradients of its shared rows, add in what every borrower computed
-    // in its borrowed slots for them, and write the totals back. compute_pass already drained the
-    // private rows, which no borrower adds to. Meow.
-    if (chunked) {
-    merge_borrowed_pass:
-        for (int j = 0; j < num_chunks; j++) {
-            const pinrec::ChunkDesc desc = chunks_DDR[j];
-            const int shared_slot_beats = desc.first_private_slot / pinrec::LANES;
-            load_slot_array(grad_DDR + desc.slot_beat_offset, shared_slot_beats, grad_URAM);   // slot_arrays.hpp
-            for (int s = 0; s < desc.num_borrowers; s++)   // borrowers ascending: each slot's adds in a fixed order
-                merge_borrowed_block(borrowed_blocks_DDR[desc.first_borrowed_block + s], borrowed_ops_DDR, grad_DDR, grad_URAM);   // borrowed_copies.hpp
-            drain_slot_array(grad_URAM, shared_slot_beats, grad_DDR + desc.slot_beat_offset);   // slot_arrays.hpp
-        }
-    }
 }
 
 } // namespace plalgo

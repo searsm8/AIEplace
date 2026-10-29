@@ -28,22 +28,9 @@ constexpr int ROWS_PER_BANK    = SLOT_CAPACITY / pinrec::BANKS;   // 32K
 
 // Slot-major DDR beat b holds slots 16b..16b+15 -> banks (b&1)*16 + j, row b>>1: sixteen distinct
 // banks, so a whole beat lands in one cycle. Shared by every array loaded or drained this way. Meow.
-static void load_slot_array(const pinrec::SlotBeat* src_DDR, int num_slot_beats,
-                            float dst_URAM[pinrec::BANKS][ROWS_PER_BANK]) {
-    // Copy a chunk's array DDR -> URAM, one beat (16 floats, half a row) per cycle. Meow.
-load_slots:
-    for (int b = 0; b < num_slot_beats; b++) {
-#pragma HLS PIPELINE II=1
-        const pinrec::SlotBeat beat = src_DDR[b];
-        for (int j = 0; j < pinrec::LANES; j++) {
-            if (b & 1) dst_URAM[j + pinrec::LANES][b >> 1] = beat.v[j];
-            else       dst_URAM[j][b >> 1]                 = beat.v[j];
-        }
-    }
-}
-
-// load_slot_array for pos_URAM, zeroing grad_URAM's movable slots in the same cycle: separate
-// arrays, so the zeroing costs no extra cycles. Meow.
+//
+// Load pos_URAM, one beat (16 floats, half a row) per cycle, zeroing grad_URAM's movable slots in
+// the same cycle: separate arrays, so the zeroing costs no extra cycles. Meow.
 static void load_pos_zero_grad(const pinrec::SlotBeat* pos_DDR, int num_slot_beats, int movable_slot_beats,
                                float pos_URAM[pinrec::BANKS][ROWS_PER_BANK],
                                float grad_URAM[pinrec::BANKS][ROWS_PER_BANK]) {
@@ -66,7 +53,7 @@ load_pos_zero_grad:
 
 static void drain_slot_array(const float src_URAM[pinrec::BANKS][ROWS_PER_BANK], int num_slot_beats,
                              pinrec::SlotBeat* dst_DDR) {
-    // The reverse of load_slots: URAM -> DDR, one beat per cycle. Meow.
+    // The reverse of load_pos_zero_grad: URAM -> DDR, one beat per cycle. Meow.
 drain_slots:
     for (int b = 0; b < num_slot_beats; b++) {
 #pragma HLS PIPELINE II=1
@@ -137,9 +124,9 @@ refresh_macros:   // reads macro slots, writes macro-pin slots: disjoint, so no 
 // loop is done. Only the add into acc sits inside the read-add-write that the distance covers; the
 // tree before it carries nothing between beats. At distance 8 the add takes 3 cycles: at 4 it had to
 // be a 1-cycle add chained with the URAM read and bank mux (4.3 ns estimated, 2026-10-27). Its
-// binding (fulldsp; refresh_macros and merge_borrowed_block use primitivedsp) keeps HLS from sharing
-// it: shared with merge, one adder fed the write data of every bank of both arrays, the largest
-// failing group at 250 MHz (2026-10-26). Meow.
+// binding (fulldsp; refresh_macros uses primitivedsp) keeps HLS from sharing it: shared with B3's
+// merge (removed 2026-10-29, #47 D), one adder fed the write data of every bank of both arrays, the
+// largest failing group at 250 MHz (2026-10-26). Meow.
 static void fold_macro_pins(const pinrec::MacroBeat* macro_beats_DDR, int num_macro_beats,
                             float grad_URAM[pinrec::BANKS][ROWS_PER_BANK],
                             float acc_URAM[pinrec::BANKS][ROWS_PER_BANK]) {

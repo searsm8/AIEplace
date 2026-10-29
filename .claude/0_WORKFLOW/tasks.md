@@ -953,7 +953,8 @@ pass alone (item 4 / D): its B3 passes, the `borrowed_blocks` / `borrowed_ops` p
 `borrowed_copies.hpp` + test are deleted (Mark). With M2's exchange around it the gradient is byte-identical
 to the old CU's (synthetic, 1-30 chunks) and bit-exact vs sw_flat on bigblue4 / mms/bigblue4 (3 chunks):
 tier 1, `check-record-stream` 6/6, sw_emu 4/4; C-synth 19/19 II=1, est. 287.2 MHz unchanged. **Build H no
-longer matches the interface: a new hw build is the next step (ask Mark).** The packer / format still emit
+longer matches the interface: build I (250 MHz) launched 20:54 CET on `build`, `~/AIEplace_timing/expI/pl/build/run/`;
+next read routed slack, then the card.** The packer / format still emit
 B3's op lists, read by nothing now. -> [[REPORT_47_pass_removal_20261029.md]]
 <details><summary>superseded headline (2026-10-29, morning)</summary>
 

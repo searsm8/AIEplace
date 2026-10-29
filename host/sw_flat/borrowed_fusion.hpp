@@ -10,7 +10,7 @@
 //   fused_send   (R1)  at owned slot s, every borrower whose cursor is at s gets pos[s] in its borrowed slot
 //   fused_merge  (R4)  at owned slot s, grad[s] = partial + each borrower's borrowed gradient for s, in
 //                      ASCENDING borrower order -- the order B3's merge_borrowed_pass adds them in, so the two are
-//                      bit-identical (pl/test/borrowed_copies_test.cpp holds them so)
+//                      bit-identical (borrowed_copies_test held them so until B3 was removed, 2026-10-29, #47 D)
 // Arrays are the concatenated chunk slot images (packer::chunked_device_arrays' layout: chunk k starts
 // at the sum of the earlier chunks' num_slots), one axis. Meow.
 

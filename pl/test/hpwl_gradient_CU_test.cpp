@@ -1,5 +1,7 @@
 // Verify hpwl_gradient_CU (src/modules/hpwl_gradient_CU.hpp) -- WA gradient for a design split into
 // chunks: borrowed positions out, borrowed gradients back, through the borrowers' borrowed rows (#41, #47).
+// The exchange is iteration_update_CU's (#47 B4 = A), so here its golden, borrowed_fusion.hpp's
+// fused_send before the CU and fused_merge after (iteration_update_CU_test holds the device to them).
 // From vck5000/test/hpwl_gradient_computer_v2_test.cpp @ 41f2193 (#45). Meow.
 //
 // Golden: wa_gradient_golden.hpp (sw_only's WA partial in double from the PARSED netlist), so it
@@ -16,8 +18,8 @@
 //                  quantization within 2^-HPWL_FRAC_BITS per net of the exact double sum
 //   [5] COVERAGE   several chunks; borrowed cells and macros exist; borrowed gradients carry a
 //                  real share of the total (a dropped merge would be visible); borrowers with many
-//                  owner blocks, and blocks of several rows. Row-buffer wrap-around (a block of more
-//                  than BORROWED_BUFFER_ROWS rows) appears only on real designs (--netlist).
+//                  owner blocks, and blocks of several rows. The device exchange's ring buffers are
+//                  iteration_update_CU_test's to cover, not this harness's. Meow.
 //
 // `hpwl_gradient_CU_test --netlist FILE [CAPACITY]` runs [1]+[4] on a real design (FILE from
 // `make -C host/sw_flat netlists`); CAPACITY defaults to the on-chip SLOT_CAPACITY. Meow.
@@ -25,6 +27,7 @@
 #include "tier1_stub.hpp"                  // PL_TIER1_STUB + hls::stream stand-in, BEFORE the module
 #include "wa_gradient_golden.hpp"
 #include "modules/hpwl_gradient_CU.hpp"
+#include "borrowed_fusion.hpp"
 
 #include <cstdio>
 
@@ -38,19 +41,23 @@ struct DeviceAxis {
 static DeviceAxis run_axis(const packer::Chunked& ch, size_t num_parsed, int axis, const std::vector<float>& node_pos,
                            const golden::Lut& lut) {
     const packer::ChunkedDevice dev = packer::chunked_device_arrays(ch, axis, node_pos);
+    const auto parcels = sw_flat::borrowed_parcels(ch);
+    std::vector<float> pos_slots = dev.slot_images;
+    for (int j = 0; j < ch.num_chunks; j++) sw_flat::fused_send(ch, j, parcels[j], pos_slots);   // iteration_update_CU's STEP, before
     std::vector<pinrec::RecordBeat> records(dev.records.size() / pinrec::LANES);
     std::memcpy(records.data(), dev.records.data(), dev.records.size() * sizeof(uint32_t));
-    std::vector<pinrec::SlotBeat> pos(dev.slot_images.size() / pinrec::LANES);
-    std::memcpy(pos.data(), dev.slot_images.data(), dev.slot_images.size() * sizeof(float));
+    std::vector<pinrec::SlotBeat> pos(pos_slots.size() / pinrec::LANES);
+    std::memcpy(pos.data(), pos_slots.data(), pos_slots.size() * sizeof(float));
     std::vector<pinrec::SlotBeat> grad(pos.size());
     for (auto& beat : grad) for (float& v : beat.v) v = NAN;     // unwritten slots stay visibly wrong
     DeviceAxis out;
     hpwl_gradient_CU(dev.desc.data(), dev.group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(), dev.macro_beats.data(), dev.macro_offsets.data(),
-                     dev.borrowed_blocks.data(), dev.borrowed_ops.data(),
                      dev.offset_table.data(), (int)dev.offset_table.size(), lut.table.data(), lut.size,
                      grad.data(), dev.offset_bits, 1.0f / golden::GAMMA, lut.inv_step, out.hpwl_total_fixed);
 
-    const float* grad_slots = reinterpret_cast<const float*>(grad.data());
+    std::vector<float> grad_slots(grad.size() * pinrec::LANES);
+    std::memcpy(grad_slots.data(), grad.data(), grad_slots.size() * sizeof(float));
+    for (int j = 0; j < ch.num_chunks; j++) sw_flat::fused_merge(ch, j, parcels[j], grad_slots);   // iteration_update_CU's COMBINE, after
     out.node_grad.assign(num_parsed, NAN);
     for (int k = 0; k < ch.num_chunks; k++) {
         const packer::Chunk& c = ch.chunks[k];

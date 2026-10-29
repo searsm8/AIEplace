@@ -25,7 +25,7 @@ Plan: `.claude/1_REVIEW/reports/PLAN_45_integration_20261006.md`. So far:
 | `model/` | #47 cycle / layout models |
 | `test/flat_database_check.*` | the step-3 gate: FlatDatabase vs DataBase (bit-exact) and vs the legacy packer reader |
 | `density_inputs.hpp` | #48: `bin_density_CU`'s host inputs from a placer (footprint table, per-slot index); `make check-bin-density` holds the module bit-equal to sw_flat's deposit on real designs |
-| `borrowed_fusion.hpp` | #47 M2: the chunk exchange as `iteration_update` will do it (option A); `pl/test/borrowed_copies_test` holds it bit-equal to B3's device exchange |
+| `borrowed_fusion.hpp` | #47 M2: the chunk exchange as `iteration_update` will do it (option A); was held bit-equal to B3's device exchange (removed 2026-10-29, #47 D); the tests use it as the exchange around `hpwl_gradient_CU` |
 | `placer/` | `sw_flat_place`, the CPU phase-1 placer (step 5): sw_only's algorithm on slot-ordered state, one file per sw_only file (see `placer.hpp`). `Placer::run` has the device's shape: `initialization()`, then `compute_hpwl_partials`, `compute_electric_fields`, `iteration_update` per iteration; `iteration_update` does #47 B4's borrowed merge and send |
 | `device_loop.hpp` | SKELETON, nothing runs: the same loop for the device run (#45 step 7), each call's compute unit, DDR arrays and host scalars |
 | `test/placer_check.sh`, `test/d6_config.py` | the step-5 gate: `sw_flat_place` vs sw_only under the D6 config, schedule traces identical as text |

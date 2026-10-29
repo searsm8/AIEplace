@@ -1,58 +1,32 @@
-// cosim_tb.cpp -- RTL co-simulation bench for hpwl_gradient_CU_top: the chunked send_borrowed /
-// compute / merge_borrowed passes, the borrowed-copy exchange's row buffers and the gradient merge, as synthesized RTL. A small
-// synthetic design is split into chunks by a small capacity. Same golden and tolerance as tier 1.
+// cosim_tb.cpp -- RTL co-simulation bench for hpwl_gradient_CU_top: the chunked compute pass and the
+// gradient scatter-add, as synthesized RTL. A small synthetic design is split into chunks by a small
+// capacity; the borrowed exchange around the CU is iteration_update_CU's (#47 B4 = A), here its golden
+// (borrowed_fusion.hpp fused_send before, fused_merge after). Same golden and tolerance as tier 1.
 // Exits 0 on pass.
 //
 //   cosim_tb [CAPACITY [HAZARD]]    defaults 1536 (16 chunks; 1280 and below fit no K, 2048 is one chunk), HAZARD_DISTANCE
 //
-// The row buffer is read the cycle after it is written in both directions: send writes a half-row
-// out right after the entry that completed it, merge reads an entry right after loading its
-// half-row (#47 B3). C simulation cannot see whether the RTL honours that, so the run must contain
-// both back-to-back cases or it proves nothing. HAZARD < 4 is the negative control for the beat
-// loop's scatter-add: the packer then places same-slot updates too close, and co-sim must FAIL.
+// HAZARD < 4 is the negative control for the beat loop's scatter-add: the packer then places
+// same-slot updates too close, and co-sim must FAIL.
 // From vck5000/bring_up/hpwl_gradient_computer_v2/cosim/cosim_tb.cpp @ 41f2193 (#45). Meow.
 
 #include "wa_gradient_golden.hpp"
 #include "modules/hpwl_gradient_CU.hpp"
+#include "borrowed_fusion.hpp"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 extern "C" void hpwl_gradient_CU_top(
-        const pinrec::ChunkDesc*, const int32_t*, int, const pinrec::RecordBeat*, pinrec::SlotBeat*, const pinrec::MacroBeat*, const pinrec::SlotBeat*,
-        const pinrec::BorrowedBlockDesc*, const uint32_t*, const float*, int, const float*, int,
+        const pinrec::ChunkDesc*, const int32_t*, int, const pinrec::RecordBeat*, const pinrec::SlotBeat*, const pinrec::MacroBeat*, const pinrec::SlotBeat*,
+        const float*, int, const float*, int,
         pinrec::SlotBeat*, int, float, float, int64_t*);
 
 // Co-simulation copies `depth` elements from every pointer (cosim_top.cpp): pad to it. Meow.
 template <class T> static std::vector<T> padded(std::vector<T> v, size_t depth) {
     if (v.size() < depth) v.resize(depth);
     return v;
-}
-
-// Back-to-back row-buffer uses: a send BORROWED_BEAT straight after an ENTRY of the half-row it writes,
-// and a merge ENTRY straight after the BORROWED_BEAT that loaded its half-row. Meow.
-static void count_back_to_back(const packer::ChunkedDevice& dev, long& send_pairs, long& merge_pairs) {
-    for (const pinrec::BorrowedBlockDesc& block_desc : dev.borrowed_blocks) {
-        std::vector<long> row(pinrec::BANKS, 0);
-        long beat = 0;
-        for (int i = 0; i < block_desc.num_send_ops; i++) {
-            const uint32_t op = dev.borrowed_ops[block_desc.send_op_offset + i];
-            if (op & pinrec::BORROWED_BEAT_OP) { beat++; continue; }
-            const int bank = pinrec::borrowed_entry_bank(op);
-            const long half_beat = row[bank]++ * 2 + bank / pinrec::LANES;
-            if (i + 1 < block_desc.num_send_ops && (dev.borrowed_ops[block_desc.send_op_offset + i + 1] & pinrec::BORROWED_BEAT_OP) && beat == half_beat) send_pairs++;
-        }
-        std::fill(row.begin(), row.end(), 0);
-        beat = 0;
-        for (int i = 0; i < block_desc.num_merge_ops; i++) {
-            const uint32_t op = dev.borrowed_ops[block_desc.merge_op_offset + i];
-            if (op & pinrec::BORROWED_BEAT_OP) { beat++; continue; }
-            const int bank = pinrec::borrowed_entry_bank(op);
-            const long half_beat = row[bank]++ * 2 + bank / pinrec::LANES;
-            if (i > 0 && (dev.borrowed_ops[block_desc.merge_op_offset + i - 1] & pinrec::BORROWED_BEAT_OP) && beat - 1 == half_beat) merge_pairs++;
-        }
-    }
 }
 
 int main(int argc, char** argv) {
@@ -67,12 +41,10 @@ int main(int argc, char** argv) {
     if (packer::check_chunked(nl, ch, cfg)) { printf("FAIL chunked packer check\n"); return 1; }
 
     const std::vector<int> large_nets = packer::chunked_large_nets(ch);
-    long send_pairs = 0, merge_pairs = 0;
-    count_back_to_back(packer::chunked_device_arrays(ch, 0, std::vector<float>(ch.global.kind.size(), 0.0f)), send_pairs, merge_pairs);
-    printf("     capacity=%ld hazard=%d: %d chunks, %ld borrowed, %zu large nets, back-to-back row-buffer uses: send %ld, merge %ld\n",
-           capacity, cfg.hazard, ch.num_chunks, ch.num_borrowed, large_nets.size(), send_pairs, merge_pairs);
-    if (!negative_control && (ch.num_chunks < 3 || send_pairs == 0 || merge_pairs == 0)) {
-        printf("FAIL coverage: the run lacks several chunks or a back-to-back row-buffer use\n");
+    printf("     capacity=%ld hazard=%d: %d chunks, %ld borrowed, %zu large nets\n",
+           capacity, cfg.hazard, ch.num_chunks, ch.num_borrowed, large_nets.size());
+    if (!negative_control && (ch.num_chunks < 3 || ch.num_borrowed == 0)) {
+        printf("FAIL coverage: the run lacks several chunks or a borrowed node\n");
         return 1;
     }
 
@@ -80,31 +52,33 @@ int main(int argc, char** argv) {
     const std::vector<float> lut_table = padded(lut.table, 1024);
     const std::vector<float> node_pos[2] = {fixture::random_positions(nl.movable.size(), 11u, golden::EXTENT),
                                             fixture::random_positions(nl.movable.size(), 12u, golden::EXTENT)};
+    const std::vector<std::vector<sw_flat::BorrowedParcel>> parcels = sw_flat::borrowed_parcels(ch);
     bool ok = true;
     for (int axis = 0; axis < 2; axis++) {
         const packer::ChunkedDevice dev = packer::chunked_device_arrays(ch, axis, node_pos[axis]);
         const bool fits = dev.records.size() / pinrec::LANES <= 2048 && dev.slot_images.size() / pinrec::LANES <= 4096 &&
-                          dev.desc.size() <= 64 && dev.group_ends.size() <= 2048 && dev.macro_beats.size() <= 4096 &&
-                          dev.borrowed_blocks.size() <= 1024 && dev.borrowed_ops.size() <= 32768;
+                          dev.desc.size() <= 64 && dev.group_ends.size() <= 2048 && dev.macro_beats.size() <= 4096;
         if (!fits) { printf("FAIL design exceeds a cosim port depth\n"); return 1; }
         std::vector<pinrec::RecordBeat> records(2048);
         std::memcpy(records.data(), dev.records.data(), dev.records.size() * sizeof(uint32_t));
+        std::vector<float> pos_slots = dev.slot_images;
+        for (int j = 0; j < ch.num_chunks; j++) sw_flat::fused_send(ch, j, parcels[j], pos_slots);   // iteration_update_CU's STEP, before
         std::vector<pinrec::SlotBeat> pos(4096);
-        std::memcpy(pos.data(), dev.slot_images.data(), dev.slot_images.size() * sizeof(float));
+        std::memcpy(pos.data(), pos_slots.data(), pos_slots.size() * sizeof(float));
         const std::vector<pinrec::ChunkDesc> desc = padded(dev.desc, 64);
         const std::vector<int32_t> group_ends = padded(dev.group_ends, 2048);
         const std::vector<pinrec::MacroBeat> macro_beats = padded(dev.macro_beats, 4096);
         const std::vector<pinrec::SlotBeat> macro_offsets = padded(dev.macro_offsets, 4096);
-        const std::vector<pinrec::BorrowedBlockDesc> borrowed_blocks = padded(dev.borrowed_blocks, 1024);
-        const std::vector<uint32_t> borrowed_ops = padded(dev.borrowed_ops, 32768);
         const std::vector<float> offsets = padded(dev.offset_table, 1024);
         std::vector<pinrec::SlotBeat> grad(4096);
         int64_t hpwl_total_fixed = -1;
         hpwl_gradient_CU_top(desc.data(), group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(), macro_beats.data(), macro_offsets.data(),
-                             borrowed_blocks.data(), borrowed_ops.data(), offsets.data(), (int)dev.offset_table.size(), lut_table.data(),
+                             offsets.data(), (int)dev.offset_table.size(), lut_table.data(),
                              lut.size, grad.data(), dev.offset_bits, 1.0f / golden::GAMMA, lut.inv_step, &hpwl_total_fixed);
 
-        const float* grad_slots = reinterpret_cast<const float*>(grad.data());
+        std::vector<float> grad_slots(grad.size() * pinrec::LANES);
+        std::memcpy(grad_slots.data(), grad.data(), grad_slots.size() * sizeof(float));
+        for (int j = 0; j < ch.num_chunks; j++) sw_flat::fused_merge(ch, j, parcels[j], grad_slots);   // iteration_update_CU's COMBINE, after
         std::vector<float> node_grad(nl.movable.size(), NAN);
         for (int k = 0; k < ch.num_chunks; k++) {
             const packer::Chunk& c = ch.chunks[k];

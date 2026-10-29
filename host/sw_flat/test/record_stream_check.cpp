@@ -1,5 +1,7 @@
 // record_stream_check -- #45 step 5b: sw_flat's record-stream arithmetic (placer/record_stream.cpp) vs
-// hpwl_gradient_CU itself, run in g++ on the same positions. BIT FOR BIT.
+// hpwl_gradient_CU itself, run in g++ on the same positions. BIT FOR BIT. The borrowed exchange around
+// the CU is iteration_update_CU's (#47 B4 = A), here its golden: borrowed_fusion.hpp's fused_send
+// before, fused_merge after.
 //
 //   record_stream_check <config.toml> [iterations=30]
 //
@@ -16,6 +18,7 @@
 
 #include "../../../pl/test/tier1_stub.hpp"   // PL_TIER1_STUB + hls::stream stand-in, BEFORE the module
 #include "modules/hpwl_gradient_CU.hpp"
+#include "borrowed_fusion.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -38,21 +41,25 @@ DeviceAxis run_device(const sw_flat::Placer& placer, int axis)
         node_pos[node] = axis ? p.y : p.x;
     }
     const packer::ChunkedDevice dev = packer::chunked_device_arrays(placer.chunked, axis, node_pos);
+    const auto parcels = sw_flat::borrowed_parcels(placer.chunked);
+    std::vector<float> pos_slots = dev.slot_images;
+    for (int j = 0; j < placer.chunked.num_chunks; j++) sw_flat::fused_send(placer.chunked, j, parcels[j], pos_slots);
     std::vector<pinrec::RecordBeat> records(dev.records.size() / pinrec::LANES);
     std::memcpy(records.data(), dev.records.data(), dev.records.size() * sizeof(uint32_t));
-    std::vector<pinrec::SlotBeat> pos(dev.slot_images.size() / pinrec::LANES);
-    std::memcpy(pos.data(), dev.slot_images.data(), dev.slot_images.size() * sizeof(float));
+    std::vector<pinrec::SlotBeat> pos(pos_slots.size() / pinrec::LANES);
+    std::memcpy(pos.data(), pos_slots.data(), pos_slots.size() * sizeof(float));
     std::vector<pinrec::SlotBeat> grad(pos.size());
     for (auto& beat : grad) for (float& v : beat.v) v = NAN;
     DeviceAxis out;
     const float inv_lut_step = 1.0f / (sw_flat::PL_LUT_STEP_NORM * placer.gamma);
     plalgo::hpwl_gradient_CU(dev.desc.data(), dev.group_ends.data(), (int)dev.desc.size(), records.data(), pos.data(),
-                             dev.macro_beats.data(), dev.macro_offsets.data(), dev.borrowed_blocks.data(), dev.borrowed_ops.data(),
+                             dev.macro_beats.data(), dev.macro_offsets.data(),
                              dev.offset_table.data(), (int)dev.offset_table.size(),
                              placer.exp_lut.data(), (int)placer.exp_lut.size(), grad.data(), dev.offset_bits,
                              placer.inv_gamma, inv_lut_step, out.hpwl_fixed);
     const float* slots = reinterpret_cast<const float*>(grad.data());
     out.grad.assign(slots, slots + grad.size() * pinrec::LANES);
+    for (int j = 0; j < placer.chunked.num_chunks; j++) sw_flat::fused_merge(placer.chunked, j, parcels[j], out.grad);
     return out;
 }
 
@@ -89,7 +96,7 @@ int main(int argc, char** argv)
     placer.setup(cfg);
     placer.run_until(iterations);
     if (placer.nan_detected) { printf("FAIL %s: NaN before iteration %d\n", placer.design.name.c_str(), iterations); return 1; }
-    placer.merge_borrowed_gradients();   // the CU still merges in merge_borrowed_pass (B3); sw_flat does it in the update. Meow.
+    placer.merge_borrowed_gradients();   // as run_device's fused_merge does; sw_flat does it in the update. Meow.
     const DeviceAxis device[2] = {run_device(placer, 0), run_device(placer, 1)};
     long owned = 0;
     for (long slot = 0; slot < placer.layout.first_filler_slot; slot++) owned += placer.layout.role[slot] == sw_flat::SlotRole::OWNED;

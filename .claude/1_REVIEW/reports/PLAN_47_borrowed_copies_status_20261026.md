@@ -78,6 +78,8 @@ Each line: the piece, then what it blocks on.
 - **D. A test of the pass-less CU:** compute pass only, with the exchange done by M2 around it (the
   `fill_borrowed` shortcut for positions), checking the whole gradient bit-exact. This proves the CU
   side of item 4 before the update exists. Low value until C is done.
+  *(2026-10-29: done as item 4 itself, after C and step 6 landed: the passes are deleted, and the
+  exchange around the CU is M2 -- [[REPORT_47_pass_removal_20261029.md]].)*
 
 ## One thing to decide
 The 250 MHz timing work now under way (#45) is pipelining B3's loops (`send_ops`' URAM read,

@@ -112,7 +112,9 @@ hw xclbin built at **200 MHz** (WNS +0.031 ns). **Clock work (10-27):** **230 MH
 **Step 6, update piece (10-29): `iteration_update_CU`** — two calls per iteration (COMBINE: merge + combine + BB/L1
 norms; STEP: precond + Nesterov step + clamp + send), #47's borrowed exchange fused in (B4 = A). **Bit-exact vs
 `Placer::iteration_update`** on 5 designs incl. bigblue3 (K=2) and bigblue4 (K=3) under sw_flat's new `reductions = "lanes"`
-(default off); force gather still an input ([[REPORT_45_iteration_update_CU_20261029.md]]). **Then:** density path, then the passes out of `hpwl_gradient_CU`.
+(default off); force gather still an input ([[REPORT_45_iteration_update_CU_20261029.md]]). **Passes out of `hpwl_gradient_CU` (10-29, #47 D):**
+compute pass only, bit-exact with M2's exchange around it (sw_emu 4/4 incl. bigblue4); build H's xclbin no longer matches its
+interface, so a new hw build is due ([[REPORT_47_pass_removal_20261029.md]]). **Then:** density path.
   → [[PLAN_45_integration_20261006.md]]
 - **Building blocks (#41/#42, closed 2026-10-06; history.md):** chunked gradient tier-1 exact, II=1,
   post-route 3.955 ns vs 3.33; one axis 256 of 463 URAM; FM 1 pass 0.38× externals.
@@ -136,10 +138,10 @@ norms; STEP: precond + Nesterov step + clamp + send), #47's borrowed exchange fu
 - **#47 — the borrowed-copy exchange replaced the chunk mailbox (2026-10-09; "tail" renamed "borrowed"
   2026-10-26).** Rule C6: a macro pin is never borrowed (the macro is). Rule C7: a chunk's borrowed
   copies sit in its borrowed rows, one block per owner; owners write / read them through a 32 x 256 row
-  buffer replaying host-scheduled ops (`borrowed_copies.hpp`). C8: shared-first owned rows. bigblue4 at
-  1 M: 2.49 M -> 1.57 M cycles per axis. **B4 = A (Mark, 2026-10-09): device side BUILT 2026-10-29 in
-  `iteration_update_CU`** (bit-exact, above); `hpwl_gradient_CU` still runs its B3 passes until they are
-  removed (modeled 0.98 M) ([[PLAN_47_borrowed_copies_status_20261026.md]]).
+  buffer replaying host-scheduled ops (B3, deleted 2026-10-29). C8: shared-first owned rows. bigblue4 at
+  1 M: 2.49 M -> 1.57 M cycles per axis. **B4 = A (Mark, 2026-10-09): device side DONE 2026-10-29** --
+  the exchange in `iteration_update_CU`, the passes out of `hpwl_gradient_CU` (modeled 0.98 M); the packer
+  still emits B3's unused op lists ([[REPORT_47_pass_removal_20261029.md]], [[PLAN_47_borrowed_copies_status_20261026.md]]).
   **R (resident shared region) CLOSED 2026-10-19, measured, not chosen; B4 stays the plan.** Modeled 1–4 pp
   faster than B4 and global colouring is free, but the region is 25% of capacity at K=3 and ≥ 100% at
   K=6 (512 K run); a sliding window (first→last user chunk) equals it at K ≤ 3 and is 39–58% at K=6.

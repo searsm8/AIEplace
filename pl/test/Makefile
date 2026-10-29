@@ -18,7 +18,7 @@ BUILD     = build
 # -MMD -MP: a header edit rebuilds exactly the harnesses that include it. Meow.
 DEPFLAGS  = -MMD -MP
 
-HARNESSES = pin_record_test hpwl_gradient_CU_test borrowed_copies_test bin_density_CU_test iteration_update_CU_test
+HARNESSES = pin_record_test hpwl_gradient_CU_test bin_density_CU_test iteration_update_CU_test
 BINS      = $(addprefix $(BUILD)/, $(HARNESSES))
 
 .PHONY: test clean
