@@ -1,4 +1,4 @@
-# REPORT #45 — build H: `hpwl_gradient_CU` closes at 250 MHz (routed, 2026-10-29)
+# REPORT #45 — build H: `hpwl_gradient_CU` at 250 MHz, routed and on the card (2026-10-29)
 
 *Mark, 10-28: "write a handoff and start a new session to work on building G." Build G = `6d3961c`, the
 macro-beat `hpwl_gradient_CU`. This was that handoff; it became the build H report once the 250 MHz route
@@ -18,7 +18,24 @@ closed. Context: [[REPORT_45_macro_beats_20261027.md]] (routed G/H, co-sim, card
   URAM 256 unchanged.
 - **Bit-exact:** only operator latency changed. Tier 1 4/4, `check-record-stream` 6/6, C-synth at 2.5 ns 24/24
   loops II=1.
-- **Not yet done:** the card run on `vck`, the `KERNEL_FREQ_HZ` bump to 250 MHz, sw_emu, and the milestone.
+- **On the card (10-29): 4/4 bit for bit at 250 MHz** (below). `KERNEL_FREQ_HZ` = 250 MHz, milestone logged. Not done: sw_emu.
+
+## On the card (2026-10-29, `vck`, build H at 250 MHz)
+**4/4 PASS, bit for bit.** `XRT_DEVICE_BDF=0000:c1:00.1 TARGET=hw bash host/sw_flat/test/hpwl_gradient_xrt.sh` in the card
+checkout at `e9f798a`, so the reference g++ CU is build G's source: H matches G's arithmetic exactly. Card
+`pl/build/hw/hpwl_gradient_CU_top.xclbin` is now H (md5 `77f160cbbb002886eb45f23a88cfb02a`); G is kept beside it as
+`.G230.xclbin`. Output: `~/AIEplace_timing/expH/card_H250.out`.
+
+| design | grad image vs g++ CU | owned slots vs sw_flat | kernel run per axis, H 250 | G 230 (10-28) |
+|---|---|---|---|---|
+| synthetic | 0 / 17,344 | (n/a) | 9.2 / 0.6 ms | 10.1 / 0.7 ms |
+| mgc_fft_a | 0 / 34,592 | 0 / 30,625 × 2 | 0.2 / 0.1 ms | 0.2 / 0.1 ms |
+| mms/adaptec1 | 0 / 227,712 | 0 / 210,967 × 2 | 0.7 / 0.6 ms | 0.7 / 0.6 ms |
+| bigblue4 | 0 / 2,616,832 | 0 / 2,169,183 × 2 | **7.6 / 7.5 ms** | 7.8 / 7.8 ms |
+
+- bigblue4 is 3–4% faster. A 230 → 250 MHz clock alone would give 8% (7.2 ms), so part of the call does not scale
+  with the kernel clock (DDR transfer). The host timer has a 0.1 ms resolution, which hides the change on the small designs.
+- `pl/Makefile` `KERNEL_FREQ_HZ` is now 250 MHz.
 
 ## Where G stood (the starting point)
 - **230 MHz: done.** Routed WNS 0.000; on the VCK5000 4/4 bit-exact; commits `e9f798a`, `2df81ee`.
@@ -50,10 +67,8 @@ closed. Context: [[REPORT_45_macro_beats_20261027.md]] (routed G/H, co-sim, card
   is **not** the kernel's): read kernel slack from the routed dcp (`run/worst.tcl`, `classify_paths.tcl`).
 
 ## Next action
-1. **Card run on `vck`** (Mark books it): copy `expH/.../run/hpwl_gradient_CU_top.xclbin` to the card checkout's
-   `pl/build/hw/` (keep G as `.G230.xclbin`), then `XRT_DEVICE_BDF=0000:c1:00.1 TARGET=hw bash test/hpwl_gradient_xrt.sh`,
-   expecting 4/4 bit-exact.
-2. If it passes: set `KERNEL_FREQ_HZ` to 250 MHz, add the milestone, record per-axis kernel times.
+- None for 250 MHz. Loose ends: an MMS placer run to check the trajectory (below), and the thin margin above if
+  a later source change tips the route.
 
 ## How build G was built (reuse for build H)
 - On `build`: `~/AIEplace_timing/expG/pl/build/go.sh`; outputs in `run/` (250 MHz, timing check off via
