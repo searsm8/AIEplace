@@ -1,4 +1,55 @@
-# HANDOFF #48: RTL co-sim of the 64-bank deposit, to prove its forwarding depth
+# REPORT #48: RTL co-sim of the 64-bank deposit: forwarding distance 4, depth 6 has 2 to spare
+
+*2026-10-29. Branch `pl_algo`. Was the handoff of the same name (the brief is kept below).*
+
+## Result
+
+**The 64-bank drain needs 4 forwarding registers; `BANKED_FORWARD_DEPTH` = 6, so it has 2 to spare.** Left at 6
+(no change, so no new csynth or Vivado run). RTL co-sim of `pl/synth/bin_density_banked/cosim/` (Vitis HLS 2022.2,
+`PL_DENSITY_GRID_MAX=64`, two calls: grid 64 and grid 60):
+
+| `BANKED_FORWARD_DEPTH` | 0 | 1 | 2 | 3 | **4** | 5 | 6 (code) |
+|---|---|---|---|---|---|---|---|
+| C simulation | FAIL (95 / 118 words) | PASS | PASS | PASS | PASS | PASS | PASS |
+| RTL, grid 64 / 60: words that differ (of 4096) | not run | **FAIL** 124 / 138 | **FAIL** 108 / 117 | **FAIL** 101 / 107 | **PASS** 0 / 0 | **PASS** 0 / 0 | **PASS** 0 / 0 |
+
+- **The schedule predicts 4, and RTL agrees.** From `drain_banks_Pipeline_drain.verbose.sched.rpt` (pipeline
+  depth 6, II = 1), iteration t issues its URAM read in state 2 (cycle t+1). The data and the forward/add are in
+  state 5 (t+4). The deferred store for update t is issued by iteration t+1, in its state 5 (t+5), and lands in
+  state 6 (t+6). A same-word update d iterations later reads at t+d+1, so it reads stale data for d <= 4. Its add
+  finds update t in forwarding slot d-1, which needs depth >= d. **Minimum 4.** Depth 3 failing shows the bench
+  does create distance-4 hazards.
+- **Depth 0 now fails in C as well.** The write-back stores the previous iteration's sum after this iteration's
+  read, so even in-order C sees a distance-1 hazard unless slot 0 is compared. Co-sim stops when the C bench
+  fails, so **depth 1 is the RTL negative control**. `run_depths.sh` defaults to 1..6.
+- **The deferred write did NOT lengthen the distance relative to the 16-bank CU (5).** Different pipelines:
+  the drain has a 6-stage schedule, with the read issued one state after the pick.
+- **Termination and deadlock are clean.** The unequal slices (700 / 440 / 550 / 400 / 620 / 490 / **0** / **3**
+  cells) end with every word bit-exact, including the last deferred write. Both transactions finish (latency
+  7,682..7,865 cycles each, of which 4,096 are write-out). The HLS deadlock detector was built in and never
+  fired. Words past the grid at 60 (fixed pitch) stay 0.
+
+## The bench (`cosim_tb.cpp`)
+
+- **Distance 1:** producers 0..5 put 64 cells each at one position.
+- **Distance k = 2..8:** 48 cells each cycle through k positions 8 bins apart (same banks, different addresses),
+  phase-shifted per producer.
+- **Producer slots:** producer 0 fills every slot. It has priority, so its banks see unbroken distance-k streams.
+  Producer p >= 1 leaves every (p+1)th slot NO_DEPOSIT, so later sections interleave producers 1..5.
+- **Random tail:** unequal lengths, NO_DEPOSIT slots, cells clipped at the die edge.
+- **Golden:** a plain uint64 deposit, compared bit for bit over all 4096 raw words.
+- **A first bench was too weak.** It left NO_DEPOSIT gaps in producer 0 too. Depth 1 failed and depth 4 passed,
+  but it never ran depths 2-3. The final bench above was re-run at every depth 1..6.
+
+Files: `cosim_top.cpp` (`banked_cosim_top`: `#include "../banked_top.cpp"` plus bench-sized m_axi `depth=`),
+`cosim_tb.cpp`, `cosim.tcl`, `run_depths.sh`. Logs: `cosim/cosim_run_d{1..6}.log` (gitignored), and the
+first bench's `*_oldbench.log`. A run takes ~21 min (csynth 11-13 + co-sim 8-10), 3 in parallel on this box.
+
+**Next (#48):** build `banked_top` (Vivado already met 3.33 ns). Macro tiles: [[HANDOFF_48_macro_tiles_20261022.md]].
+
+---
+
+## The brief (as handed off)
 
 *2026-10-29. Branch `pl_algo`. Mark: "the next #48" after [[REPORT_48_drain_timing_20261028.md]] (drain meets
 3.33 ns in Vivado, 2.928 ns). Pattern to copy: the 16-bank co-sim, `pl/synth/bin_density_CU/cosim/`
