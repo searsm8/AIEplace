@@ -3,6 +3,8 @@
 
 #include "placer.hpp"
 
+#include "modules/iteration_update/slot_reduce.hpp"   // reductions = "lanes": the device's summation order
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -66,7 +68,8 @@ float Placer::lipschitz_estimate()
         float dgy = inv_pw * (next.probe_grad[slot].y - current.probe_grad[slot].y);
         grad_terms[i] = dgx*dgx + dgy*dgy;
     }
-    for (size_t i = 0; i < reduce_slots.size(); i++) { pos_norm_sq += pos_terms[i]; grad_norm_sq += grad_terms[i]; }
+    pos_norm_sq = reduce_sum(pos_terms);
+    grad_norm_sq = reduce_sum(grad_terms);
 
     last_pos_norm_sq = pos_norm_sq; last_grad_norm_sq = grad_norm_sq;
     return sqrtf(pos_norm_sq) / sqrtf(grad_norm_sq + 1e-8f);
@@ -86,8 +89,27 @@ void Placer::combine_gradients()
         gden_terms[i] = fabsf(electro.x) + fabsf(electro.y);
         g -= electro;
     }
-    last_gwl_L1 = 0.0f; last_gden_L1 = 0.0f;
-    for (size_t i = 0; i < reduce_slots.size(); i++) { last_gwl_L1 += gwl_terms[i]; last_gden_L1 += gden_terms[i]; }
+    last_gwl_L1 = reduce_sum(gwl_terms);
+    last_gden_L1 = reduce_sum(gden_terms);
+}
+
+float Placer::reduce_sum(const std::vector<float>& terms) const
+{
+    if (!cfg.reductions_lanes) {
+        float sum = 0.0f;
+        for (float term : terms) sum += term;
+        return sum;
+    }
+    std::vector<float> by_slot(layout.num_slots, 0.0f);   // a slot that is not movable sums as the device's masked 0
+    for (size_t i = 0; i < reduce_slots.size(); i++) by_slot[reduce_slots[i]] = terms[i];
+    plalgo::SlotReducer reducer;
+    reducer.clear();
+    for (size_t b = 0; b < lane_beats.size(); b++) {
+        float lanes[pinrec::LANES];
+        for (int j = 0; j < pinrec::LANES; j++) lanes[j] = by_slot[lane_beats[b] * pinrec::LANES + j];
+        reducer.add_beat((int)b, lanes);
+    }
+    return reducer.total();
 }
 
 // Node::step, then enforceDieBoundaries. Meow.

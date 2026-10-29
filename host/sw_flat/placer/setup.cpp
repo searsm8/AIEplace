@@ -109,6 +109,7 @@ PlacerConfig read_placer_config(const std::string& path)
     c.hpwl_fixed = pick("hpwl", "float", "fixed");
     c.deposit_fixed = pick("deposit", "float", "fixed");
     c.bin_index_multiply = pick("bin_index", "divide", "multiply");
+    c.reductions_lanes = pick("reductions", "serial", "lanes");
     // The stream carries nets of 2..96 pins (the packer's IGNORE_NET_DEGREE): another mask would
     // compare two net sets, not two arithmetics. Meow.
     if (c.uses_record_stream() && c.ignore_net_degree != packer::IGNORE_NET_DEGREE)
@@ -162,6 +163,10 @@ void Placer::setup(const PlacerConfig& config)
     std::sort(ascending_slots.begin(), ascending_slots.end());   // the fillers' tail stays last
     deposit_slots = cfg.slot_order_deposit ? ascending_slots : movable_slots;
     reduce_slots = cfg.slot_order_reductions ? ascending_slots : movable_slots;
+    for (int k = 0; k < layout.num_chunks; k++)   // iteration_update_CU's stream: owned beats, then the fillers. Meow.
+        for (long b = 0; b < chunked.chunks[k].enc.first_borrowed_slot / pinrec::LANES; b++)
+            lane_beats.push_back(layout.chunk_first_slot[k] / pinrec::LANES + b);
+    for (long b = layout.first_filler_slot / pinrec::LANES; b < layout.num_slots / pinrec::LANES; b++) lane_beats.push_back(b);
 
     // wa_sums.hpp's table: exp(-i * 0.05) for i < 12 / 0.05 + 2, read as exp(-d / gamma). Meow.
     for (int i = 0; i < (int)(PL_LUT_GAMMA_MULT / PL_LUT_STEP_NORM) + 2; i++) exp_lut.push_back(std::exp(-(float)i * PL_LUT_STEP_NORM));
@@ -289,18 +294,17 @@ void Placer::initialize_placement()
 // lambda_0 = (sum |grad WL|_1 / sum |grad D|_1) * multiplier; fillers count toward the density norm. Meow.
 void Placer::initialize_density_weight()
 {
-    float HPWL_L1_norm = 0.0f;
-    float density_L1_norm = 0.0f;
-    for (int i = 0; i < filler_start; i++) {
-        const Gradient& partials = next.probe_grad[reduce_slots[i]];
-        HPWL_L1_norm += std::fabs(partials.x) + std::fabs(partials.y);
+    // The fillers' wirelength term is +0.0f: x + 0.0f is x, so the serial sums are unchanged. Meow.
+    std::vector<float> hpwl_terms(reduce_slots.size(), 0.0f), density_terms(reduce_slots.size());
+    for (int i = 0; i < (int)reduce_slots.size(); i++) {
+        if (i < filler_start) {
+            const Gradient& partials = next.probe_grad[reduce_slots[i]];
+            hpwl_terms[i] = std::fabs(partials.x) + std::fabs(partials.y);
+        }
         Gradient electro_force = electrostatic_force(reduce_slots[i]);
-        density_L1_norm += std::fabs(electro_force.x) + std::fabs(electro_force.y);
+        density_terms[i] = std::fabs(electro_force.x) + std::fabs(electro_force.y);
     }
-    for (int i = filler_start; i < (int)reduce_slots.size(); i++) {
-        Gradient electro_force = electrostatic_force(reduce_slots[i]);
-        density_L1_norm += std::fabs(electro_force.x) + std::fabs(electro_force.y);
-    }
+    const float HPWL_L1_norm = reduce_sum(hpwl_terms), density_L1_norm = reduce_sum(density_terms);
     density_weight = (HPWL_L1_norm / (density_L1_norm + 1e-8f)) * cfg.density_weight_init_multiplier;
     last_gwl_L1 = HPWL_L1_norm;
     last_gden_L1 = density_L1_norm;

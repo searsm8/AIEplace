@@ -23,6 +23,8 @@
 #   make check-record-stream  sw_flat's record-stream gradient and HPWL (placer/record_stream.cpp) vs
 #                         hpwl_gradient_CU on the same positions, bit for bit, 6 designs
 #                         (test/record_stream_check.sh).
+#   make check-iteration-update  iteration_update_CU's two calls vs Placer::iteration_update, bit for bit, 3 iterations
+#                         on 5 designs, two chunked (test/iteration_update_check.sh).
 #   make hpwl-gradient-xrt  hpwl_gradient_CU through XRT (pl/'s `make xclbin`) vs the same CU in g++, bit for
 #                         bit (test/hpwl_gradient_xrt.sh). Needs `source ../../setup_env.sh`; TARGET=sw_emu
 #                         (default) | hw_emu | hw picks the xclbin and the emulation mode.
@@ -54,7 +56,7 @@ NETLIST_DIR  = $(BUILD)/netlists
 NETLISTS     = $(foreach d,$(DESIGNS),$(NETLIST_DIR)/$(subst /,_,$(d)).netlist)
 suite_of     = $(firstword $(subst _, ,$(1)))
 
-.PHONY: check-database check-layout netlists placer check-placer check-bin-density check-overflow-map gradient-bench lane-model bank-fifo-model check-record-stream hpwl-gradient-xrt clean
+.PHONY: check-iteration-update check-database check-layout netlists placer check-placer check-bin-density check-overflow-map gradient-bench lane-model bank-fifo-model check-record-stream hpwl-gradient-xrt clean
 check-database: $(BUILD)/flat_database_check
 	bash test/flat_database_check.sh
 
@@ -96,6 +98,13 @@ check-record-stream: $(BUILD)/record_stream_check
 	bash test/record_stream_check.sh
 
 $(BUILD)/record_stream_check: $(BUILD)/flat_database.o $(BUILD)/record_stream_check.o $(PLACER_LIB) $(COMMON_OBJS)
+	$(CXX) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
+check-iteration-update: $(BUILD)/iteration_update_check
+	bash test/iteration_update_check.sh
+
+$(BUILD)/iteration_update_check.o: CPPFLAGS += -Ipacker
+$(BUILD)/iteration_update_check: $(BUILD)/flat_database.o $(BUILD)/iteration_update_check.o $(PLACER_LIB) $(COMMON_OBJS)
 	$(CXX) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 TARGET     ?= sw_emu

@@ -50,15 +50,16 @@ const char* stop_reason_name(StopReason reason)
 void Placer::update_precond_weights()
 {
     float lambda_area_coef = precond_coef * density_weight;
-    float a1_norm = 0.0f, a2_norm = 0.0f;
+    std::vector<float> a1_terms(reduce_slots.size()), a2_terms(reduce_slots.size());
     for (int i = 0; i < (int)reduce_slots.size(); i++) {
         const long slot = reduce_slots[i];
         float pins = (i < filler_start) ? num_pins[slot] : 0.0f;
         float a2 = lambda_area_coef * area[slot];
-        a1_norm += pins;
-        a2_norm += a2;
+        a1_terms[i] = pins;
+        a2_terms[i] = a2;
         if (cfg.enable_preconditioning) precond_weight[slot] = std::max(1.0f, pins + a2);
     }
+    const float a1_norm = reduce_sum(a1_terms), a2_norm = reduce_sum(a2_terms);
     precond_kappa = a2_norm / (a1_norm + a2_norm + 1e-8f);
     density_force_fraction = last_gden_L1 / (last_gwl_L1 + last_gden_L1 + 1e-8f);
     precond_a1_norm = a1_norm;

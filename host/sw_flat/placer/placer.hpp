@@ -79,6 +79,8 @@ struct PlacerConfig {
     bool deposit_fixed = false;           // deposit = "fixed": each bin counts units of 2^-fixed_frac_bits bin areas
     // #48 (Mark, 2026-10-27): a divider per edge costs the producer +7.8K LUT; XPlace divides. Meow.
     bool bin_index_multiply = false;      // bin_index = "multiply": (int)(edge * inv_bin_w), not (int)(edge / bin_w)
+    // #45 step 6: iteration_update_CU sums 16 lanes a beat into rotating partials (slot_reduce.hpp). Meow.
+    bool reductions_lanes = false;        // reductions = "lanes": the BB, L1, precond and lambda_0 sums in that order
     bool uses_record_stream() const { return wa_sums_tree || grad_merge_stream || hpwl_fixed; }
 };
 // Exits with a message on a missing required key or a config outside sw_flat's scope (D6). Meow.
@@ -146,6 +148,7 @@ struct Placer {
     // The order each sum family walks: movable_slots (sw_only's), or ascending slots under
     // [sw_flat] slot_order (#45 step 5b). Components still precede fillers, so filler_start holds. Meow.
     std::vector<long> deposit_slots, reduce_slots;
+    std::vector<long> lane_beats;      // reductions = "lanes": the beats iteration_update_CU streams, in its order
     std::vector<int> fixed_nodes;
     std::vector<int> gradient_nets;    // file order, degree 2..ignore_net_degree
     std::vector<int> nets_by_name;     // name order, first of each name (std::map::emplace)
@@ -227,6 +230,9 @@ struct Placer {
     void enforce_die_boundaries(long slot);
     void cache_state();     // current = next, every movable slot
     void restore_state();   // next = current
+    // The sum of terms[i] (one per reduce_slots[i]): serially in reduce_slots order, or under
+    // reductions = "lanes" in iteration_update_CU's. Meow.
+    float reduce_sum(const std::vector<float>& terms) const;
     // schedule.cpp
     void update_precond_weights();
     void record_iteration_results();

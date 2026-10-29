@@ -17,8 +17,11 @@
 //                            it still runs its own borrowed send / merge passes (B3).
 //   compute_electric_fields  bin_density_CU: in progress (#48). The field solve (DCT pre/post on the
 //                            PL, FFT on the AIE): vck5000/ legacy only (#45 step 6).
-//   iteration_update         not built (#45 step 6): the borrowed merge, force gather + combine, the
-//                            BB norms, then (after the host's schedule) the step and the borrowed send.
+//   iteration_update         iteration_update_CU (2026-10-29): tier-1 and bit-exact vs Placer::iteration_update
+//                            (make check-iteration-update). Two calls, UPDATE_COMBINE then UPDATE_STEP, with the
+//                            host's schedule between; the borrowed exchange is fused into them (#47 B4 = A).
+//                            The force gather is not built: density_force is an input array until it is.
+//                            PLAN_45_iteration_update_CU_20261029.md
 // Meow.
 
 #include "format/density_footprint.hpp"
@@ -45,11 +48,18 @@ struct DeviceArrays {
     const densrec::FixedBeat*     fixed_base;     // the fixed nodes' capped deposit (#35)
     const pinrec::SlotBeat*       num_pins;       // per slot, constant: the preconditioner's pin term (fillers 0)
     const pinrec::SlotBeat*       area;           // per slot, constant: its area term, times lambda
+    const pinrec::SlotBeat*       size[2];        // per slot, constant: width, height (the die clamp)
+    const uint16_t*               movable;        // per beat, constant: lanes that are OWNED or FILLER
+    const pinrec::FusedOwnerDesc* owners;         // per chunk: the fused exchange's op lists (#47 B4)
+    const uint64_t*               fused_ops;
 
-    // Per iteration: Placer's SlotState pair (current = iteration k, next = k + 1).
+    // Per iteration: Placer's SlotState pair (current = iteration k, next = k + 1). The host swaps the
+    // pair's pointers before UPDATE_STEP: that swap is cache_state. Fixed pins live in both. Meow.
     pinrec::SlotBeat* node_pos[2][2];     // [current, next] u
     pinrec::SlotBeat* probe_pos[2][2];    // [current, next] v: the gradients read next, borrowed rows included
     pinrec::SlotBeat* probe_grad[2][2];   // [current, next] grad f(v): wirelength, then combined
+    pinrec::SlotBeat* inv_precond;        // 1 / precond_weight: UPDATE_COMBINE reads it, UPDATE_STEP rewrites it
+    pinrec::SlotBeat* density_force[2];   // electrostatic_force per slot, lambda in: the force gather's output (not built)
     pinrec::SlotBeat* rho;                // bin density, bins * bins
     pinrec::SlotBeat* field[2];           // E per bin, per axis
 };
@@ -66,8 +76,9 @@ struct Schedule {
 struct Report {
     int64_t  hpwl_fixed[2];             // compute_hpwl_partials, per axis (hpwl_to_fixed units)
     uint64_t overflow_excess;           // compute_electric_fields (overflow_from_excess on the host)
-    float    pos_norm_sq, grad_norm_sq; // iteration_update: |v_next - v|^2, |P (g_next - g)|^2
-    float    gwl_L1, gden_L1;           // iteration_update: lambda's and the preconditioner's norms
+    float    pos_norm_sq, grad_norm_sq; // UPDATE_COMBINE: |v_next - v|^2, |P^-1 (g_next - g)|^2 -> the BB step
+    float    gwl_L1, gden_L1;           // UPDATE_COMBINE: lambda's and the preconditioner's norms
+    float    precond_a1, precond_a2;    // UPDATE_STEP: |a1|_1, |a2|_1 -> precond_kappa, read by the next schedule
 };
 
 // Upload the arrays; iteration zero's two gradients (lambda_0 and the BB estimate's trial step, as
@@ -83,13 +94,14 @@ void compute_hpwl_partials(DeviceArrays& dev, const Schedule& schedule, Report& 
 // footprints and fixed_base; writes rho, field and report.overflow_excess. Meow.
 void compute_electric_fields(DeviceArrays& dev, const Schedule& schedule, Report& report);
 
-// Placer::iteration_update across the device and the host. Device, streaming each owner's slots
-// (#47 B4): add the borrowers' borrowed gradients into probe_grad[next], gather the force from field,
-// combine, and reduce report's norms. Host: the BB step length, metrics, schedule and stop test.
-// Device, unless stopping: the preconditioned Nesterov step into [next] after [current] = [next], the
-// die clamp, and each owner's new probe position sent into its borrowers' borrowed rows. Returns false
-// once the host's stop test fires. The step can later ride at the head of the next call's stream, so
-// an iteration is one launch (#45 step 7). Meow.
+// Placer::iteration_update across the device and the host. Device, iteration_update_CU(UPDATE_COMBINE),
+// streaming each owner's owned beats then the fillers: add the borrowers' borrowed gradients into
+// probe_grad[next] (#47 B4), subtract density_force, and reduce report's four norms. Host: the BB step
+// length sqrt(pos) / sqrt(grad + 1e-8), metrics, schedule and stop test. Device, unless stopping, after
+// the host swaps [current, next]: iteration_update_CU(UPDATE_STEP), the new preconditioner, the Nesterov
+// step and die clamp into [next], and each shared slot's new probe position sent into its borrowers'
+// borrowed rows. Two launches, because the step needs a sum over every slot first. Returns false once
+// the host's stop test fires. Meow.
 bool iteration_update(DeviceArrays& dev, Schedule& schedule, Report& report);
 
 inline void run(DeviceArrays& dev)

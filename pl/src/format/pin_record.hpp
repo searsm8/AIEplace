@@ -143,6 +143,38 @@ inline uint32_t make_borrowed_entry(uint32_t owner_slot, int bank) { return owne
 inline uint32_t borrowed_entry_slot(uint32_t op) { return op & ((1u << BORROWED_OP_BANK_SHIFT) - 1u); }
 inline int      borrowed_entry_bank(uint32_t op) { return (int)(op >> BORROWED_OP_BANK_SHIFT) & (BANKS - 1); }
 
+// #47 B4 = A: the fused exchange (iteration_update_CU, modules/iteration_update/borrowed_exchange.hpp).
+// One op list per owner chunk, its borrowers interleaved, replayed one op per cycle beside the owner's
+// shared beats. A borrower's block, its ring of BORROWED_BUFFER_ROWS rows and its per-bank row counters
+// work as in B3; what changes is that a GROUP moves up to FUSED_GROUP_ENTRIES entries at once:
+//   bit 63  FUSED_BEAT      borrower s's next half-row: merge loads it from its block (grad), send writes it (pos)
+//   bit 62  FUSED_BOUNDARY  on a GROUP only. Merge: the owner beat is complete after this op. Send: it starts here.
+//   bits 56-58              s, the borrower's rank among this owner's borrowers, ascending
+//   bits 0-39               GROUP: four 10-bit entries, valid << 9 | owner lane << 5 | borrower bank
+// A GROUP's entries belong to one owner beat and sit in distinct banks, so each bank's buffer does at
+// most one access per cycle. A GROUP with no valid entry is a NOP (a beat no borrower holds). Meow.
+constexpr int      FUSED_MAX_BORROWERS  = 4;   // per owner; the host exits on more
+constexpr int      FUSED_GROUP_ENTRIES  = 4;
+constexpr uint64_t FUSED_BEAT           = 1ull << 63;
+constexpr uint64_t FUSED_BOUNDARY       = 1ull << 62;
+constexpr int      FUSED_BORROWER_SHIFT = 56;
+constexpr int      FUSED_ENTRY_BITS     = 10;
+inline uint64_t fused_entry(int lane, int bank) { return (uint64_t)(1u << 9 | (uint32_t)lane << 5 | (uint32_t)bank); }
+inline int  fused_borrower(uint64_t op)          { return (int)(op >> FUSED_BORROWER_SHIFT) & 7; }
+inline bool fused_entry_valid(uint64_t op, int e) { return (op >> (e * FUSED_ENTRY_BITS + 9)) & 1; }
+inline int  fused_entry_lane(uint64_t op, int e)  { return (int)(op >> (e * FUSED_ENTRY_BITS + 5)) & (LANES - 1); }
+inline int  fused_entry_bank(uint64_t op, int e)  { return (int)(op >> (e * FUSED_ENTRY_BITS)) & (BANKS - 1); }
+
+// Per owner chunk: its two op lists and where each borrower's block starts. Meow.
+struct FusedOwnerDesc {
+    int32_t merge_op_offset, num_merge_ops;
+    int32_t send_op_offset, num_send_ops;           // into the concatenated fused ops
+    int32_t num_borrowers;
+    int32_t block_beat_offset[FUSED_MAX_BORROWERS];  // borrower s's block, first beat, in the concatenated slot images
+    int32_t pad[16 - 5 - FUSED_MAX_BORROWERS];
+};
+static_assert(sizeof(FusedOwnerDesc) == 64, "FusedOwnerDesc is one 512-bit bus word");
+
 inline uint32_t record_node_slot(uint32_t record, int offset_bits)  { return record >> offset_bits; }
 inline uint32_t record_offset_idx(uint32_t record, int offset_bits) { return record & ((1u << offset_bits) - 1u); }
 inline uint32_t make_record(uint32_t node_slot, uint32_t offset_idx, int offset_bits) {
