@@ -79,7 +79,7 @@ done:
 
 // The 64 banks: each takes one update per cycle and adds it in, until all 8 producers have said `last`. Meow.
 static void drain_banks(hls::stream<BankUpdate> from[PRODUCERS][NUM_BANKS], acc_word rho_URAM[NUM_BANKS][BANK_WORDS]) {
-    int finished[NUM_BANKS];
+    uint8_t finished[NUM_BANKS];
     uint16_t fwd_addr[NUM_BANKS][FORWARD_DEPTH + 1];
     acc_word fwd_value[NUM_BANKS][FORWARD_DEPTH + 1];
     bool     fwd_valid[NUM_BANKS][FORWARD_DEPTH + 1];
@@ -92,16 +92,17 @@ static void drain_banks(hls::stream<BankUpdate> from[PRODUCERS][NUM_BANKS], acc_
         finished[b] = 0;
         for (int d = 0; d <= FORWARD_DEPTH; d++) fwd_valid[b][d] = false;
     }
-    bool done = false;
+    bool done = false, all_finished = false;
 drain:
     while (!done) {
 #pragma HLS PIPELINE II=1
 #pragma HLS DEPENDENCE variable=rho_URAM inter false   // safe ONLY because of the forwarding registers
-        // Exit on the counts as they stood BEFORE this cycle's reads: the 64-way AND then starts from
-        // registers instead of trailing pick -> read -> count. Costs one idle cycle at the end. Meow.
-        bool all_finished = true;
-        for (int b = 0; b < NUM_BANKS; b++) all_finished &= finished[b] == PRODUCERS;
+        // The exit drives the pipeline's enables (fanout ~14 K), so it must come straight from a register:
+        // the 64-way AND over the counts lands in `all_finished` and the exit reads it a cycle later. With
+        // the AND on the exit itself, every failing path in Vivado started at finished[]. Two idle cycles. Meow.
         done = all_finished;
+        all_finished = true;
+        for (int b = 0; b < NUM_BANKS; b++) all_finished &= finished[b] == PRODUCERS;
     banks:
         for (int b = 0; b < NUM_BANKS; b++) {
 #pragma HLS UNROLL
