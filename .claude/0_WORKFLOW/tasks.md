@@ -6,7 +6,7 @@
 Drain timing closed 2026-10-29 in **Vivado synthesis: 2.93 ns at 3.33 (WNS +0.40)**, bit-exact; the write-back
 moved one iteration later, so the 64-bank co-sim must sweep the forwarding depth -> [[REPORT_48_drain_timing_20261028.md]].
 **64-bank RTL co-sim done 2026-10-29: forwarding distance 4** (depths 1-3 FAIL, 4-6 PASS; code keeps 6), termination
-and deadlock clean -> [[REPORT_48_banked_cosim_20261029.md]]. Now: build `banked_top`, then macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
+and deadlock clean -> [[REPORT_48_banked_cosim_20261029.md]]. Now: fold the 64-bank deposit into `bin_density_CU` (Mark, 2026-10-29: speed model skipped) -> [[HANDOFF_48_fold_banked_into_cu_20261029.md]], then macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
 `hpwl_gradient_CU` passes on the VCK5000 at **250 MHz** (build H, 2026-10-29, [[REPORT_45_build_H_250mhz_20261028.md]]).
 
 Open work, one section per task. **Status lives here; evidence lives in a
