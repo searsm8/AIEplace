@@ -5,7 +5,8 @@
 `hpwl_gradient_CU`; bit-exact, forwarding distance still 5) -> [[REPORT_48_bank_address_multiplies_20261028.md]].
 Drain timing closed 2026-10-29 in **Vivado synthesis: 2.93 ns at 3.33 (WNS +0.40)**, bit-exact; the write-back
 moved one iteration later, so the 64-bank co-sim must sweep the forwarding depth -> [[REPORT_48_drain_timing_20261028.md]].
-Now: the 64-bank co-sim -> [[HANDOFF_48_banked_cosim_20261029.md]], then macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
+**64-bank RTL co-sim done 2026-10-29: forwarding distance 4** (depths 1-3 FAIL, 4-6 PASS; code keeps 6), termination
+and deadlock clean -> [[REPORT_48_banked_cosim_20261029.md]]. Now: build `banked_top`, then macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
 `hpwl_gradient_CU` passes on the VCK5000 at 230 MHz ([[REPORT_45_hpwl_gradient_hw_flow_20261019.md]]).
 
 Open work, one section per task. **Status lives here; evidence lives in a
@@ -1253,7 +1254,12 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       margin; raise, never lower). **Vivado synth (build server, 10-29): run 1 FAILED, 4.94 ns** — all 20,995 failing
       endpoints started at `finished[]` (exit → pipeline enable, fanout 14 K; csynth cannot see it). Exit read from a
       register: **2.928 ns, WNS +0.402 ns, 287.7 K LUT / 182.7 K FF / 656 DSP / 128 URAM.** → [[REPORT_48_drain_timing_20261028.md]]
-      **Next:** the 64-bank co-sim, then build. Real-design fixtures for the tests: branch `bin-density-real-fixtures`
+      → **DONE 2026-10-29: 64-bank RTL co-sim** (`pl/synth/bin_density_banked/cosim/`, grid 64 and 60, distances
+      1..8 across producers, unequal slices incl. an empty one): **depths 1/2/3 FAIL, 4/5/6 PASS. The read→write
+      distance is 4**, as the verbose schedule predicts (read t+1, deferred store lands t+6). `BANKED_FORWARD_DEPTH`
+      = 6 kept (2 spare). Depth 0 now fails even in C (the deferred write-back), so depth 1 is the RTL negative control.
+      No deadlock; the last deferred writes land. → [[REPORT_48_banked_cosim_20261029.md]]
+      **Next:** build. Real-design fixtures for the tests: branch `bin-density-real-fixtures`
       (`0994f7a`), not merged. → [[PLAN_48_bin_density_lanes_20261020.md]],
       [[EXPLAINER_48_lane_dispatcher_20261020.md]] ~21 ms per evaluation on bigblue4 at 1 cell/cycle → lanes next.
       → [[REPORT_48_bin_density_fixed_point_20261019.md]] One 36-bit
