@@ -1,8 +1,28 @@
-# REPORT #48: timing closed on the 64-bank drain (`drain_banks` −2.14 → +0.10 ns, C-synthesis)
+# REPORT #48: timing closed on the 64-bank drain (Vivado synthesis 2.93 ns at 3.33, WNS +0.40 ns)
 
-*2026-10-28. Branch `pl_algo`. Was the handoff of the same name (kept below as the brief).*
+*2026-10-28/29. Branch `pl_algo`. Was the handoff of the same name (kept below as the brief).*
 
 ## Result
+
+**Vivado out-of-context synthesis on the build server** (`impl_check.tcl`, 2022.2, whole `banked_top`):
+
+| Vivado synth, 3.33 ns | csynth fixes only (run 1) | **+ exit from a register (final)** | + `style=frp` (not taken) |
+|---|---|---|---|
+| post-synth period | 4.938 ns, NOT met | **2.928 ns, met** | 2.880 ns, met |
+| WNS / failing endpoints | −1.608 ns / 20,995 | **+0.402 ns / 0** | +0.450 ns / 0 |
+| LUT / FF / DSP / URAM | 291,311 / 184,270 / 656 / 128 | **287,689 / 182,695 / 656 / 128** | 287,516 / 182,706 / 656 / 128 |
+| `drain_banks` LUT / FF | 21,515 / 39,332 | 18,957 / 37,783 | |
+
+**Run 1 failed only in the drain's exit.** Bucketing every failing endpoint by its worst source
+(`.claude/2_ARTIFACTS/drain_timing_48_vivado/fail_buckets.tcl`, run on the synth checkpoint): **all 20,995 start at
+`finished[]`**. The path is counts → compare → 64-way AND → loop exit → the pipeline enable (HLS: fanout 14,208)
+→ every URAM `EN_A` and pipeline register: 11 logic levels, 78 % routing. csynth models neither routing nor
+fanout, so it showed this path as met. **Edit 4** below makes the exit a flop. The final worst path is a producer
+FIFO `full_n` → m_axi FIFO pointer, not the drain. `style=frp` (free-running pipeline) gains only 0.05 ns more,
+so it was not taken. Reports: `.claude/2_ARTIFACTS/drain_timing_48_vivado/{run1_csynth_fix,run2_A_registered_exit,
+run2_B_frp}/`. A run takes 77 min (csynth 18 + Vivado 58).
+
+**C-synthesis** (column "after" = edits 1–3; the final build's csynth is the same 2.33 ns, +0.10 ns):
 
 | `pl/synth/bin_density_banked` csynth, 3.33 ns, 0.90 ns uncertainty | before | after |
 |---|---|---|
@@ -15,13 +35,11 @@
 Reports: `.claude/2_ARTIFACTS/drain_timing_48_{before,after}/` (csynth.rpt, the drain csynth reports and the
 verbose schedule). HLS Fmax estimate 218.7 → 411.4 MHz.
 
-**Vivado not run:** that needs the build-server portal open (Mark's call). The csynth number is an estimate.
-
-## What changed (`drain_banks`, three edits)
+## What changed (`drain_banks`, four edits)
 
 1. **Exit on registered counts.** `all_finished` is the AND of `finished[b] == PRODUCERS` taken at the top of
-   the iteration, before that cycle's reads. The 64-way AND now starts from registers (state 2, 2.21 ns) and
-   the drain spends one idle cycle at the end.
+   the iteration, before that cycle's reads. The 64-way AND now starts from registers (state 2, 2.21 ns).
+   Enough for csynth, not for Vivado: see edit 4.
 2. **One-hot pick, OR-merge.** `take = !got && !empty`; only the taken read is nonzero, so the update is the
    OR of the 8 reads. The 8-deep `u.last` phi chain is gone (state 1 now: a 1 ns mux before `r.addr`).
 3. **Deferred write-back. The handoff missed this one.** Before, state 5 was also over budget: **3.13 ns**
@@ -30,10 +48,13 @@ verbose schedule). HLS Fmax estimate 218.7 → 411.4 MHz.
    fwd_value[b][0]`), so the store data comes from a register: state 5 = 2.33 ns, store alone in state 6.
    No update is left unwritten: a bank's real updates always come before its 8th `last`, and the loop runs
    at least one cycle after that.
+4. **Exit from a register (after Vivado run 1).** `done = all_finished; all_finished = AND(...)`: the exit
+   reads the AND from the previous cycle, so the enable fanout starts at a flop; `finished` narrowed from `int`
+   to `uint8_t`. Two idle cycles at the end.
 
 ## Verification
 
-- `banked_check` (C, 400 K cells over 8 producers): **0 of 1,048,576 words differ at grids 1024, 512, 336.**
+- `banked_check` (C, 400 K cells over 8 producers): **0 of 1,048,576 words differ at grids 1024, 512, 336**, after edits 1–3 and again after edit 4.
 - Mutants, all caught:
   - old run-time pitch (`col/8 * grid_bins/8`): 1024 PASS (the two layouts coincide), 512 FAIL 388,823, 336 FAIL 185,471 (same counts as before);
   - one-hot broken (`got` never set): the drain never exits (two `last`s in one cycle count once);
@@ -42,7 +63,7 @@ verbose schedule). HLS Fmax estimate 218.7 → 411.4 MHz.
 ## Forwarding depth: the co-sim item must check this
 
 The URAM access **states did not move**: the load is issued in state 2 (4-cycle, `latency=3`) and the store in
-state 5, before and after. **But the store now carries the previous iteration's sum, so the read→write distance in
+state 5, before and after (checked again on the final build). **But the store now carries the previous iteration's sum, so the read→write distance in
 iterations is one longer.** `bin_density_CU`'s co-sim measured distance 5 (depth 4 fails, 5 passes) with the old
 write. If the banked drain matched that, it now needs 6, which is exactly `BANKED_FORWARD_DEPTH` = 6, with no
 margin. C simulation cannot see this (it runs iteration by iteration). The 64-bank co-sim (next item) must sweep the
