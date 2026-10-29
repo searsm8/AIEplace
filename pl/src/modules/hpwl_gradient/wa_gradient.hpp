@@ -16,6 +16,17 @@
 
 namespace plalgo {
 
+// wa_gradient's adds stay at IP latency 1, not beat_add's 2: the grad_URAM read-add-write must fit
+// HAZARD_DISTANCE (latency 2 gives II=2), and HLS 2022.2 builds every fadd in one loop as a single
+// module, so beat_add here came out at latency 1 anyway (build H, 2026-10-28). Binding them also
+// keeps HLS from fusing a beat_mul into an fmadd. Meow.
+static inline float gradient_add(float a, float b) {
+#pragma HLS INLINE
+    const float sum = a + b;
+#pragma HLS BIND_OP variable=sum op=fadd impl=primitivedsp latency=1
+    return sum;
+}
+
 // A large net's beats take the net's sums from stage B (net_sums, popped on its first real beat;
 // blocking, like B's bbox pop) in net position 0 -- every lane of a degree-16 beat is net 0. Meow.
 static void wa_gradient(hls::stream<SumBeat>& sum_beats, hls::stream<NetSum>& net_sums, int num_beats, float inv_gamma,
@@ -41,17 +52,22 @@ wa_gradient_loop:
 #pragma HLS ARRAY_PARTITION variable=inv_Bp2 complete dim=0
 #pragma HLS ARRAY_PARTITION variable=inv_Bm2 complete dim=0
         for (int k = 0; k < pinrec::MAX_NETS_PER_BEAT; k++) {
-            inv_Bp2[k] = 1.0f / (s.Bp[k] * s.Bp[k]);
-            inv_Bm2[k] = 1.0f / (s.Bm[k] * s.Bm[k]);
+            inv_Bp2[k] = 1.0f / beat_mul(s.Bp[k], s.Bp[k]);
+            inv_Bm2[k] = 1.0f / beat_mul(s.Bm[k], s.Bm[k]);
         }
 
         // ---- combiners (Fig. 8, eq. 4): each pin's WA partial ----
+        //   g = ((1 + x/γ)·B+ − C+/γ)·(a+/B+²) − ((1 − x/γ)·B− + C−/γ)·(a−/B−²)   Meow.
         float g[pinrec::LANES];
 #pragma HLS ARRAY_PARTITION variable=g complete dim=0
         for (int i = 0; i < pinrec::LANES; i++) {
             const int k = i / sb.degree;
-            g[i] = ((1.0f + sb.x[i] * inv_gamma) * s.Bp[k] - s.Cp[k] * inv_gamma) * (sb.a_plus[i] * inv_Bp2[k])
-                 - ((1.0f - sb.x[i] * inv_gamma) * s.Bm[k] + s.Cm[k] * inv_gamma) * (sb.a_minus[i] * inv_Bm2[k]);
+            const float x_over_gamma = beat_mul(sb.x[i], inv_gamma);
+            const float plus_term  = beat_mul(beat_sub(beat_mul(gradient_add(1.0f, x_over_gamma), s.Bp[k]), beat_mul(s.Cp[k], inv_gamma)),
+                                              beat_mul(sb.a_plus[i], inv_Bp2[k]));
+            const float minus_term = beat_mul(gradient_add(beat_mul(beat_sub(1.0f, x_over_gamma), s.Bm[k]), beat_mul(s.Cm[k], inv_gamma)),
+                                              beat_mul(sb.a_minus[i], inv_Bm2[k]));
+            g[i] = beat_sub(plus_term, minus_term);
         }
 
         // ---- merge: a node's repeated pins sit in adjacent lanes with the same slot (packer rule
@@ -66,7 +82,7 @@ wa_gradient_loop:
 #pragma HLS ARRAY_PARTITION variable=next_g complete dim=0
             for (int i = 0; i < pinrec::LANES; i++) {
                 const bool joined = i + step < pinrec::LANES && !sb.empty[i] && sb.slot_idx[i] == sb.slot_idx[i + step];
-                next_g[i] = joined ? g[i] + g[i + step] : g[i];
+                next_g[i] = joined ? gradient_add(g[i], g[i + step]) : g[i];
             }
             for (int i = 0; i < pinrec::LANES; i++) g[i] = next_g[i];
         }
@@ -82,7 +98,7 @@ wa_gradient_loop:
                     hit = true; row = sb.slot_idx[i] / pinrec::BANKS; add = g[i];
                 }
             }
-            if (hit) grad_URAM[b][row] += add;
+            if (hit) grad_URAM[b][row] = gradient_add(grad_URAM[b][row], add);
         }
     }
 }

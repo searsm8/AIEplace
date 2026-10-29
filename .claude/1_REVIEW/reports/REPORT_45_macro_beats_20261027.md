@@ -74,6 +74,19 @@ Build G is `6d3961c`, built with build F's scripts unchanged: HLS at 400 MHz, `n
 
 - **230 MHz still closes.** The xclbin is packaged at `run230/hpwl_gradient_CU_top.xclbin` (md5 `12675424bc115b0b005761d4be96b16d`).
 
+## Routed (build H, 2026-10-28/29): 250 MHz closes
+Build H is G plus the `wa_*` DSP change: every float op in `wa_sums`, and the muls and subs in `wa_gradient`, is bound `primitivedsp` at the floating-point IP's maximum latency (add/sub 2, mul 3; production was 1/2). `wa_gradient`'s adds stay at latency 1, because the `grad_URAM` read-add-write must fit `HAZARD_DISTANCE`. Details and the two HLS traps are in [[REPORT_45_build_H_250mhz_20261028.md]]. It was built with G's 250 MHz script plus a package step (`build:~/AIEplace_timing/expH/pl/build/run/`), and the link finished 02:36 CET.
+
+| build | clock | WNS (ns) | failing endpoints | REG | LUT | DSPFP32 | BRAM | URAM |
+|---|---|---|---|---|---|---|---|---|
+| G | 250 | −0.119 | 2,840 | 225,600 | 145,805 | 738 | 232 | 256 |
+| **H** | **250** | **0.000** | **0** | 237,262 | 151,359 | 826 | 232 | 256 |
+
+- **WNS 0.000 on the 4.000 ns kernel clock** (`clkout1_primitive`). The worst endpoint is a `grad_URAM_16` address pin. `classify_paths.tcl` with the same filter that found G's 2,840 endpoints finds 0 (`run/paths_H250.csv`). The xclbin is packaged as `run/hpwl_gradient_CU_top.xclbin`, but `KERNEL_FREQ_HZ` is not changed and it has not been on the card.
+- **Cost:** +11.7 K REG, +5.6 K LUT. DSPs go up by 88 because HLS no longer fuses those fmul+fadd pairs into fmadd/fmsub. BRAM and URAM are unchanged.
+- **Bit-exact by construction and by test:** only operator latency changed. Tier 1 is 4/4 and `check-record-stream` 6/6; C-synth at 2.5 ns has 24/24 loops at II=1 (`wa_sums_loop` depth 57 → 73, `wa_gradient_loop` 58 → 61).
+- **Not verified:** sw_emu and the card run.
+
 ## On the card (2026-10-28, `vck`, build G at 230 MHz)
 **4/4 PASS, bit for bit** against the g++ CU. Run with `XRT_DEVICE_BDF=0000:c1:00.1 TARGET=hw bash test/hpwl_gradient_xrt.sh` at `e9f798a`. The card checkout's `pl/build/hw/` now holds build G; F's xclbin is kept beside it as `hpwl_gradient_CU_top.F230.xclbin`.
 
@@ -121,5 +134,5 @@ Both runs use the same synthetic design (`cosim_tb "1536 4"`: 16 chunks, 5 movab
 - The beat loop itself is unchanged (4,413 cycles). The two exchange passes are still most of a call on this design; B4 (#47) moves them out of this CU.
 
 ## Next
-- 250 MHz: register the `wa_*` DSP operands (see the routed section above).
+- 250 MHz: routed closure in build H (above). Still to do: the card run on `vck` (4 designs, bit-exact vs the g++ CU), then set `KERNEL_FREQ_HZ` to 250 MHz and log the milestone.
 - A placer run on an MMS design: the trajectory should stay within float noise of before (only the summation order changed).

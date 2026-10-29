@@ -794,7 +794,12 @@ longer matches pl_algo's host. **Routed (build G, 10-28):** 230 MHz closes (WNS 
 in `build:~/AIEplace_timing/expG/pl/build/run230/`); 250 MHz WNS −0.178 → −0.119 ns, but TNS −87 → −157 ns. Fold, refresh
 and most `send_ops` paths are gone, and ~64% of TNS is now `wa_sums`/`wa_gradient` DSP operand inputs. Co-sim (synthetic):
 compute pass −20%, chunk 0 1,452 → 782 cycles; refresh/fold now pay ~80 cycles of DDR latency per call. **On the card (10-28):**
-G at 230 MHz 4/4 bit-exact; adaptec1 0.8 → 0.7 ms per axis. Next: register the `wa_*` DSP operands for 250. → [[REPORT_45_macro_beats_20261027.md]]; handoff [[HANDOFF_45_build_G_250mhz_20261028.md]]
+G at 230 MHz 4/4 bit-exact; adaptec1 0.8 → 0.7 ms per axis.
+**250 MHz closes, routed (build H, 10-29):** WNS 0.000 ns, 0 failing endpoints (G −0.119 / 2,840). Change: the `wa_*`
+beat-loop float ops are bound `primitivedsp` at the IP's maximum latency (add/sub 2, mul 3); `wa_gradient`'s adds stay at
+1 for the `grad_URAM` RMW. Bit-exact (tier 1 4/4, record-stream 6/6), 24/24 loops II=1; +11.7 K REG, +5.6 K LUT, +88 DSP.
+xclbin `build:~/AIEplace_timing/expH/pl/build/run/`. **Next:** card run on `vck`, then `KERNEL_FREQ_HZ` = 250 MHz +
+milestone. → [[REPORT_45_build_H_250mhz_20261028.md]], [[REPORT_45_macro_beats_20261027.md]]
 
 Done 2026-10-06 as low-hanging fruit: gradient `max_rel` 1e-3
 (`vck5000/test/wa_gradient_golden.hpp`; newblue3 / mms/bigblue4 / newblue7 now pass, rel_rms still

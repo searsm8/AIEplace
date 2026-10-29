@@ -24,20 +24,44 @@ constexpr int EXP_LOOKUPS  = 2 * pinrec::LANES;   // a+ and a- per lane
 // (lut[i], lut[i+1]) in one word: an interpolated lookup is ONE read (D8). Meow.
 struct LutPair { float lo; float hi; };
 
+// The beat loop's float ops (wa_sums, wa_gradient) at the DSP's full pipeline depth: IP latency 2
+// for add/sub, 3 for mul, the most primitivedsp offers. At the default depth (1 and 2) the 250 MHz
+// route failed into the DSP's first internal register (DSP_FPM_PIPEREG, build G). The extra stage
+// is inside the DSP, so the arithmetic is unchanged; these loops have no float recurrence, so II
+// stays 1. Not for a read-add-write inside a hazard distance (grad_URAM's +=). Meow.
+static inline float beat_add(float a, float b) {
+#pragma HLS INLINE
+    const float sum = a + b;
+#pragma HLS BIND_OP variable=sum op=fadd impl=primitivedsp latency=2
+    return sum;
+}
+static inline float beat_sub(float a, float b) {
+#pragma HLS INLINE
+    const float difference = a - b;
+#pragma HLS BIND_OP variable=difference op=fsub impl=primitivedsp latency=2
+    return difference;
+}
+static inline float beat_mul(float a, float b) {
+#pragma HLS INLINE
+    const float product = a * b;
+#pragma HLS BIND_OP variable=product op=fmul impl=primitivedsp latency=3
+    return product;
+}
+
 struct AddOp {
-    static inline float apply(float a, float b) { return a + b; }
+    static inline float apply(float a, float b) { return beat_add(a, b); }
     static inline float identity() { return 0.0f; }
 };
 
 // Same arithmetic as hpwl_lut_exp, so the result is bit-identical to the pl_algo module's. Meow.
 static inline float lut_exp_pair(const LutPair lut_BRAM[GRAD_LUT_MAX], int lut_size, float inv_lut_step, float d) {
 #pragma HLS INLINE
-    const float idx_f = d * inv_lut_step;
+    const float idx_f = beat_mul(d, inv_lut_step);
     const int   idx   = (int)idx_f;
     if (idx >= lut_size - 1) return 0.0f;
-    const float frac  = idx_f - (float)idx;
+    const float frac  = beat_sub(idx_f, (float)idx);
     const LutPair pair = lut_BRAM[idx];
-    return pair.lo * (1.0f - frac) + pair.hi * frac;
+    return beat_add(beat_mul(pair.lo, beat_sub(1.0f, frac)), beat_mul(pair.hi, frac));
 }
 
 // One copy per concurrent lookup: 32 lookups per beat, one read each. Meow.
@@ -129,10 +153,10 @@ wa_sums_loop:
             const int   net     = LANE_NET.of[degree_idx][i];
             const float net_max = f.large ? large_bbox.hi : pb.net_max[net];
             const float net_min = f.large ? large_bbox.lo : pb.net_min[net];
-            sb.a_plus[i]  = pb.empty[i] ? 0.0f : lut_exp_pair(lut_BRAM[2 * i],     lut_size, inv_lut_step, net_max - x);
-            sb.a_minus[i] = pb.empty[i] ? 0.0f : lut_exp_pair(lut_BRAM[2 * i + 1], lut_size, inv_lut_step, x - net_min);
-            Bp_terms[i] = sb.a_plus[i];  Cp_terms[i] = sb.a_plus[i] * x;
-            Bm_terms[i] = sb.a_minus[i]; Cm_terms[i] = sb.a_minus[i] * x;
+            sb.a_plus[i]  = pb.empty[i] ? 0.0f : lut_exp_pair(lut_BRAM[2 * i],     lut_size, inv_lut_step, beat_sub(net_max, x));
+            sb.a_minus[i] = pb.empty[i] ? 0.0f : lut_exp_pair(lut_BRAM[2 * i + 1], lut_size, inv_lut_step, beat_sub(x, net_min));
+            Bp_terms[i] = sb.a_plus[i];  Cp_terms[i] = beat_mul(sb.a_plus[i], x);
+            Bm_terms[i] = sb.a_minus[i]; Cm_terms[i] = beat_mul(sb.a_minus[i], x);
             sb.x[i]        = x;
             sb.slot_idx[i] = pb.slot_idx[i];
             sb.empty[i]    = pb.empty[i];
