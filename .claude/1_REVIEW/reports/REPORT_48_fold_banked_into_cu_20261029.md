@@ -1,9 +1,128 @@
-# HANDOFF #48: fold the 64-bank deposit into `bin_density_CU`
+# REPORT #48: `bin_density_CU` is now the 8-producer, 64-bank module, bit-exact on 44/44
 
 *2026-10-29. Branch `pl_algo`. Mark: "Skip the model; fold the banked design into bin_density_CU now."
-Evidence for the banked design: [[REPORT_48_bank_address_multiplies_20261028.md]] (656 DSP),
-[[REPORT_48_drain_timing_20261028.md]] (Vivado synth 2.928 ns at 3.33), [[REPORT_48_banked_cosim_20261029.md]]
-(RTL bit-exact, forwarding distance 4, depth 6). Overview: [[EXPLAINER_48_bin_density_CU_overview_20261022.md]].*
+This was the handoff of the same name; its brief is kept below the result. Evidence for the banked design:
+[[REPORT_48_bank_address_multiplies_20261028.md]] (656 DSP), [[REPORT_48_drain_timing_20261028.md]] (Vivado synth
+2.928 ns at 3.33), [[REPORT_48_banked_cosim_20261029.md]] (RTL bit-exact, forwarding distance 4, depth 6).
+Overview: [[EXPLAINER_48_bin_density_CU_overview_20261022.md]].*
+
+## Result
+
+`pl/src/modules/bin_density_CU.hpp` keeps its interface, its phases and its golden. Its fast deposit is now
+`banked_top`'s: 8 producers, 8 × 64 private FIFOs and 64 URAM banks with forwarding. Its other phases moved
+from 16 to 64 banks.
+
+| check | result |
+|---|---|
+| `make -C pl test` (tier 1, plain g++, no Vitis) | **PASS**, all 4 harnesses; `bin_density_CU_test` at 128 and 1024, shuffled order bit-identical |
+| `make -C host/sw_flat check-bin-density` | **44 of 44 PASS**: rho, excess and overflow bit-equal, shuffled slot order too. `.claude/2_ARTIFACTS/scratch_48/bin_density_check_44_banked_cu_20261029.txt` |
+| C-synthesis (`pl/synth/bin_density_CU/synth_check.tcl`, grid 1024, 3.33 ns) | met, **2.571 ns** estimated; II = 1 everywhere it matters (table below) |
+| RTL co-sim of the folded CU (`cosim/run_depths.sh`, grid 64 and 48) | **depths 1-3 FAIL, 4-6 PASS**: minimum forwarding depth **4**, as in `banked_top`; `BIN_FORWARD_DEPTH` stays 6 |
+
+### C-synthesis (Vitis HLS 2022.2, xcvc1902, 3.33 ns)
+
+| | DSP | FF | LUT | URAM |
+|---|---|---|---|---|
+| **`bin_density_CU_top` total** | **689 (35 %)** | 258 K (14 %) | **517 K (57 %)** | **128 (27 %)** |
+| `deposit_region` (deal + 8 produce + drain_banks + 512 FIFOs) | 657 | 212 K | 433 K | (the banks) |
+| ↳ `produce` × 8 | 82 each | 19.1 K each | 42.8 K each | |
+| ↳ `drain_banks` | 0 | 38.1 K | 58.5 K | |
+| ↳ `deal_slots` | 1 | 12.6 K | 4.5 K | |
+| ↳ FIFOs | | 8.5 K | 27.3 K | |
+| `deposit_slow` (64-way dynamic bank) | 8 | 9.8 K | 16.1 K | |
+| `overflow_excess_sum` (64 → 1 tree) | 4 | 3.7 K | 8.7 K | |
+| `drain` to rho beats (16 int→float, ×rho_unit) | 16 | 2.8 K | 2.5 K | |
+| `load_base` | 0 | 0.7 K | 0.3 K | |
+| *for comparison:* `banked_top` (deposit only) | 656 | 263 K | 454 K | 128 |
+| *for comparison:* previous `bin_density_CU` (16 banks, 1 cell/cycle) | 102 | 79 K | 100 K | (37 in csynth) |
+
+| loop | II | depth | cycles at grid 1024 |
+|---|---|---|---|
+| `load_base` | 1 | 5 | 65.5 K (one beat per cycle; was 262 K at 4 bins/cycle) |
+| `deal_beats` | 1 | 4 | one beat per cycle, so 8 slots per cycle feed the producers |
+| `produce_cells` × 8 | 1 | 33 | one cell per cycle each |
+| `drain_banks`' `drain` | 1 | 6 | (same depth-6 schedule as `banked_top`) |
+| `reduce` | 1 | 10 | 16.4 K (64 bins/cycle; was 65.5 K) |
+| `drain` to rho beats | 1 | 14 | 65.5 K (one beat per cycle; was 262 K) |
+| `deal_table` | **2** | 77 | ≤ 256 per region: a carried m_axi read dependence; not worth a fix |
+| `slow_rows` | **7** | 21 | the slow path, one bin per 7 cycles: the macro-tile item replaces it |
+
+So one call at grid 1024 now takes about 65.5 K (base) + cell beats × 2 + 16.4 K + filler beats × 2 + slow + 65.5 K
+cycles, against 262 K + cell slots + 65.5 K + filler slots + slow + 262 K before. LUT is the resource to watch:
+57 % for this CU alone, beside `hpwl_gradient_CU`. A per-producer LUT diet (the 16:1 fill select × 64 banks)
+is the lever if place-and-route needs it; out of scope here.
+
+## Decisions
+
+1. **Feeding the producers (as proposed).** `deal_slots` reads one beat of x, y and footprint index per cycle
+   (three m_axi ports, as before) and gives lanes 2p and 2p+1 to producer p as one `SlotPair` FIFO word (depth 4).
+   A producer reads its FIFO every other cycle, so one reader keeps all 8 busy. NO_DEPOSIT slots (slow cells,
+   padding, borrowed copies, pins) go to the producer and deposit nothing, as before. **The dealing is by lane**,
+   so how many real cells each producer gets depends on the slot order. Accepted, to be measured on the device
+   rather than modelled.
+2. **Footprint table: one BRAM per producer, fed by stream.** Each `deposit_region` call begins with `deal_slots`
+   reading the table from DDR, scaling the weight (`fp.weight *= fixed_scale`, the same single float multiply)
+   and writing every entry to 8 table FIFOs. Each producer loads its own 128-entry `table_BRAM` from its FIFO.
+   That costs ≤ 2 × 128 cycles per call. **There is no shared table and no array read by two dataflow
+   processes.** `FOOTPRINT_TABLE_MAX` drops 4096 → **128** in the contract (measured 4..105 on the 44
+   designs; `check-bin-density` [2] asserts the fit, max 128 in its log). `deposit_slow` reads its entry
+   straight from DDR and scales it the same way, so the CU-level `footprint_BRAM` is gone.
+3. **Phases around the region, at 64 banks.** The URAM is `rho_URAM[64][16K]`, bank `8·(col%8) + row%8`, address
+   `(col/8)·128 + row/8` (fixed `GRID_MAX/8` pitch, a shift). It is bound **`ram_t2p`**: URAM is natively true dual
+   port, so `load_base` and `drain` move two words per bank per cycle, and `drain_banks` reads on one port and
+   writes on the other. Order: `load_base` → region (cell beats) → `deposit_slow` (cells) →
+   `overflow_excess_sum` → region (filler beats) → `deposit_slow` (fillers) → `drain`. **One owner per phase.**
+   Inside the region only `drain_banks` touches the URAM. The region returns once every bank has taken every
+   producer's `last`, and that return is the B' barrier. `overflow_excess_sum` reads one address in all 64
+   banks: an 8×8 tile per cycle.
+4. **The drain to rho beats, at full rate.** A col-major beat is rows 16k..16k+15 of one column. Under 8×8 those are
+   the 8 banks of bank column `col % 8`, at addresses 2k (lanes 0..7) and 2k+1 (lanes 8..15): **two words in each
+   of 8 banks**, which `ram_t2p` reads in one cycle. To keep the bank indices constant (else HLS sees 16 dynamic
+   reads per bank), all 64 banks are read at both addresses and the bank column is selected after. `load_base` is
+   the mirror image: writes enabled only in the selected bank column. Both run at **one beat per cycle**, 4× the
+   old 16-bank loops.
+5. **`hls::stream` in host g++ builds: a shim, not the include path.** `bin_density_CU.hpp` includes
+   `<hls_stream.h>` when `__SYNTHESIS__` is defined or the header is on the path (`__has_include`). That covers
+   HLS, co-sim and `banked_check`. Otherwise it defines a minimal `hls::stream` over a `std::deque` (write, read,
+   empty; a read of an empty stream aborts). Off-synthesis the region's processes run one after another, so an
+   unbounded queue is exactly a stream. **Tier 1 and `check-bin-density` still need no Vitis**, and no Makefile
+   changed.
+
+## Co-sim
+
+`pl/synth/bin_density_CU/cosim/` (Vitis HLS 2022.2, `PL_DENSITY_GRID_MAX=64`, two calls: grid 64 and grid 48).
+The bench is new. It lays out `banked_top`'s per-producer cell lists so that producer p's j-th cell sits at beat j/2,
+lane 2p + j%2. Bank words are therefore re-hit **across producers** at distances 1..8, and the slices finish at very
+different times (700 / 440 / 550 / 401 / 620 / 490 / 0 / 3 cells). One macro takes the slow path. The filler
+region repeats the distance-1 pile-up on every producer, and a fixed base sits under all of it. The golden is a
+plain uint64 deposit in slot order, with the excess taken at the barrier, compared bit for bit.
+
+| `BIN_FORWARD_DEPTH` | 0 | 1 | 2 | 3 | **4** | 5 | 6 (code) |
+|---|---|---|---|---|---|---|---|
+| C simulation | FAIL (77 / 143 bins) | PASS | PASS | PASS | PASS | PASS | PASS |
+| RTL, grid 64 / 48: bins that differ | not run | **FAIL** 159 / 176 | **FAIL** 129 / 133 | **FAIL** 105 / 105 | **PASS** 0 / 0 | **PASS** 0 / 0 | **PASS** 0 / 0 |
+
+- **Distance 4, the same as `banked_top`.** `drain_banks` has the same depth-6 schedule in the CU. Folding it in,
+  and binding `ram_t2p`, did not move the read-to-write distance. The excess fails along with rho at depths 1-3,
+  so the barrier reduce sees the hazards too.
+- **Termination, the two regions and the barrier are clean.** Both transactions pass: 4,616 and 5,034 cycles
+  (Verilog), with no deadlock report. The second region starts after the reduce, and the filler pile-up on all
+  8 producers is bit-exact.
+- One run is ~28 min wall (csynth ~13 + co-sim ~12), three in parallel.
+
+## Not done / follow-ups
+
+- **Vivado synthesis** of the folded CU (`impl_check.tcl` pattern on the build server). Optional for done; the
+  portal is Mark's. Not run.
+- `deposit_slow` at II = 7 and its 64-way dynamic bank select (16 K LUT): superseded by the macro tiles,
+  [[HANDOFF_48_macro_tiles_20261022.md]].
+- `host/sw_flat/model/{lane_model,bank_fifo_model}.cpp` call `footprint_window(..., bin_w, bin_h)` where the
+  signature takes `inv_bin_w, inv_bin_h` (since the multiply change, 2026-10-27). Pre-existing; they still compile,
+  but their windows are wrong. Not touched here.
+
+---
+
+# The brief, as handed off
 
 ## Two designs today
 

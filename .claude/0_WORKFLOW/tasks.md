@@ -1,12 +1,15 @@
 # Tasks
 
-**Active Task (2026-10-28): #48 — on-chip density path.** Bank address at a fixed pitch landed 2026-10-28
+**Active Task (2026-10-29): #48 — on-chip density path.** Bank address at a fixed pitch landed 2026-10-28
 (the 64 per-producer multiplies gone: banked deposit 1,168 -> 656 DSP, 69 % of the chip beside
 `hpwl_gradient_CU`; bit-exact, forwarding distance still 5) -> [[REPORT_48_bank_address_multiplies_20261028.md]].
 Drain timing closed 2026-10-29 in **Vivado synthesis: 2.93 ns at 3.33 (WNS +0.40)**, bit-exact; the write-back
 moved one iteration later, so the 64-bank co-sim must sweep the forwarding depth -> [[REPORT_48_drain_timing_20261028.md]].
 **64-bank RTL co-sim done 2026-10-29: forwarding distance 4** (depths 1-3 FAIL, 4-6 PASS; code keeps 6), termination
-and deadlock clean -> [[REPORT_48_banked_cosim_20261029.md]]. Now: fold the 64-bank deposit into `bin_density_CU` (Mark, 2026-10-29: speed model skipped) -> [[HANDOFF_48_fold_banked_into_cu_20261029.md]], then macro tiles ([[HANDOFF_48_macro_tiles_20261022.md]]).
+and deadlock clean -> [[REPORT_48_banked_cosim_20261029.md]]. **Folded into `bin_density_CU` 2026-10-29: the real CU is now
+8 producers × 64 banks** — 44/44 bit-equal, csynth 2.571 ns / 689 DSP / 517 K LUT (57 %) / 128 URAM, RTL co-sim of the CU
+distance 4 (depth 6 kept) -> [[REPORT_48_fold_banked_into_cu_20261029.md]]. **Now:** macro tiles
+([[HANDOFF_48_macro_tiles_20261022.md]]; `slow_rows` is II = 7). Optional: Vivado synth of the folded CU (Mark's portal).
 `hpwl_gradient_CU` passes on the VCK5000 at **250 MHz** (build H, 2026-10-29, [[REPORT_45_build_H_250mhz_20261028.md]]).
 
 Open work, one section per task. **Status lives here; evidence lives in a
@@ -954,7 +957,7 @@ pass alone (item 4 / D): its B3 passes, the `borrowed_blocks` / `borrowed_ops` p
 to the old CU's (synthetic, 1-30 chunks) and bit-exact vs sw_flat on bigblue4 / mms/bigblue4 (3 chunks):
 tier 1, `check-record-stream` 6/6, sw_emu 4/4; C-synth 19/19 II=1, est. 287.2 MHz unchanged. **Build H no
 longer matches the interface: build I (250 MHz) launched 20:54 CET on `build`, `~/AIEplace_timing/expI/pl/build/run/`;
-next read routed slack, then the card.** The packer / format still emit
+detached waiters then read routed slack (`expI/pl/build/run/worst.out`) and run the card (`expI/card_I250.out`).** The packer / format still emit
 B3's op lists, read by nothing now. -> [[REPORT_47_pass_removal_20261029.md]]
 <details><summary>superseded headline (2026-10-29, morning)</summary>
 
@@ -1256,7 +1259,8 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       run_depths.sh`): depth 0 and 4 FAIL, 5 and 6 PASS — the scheduled read→write distance is 5. C-synth
       3.33 ns met, LUT 11%. Drift of per-design F: in noise on 3/4, mms/adaptec1 +0.12% (its two-outcome
       flip); bigblue4 (2048, F ≈ 12) −0.013%, 0.003 pp past its ±0.01% band.
-- [ ] **Phase 2b, 8 lanes (Mark, 2026-10-20; modelled, not built).** Each lane owns grid rows with its own
+- [x] **Phase 2b, 8 producers × 64 banks: BUILT in `bin_density_CU` 2026-10-29** (see the last DONE below).
+      *Was: "8 lanes (Mark, 2026-10-20; modelled, not built)".* Each lane owns grid rows with its own
       16 banks (8 lanes = 128 URAMs, no extra). Lane model on real positions (`make -C host/sw_flat
       lane-model`): **4-row strips + FIFO 128 + 4 read points + pairing** (two cells per cycle when their banks
       don't overlap) gives 4.6–7.2× over one cell per cycle on 5 designs (bigblue4 7.2×, ~2.6 ms); bands
@@ -1293,7 +1297,15 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       distance is 4**, as the verbose schedule predicts (read t+1, deferred store lands t+6). `BANKED_FORWARD_DEPTH`
       = 6 kept (2 spare). Depth 0 now fails even in C (the deferred write-back), so depth 1 is the RTL negative control.
       No deadlock; the last deferred writes land. → [[REPORT_48_banked_cosim_20261029.md]]
-      **Next:** build. Real-design fixtures for the tests: branch `bin-density-real-fixtures`
+      → **DONE 2026-10-29: folded into `bin_density_CU`** (Mark: model skipped). `deal_slots` deals each beat's
+      lanes 2p, 2p+1 to producer p; one 128-entry table per producer, fed by stream (`FOOTPRINT_TABLE_MAX`
+      4096 → 128); `rho_URAM` 64 banks `ram_t2p`, so `load_base`/`drain` move a beat per cycle (4× before),
+      `reduce` an 8×8 tile per cycle; the region's return is the B' barrier; a `std::deque` shim keeps g++ builds
+      Vitis-free. **pl tier 1 PASS, check-bin-density 44/44 bit-equal** (`scratch_48/bin_density_check_44_banked_cu_20261029.txt`),
+      **csynth 2.571 ns, 689 DSP / 517 K LUT (57 %) / 128 URAM**, all II = 1 except `deal_table` (2) and `slow_rows`
+      (7). **RTL co-sim of the CU, collisions across producers: depths 1-3 FAIL, 4-6 PASS** (distance 4; code keeps 6).
+      Vivado not run (optional). → [[REPORT_48_fold_banked_into_cu_20261029.md]]
+      Real-design fixtures for the tests: branch `bin-density-real-fixtures`
       (`0994f7a`), not merged. → [[PLAN_48_bin_density_lanes_20261020.md]],
       [[EXPLAINER_48_lane_dispatcher_20261020.md]] ~21 ms per evaluation on bigblue4 at 1 cell/cycle → lanes next.
       → [[REPORT_48_bin_density_fixed_point_20261019.md]] One 36-bit

@@ -134,7 +134,9 @@ interface, so a new hw build is due ([[REPORT_47_pass_removal_20261029.md]]). **
   by multiply** in golden and device (registered divergence; drift nil on 4/5, in noise on bigblue4; ~63 K LUT saved over 8
   producers) → [[REPORT_48_multiply_bin_index_20261027.md]] **10-28: banked deposit 656 DSP, drain timing met in
   Vivado synth (2.93 ns at 3.33)**; → [[REPORT_48_drain_timing_20261028.md]]; **10-29: 64-bank RTL co-sim: forwarding distance 4, depth 6 kept, no
-  deadlock** → [[REPORT_48_banked_cosim_20261029.md]]
+  deadlock** → [[REPORT_48_banked_cosim_20261029.md]]; **10-29: folded — `bin_density_CU` IS the 8-producer, 64-bank
+  module** (44/44 bit-equal, csynth 2.571 ns / 689 DSP / 517 K LUT 57 % / 128 URAM, CU co-sim distance 4); next macro
+  tiles → [[REPORT_48_fold_banked_into_cu_20261029.md]]
 - **#47 — the borrowed-copy exchange replaced the chunk mailbox (2026-10-09; "tail" renamed "borrowed"
   2026-10-26).** Rule C6: a macro pin is never borrowed (the macro is). Rule C7: a chunk's borrowed
   copies sit in its borrowed rows, one block per owner; owners write / read them through a 32 x 256 row
