@@ -9,6 +9,11 @@ closed. Context: [[REPORT_45_macro_beats_20261027.md]] (routed G/H, co-sim, card
 - **250 MHz closes, routed:** WNS **0.000 ns** on the 4.000 ns kernel clock, **0 failing endpoints** (G: −0.119 ns,
   TNS −157 ns, 2,840). The worst endpoint is `grad_URAM_16` `ADDR_A[13]`. `classify_paths.tcl` with G's filter finds 0
   paths. Packaged: `build:~/AIEplace_timing/expH/pl/build/run/hpwl_gradient_CU_top.xclbin`.
+- **The margin is thin:** 556 endpoints sit within 0.1 ns of failing (`run/paths_H250_near.csv`, slack < 0.1).
+  The tightest are memory inputs at +0.001..+0.003 ns: `offset_BRAM` (65), `pos_URAM` (DSP output and `dout_vld`,
+  53), `send_ops`' RAM (34), and `grad_URAM` from `wa_gradient`'s stage-56 compare/enable registers (~50). The old
+  operand → DSP group is no longer critical. What remains of it is pipeline-enable fan-out into `grp_fu_*`
+  operands at +0.03..+0.08 ns. A different seed or a small RTL change could tip these back below zero.
 - **Cost (routed kernel, vs G):** REG 225,600 → 237,262, LUT 145,805 → 151,359, DSPFP32 738 → 826, BRAM 232 and
   URAM 256 unchanged.
 - **Bit-exact:** only operator latency changed. Tier 1 4/4, `check-record-stream` 6/6, C-synth at 2.5 ns 24/24

@@ -83,6 +83,7 @@ Build H is G plus the `wa_*` DSP change: every float op in `wa_sums`, and the mu
 | **H** | **250** | **0.000** | **0** | 237,262 | 151,359 | 826 | 232 | 256 |
 
 - **WNS 0.000 on the 4.000 ns kernel clock** (`clkout1_primitive`). The worst endpoint is a `grad_URAM_16` address pin. `classify_paths.tcl` with the same filter that found G's 2,840 endpoints finds 0 (`run/paths_H250.csv`). The xclbin is packaged as `run/hpwl_gradient_CU_top.xclbin`, but `KERNEL_FREQ_HZ` is not changed and it has not been on the card.
+- **Thin margin:** 556 endpoints have slack under 0.1 ns. They are mostly BRAM/URAM inputs (`offset_BRAM`, `pos_URAM`, `grad_URAM`, `send_ops`' RAM) at +0.001..+0.003 ns. The operand → DSP group is no longer among them.
 - **Cost:** +11.7 K REG, +5.6 K LUT. DSPs go up by 88 because HLS no longer fuses those fmul+fadd pairs into fmadd/fmsub. BRAM and URAM are unchanged.
 - **Bit-exact by construction and by test:** only operator latency changed. Tier 1 is 4/4 and `check-record-stream` 6/6; C-synth at 2.5 ns has 24/24 loops at II=1 (`wa_sums_loop` depth 57 → 73, `wa_gradient_loop` 58 → 61).
 - **Not verified:** sw_emu and the card run.
