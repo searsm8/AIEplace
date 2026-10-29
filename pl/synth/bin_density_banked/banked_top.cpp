@@ -25,7 +25,7 @@ typedef uint64_t acc_word;   // wider off-synthesis, as bin_density_CU
 #endif
 
 #ifndef BANKED_FORWARD_DEPTH
-#define BANKED_FORWARD_DEPTH 6
+#define BANKED_FORWARD_DEPTH 6   // RTL co-sim (cosim/): read->write distance 4, depths 1-3 FAIL, 4-6 PASS. Meow.
 #endif
 
 constexpr int PRODUCERS     = 8;
