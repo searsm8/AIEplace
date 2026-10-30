@@ -135,10 +135,21 @@ and `deposit_slow` → a 769-fanout net (1.1 ns) to every URAM enable. Each bank
 the address top bit becomes `EN_A`. In `banked_top` the URAMs had one owner and this chain met with slack to spare.
 Folding added the shared port mux and its fanout, and that is enough to fail.
 
+**`style=frp` cannot work on this loop (tried 2026-10-30, pragma removed).** HLS drops it: warning 200-1964, "Disabling
+free running pipeline (frp) architecture on pipeline 'drain' ... because it has non-blocking accesses on an input
+port", once per `empty()`. The generated RTL has no FRP logic and `rho_URAM_*_ce*` is still gated by
+`ap_block_pp0_stage0_11001`. So the Vivado run was stopped: it was the same design as run 1. RTL co-sim of that
+build matched the earlier sweep (depth 3 FAIL, 4 and 6 PASS), which proves nothing about FRP. The `banked_top` FRP run
+in [[REPORT_48_drain_timing_20261028.md]] may have been dropped the same way; not checked.
+
+**The stall is one that never fires.** `ap_block_pp0_stage0_11001` is an OR over `(take predicate) & (empty_n == 0)`
+for every FIFO, from the blocking `read()` at bin_density_CU.hpp:303. `take` already includes `!empty()`, so the
+term is never true, but HLS cannot prove that and builds the logic.
+
 Possible fixes, not tried:
-- **`style=frp` on `drain_banks`' drain loop.** The pipeline then runs free, so the URAM enable stops depending
-  on the FIFO stall logic. One pragma, and no C change. On `banked_top` it gained only 0.05 ns, because this chain
-  was not the critical one there.
+- **`read_nb` in place of `empty()` + `read()`.** A non-blocking read has no stall term, so the enable should stop
+  depending on the FIFOs. Changes the C (and the `hls::stream` shim needs `read_nb`); the schedule may move, so
+  sweep the forwarding depth again.
 - **Register the priority pick.** Feed the URAM the pick from one cycle earlier, which cuts the path at the OR tree.
   This changes the C schedule, so the forwarding depth must be swept again in co-sim.
 
