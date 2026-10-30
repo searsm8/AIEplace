@@ -132,8 +132,27 @@ Vivado's LUT count is **57 % of csynth's 517 K**; the CU adds only ~6.4 K LUT to
 8-way priority OR (`or_ln304`, bin_density_CU.hpp:304) → the drain pipeline's enable (**fanout 2,771**) → the
 **CU-level port mux** that shares each URAM between `drain_banks`, `load_base`, `drain`, `overflow_excess_sum`
 and `deposit_slow` → a 769-fanout net (1.1 ns) to every URAM enable. Each bank is 16 K words = two cascaded URAMs, so
-the address top bit becomes `EN_A`. In `banked_top` the URAMs had one owner and this chain met with slack to spare.
-Folding added the shared port mux and its fanout, and that is enough to fail.
+the address top bit becomes `EN_A`.
+
+**Cause, measured on both synth checkpoints (2026-10-30): Vivado simplified the stall away in `banked_top` but only
+partly in the CU.** This retracts the first reading above this paragraph's edit, "the shared port mux is what the fold
+added, and that is enough to fail": the mux stage is ~0.36 ns of a gap of 1.385 ns.
+
+| worst setup path into URAM `EN_A` | `banked_top` (bdA) | folded CU |
+|---|---|---|
+| slack | **+0.653 ns** | **−0.732 ns** |
+| logic levels | 2 | 8 |
+| arrival at the final net | 0.607 ns | 2.244 ns |
+| final net | 1,152 loads, 1.349 ns | 769 loads, 1.097 ns |
+| startpoints in one URAM's `EN_A` cone | **13, no FIFO** | **189, of which 168 FIFO `empty_n`** + `done`, `all_finished` |
+
+- The HLS RTL has the same stall term in both: `rho_URAM_*_ce*` is gated by `ap_block_pp0_stage0_11001`, an OR of
+  `(take predicate) & (empty_n == 0)`. Since `take` already requires `!empty()`, the term is never true. Vivado
+  removed all of it from `banked_top`'s enable, and left 168 of the CU's 512 FIFOs in.
+- **Why it stopped short in the CU is not known.** The cone is a netlist-optimization outcome, so it may be sensitive to
+  small changes. Relying on it is fragile; the C should not generate the term at all.
+- The big final net is not the problem: `banked_top`'s is larger and it has +0.65 ns.
+- Scripts: `.claude/2_ARTIFACTS/fold_48_vivado/{uram_paths,en_fanin}.tcl`.
 
 **`style=frp` cannot work on this loop (tried 2026-10-30, pragma removed).** HLS drops it: warning 200-1964, "Disabling
 free running pipeline (frp) architecture on pipeline 'drain' ... because it has non-blocking accesses on an input

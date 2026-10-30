@@ -11,7 +11,8 @@ and deadlock clean -> [[REPORT_48_banked_cosim_20261029.md]]. **Folded into `bin
 distance 4 (depth 6 kept) -> [[REPORT_48_fold_banked_into_cu_20261029.md]]. **Vivado synth of the folded CU (10-30):
 NOT met, 4.062 ns, WNS −0.732, 504 endpoints, all one path:** `drain_banks`' stall logic → the CU's shared URAM
 port mux → URAM `EN_A` (294 K LUT / 687 DSP / 128 URAM). `style=frp` is impossible here (HLS 200-1964: the `empty()`
-checks). **Now:** close that (`read_nb`, which drops the stall, or register the pick; Mark to pick), then macro tiles
+checks). Cause (both checkpoints): the never-true FIFO stall on the URAM enable, which Vivado removed in `banked_top`
+(13 startpoints, +0.65) but left 168 `empty_n` of in the CU. **Now:** remove it in the C (`read_nb`; Mark to confirm), then macro tiles
 ([[HANDOFF_48_macro_tiles_20261022.md]]; `slow_rows` is II = 7).
 `hpwl_gradient_CU` passes on the VCK5000 at **250 MHz** (build H, 2026-10-29, [[REPORT_45_build_H_250mhz_20261028.md]]).
 
