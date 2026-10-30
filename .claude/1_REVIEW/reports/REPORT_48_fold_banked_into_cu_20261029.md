@@ -110,10 +110,43 @@ plain uint64 deposit in slot order, with the excess taken at the barrier, compar
   8 producers is bit-exact.
 - One run is ~28 min wall (csynth ~13 + co-sim ~12), three in parallel.
 
+## Vivado synthesis (2026-10-30): timing NOT met, one path
+
+`pl/synth/bin_density_CU/impl_check.tcl` on the build server (Vitis 2022.2, out of context, 3.33 ns, default
+strategy), run from a scratch copy `~/impl48_cu`. Started 02:33, done 04:04: 91 min. Reports:
+`.claude/2_ARTIFACTS/fold_48_vivado/run1/`.
+
+| Vivado synth, 3.33 ns | folded `bin_density_CU_top` | *`banked_top` final (10-29)* |
+|---|---|---|
+| post-synth period | **4.062 ns, NOT met** | 2.928 ns, met |
+| WNS / TNS / failing endpoints | **−0.732 ns / −277.5 ns / 504** of 500,158 | +0.402 ns / 0 / 0 |
+| LUT / FF / DSP / URAM / BRAM | **294,106 / 194,409 / 687 / 128 / 86** | 287,689 / 182,695 / 656 / 128 |
+| ↳ `deposit_region` LUT / FF / DSP | 260,249 / 160,587 / 657 | |
+| ↳ `deposit_slow` / `drain` / `overflow_excess_sum` / `load_base` LUT | 7,151 / 6,409 / 3,360 / 665 | |
+
+Vivado's LUT count is **57 % of csynth's 517 K**; the CU adds only ~6.4 K LUT to the banked deposit.
+
+**All 504 failing endpoints are one path family** (`fail_buckets.tcl` on the synth checkpoint): source
+`drain_banks`' drain-loop `done_reg`, destination the `EN_A` pins of the `rho_URAM` cascades (496 at −0.732,
+8 at −0.668, bank 0). The path is 8 LUT levels, 80 % routing: `done_reg` (fanout 588) → bank-FIFO empty / the
+8-way priority OR (`or_ln304`, bin_density_CU.hpp:304) → the drain pipeline's enable (**fanout 2,771**) → the
+**CU-level port mux** that shares each URAM between `drain_banks`, `load_base`, `drain`, `overflow_excess_sum`
+and `deposit_slow` → a 769-fanout net (1.1 ns) to every URAM enable. Each bank is 16 K words = two cascaded URAMs, so
+the address top bit becomes `EN_A`. In `banked_top` the URAMs had one owner and this chain met with slack to spare.
+Folding added the shared port mux and its fanout, and that is enough to fail.
+
+Possible fixes, not tried:
+- **`style=frp` on `drain_banks`' drain loop.** The pipeline then runs free, so the URAM enable stops depending
+  on the FIFO stall logic. One pragma, and no C change. On `banked_top` it gained only 0.05 ns, because this chain
+  was not the critical one there.
+- **Register the priority pick.** Feed the URAM the pick from one cycle earlier, which cuts the path at the OR tree.
+  This changes the C schedule, so the forwarding depth must be swept again in co-sim.
+
+Either fix then needs another Vivado run (~90 min).
+
 ## Not done / follow-ups
 
-- **Vivado synthesis** of the folded CU (`impl_check.tcl` pattern on the build server). Optional for done; the
-  portal is Mark's. Not run.
+- **Vivado timing** of the folded CU fails at 3.33 ns (section above). The next step is to close it.
 - `deposit_slow` at II = 7 and its 64-way dynamic bank select (16 K LUT): superseded by the macro tiles,
   [[HANDOFF_48_macro_tiles_20261022.md]].
 - `host/sw_flat/model/{lane_model,bank_fifo_model}.cpp` call `footprint_window(..., bin_w, bin_h)` where the

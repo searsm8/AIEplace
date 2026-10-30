@@ -8,8 +8,10 @@ moved one iteration later, so the 64-bank co-sim must sweep the forwarding depth
 **64-bank RTL co-sim done 2026-10-29: forwarding distance 4** (depths 1-3 FAIL, 4-6 PASS; code keeps 6), termination
 and deadlock clean -> [[REPORT_48_banked_cosim_20261029.md]]. **Folded into `bin_density_CU` 2026-10-29: the real CU is now
 8 producers × 64 banks** — 44/44 bit-equal, csynth 2.571 ns / 689 DSP / 517 K LUT (57 %) / 128 URAM, RTL co-sim of the CU
-distance 4 (depth 6 kept) -> [[REPORT_48_fold_banked_into_cu_20261029.md]]. **Now:** macro tiles
-([[HANDOFF_48_macro_tiles_20261022.md]]; `slow_rows` is II = 7). Optional: Vivado synth of the folded CU (Mark's portal).
+distance 4 (depth 6 kept) -> [[REPORT_48_fold_banked_into_cu_20261029.md]]. **Vivado synth of the folded CU (10-30):
+NOT met, 4.062 ns, WNS −0.732, 504 endpoints, all one path:** `drain_banks`' stall logic → the CU's shared URAM
+port mux → URAM `EN_A` (294 K LUT / 687 DSP / 128 URAM). **Now:** close that (`style=frp` first), then macro tiles
+([[HANDOFF_48_macro_tiles_20261022.md]]; `slow_rows` is II = 7).
 `hpwl_gradient_CU` passes on the VCK5000 at **250 MHz** (build H, 2026-10-29, [[REPORT_45_build_H_250mhz_20261028.md]]).
 
 Open work, one section per task. **Status lives here; evidence lives in a
@@ -1305,7 +1307,10 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       Vitis-free. **pl tier 1 PASS, check-bin-density 44/44 bit-equal** (`scratch_48/bin_density_check_44_banked_cu_20261029.txt`),
       **csynth 2.571 ns, 689 DSP / 517 K LUT (57 %) / 128 URAM**, all II = 1 except `deal_table` (2) and `slow_rows`
       (7). **RTL co-sim of the CU, collisions across producers: depths 1-3 FAIL, 4-6 PASS** (distance 4; code keeps 6).
-      Vivado not run (optional). → [[REPORT_48_fold_banked_into_cu_20261029.md]]
+      **Vivado synth (10-30): NOT met, 4.062 ns at 3.33** (WNS −0.732, 504 endpoints, all `drain_banks` `done_reg`
+      → stall logic → CU URAM port mux → URAM `EN_A`); 294 K LUT / 194 K FF / 687 DSP / 128 URAM.
+      - [ ] Close it: `style=frp` on `drain_banks`' drain loop, else register the priority pick (re-sweep depth).
+      → [[REPORT_48_fold_banked_into_cu_20261029.md]]
       Real-design fixtures for the tests: branch `bin-density-real-fixtures`
       (`0994f7a`), not merged. → [[PLAN_48_bin_density_lanes_20261020.md]],
       [[EXPLAINER_48_lane_dispatcher_20261020.md]] ~21 ms per evaluation on bigblue4 at 1 cell/cycle → lanes next.
