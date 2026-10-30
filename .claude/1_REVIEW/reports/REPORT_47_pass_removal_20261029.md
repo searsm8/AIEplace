@@ -8,6 +8,10 @@ gradient is **bit-exact**: byte-identical to the old CU's whole grad image, and 
 real chunked designs. B3's device exchange (`borrowed_copies.hpp`, `borrowed_copies_test`) and its only
 other helper `load_slot_array` are deleted (Mark, 2026-10-29).
 
+**On the card (build I, 250 MHz, 2026-10-30 01:11):** routed WNS **0.000 ns**, hold +0.011 ns; the
+VCK5000 run is **4/4 PASS** (synthetic 16 chunks, mgc_fft_a, mms/adaptec1, bigblue4 3 chunks), with M2's
+exchange done by the host around the kernel. Near-critical endpoints (slack < 0.1 ns) **556 → 247**.
+
 ## What changed
 | file | change |
 |---|---|
@@ -49,12 +53,28 @@ other helper `load_slot_array` are deleted (Mark, 2026-10-29).
   outputs in `build/run/` (`done` records link and package exits; script `scratch_47/synth_I/run.sh`).
   Source: HEAD `38460cb` + this change's uncommitted `hpwl_gradient_CU.hpp`, `slot_arrays.hpp` and the
   synth top, exported clean (not the live tree, which another session is editing). Build H's link took
-  ~4 h 15 min. **Next:** read the kernel's routed slack from the dcp (`worst.tcl`, `classify_paths.tcl`, as
-  for H), then a card run on `vck` (Mark books it). Expect timing to ease: B3's `send_ops` RAM read was
-  among H's near-critical endpoints.
-- **Commit hazard:** the deletions of `borrowed_copies.hpp` / `borrowed_copies_test.cpp` were staged here
-  and went into another session's commit `38460cb`; the CU edits did not. Until this change is committed,
-  HEAD's `hpwl_gradient_CU.hpp` includes a file HEAD no longer has.
+  ~4 h 15 min; at 22:24 build I was in implementation (synth done 22:07).
+  **Unattended follow-through (launched 22:30, both detached, no tunnel needed):**
+  `build:~/AIEplace_timing/expI/after_build.sh` waits for the package step, then writes `worst.out` and
+  `paths_I250_near.csv` (slack < 0.1 ns) into `expI/pl/build/run/`, then `worst.done`.
+  `vck:~/AIEplace_timing/expI/after_card.sh` waits for the same step, keeps H as
+  `pl/build/hw/hpwl_gradient_CU_top.H250.xclbin`, installs I, and runs
+  `XRT_DEVICE_BDF=0000:c1:00.1 TARGET=hw bash host/sw_flat/test/hpwl_gradient_xrt.sh` into `expI/card_I250.out`,
+  then `card_I250.done`. The card checkout `~/AIEplace` is detached at `674d729` (pushed as branch
+  `card_47d`), the source build I was made from, with the XRT host rebuilt there. Scripts: `scratch_47/synth_I/`.
+  **Do not move the card checkout past the B3 format cleanup** (it drops two `ChunkDesc` fields): build I's
+  xclbin expects the old layout.
+  **Result (package done 01:11 CET):** routed WNS **0.000 ns** on the 4.000 ns kernel clock, hold **+0.011 ns**
+  (`worst.out`); **247** endpoints within 0.1 ns of failing (`paths_I250_near.csv`), against build H's 556.
+  The worst endpoints are the macro-pin passes into the pos/grad URAMs (`refresh_macro_pins` address
+  registers → `pos_URAM_*`, `fold_macro_pins`' fadd → `grad_URAM_*`), `load_pos_zero_grad`'s loop-init
+  replica → `grad_URAM_*`, and the gmem3 read FIFO; B3's endpoints are gone with B3. **Card (vck,
+  `0000:c1:00.1`, xclbin md5 `7ee93d33…`): 4/4 PASS**, `expI/card_I250.out`: synthetic (16 chunks at
+  capacity 1536), mgc_fft_a, mms/adaptec1, bigblue4 (3 chunks). Build H stays on the card checkout as
+  `pl/build/hw/hpwl_gradient_CU_top.H250.xclbin`; the installed xclbin is now I.
+- **Commit hazard (resolved):** the deletions of `borrowed_copies.hpp` / `borrowed_copies_test.cpp` were staged here
+  and went into another session's commit `38460cb`; the CU edits did not, so HEAD did not compile until
+  `674d729` (the #48 handoff commit, which picked up the rest of this change).
 - **The packer and format still carry B3:** `pin_record.hpp` `BorrowedBlockDesc`, `BORROWED_BEAT_OP`,
   `make_borrowed_entry`; `ChunkDesc::first_borrowed_block` / `num_borrowers`; `chunked_device_arrays`'
   `borrowed_blocks` / `borrowed_ops`; `check_chunked`'s B3 replay; `model/cycle_model.hpp`'s TODAY

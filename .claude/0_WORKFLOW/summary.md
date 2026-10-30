@@ -113,8 +113,8 @@ hw xclbin built at **200 MHz** (WNS +0.031 ns). **Clock work (10-27):** **230 MH
 norms; STEP: precond + Nesterov step + clamp + send), #47's borrowed exchange fused in (B4 = A). **Bit-exact vs
 `Placer::iteration_update`** on 5 designs incl. bigblue3 (K=2) and bigblue4 (K=3) under sw_flat's new `reductions = "lanes"`
 (default off); force gather still an input ([[REPORT_45_iteration_update_CU_20261029.md]]). **Passes out of `hpwl_gradient_CU` (10-29, #47 D):**
-compute pass only, bit-exact with M2's exchange around it (sw_emu 4/4 incl. bigblue4); build H's xclbin no longer matches its
-interface, so a new hw build is due ([[REPORT_47_pass_removal_20261029.md]]). **Then:** density path.
+compute pass only, bit-exact with M2's exchange around it; on the VCK5000 at 250 MHz (build I) 4/4 PASS incl. bigblue4,
+WNS 0.000, near-critical endpoints 556 → 247 ([[REPORT_47_pass_removal_20261029.md]]). **Then:** density path.
   → [[PLAN_45_integration_20261006.md]]
 - **Building blocks (#41/#42, closed 2026-10-06; history.md):** chunked gradient tier-1 exact, II=1,
   post-route 3.955 ns vs 3.33; one axis 256 of 463 URAM; FM 1 pass 0.38× externals.

@@ -955,9 +955,10 @@ chunk turns receive into part of load and return into part of drain. Estimate fo
 pass alone (item 4 / D): its B3 passes, the `borrowed_blocks` / `borrowed_ops` ports and B3's
 `borrowed_copies.hpp` + test are deleted (Mark). With M2's exchange around it the gradient is byte-identical
 to the old CU's (synthetic, 1-30 chunks) and bit-exact vs sw_flat on bigblue4 / mms/bigblue4 (3 chunks):
-tier 1, `check-record-stream` 6/6, sw_emu 4/4; C-synth 19/19 II=1, est. 287.2 MHz unchanged. **Build H no
-longer matches the interface: build I (250 MHz) launched 20:54 CET on `build`, `~/AIEplace_timing/expI/pl/build/run/`;
-detached waiters then read routed slack (`expI/pl/build/run/worst.out`) and run the card (`expI/card_I250.out`).** The packer / format still emit
+tier 1, `check-record-stream` 6/6, sw_emu 4/4; C-synth 19/19 II=1, est. 287.2 MHz unchanged. **On the card:
+build I (250 MHz, source `674d729`) routes at WNS 0.000 / hold +0.011 ns, near-critical endpoints 556 → 247,
+and the VCK5000 run is 4/4 PASS incl. bigblue4 (3 chunks).** The card checkout stays at `674d729` until a
+build matches the format cleanup (it drops two `ChunkDesc` fields). The packer / format still emit
 B3's op lists, read by nothing now. -> [[REPORT_47_pass_removal_20261029.md]]
 <details><summary>superseded headline (2026-10-29, morning)</summary>
 
