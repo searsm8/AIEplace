@@ -1311,7 +1311,7 @@ Phases: 1 URAM budget, 2 density CU (+ force gather), 2b dataflow, 3 Geert's AIE
       (7). **RTL co-sim of the CU, collisions across producers: depths 1-3 FAIL, 4-6 PASS** (distance 4; code keeps 6).
       **Vivado synth (10-30): NOT met, 4.062 ns at 3.33** (WNS −0.732, 504 endpoints, all `drain_banks` `done_reg`
       → stall logic → CU URAM port mux → URAM `EN_A`); 294 K LUT / 194 K FF / 687 DSP / 128 URAM.
-      - [ ] Close it: `read_nb` (no stall term) or register the priority pick; re-sweep depth either way.
+      - [ ] Close it: `read_nb` (no stall term in the C; the never-true stall is the measured cause), re-sweep depth.
         `style=frp` tried 10-30: HLS 200-1964 drops it because of the `empty()` checks; pragma removed.
       → [[REPORT_48_fold_banked_into_cu_20261029.md]]
       Real-design fixtures for the tests: branch `bin-density-real-fixtures`
