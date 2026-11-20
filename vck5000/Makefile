@@ -67,9 +67,9 @@ $(XCLBIN): $(XSA) $(AIE_LIBADF)
 .PHONY: link_config
 link_config: $(LINK_CONNECTIONS_FILE)
 
-$(LINK_CONNECTIONS_FILE):
+$(LINK_CONNECTIONS_FILE): $(PL_DIR)/generate_link_cfg.py
 	$(dir_guard)
-	python3 $(PL_DIR)/generate_link_cfg.py $@ \
+	python3 $< $@ \
 		-p $(AIE_PARTIALS_INSTANCES) -d $(AIE_DENSITY_INSTANCES)
 
 # Link backs to trigger PHONY targets if artifacts don't exist

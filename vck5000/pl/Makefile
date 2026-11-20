@@ -17,6 +17,7 @@ PROJECT_ROOT ?= $(CURDIR)/..
 
 # In each subproject, add the .xo files to the makeflags.mk file
 KERNEL_XO :=
+KERNEL_EXTRA_SRCS :=
 
 include $(PROJECT_ROOT)/common.mk
 include $(PL_DIR)/makeflags.mk
@@ -26,9 +27,9 @@ include $(PL_DIR)/makeflags.mk
 all: $(PL_KERNELS)
 
 # Building kernel
-$(BUILD_DIR_PL)/%.xo: src/$(PL)/src/%.cpp
+$(BUILD_DIR_PL)/%.xo: src/$(PL)/src/%.cpp $(addprefix src/$(PL)/src/,$(KERNEL_EXTRA_SRCS))
 	$(dir_guard)
-	v++ -c --target $(TARGET) --platform $(PLATFORM) $(XO_COMPILE_OPTS) -k $* $< -o $@
+	v++ -c --target $(TARGET) --platform $(PLATFORM) $(XO_COMPILE_OPTS) -k $* $^ -o $@
 
 .PHONY: emconfig
 emconfig:

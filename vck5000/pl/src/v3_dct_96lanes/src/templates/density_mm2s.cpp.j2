@@ -1,0 +1,97 @@
+#include <ap_int.h>
+#include <hls_stream.h>
+#include <ap_axi_sdata.h>
+
+extern "C" {
+
+typedef ap_uint<512> ddr;            // 512-bit DDR word
+typedef ap_axiu<64, 0, 0, 0> axis_pkt;
+typedef hls::stream<axis_pkt> aie_stream;
+
+static constexpr unsigned int NUM_LANES = {{ num_lanes }};
+static constexpr unsigned int REALS_PER_DDR_WORD = 16;
+static constexpr unsigned int DDR_WORDS_PER_OUTPUT =
+    (NUM_LANES + REALS_PER_DDR_WORD - 1) / REALS_PER_DDR_WORD;
+
+// PL kernel: read 32-bit real values from DDR and send one 64-bit complex
+// packet to each lane. The upper 32 bits, representing the imaginary part,
+// are set to zero.
+//
+// "size" is the number of output packets produced on each lane.
+//
+// Required DDR storage:
+//     size * DDR_WORDS_PER_OUTPUT 512-bit words
+//
+// Values for output iteration n are stored in a block of
+// DDR_WORDS_PER_OUTPUT consecutive DDR words.
+void density_mm2s(
+    const ddr* mem,
+    const unsigned int size,
+{% for lane in range(0, num_lanes ) %}
+    aie_stream& s{{ lane }}{% if not loop.last %},{% endif %}
+{% endfor %}
+) {
+#pragma HLS INTERFACE m_axi port=mem offset=slave bundle=gmem depth={{ memory_depth }} \
+                                max_read_burst_length=16 num_read_outstanding=16
+#pragma HLS INTERFACE s_axilite port=mem bundle=control
+#pragma HLS INTERFACE s_axilite port=size bundle=control
+#pragma HLS INTERFACE s_axilite port=return bundle=control
+
+{% for lane in range(0, num_lanes) %}
+#pragma HLS INTERFACE axis port=s{{ lane }}
+{% endfor %}
+
+DDR_READ_LOOP:
+    for (unsigned int n = 0; n < size; ++n) {
+#pragma HLS PIPELINE II={{ pipeline_ii }}
+
+        // Preserve the address ordering from the original kernel:
+        //
+        //   logical_addr = 2*n                    when n < size/2
+        //   logical_addr = 2*size - 1 - 2*n       otherwise
+        //
+        // Each logical address now identifies a block containing enough
+        // 512-bit words to provide data for all lanes.
+        unsigned int logical_addr;
+
+        if (n < (size >> 1)) {
+            logical_addr = 2 * n;
+        } else {
+            logical_addr = 2 * size - 1 - 2 * n;
+        }
+
+        const unsigned int base_addr =
+            logical_addr * DDR_WORDS_PER_OUTPUT;
+
+        ddr wide_words[DDR_WORDS_PER_OUTPUT];
+#pragma HLS ARRAY_PARTITION variable=wide_words complete
+
+{% for word in range(ddr_words_per_output) %}
+        wide_words[{{ word }}] = mem[base_addr + {{ word }}];
+{% endfor %}
+
+        axis_pkt v[NUM_LANES];
+#pragma HLS ARRAY_PARTITION variable=v complete
+
+        // Extract one 32-bit real value for each lane and construct
+        // a 64-bit complex packet with an imaginary value of zero.
+{% for lane_index in range(num_lanes) %}
+        v[{{ lane_index }}].data.range(31, 0) =
+            wide_words[{{ lane_index // 16 }}].range(
+                {{ (lane_index % 16) * 32 + 31 }},
+                {{ (lane_index % 16) * 32 }}
+            );
+        v[{{ lane_index }}].data.range(63, 32) = 0;
+        v[{{ lane_index }}].keep = -1;
+        v[{{ lane_index }}].strb = -1;
+        v[{{ lane_index }}].last = (n == size - 1);
+{% endfor %}
+
+        // Send each value to its corresponding AXI stream.
+{% for lane in range(0, num_lanes) %}
+        s{{ lane }}.write(v[{{ lane }}]);
+{% endfor %}
+    }
+}
+
+} // extern "C"

@@ -1,0 +1,140 @@
+#include <ap_int.h>
+#include <hls_stream.h>
+#include <ap_axi_sdata.h>
+#include <cstdint>
+
+#include "twiddle_table.h"
+
+extern "C" {
+
+typedef ap_uint<512> ddr;
+typedef ap_axiu<64, 0, 0, 0> axis_pkt;
+typedef hls::stream<axis_pkt> aie_stream;
+
+static constexpr unsigned int NUM_LANES = {{ num_lanes }};
+static constexpr unsigned int FLOATS_PER_DDR_WORD = 16;
+static constexpr unsigned int DDR_WORDS_PER_OUTPUT =
+    (NUM_LANES + FLOATS_PER_DDR_WORD - 1) / FLOATS_PER_DDR_WORD;
+
+union FloatBits {
+    float f;
+    std::uint32_t u;
+};
+
+static ap_uint<32> float_to_bits(float value) {
+#pragma HLS INLINE
+    FloatBits converter;
+    converter.f = value;
+    return converter.u;
+}
+
+static float bits_to_float(ap_uint<32> value) {
+#pragma HLS INLINE
+    FloatBits converter;
+    converter.u = value.to_uint();
+    return converter.f;
+}
+
+// Unpack a 64-bit complex value:
+//   [31:0]  -> real
+//   [63:32] -> imaginary
+static void unpack_complex(
+    ap_uint<64> input,
+    float& re,
+    float& im
+) {
+#pragma HLS INLINE
+    ap_uint<32> re_bits = input.range(31, 0);
+    ap_uint<32> im_bits = input.range(63, 32);
+
+    re = bits_to_float(re_bits);
+    im = bits_to_float(im_bits);
+}
+
+// Receive one complex sample from each AXI stream for every iteration.
+//
+// "size" is the number of samples received from each lane.
+//
+// Each output sample contains one 32-bit real value. Therefore, every
+// iteration writes DDR_WORDS_PER_OUTPUT 512-bit DDR words.
+//
+// Required DDR storage:
+//     size * DDR_WORDS_PER_OUTPUT 512-bit words
+//
+// DDR layout for iteration n:
+//     mem[n * DDR_WORDS_PER_OUTPUT + 0] -> lanes 1..16
+//     mem[n * DDR_WORDS_PER_OUTPUT + 1] -> lanes 17..32
+//     ...
+void density_s2mm(
+    ddr* mem,
+    const unsigned int size,
+{% for lane in range(0, num_lanes) %}
+    aie_stream& s{{ lane }}{% if not loop.last %},{% endif %}
+{% endfor %}
+) {
+#pragma HLS INTERFACE m_axi port=mem offset=slave bundle=gmem depth={{ memory_depth }} \
+                                max_write_burst_length=16 num_write_outstanding=16
+#pragma HLS INTERFACE s_axilite port=mem bundle=control
+#pragma HLS INTERFACE s_axilite port=size bundle=control
+#pragma HLS INTERFACE s_axilite port=return bundle=control
+
+{% for lane in range(0, num_lanes) %}
+#pragma HLS INTERFACE axis port=s{{ lane }}
+{% endfor %}
+
+DDR_WRITE_LOOP:
+    for (unsigned int n = 0; n < size; ++n) {
+#pragma HLS PIPELINE II={{ pipeline_ii }}
+
+        // Read one 64-bit complex sample from every input stream.
+{% for lane in range(0, num_lanes) %}
+        axis_pkt p{{ lane }} = s{{ lane }}.read();
+{% endfor %}
+
+        // Twiddle for this sample:
+        //
+        //     e^(-j theta) = cos(theta) - j sin(theta)
+        //
+        // twiddle_re[n] =  cos(theta_n)
+        // twiddle_im[n] = -sin(theta_n)
+        float c = twiddle_re[n];
+        float s = -twiddle_im[n];
+
+        // Unpack each complex packet into real and imaginary floats.
+{% for lane in range(0, num_lanes) %}
+        float re{{ lane }};
+        float im{{ lane }};
+        unpack_complex(p{{ lane }}.data, re{{ lane }}, im{{ lane }});
+{% endfor %}
+
+        // Multiply by the twiddle factor:
+        //
+        // 2 * (re + j*im) * (c - j*s)
+        //
+        // The real component is:
+        //
+        // 2 * (re*c + im*s)
+{% for lane in range(0, num_lanes) %}
+        float out_re{{ lane }} = 2.0f * (re{{ lane }} * c + im{{ lane }} * s);
+{% endfor %}
+
+        // Pack the 32-bit real results into 512-bit DDR words.
+        // Unused fields in the final word are left as zero.
+{% for word in range(ddr_words_per_output) %}
+        ddr buf{{ word }} = 0;
+{% for lane_index in range(word * 16, [num_lanes, (word + 1) * 16] | min) %}
+        buf{{ word }}.range({{ (lane_index % 16) * 32 + 31 }}, {{ (lane_index % 16) * 32 }}) = float_to_bits(out_re{{ lane_index }});
+{% endfor %}
+{% endfor %}
+
+        // Write all packed words for this iteration to consecutive
+        // DDR locations.
+        const unsigned int base_addr = n * DDR_WORDS_PER_OUTPUT;
+
+{% for word in range(ddr_words_per_output) %}
+        mem[base_addr + {{ word }}] = buf{{ word }};
+{% endfor %}
+    }
+}
+
+} // extern "C"

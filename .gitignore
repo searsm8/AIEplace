@@ -1,4 +1,5 @@
 *.o
+*.d
 *.out
 python/AIEmath
 python/results

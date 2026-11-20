@@ -23,9 +23,17 @@ def generate_link_cfg(file_path, partials_channels, density_channels):
         f.write(s2mm_nk + "\n")
         
         for i in range(density_instances):
-            for j in range(channels_per_instance):
-                f.write(f"stream_connect={mm2s_name}_{i}.s{j+1}:ai_engine_0.fft_in{i+j}\n")
-                f.write(f"stream_connect=ai_engine_0.fft_out{i+j}:{s2mm_name}_{i}.s{j+1}\n")
+          for j in range(channels_per_instance):
+            port = i * channels_per_instance + j
+        
+            f.write(
+              f"stream_connect={mm2s_name}_{i}.s{j + 1}:"
+              f"ai_engine_0.fft_in{port}\n"
+            )
+            f.write(
+              f"stream_connect=ai_engine_0.fft_out{port}:"
+              f"{s2mm_name}_{i}.s{j + 1}\n"
+            )
 
         # TODO: Are these slr and sp lines necessary?
         #for i in range(partials_graph_count):
